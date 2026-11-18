@@ -217,10 +217,7 @@ test('workspace metadata validates packaged imports and preview limits', async (
   assert.deepEqual(desktop.navigation_options,{pinned:true,order:400,target:'worktree',details:true});
   assert.deepEqual(desktop.renderers,[{resource:'documents',shortcut:'secondary-p'}]);
   assert.deepEqual(desktop.previews,[
-    'text/html','application/pdf',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'text/html',
     'application/x-ipynb+json',
   ]);
   let bytes = 0;

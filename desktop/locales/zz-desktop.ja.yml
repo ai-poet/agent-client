@@ -15,7 +15,6 @@ git_tag_push_open: タグをプッシュ…
 composer_group_prompts: プロンプト
 composer_group_modes: モード
 composer_group_session: セッション
-reference_group_connections: 接続
 reference_group_skills: スキル
 reference_group_plugins: プラグイン
 reference_group_attach: 添付ファイル

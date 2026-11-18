@@ -15,7 +15,6 @@ git_tag_push_open: "Push du tag…"
 composer_group_prompts: Prompts
 composer_group_modes: Modes
 composer_group_session: Session
-reference_group_connections: Connexions
 reference_group_skills: Compétences
 reference_group_plugins: Plugins
 reference_group_attach: Pièces jointes

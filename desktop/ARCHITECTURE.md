@@ -15,10 +15,17 @@ This fork removes the Flutter application (`apps/`), its Go adapter
 (`services/`). Mobile and pairing-service descriptions below document the
 upstream architecture, not components shipped by this checkout.
 
-The shared Link implementation still depends on `internal/link/iroh` and its
-native library source in `native/iroh`. Node resource services still depend on
-`internal/office`, `internal/ssh` and `internal/databases`. These dependencies
-remain until their callers can be separated without breaking Desktop or Host.
+This desktop variant removes SSH, external database connections, Office/PDF
+extraction and local inference, including dictation. Link still uses
+`internal/link/iroh` and `native/iroh`; WSL provisioning and pairing remain.
+Online models, files, Git, local terminals and keyword-based text knowledge
+collections remain. Shared Protocol types and legacy profile records are kept,
+but the removed capabilities are not registered.
+
+Python plugin execution remains separate from local inference. No Python runtime
+is fetched or packaged automatically. A pre-provisioned runtime can be selected
+with `SAILRY_PYTHON_RUNTIME` (or `python.Options.RuntimeDirectory`); the existing
+receipt, version, containment and file-hash checks still apply.
 
 ## System context
 
@@ -31,7 +38,7 @@ Desktop A / MyGo ── Client ── Node A (controller and resource entry)
 Mobile / Flutter ── Dart FFI ── Client ── Link / iroh ── Node A
 
 Host service ── Node + Link endpoint
-Node ── agent loop + resource services ── models / files / Git / PTY / SSH / databases
+Node ── agent loop + resource services ── online models / files / Git / PTY / knowledge
 ```
 
 Node owns execution, configuration, credentials and durable conversation history.
@@ -71,9 +78,7 @@ The Go module is `github.com/ai-poet/agent-client/desktop`.
 | `internal/node/store` | Turso schema, transactions, durable requests, session records and event log |
 | `internal/node/program` | Package-declared executable lifecycle and process isolation |
 | `internal/core` | Profile ownership, paths, confined files and common faults |
-| `internal/localmodels` | Model registry, verified installation and CPU inference scheduling |
-| `internal/office`, `internal/databases`, `internal/ssh` | Document extraction, database drivers and verified SSH connections |
-| `internal/speech` | Controller-local speech recognition and capture |
+| `internal/speech/capture`, `native/capture` | Platform audio I/O, without a speech recognition engine |
 | `internal/shipped` | Packaged resources and native library seals |
 | `internal/desktop` | Feature views, view models and action contracts |
 | `internal/desktop/kit` | Shared MyGo controls, themes, overlays and CrychicUI adapters |
@@ -98,7 +103,7 @@ Node and Link share Protocol contracts
 ```
 
 `internal/client` imports only Protocol and Link from this repository. Service
-packages such as Core, SSH, databases, local models and speech do not import
+leaf packages such as Core, files and Git do not import
 Node. Desktop production packages do not start Node or import its root package;
 `desktop/live` uses Node leaf value types and pure helpers from Git, knowledge,
 plugins, providers and telemetry. Production startup belongs to the entry points.
@@ -130,15 +135,12 @@ request recovery retain both. A resource reached through A and the same resource
 reached through another controller have distinct controller state. Resource
 identity below the target is project → worktree → session or terminal.
 Navigation does not change that scope. File and Git operations retain their
-captured worktree; SSH, database and plugin surfaces retain their Node and resource
+captured worktree; plugin surfaces retain their Node and resource
 identity. Registered projects remain at their original filesystem paths.
 
-Machine paths carry their owner as `HostPath{node, path}`. File-backed database
-profiles and SSH key-file credentials preserve that location when their
-configuration is cached elsewhere. SSH agents also retain their authentication
-Node. A different execution Node rejects the operation with a target fault
-instead of interpreting the path or `SSH_AUTH_SOCK` on its own machine. Legacy
-file locations resolve against the Node that owns their saved definition.
+Machine paths carry their owner as `HostPath{node, path}`. Caching configuration
+does not move its files to another execution Node. Legacy locations remain
+readable without reinterpreting them on a different machine.
 
 Usage statistics read each execution Node's accessible project and provider
 inventory, independently of recorded usage. Filter selections retain Node plus
@@ -547,9 +549,8 @@ Opted-in completions can continue an idle session through its normal queue.
 | Web | Execution-Node reads and ordered search channels; direct reads pin public DNS on redirects and reject private addresses |
 | Browser | Node-owned Chromium process tree and private browser profile per conversation |
 | Code index | Lazy gotreesitter index, using the pinned grammar registry; bounded name-based graph heuristics without language servers |
-| Local models | Verified explicit installation, one CPU inference at a time, interactive priority and idle engine release |
-| Knowledge | Shared retrieval service used by package-owned features; citations recheck source identity |
-| Python | Bundled runtime; lazy package environments from hash-locked requirements and prebuilt wheels |
+| Knowledge | Keyword-based text retrieval used by package-owned features; citations recheck source identity |
+| Python | Pre-provisioned, verified runtime; lazy package environments from hash-locked requirements and prebuilt wheels |
 | Session documents | Immutable bounded HTML revisions, rendered in an opaque-origin sandbox |
 | Hooks | Captured worktree scripts; launched groups are not replayed after cancellation or a crash |
 | Dispatch | Durable schedules driven by Sailry's calendar on standard timers |
@@ -576,9 +577,7 @@ through the scoped resource services. User-created terminals use their login-she
 environment. Zsh starts from the Node account's home unless its launch specifies
 a startup directory; parent terminal hooks cannot replace that directory, and
 the user's `.zshenv` can select a custom one. Configured HTTP proxies are trusted
-to route public hostnames; failure does not silently bypass the proxy. Local model
-downloads require an installation action, and an unavailable engine reports that
-state.
+to route public hostnames; failure does not silently bypass the proxy.
 
 ## Extensions and plugins
 
@@ -618,8 +617,7 @@ Plugins own their feature UI, state, workflows, prompts and orchestration. Core
 exposes shared scoped services through Protocol, Client and the SDK. Desktop
 navigation and settings pages resolve from declarations. Workspace content,
 navigation and details project into the shell's common columns; shell layout owns
-resizing, dividers and visibility. SSH and database workflows use package
-surfaces and reusable native components. Files and Git use the core panels; their
+resizing, dividers and visibility. Files and Git use the core panels; their
 full-page resource lists use the shell's details column, width and fold toggle,
 while conversation tabs retain their compact adaptive layout. Their package
 navigation and panel surfaces are not mounted. Local terminal tabs also
@@ -741,7 +739,7 @@ Session HTML uses a sandboxed MyGo WebView with no privileged bridge. The host
 inlines available document images as data URLs; the page receives neither a file
 base URL nor network access.
 
-Voice capture, speech recognition, voice reading and global selection shortcuts
+System voice reading and global selection shortcuts
 are controller-local. `--preview` opens no profile and starts no Node. Explicit
 acceptance and replay run in isolated processes; their limits and commands are in
 [CONTRIBUTING.md](CONTRIBUTING.md#manual-acceptance).
@@ -864,9 +862,8 @@ the pairing service and data relay are distinct services.
 A pairing code connects to an already-running Node and follows the relay address
 in its invitation; the claiming device does not choose or change its own relay
 selection. Relay selection belongs to the Node whose address is being published,
-including when a Host generates a code, or to an SSH/WSL installation before its
-new Node starts. SSH installation supports password, private key, key file and,
-where available, the installing Node's SSH agent as authentication methods.
+including when a Host generates a code, or to a WSL installation before its
+new Node starts.
 
 Desktop windows share one Network and its remote Clients. Peer discovery runs on
 changes and periodically. Only compatible execution peers become Node Clients;
@@ -874,9 +871,9 @@ paired controllers remain devices. Node relay changes use revision-checked durab
 commands. Cloudflare and EdgeOne pairing adapters share the ticket-exchange logic.
 
 Host starts with an explicit profile, network configuration and opt-in pairing.
-Add Host installs checksum-verified assets over Node-owned SSH, starts systemd or
-launchd and pairs through a private bootstrap ticket. Windows controllers deploy a
-Linux Host into WSL2. The installed `sailry` command offers an interactive menu;
+Windows controllers deploy checksum-verified Host assets into WSL2 and pair through
+a private bootstrap ticket. Other machines start a Host separately and pair over
+iroh. The installed `sailry` command offers an interactive menu;
 `link` selects the Host's network before publishing a pairing code. `share` remains
 an alias using the current network. Host's `link`, `share`, `submit`, `wait`,
 `users` and `devices` management commands use the running owner's private Unix

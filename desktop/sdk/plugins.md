@@ -175,48 +175,6 @@ Controller-owned authorization grants supply execution-only credentials to that
 Node; ordinary host callbacks and model translation receive neither those grants
 nor their runtime tokens.
 
-Use `sailry/models` for public `search`, `versions` and `resolve` with `models.read`.
-`list({target:'node', kind?})` reads OCR, embedding and decision definitions with their
-installation state from the captured Node. Node model identities are opaque strings.
-`register({target, definition})` and `prepare(model)` require `models.install` and
-return ordinary prepared request IDs. Complete registration first, then prepare
-installation with `{target:'node', kind, id}` and its returned model identity.
-Definitions retain pinned asset digests; OCR, embedding and decision target `node`, while
-speech uses `{target:'controller', kind:'speech', id}` on its controller.
-Headless callbacks cannot install controller-local speech models.
-
-Node tools and callbacks import `decide` from `sailry/decisions` with the
-`decisions.run` action. This read-only call accepts `{model?, state, questions}`;
-`model` is an optional registered Node model ID. It uses the saved decision
-selection when omitted and requires an explicitly installed model. Global decision
-disablement also applies to explicit IDs. It does not generate conversation text
-or download a model.
-
-Questions use `type: "noul"`, `"choice"`, or `"score"`, with `instructions` and
-optional binary criteria, named choices, or an ordered score legend. Binary answers
-contain only their true probability as `noul`; choice and score answers include
-normalized probabilities and their algorithm's confidence. Input is limited to
-16 KiB of state, 16 questions, 16 choice options, 1 KiB of instructions and
-256 bytes per option. Tokenized prompts must also fit the installed model context.
-
-```javascript
-import {decide} from 'sailry/decisions';
-const result = await decide({state: pageText, questions: {
-  save: {type: 'noul', instructions: 'Is Save available?'}
-}});
-```
-
-`sailry/installations.read(ids)` observes only owned model installation requests
-in their original captured scope and requires `models.install`. It retains the exact
-prepared request IDs and exposes only their resource category, never another plugin's
-or the controller's installation feed. `watch(ids)` starts a Desktop subscription and `next()` consumes its
-Client-reduced snapshots. Headless callbacks use bounded model-only `read(ids)` snapshots;
-`watch` and `next` cannot retain live subscriptions beyond their callback budget.
-SDK rows use
-decimal-string revisions and explicit `target`. `dismiss(id)` removes a failed or
-uncertain observation without cancelling work or changing the durable outcome.
-Package installation and update are not exposed by these model APIs.
-
 ```js
 import {readSettings, listModels, resolveModel, prepareRequest,
   completeRequest, forgetRequest} from "sailry/sdk";
@@ -874,10 +832,7 @@ Writable directories and MCP/program instances remain on their execution Node.
 An admitted turn or callback retains its original settings and storage principal.
 
 Machine-bound resources retain a separate `HostPath{node, path}` location.
-Caching a database profile or SSH key-file reference does not copy its file or
-retarget its path. SSH agent authentication similarly retains its Node.
-Operations requiring these resources must execute on their owner; another Node
-reports a target fault.
+Caching configuration does not copy its files or retarget their paths.
 
 Keys are nonempty UTF-8 strings up to 128 bytes, without NUL. Values are JSON up
 to 256 KiB; a namespace permits 4096 live keys and 128 MiB of values plus indexes.
@@ -1074,6 +1029,10 @@ The browser package owns annotation review and note drafts. `browserAction({kind
 
 ## Knowledge
 
+This build indexes plain text with keyword retrieval. Shared semantic and hybrid
+query modes fall back to keyword results without an embedding engine. Local model
+management, OCR and Office/PDF extraction are not exposed by the SDK.
+
 Knowledge retrieval is a shared Node service. Notes, reminders and other feature
 packages organize their own collections and expose their settings and tools
 through the SDK. Declare `knowledge.read` for queries and citation reads and
@@ -1153,7 +1112,7 @@ the retained Node screen. `focusTerminal(terminal)` focuses a mounted terminal.
 
 ## Conversation component
 
-`Conversation.new("chat")` embeds a resource panel's captured session and Node with independent focus and draft state. Declare both `conversation.read` and `conversation.control`. The native message list, composer, approvals, questions, model selection and history are shared with database and SSH assistants.
+`Conversation.new("chat")` embeds a resource panel's captured session and Node with independent focus and draft state. Declare both `conversation.read` and `conversation.control`. Plugin and workspace assistants share the native message list, composer, approvals, questions, online model selection and history.
 
 `Conversation.new("detail", { session: id, active: open })` embeds an existing, non-archived session from the panel's captured Node. It resolves the session's project and worktree from the canonical snapshot and uses the same native controls. `session` cannot be combined with `assistant` or `resource`. Set `active: false` to release the mounted conversation when a dialog closes; this does not stop admitted work. Reactivating the component can select another session. Changing session props while active cannot retarget its mounted chat.
 
@@ -1183,7 +1142,7 @@ export default class Assistant extends View {
 }
 ```
 
-`resource` is `plugin`, `workspace`, `database` or `ssh`. A plugin assistant uses a private Node workspace; a workspace assistant uses the panel's captured project/worktree. Database and SSH assistants require a concrete resource in the same Node: `{ assistant: "database", resource: { kind: "database", id } }`. The bound SSH profile is the default target; an SSH assistant can use other saved SSH profiles on that Node under ordinary approvals and host-key verification. Database operations retain their native connection scope.
+`resource` is `plugin` or `workspace`. A plugin assistant uses a private Node workspace; a workspace assistant uses the panel's captured project/worktree.
 
 A `builtin` tool selector names a registered native tool. A `plugin` selector names this package's public operation tool, or its MCP tool when `server` is supplied; a `package` selector names an enabled package's public tool. Selectors make preferred tools available on the first model request; other ordinary conversation tools and skills remain discoverable under the same mode, caller and permissions. Context and selectors come from the immutable installed package; JavaScript cannot replace them or grant additional authority.
 
@@ -1604,7 +1563,7 @@ The content is finite data. Tables contain literal strings with equal row and co
 
 Content allows 1–16 blocks and at most 256 KiB of serialized JSON. Tables allow 1–64 columns, 1000 rows, 1024 bytes per column label and 16 KiB per cell. Diffs allow a 4096-byte path without control characters and 4096 lines. Tables and diffs accept `truncated: true` to disclose partial output. Unknown fields or kinds, unsupported versions, mismatched rows, missing or duplicate image references and failed results retain the original result for inspection. The shared Client validates the matched call and result, so controllers can consume the same content.
 
-Desktop renders these blocks with the common Kit table, diff and authenticated image viewer. Native call state, approval, cancellation, folding and history order still belong to the conversation. Explicit raw inspection preserves the unchanged result when a standard block cannot be rendered. History remains readable after package removal and Node restart; no plugin script runs to render saved tool content. The built-in database query uses this same contract.
+Desktop renders these blocks with the common Kit table, diff and authenticated image viewer. Native call state, approval, cancellation, folding and history order still belong to the conversation. Explicit raw inspection preserves the unchanged result when a standard block cannot be rendered. History remains readable after package removal and Node restart; no plugin script runs to render saved tool content.
 
 Plans retain `presentation: "progress"` and the `progress.update` operation.
 Node validates the successful result as core `ConversationProgress`; Desktop
@@ -1614,14 +1573,6 @@ of the tool name. Questions and plan confirmation retain `ask_user` and the exis
 The runnable [tool-content MCP example](../plugins/examples/tool-content) returns a table, diff and image without a desktop entry.
 
 ## Boundaries
-
-Headless `sailry/models.list({target:'node', kind:'ocr'})` reads the same Node model
-registry as embedding discovery and installation. Package handlers use the native
-`models.install` and `models.remove` operations for explicit Node model lifecycle
-tools. Removal requires the original claimed command approval and keeps definitions
-and settings. Model installation shares the existing bounded queue; inference
-shares one CPU runtime. Plan turns cannot mutate models; callbacks cannot directly
-dispatch model removal.
 
 Headless `listRoles()` requires `roles.read` and returns public catalog profiles,
 with decimal-string revisions and model identifiers, not session provider

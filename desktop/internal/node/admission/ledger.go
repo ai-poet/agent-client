@@ -50,6 +50,9 @@ func CredentialBody(body []byte) []byte {
 // and headers are free-form.
 func DigestOnly(kind string) bool {
 	switch kind {
+	case "save_database", "save_ssh":
+		// Retired wire payloads must not expose credentials during admission.
+		return true
 	case "save_provider", "complete_provider_login", "import_session", "save_search_settings", "save_plugin_settings", "save_plugin_mcp", "install_mcp", "start_connector_login", "submit_connector_input", "update_connection", "save_backup_settings", "restore_backup", "restore_backup_file", "dispatch", "plugin_transaction", "configuration_follow":
 		return true
 	default:

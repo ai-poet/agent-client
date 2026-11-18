@@ -15,7 +15,6 @@ git_tag_push_open: Отправить тег…
 composer_group_prompts: Промпты
 composer_group_modes: Режимы
 composer_group_session: Сеанс
-reference_group_connections: Подключения
 reference_group_skills: Навыки
 reference_group_plugins: Плагины
 reference_group_attach: Вложения

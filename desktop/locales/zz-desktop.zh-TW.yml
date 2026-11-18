@@ -15,7 +15,6 @@ git_tag_push_open: 推送標籤…
 composer_group_prompts: 提示詞
 composer_group_modes: 模式
 composer_group_session: 會話
-reference_group_connections: 連線
 reference_group_skills: 技能
 reference_group_plugins: 外掛
 reference_group_attach: 附件

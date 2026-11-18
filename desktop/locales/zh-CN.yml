@@ -49,56 +49,6 @@ content_caution: 注意
 content_document: 文档
 content_source: 源码
 turn_work_steps: "处理过程 · %{count} 步"
-ssh_new: 新建连接
-ssh_edit: 编辑
-ssh_host: 地址
-ssh_port: 端口
-ssh_username: 用户名
-ssh_authentication: 认证方式
-ssh_password: 密码
-ssh_private_key: 私钥
-ssh_key_path: 私钥路径
-ssh_agent: 执行主机的 SSH Agent
-ssh_key_file: 私钥文件
-ssh_agent_short: SSH Agent
-ssh_passphrase: 私钥口令
-ssh_keep_credential: 留空保留已保存的凭据
-ssh_command_hint: 输入命令
-ssh_run: 运行
-ssh_connect: 测试连接
-ssh_open_terminal: 打开终端
-ssh_reveal_terminal: 查看终端
-ssh_terminal_label: "SSH · %{name}"
-ssh_connected: 已连接
-ssh_empty: 暂无连接
-ssh_connections: SSH 连接
-ssh_workspace_empty: 打开 SSH 连接
-ssh_key_unknown: 确认此主机的密钥
-ssh_key_changed: 主机密钥已变化，请核对指纹
-ssh_trust: 信任
-ssh_remove_confirm: "删除连接 %{name}"
-ssh_invalid: 请检查连接信息
-ssh_conflict: 连接配置已变化，请重新打开编辑
-ssh_auth_failed: 认证失败，请检查凭据
-ssh_unknown: 结果未确认，请检查远端后再重试
-ssh_unavailable: 连接或回执不可用
-ssh_cancelled: 已取消
-ssh_busy: 正在处理其他连接，请稍后重试
-ssh_failed: 操作失败
-ssh_running: 正在处理
-ssh_details: 详情
-ssh_stopping: 正在停止
-ssh_stop: 停止
-ssh_transfer: 传输文件
-ssh_transferred: 已传输 %{size} 字节
-ssh_worktree: 项目目录
-ssh_no_project: 暂无项目
-ssh_project_path: 项目文件路径
-ssh_remote_path: SSH 文件路径
-ssh_upload: 上传
-ssh_download: 下载
-ssh_upload_confirm: 上传到 %{path}，已有文件可能被覆盖
-ssh_inspect: 查询结果
 db_new: 新建连接
 db_edit: 编辑连接
 db_check: 测试连接
@@ -2223,8 +2173,6 @@ provider_key_hint: 输入 API Key
 form_date_hint: 选择日期
 form_time_hint: "HH:mm:ss"
 
-ssh_trust_title: 信任主机密钥
-
 form_key_path_hint: ~/.ssh/id_ed25519
 
 connection_connecting: 正在连接
@@ -2269,8 +2217,6 @@ host_install_pairing: 正在配对
 host_install_failed: 添加失败
 host_added: 主机已添加
 host_install_unknown: 安装结果未确认，请检查主机后重试
-host_ssh_windows_pairing: 请在 Windows 主机安装并打开 Sailry 桌面版，再使用配对码添加。
-
 pairing_share_hint: 在另一台设备的「远程连接」中输入配对码
 db_catalog_failed: 加载失败，收起后重试
 db_data: 数据
@@ -2282,11 +2228,6 @@ connection_global: 全局共享
 connection_projects: 项目共享
 connection_no_projects: 暂无项目
 connection_assistant: 数据库助手
-reference_databases: 数据库
-reference_ssh: SSH 连接
-
-ssh_assistant: SSH 助手
-
 db_toggle_assistant: 数据库助手
 db_history: 执行记录
 connection_action_open: 打开
@@ -2294,28 +2235,12 @@ connection_action_edit: 编辑
 connection_action_check: 测试连接
 connection_search: 搜索
 connection_search_empty: 无匹配结果
-ssh_files_parent: 上级目录
-ssh_files_denied: 无权访问远程文件
-ssh_files_missing: 远程路径不存在
-ssh_files_failed: 无法读取远程目录，点击刷新重试
-ssh_files_count: '%{count} 项'
-ssh_files_exists: 同名文件已存在，是否替换
-ssh_files_replace: 替换
-ssh_files_uncertain: 操作结果未确认，请检查远程文件
-ssh_files_delete_confirm: 永久删除所选文件和目录
-ssh_files_merge: 合并并替换
-ssh_files_action_failed: 文件操作失败
 chat_sidebar_empty: 开始会话
 
 composer_permission_readonly: 只读权限
 reference_select_current: 选择当前
 chat_connection_history: 历史会话
 chat_connection_history_empty: 暂无历史会话
-
-ssh_files_selected: 已选择 %{count} 项
-ssh_files_uploading: 上传 %{count} 项
-ssh_files_downloading: 下载 %{count} 项
-ssh_files_transferring: 上传 %{uploads} 项 · 下载 %{downloads} 项
 
 db_copy_cell: 复制单元格
 db_copy_row: 复制整行
@@ -2350,9 +2275,6 @@ db_ssh_connection: SSH 连接
 db_ssh_select: 选择 SSH 连接
 db_ssh_verify: 请先在 SSH 连接中验证主机密钥
 db_path_hint: 输入路径
-ssh_key_choose: 选择私钥文件
-ssh_key_read_failed: 无法读取私钥文件
-ssh_key_invalid_file: 请选择有效的私钥文件
 background_one: "1 个终端"
 background_count: "%{count} 个终端"
 background_stop: 停止命令
@@ -2526,50 +2448,8 @@ plugins_builtin_label: 内置
 computer_device: 执行电脑
 computer_permissions: 系统权限
 
-dictation_start: 语音输入
-dictation_finish: 结束录音
-dictation_preparing: 正在准备本地语音模型
-dictation_transcribing: 正在识别
-dictation_unavailable: 本地语音输入不可用
-dictation_busy: 语音输入正在使用中，请稍后重试
-dictation_microphone: 无法使用麦克风，请检查系统权限
-dictation_storage: 无法保存语音模型
-dictation_download: 语音模型下载失败，请重试
-dictation_model_invalid: 语音模型无效，请重试
-dictation_failed: 语音识别失败，请重试
-dictation_cancelled: 已取消
-dictation_empty: 未识别到语音
-settings_dictation: 语音输入
 settings_dictation_description: 在本机识别语音，结果填入消息草稿
-dictation_input: 输入
-dictation_microphone_label: 麦克风
-dictation_microphone_default: 系统默认
-dictation_device_missing: 所选麦克风不可用
-dictation_device_loading: 正在检测麦克风
-dictation_permission: 请在系统设置中允许麦克风访问
-dictation_access: 麦克风权限
-dictation_download_speed: "%{value} MB/s"
-dictation_model_missing: 请先下载语音模型
-dictation_access_granted: 已授权
-dictation_access_hint: 为当前应用允许访问，返回后自动检测
-dictation_language: 识别语言
-dictation_language_auto: 自动识别
-dictation_language_chinese: 中文
-dictation_language_english: 英文
-dictation_local_model: 本地模型
-dictation_model_name: SenseVoice INT8
-dictation_model_size: 约 240 MB，下载后可离线使用
-dictation_download_model: 下载模型
-dictation_retry: 重试
-dictation_ready: 已就绪
-dictation_checking: 正在检查
-
 composer_goal: 目标
-dictation_no_audio: 未收到麦克风音频，请检查设备和权限
-dictation_silent: 未检测到声音，请检查麦克风
-
-dictation_draft_changed: 草稿已修改，已停止语音输入
-
 composer_settings: 会话设置
 composer_context_details: 上下文
 composer_statistics: 统计

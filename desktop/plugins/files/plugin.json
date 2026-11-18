@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "files",
-  "version": "0.1.31",
+  "version": "0.1.32",
   "extensions": {
     "dev.sailry.platform": {
       "api_version": "v1",
@@ -1705,10 +1705,6 @@
         ],
         "previews": [
           "text/html",
-          "application/pdf",
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "application/vnd.openxmlformats-officedocument.presentationml.presentation",
           "application/x-ipynb+json"
         ]
       },

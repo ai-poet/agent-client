@@ -91,7 +91,7 @@ func Composer(d *Data, c *Conversation, worktree string) *composer.Context {
 }
 
 // references is the @ catalog: files, subagents, sessions, the workspace
-// context, databases, SSH, the skills and plugins, then attaching files.
+// context, the skills and plugins, then attaching files.
 func references(d *Data, c *Conversation) []composer.Reference {
 	page := func(id, label, desc, alias string, icon *ui.SVG, kids ...composer.Reference) composer.Reference {
 		return composer.Reference{ID: id, Kind: composer.Page, Label: label, Description: desc, Key: true, Alias: alias,
@@ -118,19 +118,6 @@ func references(d *Data, c *Conversation) []composer.Reference {
 		context = append(context, leaf(composer.Location, "project", project, "", icons.Folder),
 			leaf(composer.Location, "worktree", branch, "", icons.GitBranch))
 	}
-	tables := func(db string, names ...string) []composer.Reference {
-		var out []composer.Reference
-		for _, n := range names {
-			out = append(out, leaf(composer.Database, "db:"+db+"/"+n, n, db, icons.Grid))
-		}
-		return out
-	}
-	databases := []composer.Reference{
-		{ID: "db:billing", Kind: composer.Page, Label: "billing (PostgreSQL)", Description: "localhost:5432", Icon: icons.MemoryStick,
-			Children: tables("billing", "invoices", "customers", "tax_rates")},
-		{ID: "db:cache", Kind: composer.Page, Label: "cache (SQLite)", Description: "~/.cache/app.db", Icon: icons.MemoryStick,
-			Children: tables("cache", "entries")},
-	}
 	var catalog []composer.Reference
 	for _, p := range d.Plugins {
 		if p.Enabled {
@@ -153,10 +140,6 @@ func references(d *Data, c *Conversation) []composer.Reference {
 			leaf(composer.Agent, "agent:tester", "@tester", "Writes and runs tests", icons.Bot)),
 		page("sessions", "reference_sessions", "reference_sessions_description", "sessions", icons.Chat, sessions...),
 		page("context", "reference_context", "reference_context_description", "context", icons.Globe, context...))
-	out = append(out, group("reference_group_connections",
-		page("databases", "reference_databases", "", "database", icons.MemoryStick, databases...),
-		page("ssh", "reference_ssh", "", "ssh", icons.Terminal,
-			leaf(composer.Location, "ssh:build", "build-box", "ci@10.0.0.12", icons.Terminal)))...)
 	out = append(out, group("reference_group_skills",
 		leaf(composer.Skill, "skill:git/commit", "Commit message", "git · Write a commit message from the diff", icons.BookOpen),
 		leaf(composer.Skill, "skill:knowledge/search", "Search knowledge", "knowledge · Search local documents", icons.BookOpen))...)

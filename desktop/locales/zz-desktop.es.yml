@@ -15,7 +15,6 @@ git_tag_push_open: Push de etiqueta…
 composer_group_prompts: Prompts
 composer_group_modes: Modos
 composer_group_session: Sesión
-reference_group_connections: Conexiones
 reference_group_skills: Habilidades
 reference_group_plugins: Plugins
 reference_group_attach: Adjuntos

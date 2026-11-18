@@ -9124,16 +9124,14 @@
       "manifest": {
         "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
         "name": "files",
-        "version": "0.1.29",
+        "version": "0.1.32",
         "extensions": {
           "dev.sailry.platform": {
             "api_version": "v1",
             "min_sailry_version": "0.1.6",
             "actions": [
               "files.read",
-              "files.write",
-              "models.read",
-              "models.install"
+              "files.write"
             ],
             "display": {
               "label": "Files",
@@ -9149,140 +9147,6 @@
               }
             },
             "tools": [
-              {
-                "name": "list_ocr_models",
-                "presentation": "summary",
-                "contexts": [
-                  "plugin",
-                  "workspace"
-                ],
-                "description": "List available OCR definitions and installation state on this execution Node. Set installed_only to list installed models. This does not install, remove, enable or select a model.",
-                "handler": {
-                  "name": "ocr_models",
-                  "read_only": true,
-                  "parameters": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [],
-                    "properties": {
-                      "installed_only": {
-                        "type": "boolean",
-                        "default": false
-                      }
-                    }
-                  }
-                },
-                "display": {
-                  "label": "OCR models",
-                  "locales": {
-                    "zh-CN": "OCR 模型",
-                    "zh-TW": "OCR 模型",
-                    "ja": "OCR モデル",
-                    "ko": "OCR 모델",
-                    "fr": "Modèles OCR",
-                    "de": "OCR-Modelle",
-                    "es": "Modelos OCR",
-                    "pt-BR": "Modelos OCR",
-                    "ru": "Модели OCR",
-                    "en": "OCR models"
-                  },
-                  "icon": "reicon:ui/magnifier"
-                }
-              },
-              {
-                "name": "install_ocr_model",
-                "presentation": "details",
-                "contexts": [
-                  "plugin",
-                  "workspace"
-                ],
-                "description": "Install the exact OCR model ID from list_ocr_models only when the user requests installation. This uses the shared Node installer and permission policy. Keep the immutable definition; do not silently select a model or repeat a denied or uncertain installation.",
-                "handler": {
-                  "name": "ocr_install",
-                  "operation": "models.install",
-                  "parameters": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "id"
-                    ],
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "pattern": "^[0-9a-f]{64}$"
-                      }
-                    }
-                  }
-                },
-                "display": {
-                  "label": "Install OCR model",
-                  "locales": {
-                    "zh-CN": "安装 OCR 模型",
-                    "zh-TW": "安裝 OCR 模型",
-                    "ja": "OCR モデルをインストール",
-                    "ko": "OCR 모델 설치",
-                    "fr": "Installer un modèle OCR",
-                    "de": "OCR-Modell installieren",
-                    "es": "Instalar modelo OCR",
-                    "pt-BR": "Instalar modelo OCR",
-                    "ru": "Установить модель OCR",
-                    "en": "Install OCR model"
-                  },
-                  "icon": "reicon:ui/magnifier",
-                  "input": {
-                    "summary": {
-                      "path": "/id"
-                    }
-                  }
-                }
-              },
-              {
-                "name": "uninstall_ocr_model",
-                "presentation": "details",
-                "contexts": [
-                  "plugin",
-                  "workspace"
-                ],
-                "description": "Uninstall the exact OCR model ID only when the user requests removal. This removes installed assets, not the model definition, settings or attachments. Do not automatically repeat a denied or uncertain removal.",
-                "handler": {
-                  "name": "ocr_remove",
-                  "operation": "models.remove",
-                  "parameters": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "id"
-                    ],
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "pattern": "^[0-9a-f]{64}$"
-                      }
-                    }
-                  }
-                },
-                "display": {
-                  "label": "Uninstall OCR model",
-                  "locales": {
-                    "zh-CN": "卸载 OCR 模型",
-                    "zh-TW": "移除 OCR 模型",
-                    "ja": "OCR モデルを削除",
-                    "ko": "OCR 모델 제거",
-                    "fr": "Désinstaller le modèle OCR",
-                    "de": "OCR-Modell deinstallieren",
-                    "es": "Desinstalar modelo OCR",
-                    "pt-BR": "Desinstalar modelo OCR",
-                    "ru": "Удалить модель OCR",
-                    "en": "Uninstall OCR model"
-                  },
-                  "icon": "reicon:ui/magnifier",
-                  "input": {
-                    "summary": {
-                      "path": "/id"
-                    }
-                  }
-                }
-              },
               {
                 "name": "list_directory",
                 "presentation": "summary",
@@ -10657,108 +10521,6 @@
                 ]
               },
               {
-                "name": "read_office",
-                "presentation": "summary",
-                "description": "Read DOCX/PDF text, XLSX cell values and formulas, or PPTX slide text and notes from a worktree path or an attachment visible in this conversation. Use source.kind \"path\" with a worktree-relative path, or \"attachment\" with its attachment ID. Earlier attachments must belong to completed, failed or cancelled turns still visible in this conversation; queued or running future inputs are unavailable. Images and scanned PDF pages use OCR when an OCR model is installed on the Node. File sources return the revision for edits. Follow next offsets to read every section, including continuations of long parts.",
-                "handler": {
-                  "name": "office",
-                  "operation": "office.read",
-                  "parameters": {
-                    "$schema": "https://json-schema.org/draft/2020-12/schema",
-                    "title": "Read",
-                    "type": "object",
-                    "properties": {
-                      "source": {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "enum": [
-                              "path",
-                              "attachment"
-                            ]
-                          },
-                          "value": {
-                            "type": "string",
-                            "description": "Worktree-relative path or visible conversation attachment ID"
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "value"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "offset": {
-                        "type": "integer",
-                        "format": "uint",
-                        "minimum": 0,
-                        "description": "Zero-based section offset. Long document parts continue in subsequent sections.",
-                        "default": 0
-                      }
-                    },
-                    "required": [
-                      "source"
-                    ],
-                    "additionalProperties": false
-                  }
-                },
-                "display": {
-                  "label": "Read document",
-                  "locales": {
-                    "zh-CN": "读取文档",
-                    "zh-TW": "讀取文件",
-                    "ja": "文書を読む",
-                    "ko": "문서 읽기",
-                    "fr": "Lire le document",
-                    "de": "Dokument lesen",
-                    "es": "Leer documento",
-                    "pt-BR": "Ler documento",
-                    "ru": "Прочитать документ",
-                    "en": "Read document"
-                  },
-                  "icon": {
-                    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" ><path d=\"M12 7v14\" /><path d=\"M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z\" /></svg>"
-                  },
-                  "input": {
-                    "summary": {
-                      "path": "/source/value",
-                      "code": true,
-                      "result_path": "/data/path"
-                    }
-                  },
-                  "output": {
-                    "preview": {
-                      "parts": [
-                        {
-                          "rows": {
-                            "value": {
-                              "source": "result",
-                              "path": "/data/sections"
-                            },
-                            "text": {
-                              "parts": [
-                                {
-                                  "value": {
-                                    "source": "item",
-                                    "path": "/text"
-                                  }
-                                }
-                              ]
-                            },
-                            "separator": "\n\n"
-                          }
-                        }
-                      ]
-                    }
-                  }
-                },
-                "contexts": [
-                  "plugin",
-                  "workspace"
-                ]
-              },
-              {
                 "name": "read_notebook",
                 "presentation": "summary",
                 "description": "Read numbered nbformat 4 cells without executing a kernel. Use next_offset to continue. Returned cell JSON retains source, metadata and saved outputs; truncated cells omit oversized content and include a bounded source preview.",
@@ -11006,13 +10768,9 @@
             "host": {
               "entry": "dev.sailry.platform/host/main.js",
               "resources": [
-                "dev.sailry.platform/host/main.js",
-                "dev.sailry.platform/host/models.js"
+                "dev.sailry.platform/host/main.js"
               ],
               "handlers": [
-                "ocr_models",
-                "ocr_install",
-                "ocr_remove",
                 "list",
                 "read",
                 "write",
@@ -11023,7 +10781,6 @@
                 "mkdir",
                 "find",
                 "search",
-                "office",
                 "notebook_read",
                 "notebook_edit"
               ]
@@ -11071,14 +10828,10 @@
               ],
               "previews": [
                 "text/html",
-                "application/pdf",
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 "application/x-ipynb+json"
               ]
             },
-            "instructions": "Use find_files and search_files for file discovery and content search rather than shell commands. Read a worktree image with read_file when you need to see it, such as a screenshot, diagram or design; read_office extracts document text and reads conversation attachments.",
+            "instructions": "Use find_files and search_files for file discovery and content search rather than shell commands. Read a worktree image with read_file when you need to see it, such as a screenshot, diagram or design.",
             "category": "development",
             "tint": "blue"
           }
@@ -11087,9 +10840,7 @@
       "provides_models": false,
       "permissions": [
         "files.read",
-        "files.write",
-        "models.read",
-        "models.install"
+        "files.write"
       ],
       "versions": [
         {
@@ -11410,18 +11161,7 @@
         }
       ],
       "release_notes": {
-        "text": "- Restore outline icons in navigation and tools",
-        "locales": {
-          "zh-CN": "- 导航和工具恢复线条图标",
-          "zh-TW": "- 導覽和工具恢復線條圖示",
-          "ja": "- ナビゲーションとツールのアイコンを線画に戻す",
-          "ko": "- 탐색 및 도구 아이콘을 선형으로 복원",
-          "fr": "- Icônes au trait rétablies dans la navigation et les outils",
-          "de": "- Umrisssymbole in Navigation und Werkzeugen wiederhergestellt",
-          "es": "- Iconos de contorno restaurados en la navegación y las herramientas",
-          "pt-BR": "- Ícones de contorno restaurados na navegação e nas ferramentas",
-          "ru": "- Возвращены контурные значки в навигации и инструментах"
-        }
+        "text": "- Stop advertising Office and PDF previews without a document extraction engine"
       }
     },
     {
@@ -17572,7 +17312,7 @@
       "manifest": {
         "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
         "name": "plugin-builder",
-        "version": "0.1.18",
+        "version": "0.1.19",
         "description": "Create and update Sailry plugins in a conversation",
         "extensions": {
           "dev.sailry.platform": {
@@ -17817,18 +17557,7 @@
         }
       ],
       "release_notes": {
-        "text": "- Align runtime guidance and SDK references with moejs and MyGo/Kit",
-        "locales": {
-          "zh-CN": "- 按当前 moejs 与 MyGo/Kit 更新运行时指导和 SDK 参考",
-          "zh-TW": "- 依目前 moejs 與 MyGo/Kit 更新執行環境指引與 SDK 參考",
-          "ja": "- moejs と MyGo/Kit に合わせてランタイムの説明と SDK リファレンスを更新",
-          "ko": "- moejs 및 MyGo/Kit에 맞게 런타임 안내와 SDK 참조 갱신",
-          "fr": "- Aligner la documentation du runtime et les références SDK sur moejs et MyGo/Kit",
-          "de": "- Laufzeithinweise und SDK-Referenzen an moejs und MyGo/Kit anpassen",
-          "es": "- Actualizar la guía de ejecución y las referencias del SDK para moejs y MyGo/Kit",
-          "pt-BR": "- Atualizar as orientações de execução e as referências do SDK para moejs e MyGo/Kit",
-          "ru": "- Обновить описание среды выполнения и справку SDK для moejs и MyGo/Kit"
-        }
+        "text": "- Align supported modules, actions and conversation contexts with the slim desktop build"
       }
     },
     {
@@ -24467,26 +24196,6 @@
       "package": "notion",
       "path": "skills/workspace/SKILL.md",
       "frontmatter": "---\nname: workspace\ndescription: Use Notion tools for pages and databases with the authorized account on the execution Node.\nmetadata:\n  display-name.en: \"Notion\"\n  display-name.zh-CN: \"Notion\"\n  display-name.zh-TW: \"Notion\"\n  display-name.ja: \"Notion\"\n  display-name.ko: \"Notion\"\n  display-name.fr: \"Notion\"\n  display-name.de: \"Notion\"\n  display-name.es: \"Notion\"\n  display-name.pt-BR: \"Notion\"\n  display-name.ru: \"Notion\"\n  display-name: Notion\n---\n"
-    },
-    {
-      "package": "office",
-      "path": "skills/excel/SKILL.md",
-      "frontmatter": "---\nname: excel\nmetadata:\n  display-name.en: \"Excel\"\n  display-name.zh-CN: \"Excel\"\n  display-name.zh-TW: \"Excel\"\n  display-name.ja: \"Excel\"\n  display-name.ko: \"Excel\"\n  display-name.fr: \"Excel\"\n  display-name.de: \"Excel\"\n  display-name.es: \"Excel\"\n  display-name.pt-BR: \"Excel\"\n  display-name.ru: \"Excel\"\n  display-name: Excel\ndescription: Create, analyze and edit Excel workbooks (.xlsx), formulas, formatting, charts, tables and validations.\n---\n"
-    },
-    {
-      "package": "office",
-      "path": "skills/pdf/SKILL.md",
-      "frontmatter": "---\nname: pdf\nmetadata:\n  display-name.en: \"PDF\"\n  display-name.zh-CN: \"PDF\"\n  display-name.zh-TW: \"PDF\"\n  display-name.ja: \"PDF\"\n  display-name.ko: \"PDF\"\n  display-name.fr: \"PDF\"\n  display-name.de: \"PDF\"\n  display-name.es: \"PDF\"\n  display-name.pt-BR: \"PDF\"\n  display-name.ru: \"PDF\"\n  display-name: PDF\ndescription: Read, generate, render and edit PDF documents, merge/split/rotate pages and fill form fields.\n---\n"
-    },
-    {
-      "package": "office",
-      "path": "skills/powerpoint/SKILL.md",
-      "frontmatter": "---\nname: powerpoint\nmetadata:\n  display-name.en: \"PowerPoint\"\n  display-name.zh-CN: \"PowerPoint\"\n  display-name.zh-TW: \"PowerPoint\"\n  display-name.ja: \"PowerPoint\"\n  display-name.ko: \"PowerPoint\"\n  display-name.fr: \"PowerPoint\"\n  display-name.de: \"PowerPoint\"\n  display-name.es: \"PowerPoint\"\n  display-name.pt-BR: \"PowerPoint\"\n  display-name.ru: \"PowerPoint\"\n  display-name: PowerPoint\ndescription: Create and edit PowerPoint presentations (.pptx), themes, slide layouts, typography, speaker notes, tables, shapes and editable charts.\n---\n"
-    },
-    {
-      "package": "office",
-      "path": "skills/word/SKILL.md",
-      "frontmatter": "---\nname: word\nmetadata:\n  display-name.en: \"Word\"\n  display-name.zh-CN: \"Word\"\n  display-name.zh-TW: \"Word\"\n  display-name.ja: \"Word\"\n  display-name.ko: \"Word\"\n  display-name.fr: \"Word\"\n  display-name.de: \"Word\"\n  display-name.es: \"Word\"\n  display-name.pt-BR: \"Word\"\n  display-name.ru: \"Word\"\n  display-name: Word\ndescription: Create and edit Word documents (.docx), templates, reports, typography, tables, headers, footers and comments.\n---\n"
     },
     {
       "package": "plugin-builder",

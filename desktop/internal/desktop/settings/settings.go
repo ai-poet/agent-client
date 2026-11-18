@@ -142,8 +142,7 @@ func Page(c *ui.Context, s *State, d *preview.Data, look Look) {
 	} else {
 		desc = i18n.T(c, desc)
 	}
-	// Each section's page starts at its top; the model pages' Available
-	// tab loads the hub's next page as it nears the end (moreLibrary).
+	// Each section's page starts at its top.
 	if s.scrolled != s.Section {
 		s.scrolled, s.pageScroll = s.Section, ui.ScrollState{}
 	}

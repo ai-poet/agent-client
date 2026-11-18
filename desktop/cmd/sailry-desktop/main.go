@@ -7,11 +7,6 @@ import (
 	"log"
 	"os"
 
-	"github.com/egoist/mygo"
-	_ "github.com/egoist/mygo/locales/ja"
-	_ "github.com/egoist/mygo/locales/zh-Hans"
-	_ "github.com/egoist/mygo/locales/zh-Hant"
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit/crychic"
@@ -24,6 +19,11 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/node/computer"
 	"github.com/ai-poet/agent-client/desktop/internal/node/logging"
+	"github.com/egoist/mygo"
+	_ "github.com/egoist/mygo/locales/ja"
+	_ "github.com/egoist/mygo/locales/zh-Hans"
+	_ "github.com/egoist/mygo/locales/zh-Hant"
+	"github.com/egoist/mygo/ui"
 )
 
 type desktopWindow struct {
@@ -254,16 +254,6 @@ func run() error {
 					return err
 				})
 			}
-			runtime.SetPickKeyFile(func(selected func(string)) {
-				paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: entry.window, Title: i18n.In(i18n.Match(mygo.App.Locale()), "ssh_key_file")})
-				if err != nil {
-					runtime.Report(err)
-					return
-				}
-				if len(paths) > 0 {
-					selected(paths[0])
-				}
-			})
 			runtime.SetPickDirectory(func(selected func(string)) {
 				paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: entry.window, Title: i18n.In(i18n.Match(mygo.App.Locale()), "directory_title"), Directory: true})
 				if err != nil {

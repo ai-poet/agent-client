@@ -15,7 +15,6 @@ git_tag_push_open: 태그 푸시…
 composer_group_prompts: 프롬프트
 composer_group_modes: 모드
 composer_group_session: 세션
-reference_group_connections: 연결
 reference_group_skills: 스킬
 reference_group_plugins: 플러그인
 reference_group_attach: 첨부 파일

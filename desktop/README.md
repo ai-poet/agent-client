@@ -54,13 +54,12 @@ to your code and data, driven from the desktop app or your phone on the
   and code review.
 - **Browse and operate** — a built-in browser the agent reads, clicks and screenshots; pick page
   elements straight into the conversation; desktop computer use.
-- **Office work** — read Word, Excel, PowerPoint and PDF (with OCR), write documents and
-  interactive HTML previews, generate images and video, search the web and your knowledge base.
+- **Content and research** — interactive HTML previews, images and video, web search
+  and text knowledge collections.
 - **Keep going** — long-term memory, searchable history, goals that run until they are done,
   reminders and scheduled tasks.
 - **Connectors** — GitHub, Notion, Slack, Linear, Figma, Google Workspace, Microsoft 365, Feishu,
   DingTalk, WeCom and [more](https://github.com/sailry/sailry-plugins).
-- **Local speech and OCR** — voice input and text recognition run on your own machine.
 
 ### Agent teams, one model per seat
 
@@ -75,10 +74,10 @@ install. Structured tools return the result the agent needs instead of raw shell
 
 - **Code graph** — symbol search, file outlines, callers and callees, change impact and a ranked
   project map, so agents read the right code instead of searching the whole tree.
-- **Databases** — PostgreSQL, MySQL and SQLite through saved connections. Queries run read-only;
-  writes follow the session's permission policy. Agents use connections by ID and never see
-  passwords or private keys.
-- **SSH** — commands and SFTP transfers on saved servers, with pinned host keys.
+
+This desktop variant omits SSH, external database connections, Office/PDF extraction
+and local inference, including dictation. It retains iroh networking, WSL setup,
+online models, text knowledge collections, files, Git and local terminals.
 
 ### Your phone is the remote control
 

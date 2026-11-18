@@ -15,7 +15,6 @@ git_tag_push_open: Tag pushen…
 composer_group_prompts: Prompts
 composer_group_modes: Modi
 composer_group_session: Sitzung
-reference_group_connections: Verbindungen
 reference_group_skills: Skills
 reference_group_plugins: Plugins
 reference_group_attach: Anhänge

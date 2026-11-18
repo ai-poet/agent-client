@@ -42,7 +42,6 @@ settings_appearance: 모양
 settings_appearance_description: 테마와 창 모양 조정하기
 settings_conversation: 대화
 settings_shortcuts: 키보드 단축키
-settings_dictation: 음성 입력
 settings_providers: 모델
 settings_providers_description: 세션 공급자, 인증 및 모델 관리
 settings_connectors: 커넥터
@@ -117,7 +116,6 @@ chat_stop: 중지
 composer_select_model: 모델 선택
 composer_effort: 추론 노력
 composer_effort_unavailable: 기본값
-dictation_start: 음성 입력
 turn_reasoning: 추론
 turn_latest: 최신 응답으로 이동
 chat_navigation: 메시지 탐색
@@ -704,8 +702,6 @@ reference_files: 파일
 reference_agents: 하위 에이전트
 reference_sessions: 세션
 reference_context: 작업 공간 컨텍스트
-reference_databases: 데이터베이스
-reference_ssh: SSH 연결
 reference_empty: 일치하는 참조가 없음
 reference_host: 호스트
 reference_project: 프로젝트
@@ -721,9 +717,6 @@ composer_prompt_test: 관련 테스트 실행, 실패 분석 및 수정
 composer_prompt_plan: 다가오는 작업 계획
 composer_prompt_explain: 관련 코드가 어떻게 작동하는지 설명
 chat_compact: 컴팩트 컨텍스트
-dictation_finish: 녹음 끝내기
-dictation_preparing: 로컬 음성 모델 준비
-dictation_transcribing: 번역 중
 directory_back: 뒤로
 directory_forward: 앞으로
 directory_up: 상위 디렉터리
@@ -834,18 +827,6 @@ connections_direction_saved: 기기 접근 방향이 업데이트됨
 connections_offline: 오프라인
 connections_online: 온라인
 connections_revoke_confirm: 페어링을 제거하려면 다시 연결해야 합니다
-dictation_access: 마이크 액세스
-dictation_access_granted: 허용됨
-dictation_access_hint: 이 앱에 대한 액세스 허용; 돌아올 때 다시 확인
-dictation_input: 입력
-dictation_language: 인식 언어
-dictation_language_auto: 자동 감지
-dictation_language_chinese: 중국어
-dictation_language_english: English
-dictation_local_model: 로컬 모델
-dictation_microphone_default: 시스템 기본값
-dictation_microphone_label: 마이크
-dictation_model_name: SenseVoice INT8
 form_name_hint: 이름
 form_passphrase_hint: 개인 키 암호 (선택 사항)
 form_private_key_hint: 개인 키 붙여넣기
@@ -877,27 +858,12 @@ hooks_unknown: Hook 저장 결과가 불확실합니다. 원래 요청을 재시
 host_install: 설치 및 연결
 host_pairing_hint: Sailry가 설치된 기기에 연결
 host_pairing_mode: 페어링 코드
-host_ssh_mode: SSH로 설치
 host_install_hint: 서버에 Sailry를 설치하고 연결
-host_ssh_agent_hint: 이 컴퓨터의 SSH 에이전트에 로드된 키 사용
-ssh_authentication: 인증
 connection: 연결
-knowledge_downloading: 다운로드 중
-knowledge_install: 설치
-knowledge_installed: 설치됨
-knowledge_missing: 미설치
-knowledge_model_details: 상세 정보
 live_revoke: 페어링 제거
 live_revoke_confirm: “%{name}” 연결을 끊고 페어링을 제거하려면 다시 연결해야 합니다
-local_models_available: 설치 가능
-local_models_empty: 설치된 모델 없음
-local_models_recommended: 추천
-local_models_status: 상태
 message_display_compact: 간결하게
 message_display_detailed: 자세히
-model_library_select: 선택
-model_library_selected: 선택됨
-model_library_source: 소스
 pairing_connect: 장치 연결
 pairing_local_code: 로컬 페어링 코드
 pairing_pin_hint: 6자리 페어링 코드 입력
@@ -937,9 +903,6 @@ power_settings_conflict: 설정이 변경되었습니다. 다시 불러오세요
 power_settings_failed: 절전 설정을 불러오거나 저장할 수 없습니다
 power_settings_saved: 저장됨
 power_settings_unknown: 저장 결과를 알 수 없습니다. 다시 불러와 확인하세요
-runtime_ocr: 문자 인식
-runtime_ocr_enable: OCR 사용
-runtime_ocr_model: OCR 모델
 runtime_python: Python
 runtime_python_bundled: 내장
 runtime_python_custom: 사용자 지정
@@ -963,7 +926,6 @@ settings_command_sandbox_description: 모든 세션의 다음 명령부터 적�
 settings_connections_description: 페어링된 장치 및 원격 Node 연결 관리
 settings_connectors_description: 서비스 연결 관리
 settings_conversation_description: 대화 메시지 표시 방법 조절하기
-settings_decision: 판단
 settings_decision_description: 로컬 판단 모델 설정
 settings_dictation_description: 메시지 초안에 로컬로 쓰기
 settings_empty: 항목 없음
@@ -996,7 +958,6 @@ settings_notify_approval: 승인 요청 알림
 settings_notify_completed: 작업 완료 알림
 settings_notify_failed: 작업 실패 알림
 settings_notify_system: 시스템 알림Comment
-settings_ocr: OCR
 settings_ocr_description: 텍스트 인식 설정
 settings_paste_description: 여러 줄을 붙여넣기 전에 확인하기
 settings_paste_protection: 멀티라인 페이스트 보호
@@ -1022,14 +983,6 @@ shortcut_record: 단축키 누르기
 shortcut_reset: 기본값으로 초기화
 shortcut_selection: 선택한 텍스트 사용
 shortcut_unavailable: 단축키를 사용할 수 없음
-ssh_host: 호스트
-ssh_key_file: 개인 키 파일
-ssh_key_path: 키 파일
-ssh_passphrase: 개인 키 암호
-ssh_password: 비밀번호
-ssh_port: 포트
-ssh_private_key: 개인 키
-ssh_username: 사용자 이름
 telemetry_conflict: 설정이 변경되었습니다. 새로고침 후 다시 시도하세요
 telemetry_errors: 오류 보고서 보내기
 telemetry_errors_description: 앱 버전, 기기 유형 및 오류 코드
@@ -1172,9 +1125,6 @@ provider_effort_invalid: 잘못된 추론 노력; 이름, 중복 및 API 지원 
 provider_login_claude: Claude
 provider_login_chat_gpt: ChatGPT
 search_driver_auto: 자동
-knowledge_settings: 기본 설정
-knowledge_default_model: 벡터 모델
-knowledge_keyword_only: 키워드만
 knowledge_collections: 컬렉션
 knowledge_collection_pending: 색인 대기 중
 knowledge_collection_unavailable: 스토리지 Node를 사용할 수 없음
@@ -1186,10 +1136,6 @@ knowledge_collection_failures: '%{count}개 색인 안 됨 · %{reason}'
 knowledge_pause: 일시 중지
 knowledge_resume: 재개
 knowledge_update: 업데이트
-runtime_decision: 판단
-runtime_decision_model: 모델
-runtime_decision_enable: 판단 사용
-local_models_none: 없음
 connector_oauth: OAuth
 connector_application: 앱 인증 정보
 connector_token: Token
@@ -1377,14 +1323,6 @@ plugins_no_mcp: 아니 MCP 서버
 market_details_permission_none: 추가 권한이 필요하지 않음
 market_details_added_permissions: 새 권한
 market_installed: 설치됨
-model_library_huggingface: Hugging Face
-model_library_modelscope: ModelScope
-model_library_query: 모델 검색
-model_library_no_results: 모델을 찾을 수 없습니다
-knowledge_delete: 삭제
-knowledge_model_size: 크기
-knowledge_delete_model_effect: '%{name} 삭제 시 이 모델을 사용하는 컬렉션은 키워드 검색을 사용합니다'
-knowledge_deleted: 삭제됨
 market_category_development: 개발
 market_category_automation: 자동화
 market_category_data: 데이터
@@ -1498,10 +1436,6 @@ market_permission_browser_control: 내장 브라우저 제어
 market_permission_http_request: 네트워크 요청 보내기
 market_details_source_local: 로컬 가져오기
 market_permission_databases_control: 데이터베이스 쿼리 실행
-model_library_embedding: 임베딩 모델
-model_library_ocr: OCR 모델
-model_library_speech: 음성 모델
-model_library_decision: 판단
 onboarding_title: Sailry에 오신 것을 환영합니다
 onboarding_description: 모델을 연결하고 시작하세요
 onboarding_host_unavailable: 호스트를 사용할 수 없습니다
@@ -1680,7 +1614,6 @@ composer_group_prompts: 프롬프트
 composer_group_modes: 모드
 composer_group_session: 세션
 reference_group_context: 컨텍스트
-reference_group_connections: 연결
 reference_group_skills: 스킬
 reference_group_plugins: 플러그인
 reference_group_attach: 첨부 파일
@@ -1866,7 +1799,6 @@ host_install_failed: 호스트를 추가할 수 없음
 host_install_installing: 호스트 설치 중
 host_install_pairing: 페어링
 host_install_unknown: 설치 결과 확인되지 않음; 호스트를 확인하고 다시 시도하십시오
-host_ssh_windows_pairing: Windows에서는 Sailry 데스크톱을 설치하고 연 다음 페어링 코드로 호스트를 추가하세요.
 host_step_connect: 호스트에 연결
 host_step_pair: 페어링
 model_effort: 강도
@@ -1892,9 +1824,6 @@ pairing_relay_selected: 선택한 네트워크
 pairing_retrying: 페어링 서비스를 사용할 수 없습니다. 다시 시도 중
 pairing_success: 장치 페어링됨
 settings_retry: 다시 시도
-ssh_key_changed: 호스트 키 변경, 지문 확인
-ssh_trust: 신뢰
-ssh_trust_title: 호스트 키 신뢰
 usage_duration_ms: '%{value} ms'
 live_host_runtime_error: 호스트 런타임을 읽을 수 없음
 live_metrics_loading: 메트릭 불러오는 중
@@ -1953,21 +1882,14 @@ market_permission_web_settings_read: 검색 설정 읽기
 market_permission_web_settings_write: 검색 설정 변경
 market_permission_activity_read: 활동 읽기
 market_permission_usage_read: 사용량 읽기
-market_permission_databases_read: 데이터베이스 연결 읽기
-market_permission_databases_manage: 데이터베이스 연결 관리
-market_permission_ssh_read: SSH 연결 읽기
-market_permission_ssh_control: SSH 세션 사용
-market_permission_ssh_manage: SSH 연결 관리
 market_permission_agents_delegate: 하위 에이전트에 위임
 market_permission_roles_read: 역할 읽기
 market_permission_teams_read: 팀 읽기
 market_permission_roles_write: 역할 변경
 market_permission_models_read: 모델 읽기
-market_permission_decisions_run: 로컬 결정 실행
 market_permission_models_provide: 모델 제공
 market_permission_models_authenticate: 모델 서비스 로그인
 market_permission_credentials_inspect: 자격 증명 확인
-market_permission_models_install: 모델 설치
 market_permission_media_inspect: 미디어 보기
 market_permission_media_image: 이미지 생성
 market_permission_media_video: 동영상 생성
@@ -2047,31 +1969,6 @@ terminal_paste: 붙여넣기
 runtime_failed: 실행 환경 작업 실패
 runtime_conflict: 설정이 변경되었습니다. 초안을 유지하려면 다시 불러오세요
 runtime_unknown: 결과를 확인할 수 없습니다. 다시 시도하세요
-knowledge_saved: 저장됨
-knowledge_cancel_requested: 취소 요청됨
-model_library_failed: 모델을 불러올 수 없습니다
-model_library_partial: 일부 결과를 사용할 수 없습니다
-model_library_conflict: 이 버전의 파일이 변경되었습니다
-model_library_version: 버전
-model_library_query_prefix: 검색 접두사
-model_library_document_prefix: 문서 접두사
-knowledge_up_to_date: 이미 최신 버전
-local_models_unavailable: 사용 불가
-dictation_unavailable: 로컬 음성 입력을 사용할 수 없음
-dictation_model_missing: 먼저 음성 모델 다운로드하기
-dictation_busy: 음성 입력이 사용 중입니다. 나중에 다시 시도하십시오
-dictation_microphone: 마이크를 사용할 수 없습니다. 시스템 권한 확인
-dictation_storage: 음성 모델을 저장할 수 없음
-dictation_download: 음성 모델 다운로드 실패; 다시 시도하기
-dictation_model_invalid: 잘못된 음성 모델; 다시 시도하기
-dictation_failed: 번역 실패; 다시 시도
-dictation_empty: 음성이 인식되지 않음Name
-dictation_device_missing: 선택한 마이크를 사용할 수 없음
-dictation_device_loading: 마이크 감지 중
-dictation_permission: 시스템 설정에서 마이크 액세스 허용
-dictation_no_audio: 마이크 오디오가 수신되지 않습니다. 장치 및 권한 확인
-dictation_silent: 소리가 감지되지 않았습니다. 마이크 확인
-dictation_draft_changed: 초안 변경; 음성 입력 중지Name
 telemetry_reset: 익명 ID를 재설정했습니다
 telemetry_diagnostics_sent: 진단 정보를 보냈습니다
 telemetry_diagnostics_failed: 진단 정보 전송을 확인하지 못했습니다
@@ -2121,9 +2018,6 @@ panel_history_empty: 아직 기록이 없습니다
 panel_documents_empty: 아직 문서가 없습니다
 connections_copy_id: ID 복사
 host_check_status: 상태 확인
-ssh_agent_short: 대리인
-ssh_keep_credential: 저장된 자격 증명을 유지하려면 비워 두십시오
-ssh_busy: 다른 연결이 바빠서 곧 다시 시도하십시오
 connection_scope: 범위
 connection_private: 비공개
 connection_global: 전역 공유

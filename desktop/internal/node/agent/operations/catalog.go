@@ -166,8 +166,7 @@ func Alias(owner, name string) string {
 }
 
 // Available reports whether the declaration's contexts admit a conversation.
-// bound names the kind of the connection resource the conversation is bound
-// to: "database", "ssh", or nothing for an unbound conversation.
+// bound preserves the scope of a previously resource-bound conversation.
 func (d Declaration) Available(project bool, bound ...string) bool {
 	if len(d.Contexts) == 0 {
 		return true

@@ -8,27 +8,6 @@ type Shell struct {
 	Args []string
 }
 
-// ModelStatus is a local model's state on its host.
-type ModelStatus int
-
-const (
-	ModelMissing ModelStatus = iota
-	ModelDownloading
-	ModelInstalled
-)
-
-// LocalModel is a model a host runs for OCR, dictation, knowledge or
-// decisions. Version (the source's revision), License and Size are its
-// definition's, "" where unknown. Removable marks a model whose files can
-// be deleted and, once installed, updated.
-type LocalModel struct {
-	ID, Name, Repo         string
-	Status                 ModelStatus
-	Percent                float64 // of a download
-	Version, License, Size string
-	Removable              bool
-}
-
 // KnowledgeState is what a knowledge collection is doing.
 type KnowledgeState int
 
@@ -52,23 +31,6 @@ type KnowledgeCollection struct {
 	Failed   uint64
 	Reason   string
 	Busy     bool
-}
-
-// LibraryModel is a model the model library finds (model_library rows).
-type LibraryModel struct {
-	ID, Name, Repo, Kind  string // Kind: model_library_embedding, _ocr, _speech, model_library_decision
-	Source, Size, License string
-	Status                ModelStatus
-	Percent               float64
-	// Versions are the hub's versions once read, newest first, and Version
-	// the index of the one the details show. Resolved marks a known
-	// definition (size, license), which an install from the details needs;
-	// Current marks the shown version as the one the host has, which Status
-	// is about. QueryPrefix and DocumentPrefix are an embedding model's own.
-	Versions                    []string
-	Version                     int
-	Resolved, Current           bool
-	QueryPrefix, DocumentPrefix string
 }
 
 // Permission is a system permission the app or a plugin needs, by its

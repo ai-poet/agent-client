@@ -1,5 +1,9 @@
 # Changes
 
+## 0.1.32
+
+- Stop advertising Office and PDF previews without a document extraction engine
+
 ## 0.1.31
 
 - Remove local OCR model discovery and installation tools in the slim desktop build

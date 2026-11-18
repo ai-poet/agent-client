@@ -48,11 +48,10 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/shipped"
 )
 
-// lockFile is the shared shape of the four runtime locks.
+// lockFile describes pinned helper assets.
 type lockFile struct {
 	Build         string            `json:"build"`
 	Release       string            `json:"release"`
-	PythonVersion string            `json:"python_version"`
 	Source        string            `json:"source"`
 	Targets       map[string]target `json:"targets"`
 }
@@ -104,7 +103,7 @@ func main() {
 	platform := flag.String("target", runtime.GOOS+"/"+runtime.GOARCH, "GOOS/GOARCH to stage")
 	artifacts := flag.String("artifacts", "", "directory of the CI native job's libraries and their SHA256SUMS")
 	bundle := flag.String("bundle", "", "directory that receives a copy of the shipped files")
-	host := flag.Bool("host", false, "stage what sailry-host ships: no speech or capture library")
+	host := flag.Bool("host", false, "stage what sailry-host ships: no capture library")
 	sealed := flag.String("seal", "", "packaged directory or signed macOS .app to seal instead of staging")
 	identity := flag.String("sign", "-", "with -seal of a macOS .app: the identity that signed it")
 	entitlements := flag.String("entitlements", "cmd/sailry-desktop/macos/app.entitlements.plist", "with -seal of a macOS .app: its entitlements")
@@ -134,7 +133,7 @@ func main() {
 	if *bundle != "" {
 		for _, name := range run.shipped {
 			// Trees are replaced whole so no earlier file stays in the package.
-			if name == "helpers" || name == "python" {
+			if name == "helpers" {
 				fail(os.RemoveAll(filepath.Join(*bundle, name)))
 			}
 			fail(copyTree(filepath.Join(run.output, name), filepath.Join(*bundle, name)))

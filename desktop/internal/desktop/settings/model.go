@@ -221,9 +221,9 @@ type Model struct {
 	teamRemoving string
 	roleRemoving string
 
-	// Plugins, Skills, Market and the model library (plugins*, skills,
-	// market*, model_library*): the installed packages, the market's
-	// plugins, skills and themes, the installed skills and the library's
+	// Plugins, Skills and Market (plugins*, skills,
+	// market*): the installed packages, the market's
+	// plugins, skills and themes, and the installed skills.
 	// models, with the pages' searches and filters.
 	Packages        []preview.Package
 	MarketPlugins   []preview.Package
@@ -240,16 +240,9 @@ type Model struct {
 	// MarketLoad is the catalog's load: the cards' skeleton shows while
 	// it runs, from the market's first frame.
 	MarketLoad preview.Fetch
-	// LibraryLoad is the model library's search: placeholder rows before
-	// its first page, a spinner over the results after. LibraryMore marks
-	// a hub with a further page and LibraryFailed a search that failed,
-	// which Retry runs again.
-	LibraryLoad preview.Fetch
 	// pageScroll is where the section's page is scrolled, of scrolled.
 	pageScroll    ui.ScrollState
 	scrolled      Section
-	LibraryMore   bool
-	LibraryFailed bool
 	config        pluginConfig
 	install       pluginInstall
 	download      pluginDownload

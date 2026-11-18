@@ -192,7 +192,7 @@ sh cmd/sailry-mobile/build.sh android arm64-v8a      # from the repository root
 sh cmd/sailry-mobile/build.sh ios iphoneos arm64
 ```
 
-Native transport, relay outage/recovery, SSH installation, Host task automation
+Native transport, relay outage/recovery, WSL installation, Host task automation
 and actual Dart callbacks require isolated integration fixtures. A passing
 macOS c-shared build or Dart process does not establish physical Android or iOS
 acceptance. Flutter analysis and the existing Flutter contract tests remain
@@ -328,11 +328,13 @@ Signing credentials, profiles, binaries and native artifacts never enter Git.
 
 `go run ./native/fetch` stages one target's pinned native artifacts in
 `.runtime/native/<goos>-<goarch>/` after checking each download against the
-lock files (`native/*.lock.json` and
-`internal/localmodels/decision/llama-runtime.lock.json`). The iroh and capture
+lock files (`native/*.lock.json`). The iroh, Turso and capture
 libraries come from `native/*/build.sh` on the target, or from the CI native
 job with `-artifacts <dir>`; `-bundle <dir>` copies the shipped set and `-host`
-leaves out the speech and capture libraries.
+leaves out the capture library. ONNX, llama.cpp and Python runtimes are not fetched
+or packaged by this build. General Python plugins can use a verified external
+runtime selected with `SAILRY_PYTHON_RUNTIME`; see the runtime checks in
+`internal/node/python`.
 
 The Desktop package is described by `cmd/sailry-desktop/mygo.json`; its version
 equals `link.ProductVersion`. Shipped files sit beside the executable, or in
@@ -376,14 +378,13 @@ go run ./native/fetch -seal .runtime/package/out/darwin-arm64/Sailry.app   # the
 `go run ./native/fetch -seal <path> [-sign <identity>] [-host]` is the step
 after signing. Signing a macOS application rewrites its libraries, so the
 upstream pins no longer describe them. The step writes `native-seal.json` (size
-and SHA-256 of the ONNX Runtime, sherpa-onnx, capture and iroh libraries as
-shipped), rewrites `llama-runtime.json` and the file list of
-`python/python-runtime.json` from the signed files, and signs the bundle again
+and SHA-256 of the iroh, Turso and capture libraries as
+shipped), and signs the bundle again
 without `--deep` so the code signature covers these records. The loaders use
 the seal in place of the upstream pins only in `Contents/Resources` of the
 running bundle; an invalid seal there is an error. Unsigned and source builds
 keep the upstream pins. For a plain directory (the Host archive, Linux,
-Windows) the step only writes `native-seal.json` for the iroh and capture
+Windows) the step writes `native-seal.json` for the iroh, Turso and capture
 libraries, which have no upstream pin. The loaders compare hashes; the code
 signature itself is enforced by macOS, not by Sailry.
 `cmd/sailry-desktop/package_integration_test.go` checks a built package's
@@ -437,8 +438,8 @@ holds `sailry-host`, the iroh library, the pinned runtimes of
 names the command package. On macOS `sailry-host`, the iroh library and the Turso library
 are signed: the pinned runtimes keep the bytes their locks record, so the
 archive is not notarized. The release carries `install-host.sh`,
-`SHA256SUMS-installer`, the archives and one `SHA256SUMS-<triple>` each. SSH
-Add Host, its update and the WSL installation download exactly those names
+`SHA256SUMS-installer`, the archives and one `SHA256SUMS-<triple>` each.
+The WSL installation downloads exactly those names
 from `https://github.com/ai-poet/agent-client/desktop/releases/download/v<version>/`,
 so they work once the draft release is published.
 `internal/node/host/deployment/SOURCE` records where the ported files come from.
@@ -552,7 +553,7 @@ these areas are a guide for choosing checks, not additional automated gates.
 | --- | --- |
 | Startup and shutdown | Open the intended profile, restore the window, reject a second profile owner and close with active work or unsaved drafts |
 | Conversation | Send, stream, stop, queue guidance, approve tools, answer questions and restore history; verify a split pane's independent draft and focus |
-| Resource workspaces | Navigate files, Git, SSH and database views; resize shell columns, switch resources and preserve drafts and captured scope |
+| Resource workspaces | Navigate files, Git and local terminals; resize shell columns, switch resources and preserve drafts and captured scope |
 | Plugin lifecycle | Open navigation and settings, leave and return, disable or update a package, and verify stale callbacks cannot act on a new view |
 | Files and terminals | Attach and preview a file, save with a revision conflict, type in a terminal, resize it and close its view without confusing detach with stop |
 | Model transport | Use scripted failures for retry, cancellation and uncertain outcomes; account sign-in and real requests require explicit account acceptance |
@@ -625,15 +626,14 @@ Both commands emit one JSON result. Exit codes are 0 for admitted/completed, 1
 for failed/stopped, 3 for approval/input/paused, 4 for uncertain, 124 for timeout
 and 130 for cancelled observation.
 
-Add Host installs the published release of `link.ProductVersion` on the remote
-machine: the bootstrap downloads `install-host.sh` and the target's archive from
+WSL setup installs the published release of `link.ProductVersion`: the bootstrap
+downloads `install-host.sh` and the target's archive from
 the release feed and verifies both against their checksum files. To install a
 locally built Host instead, place `sailry-host` and its iroh library under
 `host-artifacts/<goos>-<goarch>/` beside the controller executable, or set
-`internal/node/host.ArtifactRoot` at build time; when that directory holds
-`sailry-host` the execution Node verifies and uploads those artifacts through
-authenticated SSH after exact host-key trust. Isolated deployments need local
-artifacts. Updates preserve the managed profile and paired Node identity. An
+`internal/node/host.ArtifactRoot` at build time. WSL setup verifies the local
+artifacts before staging them. Other machines start a Host independently and
+pair over iroh; this build has no SSH deployment workflow. An
 uncertain install or update must be inspected with its original request before
 any new operation.
 

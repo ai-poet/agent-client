@@ -27,16 +27,6 @@ const (
 
 type Hook = viewmodel.Hook
 
-type ModelStatus = viewmodel.ModelStatus
-
-const (
-	ModelMissing     = viewmodel.ModelMissing
-	ModelDownloading = viewmodel.ModelDownloading
-	ModelInstalled   = viewmodel.ModelInstalled
-)
-
-type LocalModel = viewmodel.LocalModel
-
 type Permission = viewmodel.Permission
 
 type Archived = viewmodel.Archived
@@ -56,12 +46,6 @@ type Settings struct {
 	HooksOn      bool
 	Python       string // the bundled interpreter's version
 	Indexes      []string
-	OCR          []LocalModel
-	OCRCatalog   []LocalModel // models the catalog offers
-	Speech       []LocalModel
-	Embedding    []LocalModel // knowledge models
-	Decision     []LocalModel
-	Microphones  []string
 	Permissions  []Permission
 	Archived     []Archived
 	Sessions     int // sessions that are not archived
@@ -88,31 +72,6 @@ func SettingsData() *Settings {
 		HooksOn: true,
 		Python:  "3.12.7",
 		Indexes: []string{"pypi.org", "mirrors.aliyun.com", "mirrors.tencent.com", "pypi.tuna.tsinghua.edu.cn", "custom"},
-		OCR: []LocalModel{
-			{ID: "ppocr", Name: "PP-OCRv5", Repo: "PaddlePaddle/PP-OCRv5_mobile", Status: ModelInstalled},
-			{ID: "got", Name: "GOT-OCR 2.0", Repo: "stepfun-ai/GOT-OCR2_0", Status: ModelInstalled},
-		},
-		OCRCatalog: []LocalModel{
-			{ID: "ppocr", Name: "PP-OCRv5", Repo: "PaddlePaddle/PP-OCRv5_mobile", Status: ModelInstalled},
-			{ID: "got", Name: "GOT-OCR 2.0", Repo: "stepfun-ai/GOT-OCR2_0", Status: ModelInstalled},
-			{ID: "florence", Name: "Florence-2", Repo: "microsoft/Florence-2-base", Status: ModelDownloading, Percent: 42},
-			{ID: "trocr", Name: "TrOCR", Repo: "microsoft/trocr-base-printed"},
-		},
-		Speech: []LocalModel{
-			{ID: "", Name: "", Status: ModelInstalled},
-			{ID: "whisper-small", Name: "Whisper Small", Repo: "openai/whisper-small", Status: ModelMissing},
-			{ID: "sense", Name: "SenseVoice Small", Repo: "FunAudioLLM/SenseVoiceSmall", Status: ModelDownloading, Percent: 63},
-		},
-		Embedding: []LocalModel{
-			{ID: "bge-m3", Name: "BGE-M3", Repo: "BAAI/bge-m3", Status: ModelInstalled},
-			{ID: "qwen3-embed", Name: "Qwen3 Embedding 0.6B", Repo: "Qwen/Qwen3-Embedding-0.6B", Status: ModelDownloading, Percent: 27},
-			{ID: "e5", Name: "multilingual-e5-small", Repo: "intfloat/multilingual-e5-small"},
-		},
-		Decision: []LocalModel{
-			{ID: "qwen3-0.6b", Name: "Qwen3 0.6B", Repo: "Qwen/Qwen3-0.6B", Status: ModelInstalled},
-			{ID: "gemma-3-1b", Name: "Gemma 3 1B", Repo: "google/gemma-3-1b-it"},
-		},
-		Microphones: []string{"MacBook Pro Microphone", "AirPods Pro"},
 		Permissions: []Permission{
 			{Resource: "permission_accessibility", Status: "permission_granted", Settings: true},
 			{Resource: "permission_screen", Status: "permission_required", Settings: true},

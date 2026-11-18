@@ -49,7 +49,6 @@ type Runtime struct {
 	hosts                    map[string]*liveHost
 	connections              *connectionState
 	ports                    *livePorts
-	pickKeyFile              func(func(string))
 	teams                    *teamState
 	commands                 *liveCommands
 	openService              func(string)

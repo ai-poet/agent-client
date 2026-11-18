@@ -93,12 +93,9 @@ var savedFeatures = map[string]protocol.FeatureUse{
 	"save_search_settings":        protocol.FeatureUseSaveSearch,
 	"save_compaction_settings":    protocol.FeatureUseSaveCompaction,
 	"save_python_settings":        protocol.FeatureUseSavePython,
-	"save_local_model_settings":   protocol.FeatureUseSaveLocalModels,
 	"save_code_index_settings":    protocol.FeatureUseSaveCodeIndex,
 	"create_knowledge_collection": protocol.FeatureUseSaveKnowledge, "update_knowledge_collection": protocol.FeatureUseSaveKnowledge,
 	"delete_knowledge_collection": protocol.FeatureUseSaveKnowledge,
-	"save_ssh":                    protocol.FeatureUseSaveSSH, "remove_ssh": protocol.FeatureUseSaveSSH,
-	"save_database": protocol.FeatureUseSaveDatabase, "remove_database": protocol.FeatureUseSaveDatabase,
 }
 
 // featureUsage is what the last frame showed.
