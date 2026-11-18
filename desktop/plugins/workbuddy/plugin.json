@@ -1,0 +1,708 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "workbuddy",
+  "version": "0.1.18",
+  "description": "WorkBuddy model channels",
+  "homepage": "https://www.workbuddy.ai",
+  "license": "MIT",
+  "extensions": {
+    "dev.sailry.platform": {
+      "api_version": "v1",
+      "scope": "host",
+      "actions": [
+        "models.provide",
+        "models.authenticate",
+        "credentials.inspect",
+        "http.request",
+        "storage.read",
+        "storage.write",
+        "dispatch.manage",
+        "notifications.publish"
+      ],
+      "display": {
+        "label": "WorkBuddy",
+        "locales": {
+          "zh-CN": "WorkBuddy",
+          "zh-TW": "WorkBuddy"
+        },
+        "icon": {
+          "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\" fill=\"none\"><defs><clipPath id=\"workbuddy\"><circle cx=\"20\" cy=\"20\" r=\"20\"/></clipPath></defs><g clip-path=\"url(#workbuddy)\" fill=\"currentColor\"><path fill-rule=\"evenodd\" d=\"M28.5931 3.12762C28.9853 2.77585 29.0091 2.76226 29.2968 2.74499C29.7628 2.71096 30.1894 2.93488 30.916 3.59634C32.6132 5.13875 34.9769 8.30904 36.4462 11.0168L37.0138 12.0682L37.8156 12.4668C38.5896 12.8579 39.8593 13.6593 40.3898 14.0895C40.6297 14.2878 40.6638 14.2925 40.9133 14.1954C42.0388 13.7572 43.6506 14.3382 45.0727 15.7024C46.3529 16.9294 47.5794 19.026 48.0491 20.7757C48.1177 21.0574 48.2087 21.6628 48.2419 22.1134C48.349 23.6964 47.8414 24.9608 46.8637 25.5331C46.664 25.6484 46.6505 25.6795 46.6561 26.1774C46.7011 28.5481 46.0621 30.9144 44.7785 33.2221C43.3293 35.8133 40.7489 38.4945 37.2566 41.0199C35.3813 42.3846 30.9445 44.9701 28.9382 45.8778C24.1324 48.0414 20.2794 48.8709 16.9329 48.4609C14.9368 48.219 12.6769 47.44 11.34 46.5355C10.9885 46.2925 10.9325 46.2774 10.6637 46.3543C9.2327 46.7651 7.35867 45.9207 5.76659 44.1535C5.13165 43.4471 4.1065 41.7127 3.77404 40.7843C3.0054 38.6118 3.15852 36.6506 4.18236 35.4799C4.44671 35.1785 4.45511 35.1658 4.39735 34.6589C4.30195 33.8289 4.25837 32.6008 4.30192 31.808L4.33666 31.0674L3.22502 29.101C1.5033 26.0375 0.409325 23.4645 -0.012563 21.4992C-0.235219 20.4218 -0.221193 19.9436 0.0522186 19.5899C0.21871 19.3763 0.764928 19.1545 1.42322 19.0329C3.08041 18.742 6.69466 19.0056 10.7155 19.7155L11.1329 19.788L12.0511 18.976C13.5747 17.6264 14.587 16.8696 16.4531 15.706C18.3981 14.4891 20.5929 13.4877 23.0648 12.695L23.8577 12.4414L24.2939 11.2964C25.8547 7.17615 27.4533 4.13844 28.5931 3.12762ZM15.5182 24.243C13.7542 25.2615 12.8718 25.7706 12.2236 26.3413C9.59893 28.6526 8.61811 32.3134 9.73545 35.6274C10.0114 36.4457 10.5201 37.3283 11.5386 39.0923C12.5571 40.8564 13.0671 41.7383 13.6378 42.3864C15.9491 45.0112 19.6103 45.9929 22.9243 44.8755C23.7426 44.5995 24.6249 44.0899 26.3888 43.0714L36.5375 37.2121C38.3016 36.1936 39.184 35.6845 39.8321 35.1137C42.4568 32.8024 43.4373 29.1409 42.3198 25.8269C42.0438 25.0086 41.5342 24.1264 40.5158 22.3624C39.4973 20.5983 38.9882 19.7159 38.4175 19.0678C36.1062 16.4432 32.4454 15.4622 29.1314 16.5796C28.3131 16.8556 27.431 17.3651 25.6669 18.3836L15.5182 24.243Z\"/><rect x=\"16.4961\" y=\"31.3344\" width=\"4.00904\" height=\"8.32646\" rx=\"2.00452\" transform=\"rotate(-30 16.4961 31.3344)\"/><rect x=\"27.3125\" y=\"25.0894\" width=\"4.00904\" height=\"8.32646\" rx=\"2.00452\" transform=\"rotate(-30 27.3125 25.0894)\"/></g></svg>"
+        }
+      },
+      "description": {
+        "label": "WorkBuddy model channels",
+        "locales": {
+          "zh-CN": "WorkBuddy 模型渠道",
+          "zh-TW": "WorkBuddy 模型管道",
+          "de": "WorkBuddy-Modellkanäle",
+          "es": "Canales de modelos de WorkBuddy",
+          "fr": "Canaux de modèles WorkBuddy",
+          "ja": "WorkBuddy のモデルチャンネル",
+          "ko": "WorkBuddy 모델 채널",
+          "pt-BR": "Canais de modelos do WorkBuddy",
+          "ru": "Модельные каналы WorkBuddy"
+        }
+      },
+      "model_providers": [
+        {
+          "id": "china",
+          "name": "WorkBuddy China",
+          "homepage": "https://www.codebuddy.cn",
+          "routes": [
+            {
+              "protocol": "plugin",
+              "endpoint": "https://copilot.tencent.com",
+              "region": "china"
+            }
+          ],
+          "auth": {
+            "kind": "plugin",
+            "data": {
+              "flow": "china"
+            }
+          },
+          "adapter": "workbuddy",
+          "models": {
+            "kind": "discover"
+          },
+          "brand": "workbuddy",
+          "brand_display": {
+            "label": "WorkBuddy",
+            "locales": {
+              "zh-CN": "WorkBuddy",
+              "zh-TW": "WorkBuddy"
+            },
+            "icon": {
+              "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\" fill=\"none\"><defs><clipPath id=\"workbuddy\"><circle cx=\"20\" cy=\"20\" r=\"20\"/></clipPath></defs><g clip-path=\"url(#workbuddy)\" fill=\"currentColor\"><path fill-rule=\"evenodd\" d=\"M28.5931 3.12762C28.9853 2.77585 29.0091 2.76226 29.2968 2.74499C29.7628 2.71096 30.1894 2.93488 30.916 3.59634C32.6132 5.13875 34.9769 8.30904 36.4462 11.0168L37.0138 12.0682L37.8156 12.4668C38.5896 12.8579 39.8593 13.6593 40.3898 14.0895C40.6297 14.2878 40.6638 14.2925 40.9133 14.1954C42.0388 13.7572 43.6506 14.3382 45.0727 15.7024C46.3529 16.9294 47.5794 19.026 48.0491 20.7757C48.1177 21.0574 48.2087 21.6628 48.2419 22.1134C48.349 23.6964 47.8414 24.9608 46.8637 25.5331C46.664 25.6484 46.6505 25.6795 46.6561 26.1774C46.7011 28.5481 46.0621 30.9144 44.7785 33.2221C43.3293 35.8133 40.7489 38.4945 37.2566 41.0199C35.3813 42.3846 30.9445 44.9701 28.9382 45.8778C24.1324 48.0414 20.2794 48.8709 16.9329 48.4609C14.9368 48.219 12.6769 47.44 11.34 46.5355C10.9885 46.2925 10.9325 46.2774 10.6637 46.3543C9.2327 46.7651 7.35867 45.9207 5.76659 44.1535C5.13165 43.4471 4.1065 41.7127 3.77404 40.7843C3.0054 38.6118 3.15852 36.6506 4.18236 35.4799C4.44671 35.1785 4.45511 35.1658 4.39735 34.6589C4.30195 33.8289 4.25837 32.6008 4.30192 31.808L4.33666 31.0674L3.22502 29.101C1.5033 26.0375 0.409325 23.4645 -0.012563 21.4992C-0.235219 20.4218 -0.221193 19.9436 0.0522186 19.5899C0.21871 19.3763 0.764928 19.1545 1.42322 19.0329C3.08041 18.742 6.69466 19.0056 10.7155 19.7155L11.1329 19.788L12.0511 18.976C13.5747 17.6264 14.587 16.8696 16.4531 15.706C18.3981 14.4891 20.5929 13.4877 23.0648 12.695L23.8577 12.4414L24.2939 11.2964C25.8547 7.17615 27.4533 4.13844 28.5931 3.12762ZM15.5182 24.243C13.7542 25.2615 12.8718 25.7706 12.2236 26.3413C9.59893 28.6526 8.61811 32.3134 9.73545 35.6274C10.0114 36.4457 10.5201 37.3283 11.5386 39.0923C12.5571 40.8564 13.0671 41.7383 13.6378 42.3864C15.9491 45.0112 19.6103 45.9929 22.9243 44.8755C23.7426 44.5995 24.6249 44.0899 26.3888 43.0714L36.5375 37.2121C38.3016 36.1936 39.184 35.6845 39.8321 35.1137C42.4568 32.8024 43.4373 29.1409 42.3198 25.8269C42.0438 25.0086 41.5342 24.1264 40.5158 22.3624C39.4973 20.5983 38.9882 19.7159 38.4175 19.0678C36.1062 16.4432 32.4454 15.4622 29.1314 16.5796C28.3131 16.8556 27.431 17.3651 25.6669 18.3836L15.5182 24.243Z\"/><rect x=\"16.4961\" y=\"31.3344\" width=\"4.00904\" height=\"8.32646\" rx=\"2.00452\" transform=\"rotate(-30 16.4961 31.3344)\"/><rect x=\"27.3125\" y=\"25.0894\" width=\"4.00904\" height=\"8.32646\" rx=\"2.00452\" transform=\"rotate(-30 27.3125 25.0894)\"/></g></svg>"
+            }
+          }
+        },
+        {
+          "id": "workbuddy-global",
+          "name": "WorkBuddy International",
+          "homepage": "https://www.workbuddy.ai",
+          "routes": [
+            {
+              "protocol": "plugin",
+              "endpoint": "https://www.workbuddy.ai",
+              "region": "global"
+            }
+          ],
+          "auth": {
+            "kind": "plugin",
+            "data": {
+              "flow": "workbuddy-global"
+            }
+          },
+          "adapter": "workbuddy",
+          "models": {
+            "kind": "discover"
+          },
+          "brand": "workbuddy",
+          "brand_display": {
+            "label": "WorkBuddy",
+            "locales": {
+              "zh-CN": "WorkBuddy",
+              "zh-TW": "WorkBuddy"
+            },
+            "icon": {
+              "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\" fill=\"none\"><defs><clipPath id=\"workbuddy\"><circle cx=\"20\" cy=\"20\" r=\"20\"/></clipPath></defs><g clip-path=\"url(#workbuddy)\" fill=\"currentColor\"><path fill-rule=\"evenodd\" d=\"M28.5931 3.12762C28.9853 2.77585 29.0091 2.76226 29.2968 2.74499C29.7628 2.71096 30.1894 2.93488 30.916 3.59634C32.6132 5.13875 34.9769 8.30904 36.4462 11.0168L37.0138 12.0682L37.8156 12.4668C38.5896 12.8579 39.8593 13.6593 40.3898 14.0895C40.6297 14.2878 40.6638 14.2925 40.9133 14.1954C42.0388 13.7572 43.6506 14.3382 45.0727 15.7024C46.3529 16.9294 47.5794 19.026 48.0491 20.7757C48.1177 21.0574 48.2087 21.6628 48.2419 22.1134C48.349 23.6964 47.8414 24.9608 46.8637 25.5331C46.664 25.6484 46.6505 25.6795 46.6561 26.1774C46.7011 28.5481 46.0621 30.9144 44.7785 33.2221C43.3293 35.8133 40.7489 38.4945 37.2566 41.0199C35.3813 42.3846 30.9445 44.9701 28.9382 45.8778C24.1324 48.0414 20.2794 48.8709 16.9329 48.4609C14.9368 48.219 12.6769 47.44 11.34 46.5355C10.9885 46.2925 10.9325 46.2774 10.6637 46.3543C9.2327 46.7651 7.35867 45.9207 5.76659 44.1535C5.13165 43.4471 4.1065 41.7127 3.77404 40.7843C3.0054 38.6118 3.15852 36.6506 4.18236 35.4799C4.44671 35.1785 4.45511 35.1658 4.39735 34.6589C4.30195 33.8289 4.25837 32.6008 4.30192 31.808L4.33666 31.0674L3.22502 29.101C1.5033 26.0375 0.409325 23.4645 -0.012563 21.4992C-0.235219 20.4218 -0.221193 19.9436 0.0522186 19.5899C0.21871 19.3763 0.764928 19.1545 1.42322 19.0329C3.08041 18.742 6.69466 19.0056 10.7155 19.7155L11.1329 19.788L12.0511 18.976C13.5747 17.6264 14.587 16.8696 16.4531 15.706C18.3981 14.4891 20.5929 13.4877 23.0648 12.695L23.8577 12.4414L24.2939 11.2964C25.8547 7.17615 27.4533 4.13844 28.5931 3.12762ZM15.5182 24.243C13.7542 25.2615 12.8718 25.7706 12.2236 26.3413C9.59893 28.6526 8.61811 32.3134 9.73545 35.6274C10.0114 36.4457 10.5201 37.3283 11.5386 39.0923C12.5571 40.8564 13.0671 41.7383 13.6378 42.3864C15.9491 45.0112 19.6103 45.9929 22.9243 44.8755C23.7426 44.5995 24.6249 44.0899 26.3888 43.0714L36.5375 37.2121C38.3016 36.1936 39.184 35.6845 39.8321 35.1137C42.4568 32.8024 43.4373 29.1409 42.3198 25.8269C42.0438 25.0086 41.5342 24.1264 40.5158 22.3624C39.4973 20.5983 38.9882 19.7159 38.4175 19.0678C36.1062 16.4432 32.4454 15.4622 29.1314 16.5796C28.3131 16.8556 27.431 17.3651 25.6669 18.3836L15.5182 24.243Z\"/><rect x=\"16.4961\" y=\"31.3344\" width=\"4.00904\" height=\"8.32646\" rx=\"2.00452\" transform=\"rotate(-30 16.4961 31.3344)\"/><rect x=\"27.3125\" y=\"25.0894\" width=\"4.00904\" height=\"8.32646\" rx=\"2.00452\" transform=\"rotate(-30 27.3125 25.0894)\"/></g></svg>"
+            }
+          }
+        },
+        {
+          "id": "codebuddy-global",
+          "name": "CodeBuddy International",
+          "homepage": "https://www.codebuddy.ai",
+          "routes": [
+            {
+              "protocol": "plugin",
+              "endpoint": "https://www.codebuddy.ai",
+              "region": "global"
+            }
+          ],
+          "auth": {
+            "kind": "plugin",
+            "data": {
+              "flow": "codebuddy-global"
+            }
+          },
+          "adapter": "workbuddy",
+          "models": {
+            "kind": "discover"
+          },
+          "brand": "workbuddy",
+          "brand_display": {
+            "label": "WorkBuddy",
+            "locales": {
+              "zh-CN": "WorkBuddy",
+              "zh-TW": "WorkBuddy"
+            },
+            "icon": {
+              "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\" fill=\"none\"><defs><clipPath id=\"workbuddy\"><circle cx=\"20\" cy=\"20\" r=\"20\"/></clipPath></defs><g clip-path=\"url(#workbuddy)\" fill=\"currentColor\"><path fill-rule=\"evenodd\" d=\"M28.5931 3.12762C28.9853 2.77585 29.0091 2.76226 29.2968 2.74499C29.7628 2.71096 30.1894 2.93488 30.916 3.59634C32.6132 5.13875 34.9769 8.30904 36.4462 11.0168L37.0138 12.0682L37.8156 12.4668C38.5896 12.8579 39.8593 13.6593 40.3898 14.0895C40.6297 14.2878 40.6638 14.2925 40.9133 14.1954C42.0388 13.7572 43.6506 14.3382 45.0727 15.7024C46.3529 16.9294 47.5794 19.026 48.0491 20.7757C48.1177 21.0574 48.2087 21.6628 48.2419 22.1134C48.349 23.6964 47.8414 24.9608 46.8637 25.5331C46.664 25.6484 46.6505 25.6795 46.6561 26.1774C46.7011 28.5481 46.0621 30.9144 44.7785 33.2221C43.3293 35.8133 40.7489 38.4945 37.2566 41.0199C35.3813 42.3846 30.9445 44.9701 28.9382 45.8778C24.1324 48.0414 20.2794 48.8709 16.9329 48.4609C14.9368 48.219 12.6769 47.44 11.34 46.5355C10.9885 46.2925 10.9325 46.2774 10.6637 46.3543C9.2327 46.7651 7.35867 45.9207 5.76659 44.1535C5.13165 43.4471 4.1065 41.7127 3.77404 40.7843C3.0054 38.6118 3.15852 36.6506 4.18236 35.4799C4.44671 35.1785 4.45511 35.1658 4.39735 34.6589C4.30195 33.8289 4.25837 32.6008 4.30192 31.808L4.33666 31.0674L3.22502 29.101C1.5033 26.0375 0.409325 23.4645 -0.012563 21.4992C-0.235219 20.4218 -0.221193 19.9436 0.0522186 19.5899C0.21871 19.3763 0.764928 19.1545 1.42322 19.0329C3.08041 18.742 6.69466 19.0056 10.7155 19.7155L11.1329 19.788L12.0511 18.976C13.5747 17.6264 14.587 16.8696 16.4531 15.706C18.3981 14.4891 20.5929 13.4877 23.0648 12.695L23.8577 12.4414L24.2939 11.2964C25.8547 7.17615 27.4533 4.13844 28.5931 3.12762ZM15.5182 24.243C13.7542 25.2615 12.8718 25.7706 12.2236 26.3413C9.59893 28.6526 8.61811 32.3134 9.73545 35.6274C10.0114 36.4457 10.5201 37.3283 11.5386 39.0923C12.5571 40.8564 13.0671 41.7383 13.6378 42.3864C15.9491 45.0112 19.6103 45.9929 22.9243 44.8755C23.7426 44.5995 24.6249 44.0899 26.3888 43.0714L36.5375 37.2121C38.3016 36.1936 39.184 35.6845 39.8321 35.1137C42.4568 32.8024 43.4373 29.1409 42.3198 25.8269C42.0438 25.0086 41.5342 24.1264 40.5158 22.3624C39.4973 20.5983 38.9882 19.7159 38.4175 19.0678C36.1062 16.4432 32.4454 15.4622 29.1314 16.5796C28.3131 16.8556 27.431 17.3651 25.6669 18.3836L15.5182 24.243Z\"/><rect x=\"16.4961\" y=\"31.3344\" width=\"4.00904\" height=\"8.32646\" rx=\"2.00452\" transform=\"rotate(-30 16.4961 31.3344)\"/><rect x=\"27.3125\" y=\"25.0894\" width=\"4.00904\" height=\"8.32646\" rx=\"2.00452\" transform=\"rotate(-30 27.3125 25.0894)\"/></g></svg>"
+            }
+          }
+        }
+      ],
+      "model_auth": [
+        {
+          "id": "china",
+          "display": {
+            "label": "WorkBuddy China",
+            "locales": {
+              "zh-CN": "WorkBuddy China",
+              "zh-TW": "WorkBuddy China"
+            }
+          },
+          "flow": {
+            "kind": "polling",
+            "start": {
+              "url": "https://www.codebuddy.cn/v2/plugin/auth/state",
+              "method": "POST",
+              "headers": {
+                "User-Agent": "CLI/2.63.2 CodeBuddy/2.63.2",
+                "X-Requested-With": "XMLHttpRequest",
+                "X-Product": "SaaS"
+              },
+              "query": {
+                "platform": "workbuddy"
+              },
+              "body": {
+                "kind": "json",
+                "value": {}
+              }
+            },
+            "state": "/data/state",
+            "verification_url": "/data/authUrl",
+            "token": {
+              "url": "https://www.codebuddy.cn/v2/plugin/auth/token",
+              "method": "GET",
+              "headers": {
+                "User-Agent": "CLI/2.63.2 CodeBuddy/2.63.2",
+                "X-Requested-With": "XMLHttpRequest",
+                "X-Product": "SaaS"
+              },
+              "query": {
+                "state": "{state}"
+              }
+            },
+            "success": {
+              "pointer": "/code",
+              "values": [
+                0,
+                200
+              ]
+            },
+            "interval_ms": null
+          },
+          "token": {
+            "access": "/access",
+            "refresh": "/refresh",
+            "expires_in": "/expires_in",
+            "extra": {
+              "domain": "/domain"
+            }
+          },
+          "inject": [
+            {
+              "header": "Authorization",
+              "template": "Bearer {access}"
+            },
+            {
+              "header": "X-Domain",
+              "template": "{extra.domain}"
+            }
+          ],
+          "exchange": {
+            "script": {
+              "entry": "dev.sailry.platform/auth.js",
+              "resources": [
+                "dev.sailry.platform/auth.js"
+              ]
+            },
+            "handler": "exchange"
+          },
+          "refresh": {
+            "request": {
+              "url": "https://copilot.tencent.com/v2/plugin/auth/token/refresh",
+              "method": "POST",
+              "headers": {
+                "User-Agent": "CLI/2.63.2 CodeBuddy/2.63.2",
+                "X-Requested-With": "XMLHttpRequest",
+                "X-Product": "SaaS",
+                "X-Refresh-Token": "{refresh}",
+                "X-Auth-Refresh-Source": "workbuddy"
+              }
+            },
+            "token": {
+              "access": "/access",
+              "refresh": "/refresh",
+              "expires_in": "/expires_in",
+              "extra": {
+                "domain": "/domain"
+              }
+            }
+          },
+          "requests": {
+            "credits": {
+              "url": "https://www.codebuddy.cn/v2/billing/meter/get-user-resource",
+              "method": "POST",
+              "headers": {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "WorkBuddy/5.9.3",
+                "X-CodeBuddy-Request": "1",
+                "Accept-Language": "zh-CN"
+              },
+              "body": {
+                "kind": "json",
+                "value": {
+                  "PageNumber": 1,
+                  "PageSize": 100,
+                  "ProductCode": "p_tcaca",
+                  "Status": [
+                    0,
+                    3
+                  ],
+                  "PackageEndTimeRangeBegin": "{input.begin}",
+                  "PackageEndTimeRangeEnd": "{input.end}"
+                }
+              },
+              "cache_ttl_ms": 60000
+            },
+            "checkin_status": {
+              "url": "https://copilot.tencent.com/v2/billing/meter/checkin-activity-status",
+              "method": "POST",
+              "headers": {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "WorkBuddy/5.9.3",
+                "X-CodeBuddy-Request": "1",
+                "Accept-Language": "zh-CN"
+              },
+              "body": {
+                "kind": "json",
+                "value": {}
+              }
+            }
+          },
+          "mutations": {
+            "checkin_claim": {
+              "url": "https://copilot.tencent.com/v2/billing/meter/daily-checkin",
+              "method": "POST",
+              "headers": {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "WorkBuddy/5.9.3",
+                "X-CodeBuddy-Request": "1",
+                "Accept-Language": "zh-CN"
+              },
+              "body": {
+                "kind": "json",
+                "value": {}
+              }
+            }
+          },
+          "warning": {
+            "text": "Tencent may suspend a WorkBuddy account used outside its own apps, and accounts of the international build have been banned for it. Use an account you can afford to lose.",
+            "locales": {
+              "zh-CN": "腾讯可能封禁在其官方应用之外使用的 WorkBuddy 账号，国际版已有账号因此被封。请使用可以承受损失的账号。",
+              "zh-TW": "騰訊可能封鎖在其官方應用程式之外使用的 WorkBuddy 帳號，國際版已有帳號因此被封。請使用可以承受損失的帳號。",
+              "de": "Tencent kann ein WorkBuddy-Konto sperren, das außerhalb der eigenen Apps genutzt wird; Konten der internationalen Version wurden deshalb bereits gesperrt. Verwende ein Konto, dessen Verlust du verkraften kannst.",
+              "es": "Tencent puede suspender una cuenta de WorkBuddy usada fuera de sus propias aplicaciones; ya se han bloqueado cuentas de la versión internacional por ello. Usa una cuenta que puedas permitirte perder.",
+              "fr": "Tencent peut suspendre un compte WorkBuddy utilisé en dehors de ses propres applications ; des comptes de la version internationale ont déjà été bannis pour cela. Utilisez un compte que vous pouvez vous permettre de perdre.",
+              "ja": "Tencent は公式アプリ以外で使われた WorkBuddy アカウントを停止することがあり、国際版ではすでに停止された例があります。失っても困らないアカウントを使ってください。",
+              "ko": "Tencent는 자사 앱 밖에서 사용된 WorkBuddy 계정을 정지할 수 있으며, 국제판에서는 이미 정지된 계정이 있습니다. 잃어도 괜찮은 계정을 사용하세요.",
+              "pt-BR": "A Tencent pode suspender uma conta do WorkBuddy usada fora dos próprios aplicativos; contas da versão internacional já foram banidas por isso. Use uma conta que você possa perder.",
+              "ru": "Tencent может заблокировать аккаунт WorkBuddy, используемый вне её собственных приложений; аккаунты международной версии уже блокировались по этой причине. Используйте аккаунт, который не жалко потерять."
+            }
+          }
+        },
+        {
+          "id": "workbuddy-global",
+          "display": {
+            "label": "WorkBuddy International",
+            "locales": {
+              "zh-CN": "WorkBuddy International",
+              "zh-TW": "WorkBuddy International"
+            }
+          },
+          "flow": {
+            "kind": "polling",
+            "start": {
+              "url": "https://www.workbuddy.ai/v2/plugin/auth/state",
+              "method": "POST",
+              "headers": {
+                "User-Agent": "CLI/2.63.2 CodeBuddy/2.63.2",
+                "X-Requested-With": "XMLHttpRequest",
+                "X-Product": "SaaS"
+              },
+              "query": {
+                "platform": "workbuddy"
+              },
+              "body": {
+                "kind": "json",
+                "value": {}
+              }
+            },
+            "state": "/data/state",
+            "verification_url": "/data/authUrl",
+            "token": {
+              "url": "https://www.workbuddy.ai/v2/plugin/auth/token",
+              "method": "GET",
+              "headers": {
+                "User-Agent": "CLI/2.63.2 CodeBuddy/2.63.2",
+                "X-Requested-With": "XMLHttpRequest",
+                "X-Product": "SaaS"
+              },
+              "query": {
+                "state": "{state}"
+              }
+            },
+            "success": {
+              "pointer": "/code",
+              "values": [
+                0,
+                200
+              ]
+            },
+            "interval_ms": null
+          },
+          "token": {
+            "access": "/access",
+            "refresh": "/refresh",
+            "expires_in": "/expires_in",
+            "extra": {
+              "domain": "/domain"
+            }
+          },
+          "inject": [
+            {
+              "header": "Authorization",
+              "template": "Bearer {access}"
+            },
+            {
+              "header": "X-Domain",
+              "template": "{extra.domain}"
+            }
+          ],
+          "exchange": {
+            "script": {
+              "entry": "dev.sailry.platform/auth.js",
+              "resources": [
+                "dev.sailry.platform/auth.js"
+              ]
+            },
+            "handler": "exchange"
+          },
+          "refresh": {
+            "request": {
+              "url": "https://www.workbuddy.ai/v2/plugin/auth/token/refresh",
+              "method": "POST",
+              "headers": {
+                "User-Agent": "CLI/2.63.2 CodeBuddy/2.63.2",
+                "X-Requested-With": "XMLHttpRequest",
+                "X-Product": "SaaS",
+                "X-Refresh-Token": "{refresh}",
+                "X-Auth-Refresh-Source": "workbuddy"
+              }
+            },
+            "token": {
+              "access": "/access",
+              "refresh": "/refresh",
+              "expires_in": "/expires_in",
+              "extra": {
+                "domain": "/domain"
+              }
+            }
+          },
+          "requests": {
+            "credits": {
+              "url": "https://www.workbuddy.ai/v2/billing/meter/get-user-resource",
+              "method": "POST",
+              "headers": {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "WorkBuddy/5.9.3",
+                "X-CodeBuddy-Request": "1",
+                "Accept-Language": "en-US"
+              },
+              "body": {
+                "kind": "json",
+                "value": {
+                  "PageNumber": 1,
+                  "PageSize": 100,
+                  "ProductCode": "p_tcaca",
+                  "Status": [
+                    0,
+                    3
+                  ],
+                  "PackageEndTimeRangeBegin": "{input.begin}",
+                  "PackageEndTimeRangeEnd": "{input.end}"
+                }
+              },
+              "cache_ttl_ms": 60000
+            }
+          },
+          "warning": {
+            "text": "Tencent may suspend a WorkBuddy account used outside its own apps, and accounts of the international build have been banned for it. Use an account you can afford to lose.",
+            "locales": {
+              "zh-CN": "腾讯可能封禁在其官方应用之外使用的 WorkBuddy 账号，国际版已有账号因此被封。请使用可以承受损失的账号。",
+              "zh-TW": "騰訊可能封鎖在其官方應用程式之外使用的 WorkBuddy 帳號，國際版已有帳號因此被封。請使用可以承受損失的帳號。",
+              "de": "Tencent kann ein WorkBuddy-Konto sperren, das außerhalb der eigenen Apps genutzt wird; Konten der internationalen Version wurden deshalb bereits gesperrt. Verwende ein Konto, dessen Verlust du verkraften kannst.",
+              "es": "Tencent puede suspender una cuenta de WorkBuddy usada fuera de sus propias aplicaciones; ya se han bloqueado cuentas de la versión internacional por ello. Usa una cuenta que puedas permitirte perder.",
+              "fr": "Tencent peut suspendre un compte WorkBuddy utilisé en dehors de ses propres applications ; des comptes de la version internationale ont déjà été bannis pour cela. Utilisez un compte que vous pouvez vous permettre de perdre.",
+              "ja": "Tencent は公式アプリ以外で使われた WorkBuddy アカウントを停止することがあり、国際版ではすでに停止された例があります。失っても困らないアカウントを使ってください。",
+              "ko": "Tencent는 자사 앱 밖에서 사용된 WorkBuddy 계정을 정지할 수 있으며, 국제판에서는 이미 정지된 계정이 있습니다. 잃어도 괜찮은 계정을 사용하세요.",
+              "pt-BR": "A Tencent pode suspender uma conta do WorkBuddy usada fora dos próprios aplicativos; contas da versão internacional já foram banidas por isso. Use uma conta que você possa perder.",
+              "ru": "Tencent может заблокировать аккаунт WorkBuddy, используемый вне её собственных приложений; аккаунты международной версии уже блокировались по этой причине. Используйте аккаунт, который не жалко потерять."
+            }
+          }
+        },
+        {
+          "id": "codebuddy-global",
+          "display": {
+            "label": "CodeBuddy International",
+            "locales": {
+              "zh-CN": "CodeBuddy International",
+              "zh-TW": "CodeBuddy International"
+            }
+          },
+          "flow": {
+            "kind": "polling",
+            "start": {
+              "url": "https://www.codebuddy.ai/v2/plugin/auth/state",
+              "method": "POST",
+              "headers": {
+                "User-Agent": "CLI/2.63.2 CodeBuddy/2.63.2",
+                "X-Requested-With": "XMLHttpRequest",
+                "X-Product": "SaaS"
+              },
+              "query": {
+                "platform": "workbuddy"
+              },
+              "body": {
+                "kind": "json",
+                "value": {}
+              }
+            },
+            "state": "/data/state",
+            "verification_url": "/data/authUrl",
+            "token": {
+              "url": "https://www.codebuddy.ai/v2/plugin/auth/token",
+              "method": "GET",
+              "headers": {
+                "User-Agent": "CLI/2.63.2 CodeBuddy/2.63.2",
+                "X-Requested-With": "XMLHttpRequest",
+                "X-Product": "SaaS"
+              },
+              "query": {
+                "state": "{state}"
+              }
+            },
+            "success": {
+              "pointer": "/code",
+              "values": [
+                0,
+                200
+              ]
+            },
+            "interval_ms": null
+          },
+          "token": {
+            "access": "/access",
+            "refresh": "/refresh",
+            "expires_in": "/expires_in",
+            "extra": {
+              "domain": "/domain"
+            }
+          },
+          "inject": [
+            {
+              "header": "Authorization",
+              "template": "Bearer {access}"
+            },
+            {
+              "header": "X-Domain",
+              "template": "{extra.domain}"
+            }
+          ],
+          "exchange": {
+            "script": {
+              "entry": "dev.sailry.platform/auth.js",
+              "resources": [
+                "dev.sailry.platform/auth.js"
+              ]
+            },
+            "handler": "exchange"
+          },
+          "refresh": {
+            "request": {
+              "url": "https://www.codebuddy.ai/v2/plugin/auth/token/refresh",
+              "method": "POST",
+              "headers": {
+                "User-Agent": "CLI/2.63.2 CodeBuddy/2.63.2",
+                "X-Requested-With": "XMLHttpRequest",
+                "X-Product": "SaaS",
+                "X-Refresh-Token": "{refresh}",
+                "X-Auth-Refresh-Source": "workbuddy"
+              }
+            },
+            "token": {
+              "access": "/access",
+              "refresh": "/refresh",
+              "expires_in": "/expires_in",
+              "extra": {
+                "domain": "/domain"
+              }
+            }
+          },
+          "requests": {
+            "credits": {
+              "url": "https://www.codebuddy.ai/v2/billing/meter/get-user-resource",
+              "method": "POST",
+              "headers": {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "WorkBuddy/5.5.2",
+                "X-CodeBuddy-Request": "1",
+                "Accept-Language": "en-US"
+              },
+              "body": {
+                "kind": "json",
+                "value": {
+                  "PageNumber": 1,
+                  "PageSize": 100,
+                  "ProductCode": "p_tcaca",
+                  "Status": [
+                    0,
+                    3
+                  ],
+                  "PackageEndTimeRangeBegin": "{input.begin}",
+                  "PackageEndTimeRangeEnd": "{input.end}"
+                }
+              },
+              "cache_ttl_ms": 60000
+            }
+          },
+          "warning": {
+            "text": "Tencent may suspend a WorkBuddy account used outside its own apps, and accounts of the international build have been banned for it. Use an account you can afford to lose.",
+            "locales": {
+              "zh-CN": "腾讯可能封禁在其官方应用之外使用的 WorkBuddy 账号，国际版已有账号因此被封。请使用可以承受损失的账号。",
+              "zh-TW": "騰訊可能封鎖在其官方應用程式之外使用的 WorkBuddy 帳號，國際版已有帳號因此被封。請使用可以承受損失的帳號。",
+              "de": "Tencent kann ein WorkBuddy-Konto sperren, das außerhalb der eigenen Apps genutzt wird; Konten der internationalen Version wurden deshalb bereits gesperrt. Verwende ein Konto, dessen Verlust du verkraften kannst.",
+              "es": "Tencent puede suspender una cuenta de WorkBuddy usada fuera de sus propias aplicaciones; ya se han bloqueado cuentas de la versión internacional por ello. Usa una cuenta que puedas permitirte perder.",
+              "fr": "Tencent peut suspendre un compte WorkBuddy utilisé en dehors de ses propres applications ; des comptes de la version internationale ont déjà été bannis pour cela. Utilisez un compte que vous pouvez vous permettre de perdre.",
+              "ja": "Tencent は公式アプリ以外で使われた WorkBuddy アカウントを停止することがあり、国際版ではすでに停止された例があります。失っても困らないアカウントを使ってください。",
+              "ko": "Tencent는 자사 앱 밖에서 사용된 WorkBuddy 계정을 정지할 수 있으며, 국제판에서는 이미 정지된 계정이 있습니다. 잃어도 괜찮은 계정을 사용하세요.",
+              "pt-BR": "A Tencent pode suspender uma conta do WorkBuddy usada fora dos próprios aplicativos; contas da versão internacional já foram banidas por isso. Use uma conta que você possa perder.",
+              "ru": "Tencent может заблокировать аккаунт WorkBuddy, используемый вне её собственных приложений; аккаунты международной версии уже блокировались по этой причине. Используйте аккаунт, который не жалко потерять."
+            }
+          }
+        }
+      ],
+      "model_adapters": [
+        {
+          "id": "workbuddy",
+          "script": {
+            "entry": "dev.sailry.platform/adapter.js",
+            "resources": [
+              "dev.sailry.platform/adapter.js",
+              "dev.sailry.platform/errors.js"
+            ]
+          },
+          "origins": [
+            "https://copilot.tencent.com",
+            "https://www.workbuddy.ai",
+            "https://www.codebuddy.ai"
+          ],
+          "framing": "sse",
+          "schema_dialect": "open_ai",
+          "capabilities": {
+            "vision": true,
+            "tools": true,
+            "reasoning": true
+          },
+          "discovery": true
+        }
+      ],
+      "category": "automation",
+      "tint": "amber",
+      "ui": [
+        {
+          "id": "credits",
+          "slot": "footer",
+          "kind": "metric",
+          "label": {
+            "label": "Account credits",
+            "locales": {
+              "zh-CN": "账户积分",
+              "zh-TW": "帳戶積分",
+              "de": "Kontoguthaben",
+              "es": "Créditos de la cuenta",
+              "fr": "Crédits du compte",
+              "ja": "アカウントクレジット",
+              "ko": "계정 크레딧",
+              "pt-BR": "Créditos da conta",
+              "ru": "Кредиты аккаунта"
+            }
+          },
+          "icon": "reicon:money/coins",
+          "order": 0
+        },
+        {
+          "id": "provider_credits",
+          "slot": "provider",
+          "kind": "metric",
+          "label": {
+            "label": "Account credits",
+            "locales": {
+              "zh-CN": "账户积分",
+              "zh-TW": "帳戶積分",
+              "de": "Kontoguthaben",
+              "es": "Créditos de la cuenta",
+              "fr": "Crédits du compte",
+              "ja": "アカウントクレジット",
+              "ko": "계정 크레딧",
+              "pt-BR": "Créditos da conta",
+              "ru": "Кредиты аккаунта"
+            }
+          },
+          "icon": "reicon:money/coins",
+          "order": 0
+        }
+      ],
+      "desktop": {
+        "ui_shared": true,
+        "ui_entry": "dev.sailry.platform/desktop/footer.js",
+        "resources": [
+          "dev.sailry.platform/desktop/footer.js",
+          "dev.sailry.platform/desktop/credits.js",
+          "dev.sailry.platform/desktop/locales.js",
+          "dev.sailry.platform/errors.js",
+          "dev.sailry.platform/desktop/providers.js",
+          "dev.sailry.platform/desktop/visibility.js"
+        ]
+      },
+      "host": {
+        "entry": "dev.sailry.platform/host/main.js",
+        "resources": [
+          "dev.sailry.platform/host/main.js",
+          "dev.sailry.platform/host/records.js",
+          "dev.sailry.platform/host/protocol.js",
+          "dev.sailry.platform/host/checkin.js",
+          "dev.sailry.platform/host/schedules.js",
+          "dev.sailry.platform/errors.js",
+          "dev.sailry.platform/desktop/locales.js"
+        ],
+        "handlers": [
+          "register",
+          "checkin",
+          "reconcile"
+        ]
+      },
+      "settings_schema": "dev.sailry.platform/settings.json",
+      "min_sailry_version": "0.1.6"
+    }
+  }
+}

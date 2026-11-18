@@ -1,0 +1,3 @@
+ram_plugins: "插件（估算）"
+ram_plugins_partial: "%{bytes} · 部分样本"
+ram_plugins_error: "无法读取插件内存"

@@ -1,0 +1,409 @@
+// Adapted from Goose ee8500d5 and 14741e9a (Apache-2.0).
+// See ../model/LICENSE.goose.
+package engine
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"charm.land/fantasy"
+	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
+	handoff "github.com/ai-poet/agent-client/desktop/internal/node/agent/compact"
+	"github.com/ai-poet/agent-client/desktop/internal/node/agent/model"
+	"github.com/ai-poet/agent-client/desktop/internal/node/agent/output"
+	"github.com/ai-poet/agent-client/desktop/internal/node/agent/tokens"
+	"github.com/ai-poet/agent-client/desktop/internal/node/store"
+	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+)
+
+func capturedModel(binding model.Binding) protocol.ConversationModel {
+	for _, candidate := range binding.Provider.Models {
+		if candidate.ID == binding.Config.Model {
+			return candidate
+		}
+	}
+	// An unlisted model declares no capabilities; only its window is known.
+	selected := protocol.DefaultConversationModel()
+	selected.ID, selected.Context = binding.Config.Model, model.ContextLimit(binding)
+	return selected
+}
+func contextTokens(records []canonical.Record) uint64 {
+	start := 0
+	for i, record := range records {
+		if record.Kind == "compaction" {
+			start = i
+		}
+	}
+	for i := len(records) - 1; i >= start; i-- {
+		message := records[i].MutableMessage()
+		if message != nil && message.Usage != nil {
+			if !compactionUsage(records[i]) && message.Usage.Total != nil {
+				return *message.Usage.Total + pendingTokens(records[i+1:])
+			}
+			// Only the latest observation can describe the current context. An
+			// incomplete report or summary usage cannot reuse an older total.
+			break
+		}
+	}
+	// Retained messages can precede the checkpoint in storage. Their old
+	// measurements describe the pre-compaction request, but their content
+	// still belongs to the new context alongside the latest summary.
+	return pendingTokens(records)
+}
+func pendingTokens(records []canonical.Record) uint64 {
+	var cache output.Cache
+	var count uint64
+	for _, record := range cache.Project(handoff.Pending(records)) {
+		count += tokens.Chat("", []canonical.Record{record})
+	}
+	return count
+}
+func compactionUsage(record canonical.Record) bool {
+	return record.Kind == "compaction" || record.Metadata.Execution != nil && record.Metadata.Execution.Purpose != nil && *record.Metadata.Execution.Purpose == canonical.PurposeCompaction
+}
+func shouldCompact(binding model.Binding, state store.AgentState, percent uint8) bool {
+	last := lastMessage(state.Records)
+	if last == nil || last.Role == canonical.Assistant {
+		return false
+	}
+	selected := capturedModel(binding)
+	limit := uint64(selected.Context)
+	budget := store.AgentCompactionBudget(selected, percent)
+	if budget == nil || budget.TriggerTokens == 0 || budget.TriggerTokens >= limit {
+		return false
+	}
+	count := contextTokens(state.Records)
+	return count > budget.TriggerTokens && automaticFailures(binding, state.Records) < pauseAfter
+}
+
+// pauseAfter is how many automatic compactions in a row may fail before the
+// threshold stops starting one: each costs a summary request and its retries.
+const pauseAfter = 3
+
+// automaticFailures counts the automatic compactions that failed in a row for
+// this provider and model. A compaction that succeeded, manual or automatic,
+// starts the count again, and so does a request another provider or model
+// answered. The count is read from the records, so it survives a restart.
+func automaticFailures(binding model.Binding, records []canonical.Record) int {
+	count := 0
+	for _, record := range records {
+		if record.Kind == "compaction" {
+			count = 0
+			continue
+		}
+		execution := record.Metadata.Execution
+		if execution != nil && execution.Source != nil && execution.Media == nil && (execution.Purpose == nil || *execution.Purpose != canonical.PurposeSearch) &&
+			(execution.Source.ID != binding.Provider.ID || execution.Source.Model != binding.Config.Model) {
+			count = 0
+			continue
+		}
+		if maintenance := record.Metadata.Compaction; maintenance != nil && maintenance.Failure != nil && maintenance.Failure.Source == protocol.ConversationCompactionSourceAutomatic {
+			count++
+		}
+	}
+	return count
+}
+
+// compactionFailure is the conversation's record of a compaction that failed.
+// Clients show it as their own localized notice with the cause.
+func (r *Runtime) compactionFailure(x *execution, binding model.Binding, earlier []canonical.Record, manual bool, stage protocol.ConversationCompactionStage, reason protocol.ConversationCompactionReason, attempts []model.Attempt, failure error) canonical.Record {
+	detail := protocol.DefaultConversationCompactionFailure()
+	detail.Source, detail.Stage, detail.Reason = protocol.ConversationCompactionSourceAutomatic, stage, reason
+	if manual {
+		detail.Source = protocol.ConversationCompactionSourceManual
+	}
+	if len(attempts) > 0 {
+		detail.Status = attempts[len(attempts)-1].Status
+	}
+	cause := model.Classify(failure).Message
+	detail.Cause = &cause
+	record := canonical.NewRecord(x.inv.Run.Turn, "message", canonical.NewMessage(canonical.Assistant), r.clock.Now())
+	record.Provenance.Author = "system"
+	runtime := canonical.DefaultRuntime()
+	runtime.AgentVisible = false
+	record.Metadata.Runtime = &runtime
+	// The failure names its provider and model, which the pause counts by. The
+	// one that reaches the limit says the pause once.
+	scope := model.Scope(binding)
+	record.Metadata.Execution = &canonical.Execution{Source: &scope}
+	detail.Paused = !manual && automaticFailures(binding, earlier) == pauseAfter-1
+	record.Metadata.Compaction = &canonical.Maintenance{Failure: &detail}
+	return record
+}
+func (r *Runtime) compact(x *execution, binding model.Binding, state store.AgentState, manual bool) error {
+	selected := capturedModel(binding)
+	keepRecent := true
+	if last := lastMessage(state.Records); last != nil && last.Error != nil && last.Error.Code != nil && *last.Error.Code == "context_overflow" {
+		keepRecent = false
+	}
+	selection, useful := handoff.Select(state.Records, uint64(selected.Context), keepRecent)
+	if manual && !useful {
+		// An explicit request can summarize a short conversation whose entire
+		// history would otherwise fit in the retained tail.
+		selection, useful = handoff.Select(state.Records, uint64(selected.Context), false)
+	}
+	if !useful {
+		return nil
+	}
+	summaryID := protocol.NewRequestID().String()
+	if !manual {
+		progress, _ := json.Marshal(map[string]any{"type": "compacting", "started_ms": r.clock.Now().UnixMilli()})
+		_ = r.feed.Delta(x.inv.Session.ID, protocol.ConversationDraft{ID: summaryID, Turn: x.inv.Run.Turn, Author: "sailry", Parts: []protocol.ConversationPart{{Kind: "resource", Data: json.RawMessage(progress)}}})
+	}
+	binding, err := r.credential(x, binding)
+	if err != nil {
+		return err
+	}
+	summaryBinding := model.Summary(binding)
+	output := model.OutputLimit(summaryBinding, true)
+	requestText := handoff.Request
+	if manual && strings.TrimSpace(x.inv.Message.Text) != "" {
+		requestText += "\n\nUser focus for the handoff:\n" + x.inv.Message.Text
+	}
+	var attempts []model.Attempt
+	// A compaction that ends without a summary leaves its billed attempts and
+	// one record saying where and why it stopped; a stopped turn is no failure.
+	failed := func(stage protocol.ConversationCompactionStage, reason protocol.ConversationCompactionReason, failure error) error {
+		var records []canonical.Record
+		for _, attempt := range attempts {
+			records = append(records, r.observationRecord(x, summaryBinding, canonical.PurposeCompaction, attempt))
+		}
+		if x.ctx.Err() == nil {
+			records = append(records, r.compactionFailure(x, summaryBinding, state.Records, manual, stage, reason, attempts, failure))
+		}
+		if e := r.save(context.WithoutCancel(x.ctx), x.inv.Session.ID, records...); e != nil {
+			return e
+		}
+		return failure
+	}
+	system, err := handoff.Prepare(selection.Prefix, uint64(selected.Context), uint64(output), requestText)
+	if err != nil {
+		return failed(protocol.ConversationCompactionStageBudget, protocol.ConversationCompactionReasonNoFittingPrefix, err)
+	}
+	languageModel, err := r.model(x.ctx, summaryBinding)
+	if err != nil {
+		return failed(protocol.ConversationCompactionStageRequest, protocol.ConversationCompactionReasonRequestFailed, err)
+	}
+	request := canonical.NewRecord(x.inv.Run.Turn, "message", canonical.NewMessage(canonical.User, canonical.Text(0, requestText)), r.clock.Now())
+	call, err := model.BuildCall(summaryBinding, model.Request{System: system, Records: []canonical.Record{request}, MaxOutputTokens: &output, Delegated: x.inv.Session.Delegation != nil})
+	if err != nil {
+		return failed(protocol.ConversationCompactionStageRequest, protocol.ConversationCompactionReasonRequestFailed, err)
+	}
+	var text strings.Builder
+	limited, textBlock := false, false
+	var usage canonical.Usage
+	err = model.Run(x.ctx, languageModel, call, model.SummaryPurpose, r.clock, func(attempt model.Attempt) error {
+		x.timeline.attempt(attempt)
+		// An attempt that waits to be sent again shows as a main request's does.
+		if attempt.RetryDelay != nil {
+			return r.save(context.WithoutCancel(x.ctx), x.inv.Session.ID, r.retryRecord(x, summaryBinding, canonical.PurposeCompaction, attempt))
+		}
+		usage = attempt.Usage
+		attempts = append(attempts, attempt)
+		return nil
+	}, func(part fantasy.StreamPart) bool {
+		switch part.Type {
+		case fantasy.StreamPartTypeTextDelta:
+			if !textBlock && text.Len() > 0 {
+				text.WriteByte('\n')
+			}
+			text.WriteString(part.Delta)
+			textBlock = true
+		case fantasy.StreamPartTypeReasoningDelta, fantasy.StreamPartTypeReasoningEnd, fantasy.StreamPartTypeToolCall:
+			textBlock = false
+		case fantasy.StreamPartTypeFinish:
+			switch strings.ToLower(string(part.FinishReason)) {
+			case "length", "max_tokens", "max_output_tokens":
+				limited = true
+			}
+		}
+		return x.ctx.Err() == nil
+	}, nil)
+	if err != nil {
+		reason := protocol.ConversationCompactionReasonRequestFailed
+		switch model.Classify(err).Kind {
+		case model.RateLimited, model.Quota:
+			reason = protocol.ConversationCompactionReasonRateLimited
+		case model.Authentication, model.NotConfigured:
+			reason = protocol.ConversationCompactionReasonAuthorizationFailed
+		case model.ContextOverflow:
+			reason = protocol.ConversationCompactionReasonContextOverflow
+		case model.InvalidRequest, model.Unsupported:
+			reason = protocol.ConversationCompactionReasonServiceRejected
+		case model.InvalidResponse:
+			reason = protocol.ConversationCompactionReasonIncompleteResponse
+		}
+		return failed(protocol.ConversationCompactionStageRequest, reason, err)
+	}
+	if limited {
+		return failed(protocol.ConversationCompactionStageSummary, protocol.ConversationCompactionReasonTruncatedSummary, fmt.Errorf("compaction summary reached its output limit"))
+	}
+	summary, err := handoff.Parse(text.String(), handoff.Cap(uint64(selected.Context), uint64(output)))
+	if err != nil {
+		reason := protocol.ConversationCompactionReasonUnexpectedOutput
+		if strings.TrimSpace(text.String()) == "" {
+			reason = protocol.ConversationCompactionReasonEmptySummary
+		}
+		return failed(protocol.ConversationCompactionStageSummary, reason, err)
+	}
+	rendered := summary.Render()
+	boundary := selection.Boundary
+	message := canonical.NewMessage(canonical.User, canonical.Text(0, rendered))
+	message.Model = &binding.Config.Model
+	message.Usage = &usage
+	// The last summary attempt is billed on the summary; earlier attempts retain
+	// their independent observations.
+	compacted := canonical.Compaction{Boundary: boundary.ID, Summary: message, Start: state.Records[0].Created, End: boundary.Created}
+	for _, file := range summary.Files {
+		description := file.Summary
+		if file.KeyCode != nil {
+			description += "\n" + *file.KeyCode
+		}
+		compacted.Files = append(compacted.Files, canonical.CompactedFile{Path: file.Path, Summary: &description})
+	}
+	record := canonical.NewRecord(x.inv.Run.Turn, "compaction", &compacted, r.clock.Now())
+	record.ID = summaryID
+	record.Provenance.Author = "system"
+	runtime := canonical.DefaultRuntime()
+	runtime.UserVisible = false
+	record.Metadata.Runtime = &runtime
+	tailState := state
+	tailState.Records = selection.Tail
+	loaded := retainedTools(tailState)
+	record.Metadata.Context = &canonical.Context{LoadedTools: &loaded}
+	var records []canonical.Record
+	if len(attempts) > 0 {
+		for _, attempt := range attempts[:len(attempts)-1] {
+			records = append(records, r.observationRecord(x, binding, canonical.PurposeCompaction, attempt))
+		}
+		last := r.observationRecord(x, binding, canonical.PurposeCompaction, attempts[len(attempts)-1])
+		record.Metadata.Execution = last.Metadata.Execution
+	}
+	records = append(records, record)
+	if len(selection.Tail) > 0 {
+		// The original tail remains after Boundary. Projection puts the new
+		// summary before it, so no copied messages or synthetic reply is needed.
+		return r.save(x.ctx, x.inv.Session.ID, records...)
+	}
+	continuation := "Your context was compacted. The previous message contains a summary of the conversation so far.\nDo not mention that you read a summary or that conversation summarization occurred.\nContinue calling tools as necessary to complete the task."
+	if manual {
+		continuation = "Your context was compacted at the user's request. The previous message contains a summary of the conversation so far.\nDo not mention that you read a summary or that conversation summarization occurred.\nJust continue the conversation naturally based on the summarized context."
+	}
+	var preserved *canonical.Record
+	retainMedia := true
+	if !manual {
+		visible := handoff.Visible(state.Records)
+		summaries := map[string]bool{}
+		for _, record := range state.Records {
+			if record.Kind == "compaction" {
+				summaries[record.ID] = true
+			}
+		}
+		for i := len(visible) - 1; i >= 0; i-- {
+			if summaries[visible[i].ID] || compactionUsage(visible[i]) || visible[i].Metadata.Runtime != nil && visible[i].Metadata.Runtime.TurnContext {
+				continue
+			}
+			candidate := visible[i].Message()
+			if candidate != nil && candidate.Role == canonical.Assistant && candidate.Error == nil {
+				retainMedia = false
+			}
+			if candidate != nil && candidate.Role == canonical.User && !containsTool(candidate) {
+				for _, block := range candidate.Content {
+					switch block.Kind {
+					case "text", "image", "document", "file":
+						preserved = &visible[i]
+					}
+					if preserved != nil {
+						break
+					}
+				}
+				if preserved != nil {
+					if visible[i].ID == boundary.ID {
+						continuation = "Your context was compacted. The previous message contains a summary of the conversation so far.\nDo not mention that you read a summary or that conversation summarization occurred.\nJust continue the conversation naturally based on the summarized context."
+					}
+					break
+				}
+			}
+		}
+	}
+	continued := canonical.NewRecord(x.inv.Run.Turn, "message", canonical.NewMessage(canonical.Assistant, canonical.Text(0, continuation)), r.clock.Now())
+	continued.Provenance.Author = "assistant"
+	continued.Metadata.Runtime = &runtime
+	records = append(records, continued)
+	if preserved != nil {
+		var blocks []canonical.Block
+		for _, block := range preserved.Message().Content {
+			switch block.Kind {
+			case "text":
+			case "image", "document", "file":
+				if !retainMedia {
+					continue
+				}
+			default:
+				continue
+			}
+			block.Index = uint64(len(blocks))
+			blocks = append(blocks, block)
+		}
+		// Pending attachments keep their original turn binding, including when
+		// guidance joined this run. Already processed media stays in history.
+		carry := canonical.NewRecord(preserved.Turn, "message", canonical.NewMessage(canonical.User, blocks...), r.clock.Now())
+		carry.Provenance.Author = "assistant"
+		carry.Metadata.Runtime = &runtime
+		records = append(records, carry)
+	}
+	return r.save(x.ctx, x.inv.Session.ID, records...)
+}
+func containsTool(message *canonical.Message) bool {
+	for _, block := range message.Content {
+		if block.Kind == "tool_request" || block.Kind == "tool_response" {
+			return true
+		}
+	}
+	return false
+}
+func retainedTools(state store.AgentState) []string {
+	present := map[string]bool{}
+	searches := map[string]bool{}
+	for _, record := range handoff.Visible(state.Records) {
+		if m := record.Message(); m != nil {
+			for _, block := range m.Content {
+				switch value := block.Data.(type) {
+				case *canonical.ToolRequest:
+					if value.Error == nil {
+						present[value.Name] = true
+						if value.Name == "tool_search" {
+							searches[value.ID] = true
+						}
+					}
+				case *canonical.ToolResponse:
+					if value.Format == canonical.MCPError || !searches[value.ID] {
+						continue
+					}
+					var discovered struct {
+						Tools      []struct{ Name string } `json:"tools"`
+						Structured json.RawMessage         `json:"structuredContent"`
+					}
+					if json.Unmarshal(value.Result.Value, &discovered) != nil {
+						continue
+					}
+					if value.Format == canonical.MCP && len(discovered.Structured) > 0 {
+						_ = json.Unmarshal(discovered.Structured, &discovered)
+					}
+					for _, tool := range discovered.Tools {
+						present[tool.Name] = true
+					}
+				}
+			}
+		}
+	}
+	out := []string{}
+	for _, name := range state.LoadedTools {
+		if present[name] {
+			out = append(out, name)
+		}
+	}
+	return out
+}

@@ -1,0 +1,506 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"reflect"
+	"slices"
+	"time"
+
+	"github.com/ai-poet/agent-client/desktop/internal/node/authorization"
+	"github.com/ai-poet/agent-client/desktop/internal/node/plugins"
+	"github.com/ai-poet/agent-client/desktop/internal/node/providers"
+	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+)
+
+type ProviderLoginCapture struct {
+	Attempt  protocol.ConversationLoginAttempt
+	Provider protocol.ConversationProvider
+	Target   providers.AccountTarget
+}
+
+func pluginAccountOrigin(info protocol.PluginInfo) protocol.ConversationConsentOrigin {
+	if info.Origin != nil {
+		switch info.Origin.Kind {
+		case "bundled":
+			return protocol.ConversationConsentOrigin{Kind: "bundled"}
+		case "online":
+			var origin protocol.PluginOriginOnlinePayload
+			body, _ := json.Marshal(info.Origin.Data)
+			if json.Unmarshal(body, &origin) == nil {
+				return protocol.ConversationConsentOrigin{Kind: "git", Data: protocol.ConversationConsentOriginGitPayload{Repository: origin.Source.Repository, Path: origin.Path}}
+			}
+		case "registry":
+			var origin protocol.PluginOriginRegistryPayload
+			body, _ := json.Marshal(info.Origin.Data)
+			if json.Unmarshal(body, &origin) == nil {
+				return protocol.ConversationConsentOrigin{Kind: "registry", Data: protocol.ConversationConsentOriginRegistryPayload{Namespace: origin.Source.Namespace, Slug: origin.Source.Slug}}
+			}
+		case "worktree":
+			var origin protocol.PluginOriginWorktreePayload
+			body, _ := json.Marshal(info.Origin.Data)
+			if json.Unmarshal(body, &origin) == nil {
+				return protocol.ConversationConsentOrigin{Kind: "worktree", Data: protocol.ConversationConsentOriginWorktreePayload{Worktree: origin.Worktree, Path: origin.Path}}
+			}
+		}
+	}
+	return protocol.ConversationConsentOrigin{Kind: "imported", Data: protocol.ConversationConsentOriginImportedPayload{Digest: info.Summary.Digest}}
+}
+
+func providerAuthDeclaration(ctx context.Context, db *sql.Conn, provider protocol.ConversationProvider) (protocol.PluginInfo, protocol.PluginModelAuthDeclaration, error) {
+	var info protocol.PluginInfo
+	var flow string
+	if provider.Authentication == protocol.AuthenticationPlugin {
+		if provider.Binding == nil || *provider.Binding == nil || (**provider.Binding).Package == nil || (**provider.Binding).Auth == nil {
+			return info, protocol.PluginModelAuthDeclaration{}, protocol.NewConfigurationFault(protocol.ConfigurationPluginBindingMissing, "channel authentication package is not captured")
+		}
+		binding := **provider.Binding
+		current, err := ReadPlugin(ctx, db, binding.Package.Name)
+		if err != nil {
+			return info, protocol.PluginModelAuthDeclaration{}, err
+		}
+		if current != nil && !current.Summary.Enabled {
+			return info, protocol.PluginModelAuthDeclaration{}, protocol.NewConfigurationFault(protocol.ConfigurationPluginDisabled, "channel authentication package is unavailable")
+		}
+		if current == nil {
+			return info, protocol.PluginModelAuthDeclaration{}, protocol.NewConfigurationFault(protocol.ConfigurationPluginUnavailable, "channel authentication package is unavailable")
+		}
+		// Installation grants live access; the channel capture selects the
+		// immutable declaration and settings used by its existing account.
+		info, err = ReadPluginVersion(ctx, db, *binding.Package)
+		if err != nil {
+			return info, protocol.PluginModelAuthDeclaration{}, err
+		}
+		flow = binding.Auth.Flow
+	} else {
+		infos, err := ReadPluginInfos(ctx, db)
+		if err != nil {
+			return info, protocol.PluginModelAuthDeclaration{}, err
+		}
+		for _, candidate := range infos {
+			if !candidate.Summary.Enabled || candidate.Extension == nil || candidate.Summary.Compatibility.Kind != "compatible" {
+				continue
+			}
+			for _, declaration := range candidate.Extension.ModelAuth {
+				if declaration.Authentication != nil && *declaration.Authentication == provider.Authentication {
+					if flow != "" {
+						return info, declaration, invalid("multiple enabled packages provide the same account authentication")
+					}
+					info, flow = candidate, declaration.ID
+				}
+			}
+		}
+	}
+	if info.Extension == nil || !slices.Contains(info.Extension.Actions, protocol.PluginActionAuthenticateModels) {
+		return info, protocol.PluginModelAuthDeclaration{}, protocol.NewConfigurationFault(protocol.ConfigurationPluginDeclarationMissing, "model authentication is not declared by an enabled package")
+	}
+	for _, declaration := range info.Extension.ModelAuth {
+		if declaration.ID != flow {
+			continue
+		}
+		if (declaration.Flow.Kind == "script" || declaration.Exchange != nil) && !slices.Contains(info.Extension.Actions, protocol.PluginActionInspectCredentials) {
+			return info, declaration, fault(protocol.ErrorCodePermissionDenied, "model authentication package cannot inspect credentials")
+		}
+		return info, declaration, nil
+	}
+	return info, protocol.PluginModelAuthDeclaration{}, protocol.NewConfigurationFault(protocol.ConfigurationPluginDeclarationMissing, "model authentication flow is unavailable")
+}
+
+func CaptureProviderLogin(ctx context.Context, db *sql.Conn, id protocol.ProviderID, expected uint64, attempt protocol.RequestID) (ProviderLoginCapture, error) {
+	var capture ProviderLoginCapture
+	if err := checkProviderWrite(configurationApplyContext(ctx), db, id); err != nil {
+		return capture, err
+	}
+	saved, err := currentProvider(ctx, db, id, &expected)
+	if err != nil {
+		return capture, err
+	}
+	if saved.Provider.Authentication == protocol.AuthenticationApiKey {
+		return capture, invalid("API-key providers do not use account sign-in")
+	}
+	provider, err := CaptureProvider(ctx, db, *saved.Provider)
+	if err != nil {
+		return capture, err
+	}
+	return captureProviderLogin(ctx, db, provider, attempt)
+}
+
+func captureProviderLogin(ctx context.Context, db *sql.Conn, provider protocol.ConversationProvider, attempt protocol.RequestID) (ProviderLoginCapture, error) {
+	var capture ProviderLoginCapture
+	info, declaration, err := providerAuthDeclaration(ctx, db, provider)
+	if err != nil {
+		return capture, err
+	}
+	reference := plugins.PackageReference(info)
+	resolved, err := ResolvePluginSettings(ctx, db, reference)
+	if err != nil {
+		return capture, err
+	}
+	fields, err := providers.OAuthFields(provider)
+	if err != nil {
+		return capture, err
+	}
+	if declaration.Client.ClientID != nil {
+		fields["client_id"] = *declaration.Client.ClientID
+	} else if name := declaration.Client.ClientIdSetting; name != nil {
+		var clientID string
+		if json.Unmarshal(resolved.Values[*name], &clientID) != nil {
+			return capture, protocol.NewConfigurationFault(protocol.ConfigurationAuthenticationClientMissing, "model authentication client ID is not configured")
+		}
+		fields["client_id"] = clientID
+	}
+	if name := declaration.Client.ClientSecretSetting; name != nil {
+		value, exists := resolved.Secrets[*name]
+		if !exists {
+			return capture, protocol.NewConfigurationFault(protocol.ConfigurationAuthenticationClientMissing, "model authentication client secret is not configured")
+		}
+		fields["client_secret"] = value.Expose()
+	}
+	declaration.Scopes = slices.Clone(declaration.Scopes)
+	slices.Sort(declaration.Scopes)
+	declaration.Scopes = slices.Compact(declaration.Scopes)
+	capture = ProviderLoginCapture{
+		Attempt: protocol.ConversationLoginAttempt{ID: attempt, Provider: provider.ID}, Provider: provider,
+		Target: providers.AccountTarget{Provider: provider.ID, Package: reference, Origin: pluginAccountOrigin(info), Flow: declaration.ID, Endpoint: provider.Endpoint, Declaration: declaration, Fields: fields},
+	}
+	return capture, nil
+}
+
+func CompleteProviderLogin(ctx context.Context, db *sql.Conn, node protocol.NodeID, capture ProviderLoginCapture, grant providers.AccountGrant) ([]protocol.Event, error) {
+	current, err := CaptureProviderLogin(ctx, db, capture.Provider.ID, capture.Provider.Revision, capture.Attempt.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !reflect.DeepEqual(current.Provider, capture.Provider) || !reflect.DeepEqual(current.Target, capture.Target) {
+		return nil, fault(protocol.ErrorCodeRevisionConflict, "provider authentication configuration changed during sign-in")
+	}
+	saved, err := currentProvider(ctx, db, capture.Provider.ID, &capture.Provider.Revision)
+	if err != nil {
+		return nil, err
+	}
+	if err := providerCredentialCapacity(ctx, db, capture.Provider.ID, 1); err != nil {
+		return nil, err
+	}
+	if grant.Kind != saved.Provider.Authentication {
+		return nil, invalid("authorization authentication does not match the provider")
+	}
+	stampProviderGrant(&grant, uint64(time.Now().UnixMilli()))
+	body, err := json.Marshal(grant)
+	if err != nil {
+		return nil, err
+	}
+	if grant.Kind != protocol.AuthenticationPlugin {
+		if err := authorization.ValidateGrant(body, grant.Kind, time.Now()); err != nil {
+			return nil, err
+		}
+	} else if grant.Record == nil || !grant.Record.Target.Matches(capture.Target) {
+		return nil, invalid("model authorization returned a different account owner")
+	}
+	secret := protocol.NewSecret(string(body))
+	id := protocol.NewCredentialID()
+	if saved.Authorizations == nil {
+		saved.Authorizations = map[protocol.CredentialID]providerAuthorization{}
+	}
+	authorization := providerAuthorization{Authentication: grant.Kind, Revision: 1, Key: &secret, ExpiresAtMs: grant.Expiry()}
+	if grant.Kind != protocol.AuthenticationPlugin && grant.Kind != protocol.AuthenticationCopilot {
+		target := capture.Target
+		authorization.Auth = &target
+	}
+	saved.Authorizations[id] = authorization
+	saved.Provider.Credential = &protocol.CredentialRef{Node: node, ID: id}
+	saved.Provider.Revision, err = nextRevision(saved.Provider.Revision)
+	if err != nil {
+		return nil, err
+	}
+	if err := saveProviderConfiguration(ctx, db, *saved); err != nil {
+		return nil, err
+	}
+	events := []protocol.Event{
+		{Kind: "provider_changed", Data: *saved.Provider},
+		{Kind: "credential_changed", Data: protocol.EventCredentialChangedPayload{Credential: *saved.Provider.Credential, Revision: 1}},
+	}
+	quotaChanges, err := ReconcileProviderQuotas(ctx, db, node)
+	return append(events, quotaChanges...), err
+}
+
+func OAuthHost(ctx context.Context, db *sql.Conn) (string, error) {
+	host := protocol.NewRequestID().String()
+	if _, err := db.ExecContext(ctx, "INSERT INTO oauth_hosts(singleton,host_id) VALUES(1,?1) ON CONFLICT(singleton) DO NOTHING", host); err != nil {
+		return "", err
+	}
+	err := db.QueryRowContext(ctx, "SELECT host_id FROM oauth_hosts WHERE singleton=1").Scan(&host)
+	return host, err
+}
+
+func OAuthRegistration(ctx context.Context, db *sql.Conn, key string) (*string, error) {
+	var value string
+	err := db.QueryRowContext(ctx, "SELECT client_id FROM oauth_registrations WHERE provider=?1", key).Scan(&value)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return &value, err
+}
+
+func SaveOAuthRegistration(ctx context.Context, db *sql.Conn, key, client string) error {
+	_, err := db.ExecContext(ctx, "INSERT INTO oauth_registrations(provider,client_id) VALUES(?1,?2) ON CONFLICT(provider) DO UPDATE SET client_id=excluded.client_id", key, client)
+	return err
+}
+
+type ProviderRenewal struct {
+	Capture    ProviderLoginCapture
+	Credential protocol.CredentialID
+	Revision   uint64
+	Grant      providers.AccountGrant
+}
+
+// CaptureProviderAuthorization also reads the unlisted provider a paired Node
+// forwarded, which holds only a transferable authentication.
+func CaptureProviderAuthorization(ctx context.Context, db *sql.Conn, id protocol.ProviderID) (protocol.ConversationProvider, error) {
+	saved, err := readProviderConfiguration(ctx, db, id)
+	if err != nil {
+		return protocol.ConversationProvider{}, err
+	}
+	if saved != nil && saved.Provider == nil {
+		return protocol.ConversationProvider{}, protocol.NewConfigurationFault(protocol.ConfigurationProviderMissing, "provider does not exist")
+	}
+	if saved == nil || !saved.Listed && transferable(saved.Provider.Authentication) != nil {
+		return protocol.ConversationProvider{}, fault(protocol.ErrorCodeNotFound, "provider does not exist")
+	}
+	return CaptureProvider(ctx, db, *saved.Provider)
+}
+
+// authorizationProvider also admits the unlisted provider a paired Node
+// forwarded, whose only account kind is the transferable Copilot grant.
+func authorizationProvider(ctx context.Context, db *sql.Conn, provider protocol.ConversationProvider) (*providerConfiguration, error) {
+	saved, err := capturedProviderConfiguration(ctx, db, provider)
+	if err != nil {
+		return nil, err
+	}
+	if saved == nil || saved.Provider == nil {
+		return nil, protocol.NewConfigurationFault(protocol.ConfigurationProviderMissing, "provider does not exist")
+	}
+	if !saved.Listed && provider.Authentication != protocol.AuthenticationCopilot {
+		return nil, protocol.NewConfigurationFault(protocol.ConfigurationProviderRemoved, "provider does not exist")
+	}
+	return saved, nil
+}
+
+func ReadProviderAuthorization(ctx context.Context, db *sql.Conn, node protocol.NodeID, provider protocol.ConversationProvider, reference protocol.CredentialRef) (*protocol.Secret, error) {
+	controller, err := CurrentController(ctx, db, node)
+	if err != nil {
+		return nil, err
+	}
+	if controller != node {
+		return ReadRuntimeProviderCredential(ctx, db, node, provider, reference)
+	}
+	saved, err := authorizationProvider(ctx, db, provider)
+	if err != nil {
+		return nil, err
+	}
+	value, exists := saved.Authorizations[reference.ID]
+	if !exists || value.Authentication != provider.Authentication {
+		return nil, protocol.NewConfigurationFault(protocol.ConfigurationCredentialMissing, "provider authorization is unavailable")
+	}
+	grant, err := providers.DecodeAccount(value.Key, provider.Authentication)
+	if err != nil {
+		if grant.RenewalPending || grant.RenewalUncertain {
+			return nil, controllerLoginFault("renewal_uncertain", protocol.ErrorCodeOutcomeUnknown, "authorization refresh did not complete; sign in again")
+		}
+		if grant.RenewalRejected {
+			return nil, controllerLoginFault("renewal_rejected", protocol.ErrorCodePermissionDenied, "authorization refresh was rejected; sign in again")
+		}
+		return nil, err
+	}
+	capture, err := captureProviderLogin(ctx, db, provider, protocol.NewRequestID())
+	if err != nil {
+		return nil, err
+	}
+	if grant.Kind == protocol.AuthenticationPlugin {
+		if grant.Record == nil {
+			return nil, protocol.NewConfigurationFault(protocol.ConfigurationCredentialMissing, "model authentication changed; sign in again")
+		}
+		if !grant.Record.Target.Matches(capture.Target) {
+			return nil, protocol.NewConfigurationFault(protocol.ConfigurationAuthenticationChanged, "model authentication changed; sign in again")
+		}
+	} else if grant.Kind != protocol.AuthenticationCopilot {
+		if value.Auth == nil {
+			return nil, protocol.NewConfigurationFault(protocol.ConfigurationCredentialMissing, "model authentication changed; sign in again")
+		}
+		if !value.Auth.Matches(capture.Target) {
+			return nil, protocol.NewConfigurationFault(protocol.ConfigurationAuthenticationChanged, "model authentication changed; sign in again")
+		}
+	}
+	return resolveCapturedProviderKey(ctx, db, node, reference, provider)
+}
+
+func BeginProviderRenewal(ctx context.Context, db *sql.Conn, node protocol.NodeID, provider protocol.ConversationProvider, reference protocol.CredentialRef, now time.Time) (*ProviderRenewal, error) {
+	controller, err := CurrentController(ctx, db, node)
+	if err != nil {
+		return nil, err
+	}
+	if controller != node {
+		return nil, fault(protocol.ErrorCodePermissionDenied, "only the controller renews account credentials")
+	}
+	if reference.Node != node {
+		return nil, fault(protocol.ErrorCodePermissionDenied, "credential belongs to another Node")
+	}
+	saved, err := authorizationProvider(ctx, db, provider)
+	if err != nil || provider.Authentication == protocol.AuthenticationApiKey {
+		return nil, err
+	}
+	if saved.Provider.Authentication != provider.Authentication {
+		return nil, protocol.NewConfigurationFault(protocol.ConfigurationAuthenticationChanged, "provider authentication changed")
+	}
+	id := reference.ID
+	value, exists := saved.Authorizations[id]
+	if !exists || value.Authentication != provider.Authentication {
+		return nil, protocol.NewConfigurationFault(protocol.ConfigurationCredentialMissing, "provider authorization is unavailable")
+	}
+	grant, err := providers.DecodeAccount(value.Key, provider.Authentication)
+	if err != nil {
+		return nil, err
+	}
+	if grant.RenewalPending || grant.RenewalUncertain {
+		return nil, fault(protocol.ErrorCodeOutcomeUnknown, "provider renewal is unresolved; sign in again after expiry")
+	}
+	capture, err := captureProviderLogin(ctx, db, provider, protocol.NewRequestID())
+	if err != nil {
+		return nil, err
+	}
+	if grant.Kind == protocol.AuthenticationPlugin {
+		if grant.Record == nil {
+			return nil, protocol.NewConfigurationFault(protocol.ConfigurationCredentialMissing, "model authentication changed; sign in again")
+		}
+		if !grant.Record.Target.Matches(capture.Target) {
+			return nil, protocol.NewConfigurationFault(protocol.ConfigurationAuthenticationChanged, "model authentication changed; sign in again")
+		}
+	} else if grant.Kind != protocol.AuthenticationCopilot {
+		if value.Auth == nil {
+			return nil, protocol.NewConfigurationFault(protocol.ConfigurationCredentialMissing, "model authentication changed; sign in again")
+		}
+		if !value.Auth.Matches(capture.Target) {
+			return nil, protocol.NewConfigurationFault(protocol.ConfigurationAuthenticationChanged, "model authentication changed; sign in again")
+		}
+	}
+	due := grant.RenewalAt()
+	expiry := grant.Expiry()
+	if due == nil || *due > uint64(now.UnixMilli()) && (expiry == nil || *expiry > uint64(now.Add(time.Minute).UnixMilli())) {
+		return nil, nil
+	}
+	if grant.EarliestRefreshAt != nil && *grant.EarliestRefreshAt > uint64(now.UnixMilli()) {
+		return nil, protocol.NewConfigurationFault(protocol.ConfigurationRenewalDeferred, "provider renewal is not available yet")
+	}
+	if capture.Target.Declaration.Flow.Kind == "script" {
+		var flow protocol.PluginModelAuthFlowScriptPayload
+		body, _ := json.Marshal(capture.Target.Declaration.Flow.Data)
+		if json.Unmarshal(body, &flow) != nil {
+			return nil, protocol.NewConfigurationFault(protocol.ConfigurationPluginDeclarationMissing, "provider authorization expired; sign in again")
+		}
+		if !flow.Refresh {
+			return nil, protocol.NewConfigurationFault(protocol.ConfigurationAuthorizationExpired, "provider authorization expired; sign in again")
+		}
+	} else if capture.Target.Declaration.Refresh == nil || grant.Record == nil || grant.Record.Issued.Refresh == nil {
+		return nil, protocol.NewConfigurationFault(protocol.ConfigurationAuthorizationExpired, "provider authorization expired; sign in again")
+	}
+	previous := grant
+	// Copilot's exchange is a read that does not rotate the GitHub token, so a
+	// lost answer consumes nothing and the grant is not marked uncertain.
+	grant.RenewalPending = grant.Kind != protocol.AuthenticationCopilot
+	body, err := json.Marshal(grant)
+	if err != nil {
+		return nil, err
+	}
+	secret := protocol.NewSecret(string(body))
+	value.Key = &secret
+	saved.Authorizations[id] = value
+	if err := saveProviderConfiguration(ctx, db, *saved); err != nil {
+		return nil, err
+	}
+	return &ProviderRenewal{Capture: capture, Credential: id, Revision: value.Revision, Grant: previous}, nil
+}
+
+func CompleteProviderRenewal(ctx context.Context, db *sql.Conn, node protocol.NodeID, renewal ProviderRenewal, grant providers.AccountGrant) ([]protocol.Event, error) {
+	saved, err := authorizationProvider(ctx, db, renewal.Capture.Provider)
+	if err != nil {
+		return nil, err
+	}
+	capture, err := captureProviderLogin(ctx, db, renewal.Capture.Provider, renewal.Capture.Attempt.ID)
+	if err != nil {
+		return nil, err
+	}
+	current := saved.Authorizations[renewal.Credential]
+	if current.Revision != renewal.Revision || current.Key == nil || current.Authentication != renewal.Capture.Provider.Authentication ||
+		saved.Provider.Authentication != renewal.Capture.Provider.Authentication || !reflect.DeepEqual(capture.Target, renewal.Capture.Target) || !renewal.Grant.SameAccount(grant) {
+		return nil, fault(protocol.ErrorCodeRevisionConflict, "provider authorization changed during renewal")
+	}
+	grant.RenewalPending = false
+	changed := !reflect.DeepEqual(grant, renewal.Grant)
+	if grant.Record == nil && (grant.Access != renewal.Grant.Access || grant.ExpiresAtMs != renewal.Grant.ExpiresAtMs) {
+		issued := uint64(time.Now().UnixMilli())
+		grant.IssuedAtMs = &issued
+	}
+	if changed && !grant.RenewalRejected {
+		stampProviderGrant(&grant, uint64(time.Now().UnixMilli()))
+	}
+	body, err := json.Marshal(grant)
+	if err != nil {
+		return nil, err
+	}
+	secret := protocol.NewSecret(string(body))
+	current.Key, current.ExpiresAtMs = &secret, grant.Expiry()
+	if changed {
+		current.Revision, err = nextRevision(current.Revision)
+		if err != nil {
+			return nil, err
+		}
+	}
+	saved.Authorizations[renewal.Credential] = current
+	if err := saveProviderConfiguration(ctx, db, *saved); err != nil {
+		return nil, err
+	}
+	if !changed {
+		return nil, nil
+	}
+	events := []protocol.Event{{Kind: "credential_changed", Data: protocol.EventCredentialChangedPayload{Credential: protocol.CredentialRef{Node: node, ID: renewal.Credential}, Revision: current.Revision}}}
+	quotaChanges, err := ReconcileProviderQuotas(ctx, db, node)
+	return append(events, quotaChanges...), err
+}
+
+func stampProviderGrant(grant *providers.AccountGrant, issued uint64) {
+	if grant.Record != nil {
+		if grant.Record.Issued.IssuedAtMs == nil {
+			grant.Record.Issued.IssuedAtMs = &issued
+		}
+	} else if grant.IssuedAtMs == nil {
+		grant.IssuedAtMs = &issued
+	}
+}
+
+func MarkProviderRenewalUncertain(ctx context.Context, db *sql.Conn, provider protocol.ConversationProvider, id protocol.CredentialID) error {
+	saved, err := authorizationProvider(ctx, db, provider)
+	if err != nil {
+		return err
+	}
+	value, ok := saved.Authorizations[id]
+	if !ok || value.Key == nil {
+		return nil
+	}
+	var grant providers.AccountGrant
+	if err := json.Unmarshal([]byte(value.Key.Expose()), &grant); err != nil {
+		return err
+	}
+	grant.RenewalUncertain = true
+	body, err := json.Marshal(grant)
+	if err != nil {
+		return err
+	}
+	secret := protocol.NewSecret(string(body))
+	value.Key = &secret
+	value.Revision, err = nextRevision(value.Revision)
+	if err != nil {
+		return err
+	}
+	saved.Authorizations[id] = value
+	return saveProviderConfiguration(ctx, db, *saved)
+}

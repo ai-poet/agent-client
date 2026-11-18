@@ -1,0 +1,2333 @@
+// ignore: unused_import
+import 'package:intl/intl.dart' as intl;
+import 'app_localizations.dart';
+
+// ignore_for_file: type=lint
+
+/// The translations for English (`en`).
+class AppLocalizationsEn extends AppLocalizations {
+  AppLocalizationsEn([String locale = 'en']) : super(locale);
+
+  @override
+  String get guidanceWithdraw => 'Withdraw guidance';
+
+  @override
+  String get updatesVersion => 'Version';
+
+  @override
+  String get updatesCheck => 'Check for updates';
+
+  @override
+  String get updatesChecking => 'Checking';
+
+  @override
+  String updatesAvailable(String version) {
+    return 'Version $version is available';
+  }
+
+  @override
+  String get updatesDownload => 'Download update';
+
+  @override
+  String get updatesCurrent => 'You\'re up to date';
+
+  @override
+  String get updatesUnpublished => 'No mobile release yet';
+
+  @override
+  String get updatesCheckFailed => 'Could not check for updates';
+
+  @override
+  String get updatesOpenFailed => 'Could not open the download';
+
+  @override
+  String get welcomeTitle => 'What would you like to work on today?';
+
+  @override
+  String get welcomeExplore => 'Explore a project';
+
+  @override
+  String get welcomeExploreDetail =>
+      'Understand its structure and entry points';
+
+  @override
+  String get welcomeExplorePrompt =>
+      'Help me understand this project, including its key modules and entry points.';
+
+  @override
+  String get welcomeBuild => 'Build an idea';
+
+  @override
+  String get welcomeBuildDetail => 'Bring your idea to life';
+
+  @override
+  String get welcomeBuildPrompt =>
+      'I want to add a feature to this project. First confirm the requirements with me and outline an implementation plan.';
+
+  @override
+  String get welcomeReview => 'Review changes';
+
+  @override
+  String get welcomeReviewDetail => 'Check changes and potential issues';
+
+  @override
+  String get welcomeReviewPrompt =>
+      'Review the current changes in this project, focusing on potential issues and missing tests.';
+
+  @override
+  String get welcomePlan => 'Make a plan';
+
+  @override
+  String get welcomePlanDetail => 'Clarify goals and steps';
+
+  @override
+  String get welcomePlanPrompt =>
+      'Help me create a step-by-step plan for the upcoming development work.';
+
+  @override
+  String get conversationEmpty => 'Describe your task';
+
+  @override
+  String get conversationLoading => 'Loading chat';
+
+  @override
+  String get conversationReconnecting => 'Reconnecting';
+
+  @override
+  String get conversationErrorDetails => 'View reason';
+
+  @override
+  String conversationModelRetrying(String attempt, String limit) {
+    return 'Retrying model request $attempt/$limit';
+  }
+
+  @override
+  String conversationModelRetried(String attempt, String limit) {
+    return 'Model request retried $attempt/$limit';
+  }
+
+  @override
+  String get conversationStepSkipped => 'Skipped';
+
+  @override
+  String get conversationChild => 'Subtask';
+
+  @override
+  String get conversationOffline => 'Connection lost';
+
+  @override
+  String get conversationUnavailable => 'Chat unavailable';
+
+  @override
+  String get conversationFailed => 'Operation failed; retry';
+
+  @override
+  String get conversationUnknown =>
+      'Outcome unconfirmed; check the chat before acting again';
+
+  @override
+  String get conversationCheckResult => 'Check outcome';
+
+  @override
+  String get conversationConflict =>
+      'Configuration changed; reopen before acting again';
+
+  @override
+  String get conversationOlder => 'Load older messages';
+
+  @override
+  String get conversationNew => 'New chat';
+
+  @override
+  String get conversationNoHost => 'Connect a host first';
+
+  @override
+  String get conversationNoProject => 'Add a project on the host first';
+
+  @override
+  String get conversationNoModel => 'Configure a model on the host first';
+
+  @override
+  String get conversationNoTasks => 'No chats yet';
+
+  @override
+  String get conversationNoMessages => 'No messages';
+
+  @override
+  String get conversationPreviewUnavailable => 'Message unavailable';
+
+  @override
+  String get conversationInterrupted => 'Interrupted';
+
+  @override
+  String get conversationContinued => 'Continued';
+
+  @override
+  String get conversationFailedStatus => 'Failed';
+
+  @override
+  String get conversationStopping => 'Stopping';
+
+  @override
+  String get conversationQueued => 'Queued';
+
+  @override
+  String get conversationGenerating => 'Responding';
+
+  @override
+  String get conversationWaiting => 'Awaiting confirmation';
+
+  @override
+  String get conversationWaitingChild => 'Waiting for 1 subagent';
+
+  @override
+  String conversationWaitingChildren(String count) {
+    return 'Waiting for $count subagents';
+  }
+
+  @override
+  String get conversationCompacting => 'Compacting context';
+
+  @override
+  String get conversationWaitingController => 'Waiting for controller sign-in';
+
+  @override
+  String get conversationCompacted => 'Context compacted';
+
+  @override
+  String get conversationToolWaiting => 'Pending';
+
+  @override
+  String get conversationStartCoding => 'Start execution';
+
+  @override
+  String get conversationPlanFeedback => 'Suggest changes';
+
+  @override
+  String get conversationOther => 'Other';
+
+  @override
+  String get conversationSubmit => 'Submit';
+
+  @override
+  String get conversationMode => 'Work mode';
+
+  @override
+  String get conversationCode => 'Standard';
+
+  @override
+  String get conversationPlan => 'Plan';
+
+  @override
+  String get conversationFlagship => 'Collaborate';
+
+  @override
+  String get conversationAsk => 'Ask each time';
+
+  @override
+  String get conversationProject => 'Project access';
+
+  @override
+  String get conversationFull => 'Full access';
+
+  @override
+  String get conversationPermission => 'Permissions';
+
+  @override
+  String get conversationAskDescription =>
+      'Ask before editing files or running commands';
+
+  @override
+  String get conversationProjectDescription =>
+      'Edit project files automatically; ask before running commands';
+
+  @override
+  String get conversationFullDescription =>
+      'Edit files and run commands automatically, including outside the project';
+
+  @override
+  String get conversationBudget => 'Reasoning budget';
+
+  @override
+  String get conversationAttachment => 'Attachment';
+
+  @override
+  String get conversationImageFailed => 'Cannot display image';
+
+  @override
+  String get conversationImageUnavailable => 'Image unavailable';
+
+  @override
+  String get conversationDownloadFailed => 'Could not load attachment';
+
+  @override
+  String get conversationMicrophoneDenied => 'Cannot access microphone';
+
+  @override
+  String get conversationRecordingFailed => 'Speech recognition failed';
+
+  @override
+  String get conversationSpeechDisabled => 'Voice input is off';
+
+  @override
+  String get conversationSpeechMissing =>
+      'Download the speech model in Settings first';
+
+  @override
+  String get conversationRecording => 'Recording';
+
+  @override
+  String get conversationTranscribing => 'Transcribing';
+
+  @override
+  String get conversationRecordReady => 'Ready to record';
+
+  @override
+  String get conversationStartRecording => 'Start recording';
+
+  @override
+  String get conversationFinishRecording => 'Finish recording';
+
+  @override
+  String get conversationSources => 'Sources';
+
+  @override
+  String get conversationSearchSuggestions => 'Search suggestions';
+
+  @override
+  String get conversationStats => 'Chat usage';
+
+  @override
+  String get conversationStatsEmpty => 'No usage yet';
+
+  @override
+  String get conversationStatsOverview => 'Overview';
+
+  @override
+  String get conversationStatsTokenGroup => 'Token usage';
+
+  @override
+  String get conversationStatsCostGroup => 'Cost';
+
+  @override
+  String get conversationStatsGenerationGroup => 'Generation';
+
+  @override
+  String get conversationStatsTokens => 'Tokens';
+
+  @override
+  String get conversationStatsInput => 'Input';
+
+  @override
+  String get conversationStatsOutput => 'Output';
+
+  @override
+  String get conversationStatsCached => 'Cached input';
+
+  @override
+  String get conversationStatsReasoning => 'Reasoning output';
+
+  @override
+  String get conversationStatsCacheRate => 'Cache hits';
+
+  @override
+  String get conversationStatsCost => 'Estimated cost';
+
+  @override
+  String get conversationStatsCostCoverage => 'Cost coverage';
+
+  @override
+  String get conversationStatsSpeed => 'Generation speed';
+
+  @override
+  String conversationStatsSpeedValue(String value) {
+    return '$value tok/s';
+  }
+
+  @override
+  String get conversationStatsTimingCoverage => 'Timing coverage';
+
+  @override
+  String get conversationStatsTurns => 'Turns';
+
+  @override
+  String get conversationStatsResponses => 'Model responses';
+
+  @override
+  String get conversationStatsContext => 'Current context';
+
+  @override
+  String get conversationStatsInputCost => 'Input cost';
+
+  @override
+  String get conversationStatsOutputCost => 'Output cost';
+
+  @override
+  String get conversationStatsCacheReadCost => 'Cache read cost';
+
+  @override
+  String get conversationStatsCacheWriteCost => 'Cache write cost';
+
+  @override
+  String get messageHistoryUpdated => 'Chat updated; original records kept';
+
+  @override
+  String get turnUndoUnsaved =>
+      'Files have unsaved changes; save or discard them first';
+
+  @override
+  String get codePlain => 'Plain text';
+
+  @override
+  String get turnChanges => 'Turn changes';
+
+  @override
+  String turnChangesCount(String count) {
+    return '$count files';
+  }
+
+  @override
+  String get fileChangesApprovalOne => 'Apply patch to 1 file';
+
+  @override
+  String fileChangesApproval(String count) {
+    return 'Apply patch to $count files';
+  }
+
+  @override
+  String get fileChangesAdded => 'Added';
+
+  @override
+  String get fileChangesModified => 'Modified';
+
+  @override
+  String get fileChangesRenamed => 'Renamed';
+
+  @override
+  String get fileChangesDeleted => 'Deleted';
+
+  @override
+  String get turnUndo => 'Undo changes';
+
+  @override
+  String get turnUndoAll => 'Undo all';
+
+  @override
+  String get turnUndoConfirm =>
+      'Undo these file changes from this turn? Conflicts with later changes will stop the operation';
+
+  @override
+  String get turnUndoDone => 'Undone';
+
+  @override
+  String get turnUndoPartial =>
+      'Some changes undone; check the remaining files';
+
+  @override
+  String get messageActions => 'Message actions';
+
+  @override
+  String get messageEdit => 'Edit and regenerate';
+
+  @override
+  String get messageEditConfirm =>
+      'Replace this message and the following chat? Files will not be rolled back';
+
+  @override
+  String get messageRewind => 'Rewind here';
+
+  @override
+  String get messageRewindConfirm =>
+      'Keep this turn and remove later messages? Files stay unchanged';
+
+  @override
+  String get messageBackup => 'View chat backup';
+
+  @override
+  String get messageRegenerate => 'Regenerate';
+
+  @override
+  String get messageSearch => 'Search chat';
+
+  @override
+  String get messageSearchHint => 'Search messages';
+
+  @override
+  String get messageSearchMissing =>
+      'This message is no longer in the current chat';
+
+  @override
+  String get messageSearchStale => 'Chat changed; search again';
+
+  @override
+  String get messageNoResults => 'No matching messages';
+
+  @override
+  String get messageCheck => 'Check operation outcome';
+
+  @override
+  String get messageReference => 'Reference';
+
+  @override
+  String get messageReferenceContext =>
+      'This reference belongs to the context when the message was sent';
+
+  @override
+  String get toolFailed => 'Failed';
+
+  @override
+  String get fileLinkUnavailable => 'Cannot open this link';
+
+  @override
+  String get imagePreview => 'Image preview';
+
+  @override
+  String get fileOpenExternal => 'Open with another app';
+
+  @override
+  String get fileOpenFailed => 'Cannot open file';
+
+  @override
+  String get fileNoApplication => 'No app can open this file';
+
+  @override
+  String get fileSaveBeforeShare => 'Save changes before sharing?';
+
+  @override
+  String fileTrashConfirm(String name) {
+    return 'Move “$name” to the host trash? Unsaved changes will also be discarded';
+  }
+
+  @override
+  String get fileTrashUncertain =>
+      'Deletion outcome unconfirmed; retry the query';
+
+  @override
+  String get fileSaveFailed => 'File save failed';
+
+  @override
+  String get terminalHideKeyboard => 'Hide keyboard';
+
+  @override
+  String get terminalEscape => 'Esc';
+
+  @override
+  String get terminalTab => 'Tab';
+
+  @override
+  String get terminalCtrl => 'Ctrl';
+
+  @override
+  String get terminalAlt => 'Alt';
+
+  @override
+  String get terminalShift => 'Shift';
+
+  @override
+  String get terminalCmd => 'Cmd';
+
+  @override
+  String get terminalArrowLeft => 'Left';
+
+  @override
+  String get terminalArrowUp => 'Up';
+
+  @override
+  String get terminalArrowDown => 'Down';
+
+  @override
+  String get terminalArrowRight => 'Right';
+
+  @override
+  String get resourceNoWorkspace => 'Choose a worktree on a connected host';
+
+  @override
+  String get resourceRoot => 'Root';
+
+  @override
+  String get resourceMore => 'Load more';
+
+  @override
+  String get resourcePartial => 'Partial content shown';
+
+  @override
+  String get resourceEmpty => 'No content';
+
+  @override
+  String get resourceSaveError => 'Save failed; draft kept';
+
+  @override
+  String get resourceReloadConfirm =>
+      'Discard the draft and load the latest content?';
+
+  @override
+  String get resourceWorktreeCreate => 'New worktree';
+
+  @override
+  String get resourceSessionServices => 'Chat services';
+
+  @override
+  String get resourceServicesUnavailable => 'Service list unavailable';
+
+  @override
+  String get resourceNoServices => 'No service addresses found';
+
+  @override
+  String get resourceServiceOpen => 'Open service';
+
+  @override
+  String get resourceRemotePort => 'Remote port';
+
+  @override
+  String get resourceOpenPort => 'Forward port';
+
+  @override
+  String get resourceOpenBrowser => 'Preview web page';
+
+  @override
+  String get resourcePreviewFailed => 'Could not load page';
+
+  @override
+  String get resourcePreviewLink => 'Cannot open this link in preview';
+
+  @override
+  String get resourceForwardStopped => 'Forwarding stopped';
+
+  @override
+  String get resourceTerminalControl => 'Take control';
+
+  @override
+  String get resourceTerminalControlHint => 'Controlled by another device';
+
+  @override
+  String get resourceTerminalClaiming => 'Taking control';
+
+  @override
+  String get resourceTerminalEnded => 'Terminal ended';
+
+  @override
+  String get resourceTerminalConnecting => 'Connecting terminal';
+
+  @override
+  String get resourceTerminalPaste => 'Paste';
+
+  @override
+  String get resourceGitNotRepository =>
+      'This directory is not a Git repository';
+
+  @override
+  String get resourceInvalidPort => 'Enter a port from 1–65535';
+
+  @override
+  String get tool_navigate => 'Open page';
+
+  @override
+  String get tool_back => 'Go back';
+
+  @override
+  String get tool_forward => 'Go forward';
+
+  @override
+  String get tool_refresh => 'Refresh page';
+
+  @override
+  String get tool_right_click => 'Click element';
+
+  @override
+  String get tool_clear => 'Enter text';
+
+  @override
+  String get tool_select => 'Select option';
+
+  @override
+  String get tool_hover => 'Hover element';
+
+  @override
+  String get tool_scroll => 'Scroll page';
+
+  @override
+  String get tool_press_key => 'Press key';
+
+  @override
+  String get tool_new_tab => 'New tab';
+
+  @override
+  String get tool_list_windows => 'Browser tabs';
+
+  @override
+  String get tool_switch_window => 'Switch tab';
+
+  @override
+  String get tool_close_window => 'Close window';
+
+  @override
+  String get tool_close_session => 'Close browser';
+
+  @override
+  String get tool_screenshot => 'Capture page';
+
+  @override
+  String get tool_print_to_pdf => 'Export PDF';
+
+  @override
+  String get tool_file_upload => 'Upload file';
+
+  @override
+  String get tool_downloads => 'View downloads';
+
+  @override
+  String get tool_save_download => 'Save downloaded file';
+
+  @override
+  String get tool_evaluate_js => 'Run page script';
+
+  @override
+  String get tool_get_cookies => 'Read cookies';
+
+  @override
+  String get tool_delete_all_cookies => 'Change cookies';
+
+  @override
+  String get tool_drag_and_drop => 'Drag element';
+
+  @override
+  String get tool_focus => 'Focus element';
+
+  @override
+  String get tool_handle_alert => 'Handle page alert';
+
+  @override
+  String get tool_database_catalog => 'Browse database';
+
+  @override
+  String get tool_database_query => 'Query database';
+
+  @override
+  String get tool_database_execute => 'Execute database operation';
+
+  @override
+  String get tool_search_memory => 'Search memory';
+
+  @override
+  String get tool_review_memories => 'Review memories';
+
+  @override
+  String get tool_consolidate_memories => 'Merge memories';
+
+  @override
+  String get tool_save_memory => 'Save memory';
+
+  @override
+  String get tool_forget_memory => 'Delete memory';
+
+  @override
+  String get tool_update_plan => 'Update plan';
+
+  @override
+  String get tool_create_goal => 'Create goal';
+
+  @override
+  String get tool_get_goal => 'View goal';
+
+  @override
+  String get tool_update_goal => 'Update goal';
+
+  @override
+  String get tool_spawn_agent => 'Subagent';
+
+  @override
+  String get tool_browser_tabs => 'Browser tabs';
+
+  @override
+  String get tool_browser_read => 'Read page';
+
+  @override
+  String get tool_browser_navigate => 'Open page';
+
+  @override
+  String get tool_browser_click => 'Click element';
+
+  @override
+  String get tool_browser_input => 'Enter text';
+
+  @override
+  String get tool_browser_scroll => 'Scroll page';
+
+  @override
+  String get tool_browser_back => 'Go back';
+
+  @override
+  String get tool_browser_forward => 'Go forward';
+
+  @override
+  String get tool_browser_refresh => 'Refresh page';
+
+  @override
+  String get tool_browser_open => 'New tab';
+
+  @override
+  String get tool_browser_close => 'Close tab';
+
+  @override
+  String get tool_browser_focus => 'Switch tab';
+
+  @override
+  String get tool_browser_select => 'Select option';
+
+  @override
+  String get tool_browser_hover => 'Hover element';
+
+  @override
+  String get tool_browser_key => 'Press key';
+
+  @override
+  String get tool_browser_frame => 'Switch frame';
+
+  @override
+  String get tool_browser_wait => 'Wait for page';
+
+  @override
+  String get tool_browser_screenshot => 'Capture page';
+
+  @override
+  String get tool_ssh_run => 'Run SSH command';
+
+  @override
+  String get tool_ssh_transfer => 'Transfer SSH file';
+
+  @override
+  String get tool_list_worktrees => 'List worktrees';
+
+  @override
+  String get tool_create_worktree => 'New worktree';
+
+  @override
+  String get tool_register_worktree => 'Add worktree';
+
+  @override
+  String get tool_remove_worktree => 'Remove worktree';
+
+  @override
+  String get tool_google_search => 'Search web';
+
+  @override
+  String get tool_web_fetch => 'Fetch page';
+
+  @override
+  String get tool_fetch_url => 'Fetch page';
+
+  @override
+  String get tool_read_file => 'Read file';
+
+  @override
+  String get tool_write_file => 'Write file';
+
+  @override
+  String get tool_list_directory => 'Browse directory';
+
+  @override
+  String get tool_search_files => 'Search files';
+
+  @override
+  String get tool_run_command => 'Run command';
+
+  @override
+  String get tool_read_command => 'View background command';
+
+  @override
+  String get tool_stop_command => 'Stop command';
+
+  @override
+  String get tool_load_skill => 'Load skill';
+
+  @override
+  String get tool_read_skill_resource => 'Read skill resource';
+
+  @override
+  String get tool_computer_desktop => 'View desktop';
+
+  @override
+  String get tool_computer_observe => 'Observe screen';
+
+  @override
+  String get tool_computer_input => 'Control computer';
+
+  @override
+  String get tool_computer_focus => 'Switch app';
+
+  @override
+  String get tool_computer_open => 'Open app';
+
+  @override
+  String get tool_git_status => 'Git status';
+
+  @override
+  String get tool_git_diff => 'View diff';
+
+  @override
+  String get tool_git_log => 'Git log';
+
+  @override
+  String get tool_inspect_image => 'Inspect image';
+
+  @override
+  String get tool_generate_image => 'Generate image';
+
+  @override
+  String get tool_generate_video => 'Generate video';
+
+  @override
+  String get refresh => 'Refresh';
+
+  @override
+  String get loading => 'Loading';
+
+  @override
+  String get home => 'Chats';
+
+  @override
+  String get idle => 'Idle';
+
+  @override
+  String get allProjects => 'All projects';
+
+  @override
+  String get unassignedChats => 'Chats';
+
+  @override
+  String get allWorktrees => 'All worktrees';
+
+  @override
+  String get tasksActive => 'In progress';
+
+  @override
+  String get tasksToday => 'Today';
+
+  @override
+  String get yesterday => 'Yesterday';
+
+  @override
+  String get tasksThisWeek => 'This week';
+
+  @override
+  String get tasksEarlier => 'Earlier';
+
+  @override
+  String get filterProjects => 'Filter projects';
+
+  @override
+  String get archiveShort => 'Archive';
+
+  @override
+  String get archiveTab => 'Archived';
+
+  @override
+  String get delete => 'Delete';
+
+  @override
+  String get deleteTask => 'Delete chat';
+
+  @override
+  String get deleteWarning => 'This chat cannot be resumed after deletion';
+
+  @override
+  String get restored => 'Restored to home';
+
+  @override
+  String get restore => 'Restore';
+
+  @override
+  String get archiveEmpty => 'No archived chats';
+
+  @override
+  String get brand => 'Sailry';
+
+  @override
+  String get mobile => 'Mobile workspace';
+
+  @override
+  String get preview => 'Preview';
+
+  @override
+  String get mixed => 'Light and dark';
+
+  @override
+  String get dark => 'Dark';
+
+  @override
+  String get light => 'Light';
+
+  @override
+  String get brandColor => 'Accent color';
+
+  @override
+  String get brandOrange => 'Orange';
+
+  @override
+  String get brandBlue => 'Blue';
+
+  @override
+  String get brandGreen => 'Green';
+
+  @override
+  String get brandPurple => 'Purple';
+
+  @override
+  String get brandPink => 'Pink';
+
+  @override
+  String get brandTeal => 'Teal';
+
+  @override
+  String get focus => 'Single screen';
+
+  @override
+  String get page => 'Choose page';
+
+  @override
+  String get design => 'Features and design';
+
+  @override
+  String get footer => 'SAILRY / MOBILE';
+
+  @override
+  String get tasks => 'Tasks';
+
+  @override
+  String get chat => 'Chat';
+
+  @override
+  String get hosts => 'Hosts';
+
+  @override
+  String get resources => 'Resources';
+
+  @override
+  String get settings => 'Settings';
+
+  @override
+  String get usage => 'Usage';
+
+  @override
+  String get changes => 'Changes';
+
+  @override
+  String get terminal => 'Terminal';
+
+  @override
+  String get newTerminal => 'New terminal';
+
+  @override
+  String get files => 'Files';
+
+  @override
+  String get project => 'Project';
+
+  @override
+  String get worktree => 'Worktree';
+
+  @override
+  String get allHosts => 'All hosts';
+
+  @override
+  String get all => 'All';
+
+  @override
+  String get running => 'Running';
+
+  @override
+  String get waiting => 'Pending';
+
+  @override
+  String get completed => 'Completed';
+
+  @override
+  String get search => 'Search';
+
+  @override
+  String get searchTasks => 'Search tasks and projects';
+
+  @override
+  String get noResults => 'No matching tasks';
+
+  @override
+  String get notification => 'Notifications';
+
+  @override
+  String get newConversation => 'New chat';
+
+  @override
+  String get question => 'Which language should the documentation use?';
+
+  @override
+  String get reply => 'Reply';
+
+  @override
+  String get approval => 'Approval';
+
+  @override
+  String get allow => 'Allow once';
+
+  @override
+  String get deny => 'Deny';
+
+  @override
+  String get working => 'Working';
+
+  @override
+  String get branch => 'feature/sign-in';
+
+  @override
+  String get today => 'Today 09:36';
+
+  @override
+  String get phaseThinking => 'Thinking';
+
+  @override
+  String get phaseReading => 'Reading files';
+
+  @override
+  String get phaseQuestion => 'Awaiting reply';
+
+  @override
+  String get phaseEditing => 'Editing files';
+
+  @override
+  String get phaseApproval => 'Awaiting approval';
+
+  @override
+  String get phaseTesting => 'Running tests';
+
+  @override
+  String get phaseReply => 'Responding';
+
+  @override
+  String get phaseFollowup => 'Processing queue';
+
+  @override
+  String get phaseComplete => 'Completed';
+
+  @override
+  String get phaseFailed => 'Tests failed';
+
+  @override
+  String get allowShort => 'Allow';
+
+  @override
+  String get queueShort => 'Queue';
+
+  @override
+  String get questionPending => 'Awaiting your reply';
+
+  @override
+  String queueCount(String count) {
+    return '$count queued messages';
+  }
+
+  @override
+  String queuePaused(String count) {
+    return 'Queue paused · $count';
+  }
+
+  @override
+  String queueGuidance(String queue) {
+    return '$queue, guidance waiting to join';
+  }
+
+  @override
+  String get pauseQueue => 'Pause queue';
+
+  @override
+  String get resumeQueue => 'Resume queue';
+
+  @override
+  String get moveUp => 'Move up';
+
+  @override
+  String get thinkingNow => 'Thinking';
+
+  @override
+  String get thought => 'Reasoning';
+
+  @override
+  String get describeTask => 'Describe your task';
+
+  @override
+  String get send => 'Send';
+
+  @override
+  String get attach => 'Attach';
+
+  @override
+  String get voice => 'Voice input';
+
+  @override
+  String get attachment => 'Attachment';
+
+  @override
+  String get removeAttachment => 'Remove attachment';
+
+  @override
+  String get model => 'Model';
+
+  @override
+  String get copy => 'Copy';
+
+  @override
+  String get copied => 'Copied';
+
+  @override
+  String get copyFailed => 'Copy unavailable; select the text manually';
+
+  @override
+  String get more => 'More';
+
+  @override
+  String get close => 'Close';
+
+  @override
+  String get back => 'Back';
+
+  @override
+  String get cancel => 'Cancel';
+
+  @override
+  String get save => 'Save';
+
+  @override
+  String get queue => 'Message queue';
+
+  @override
+  String get queueEmpty => 'No queued messages';
+
+  @override
+  String get fork => 'Fork chat';
+
+  @override
+  String get stop => 'Stop task';
+
+  @override
+  String get stoppedStatus => 'Stopped';
+
+  @override
+  String get pair => 'Connect host';
+
+  @override
+  String get online => 'Online';
+
+  @override
+  String get offline => 'Offline';
+
+  @override
+  String get cpu => 'CPU';
+
+  @override
+  String get memory => 'Memory';
+
+  @override
+  String get metrics => 'Resource usage';
+
+  @override
+  String get activity => 'Activity';
+
+  @override
+  String get processes => 'Processes';
+
+  @override
+  String get network => 'Network';
+
+  @override
+  String get relay => 'Relay';
+
+  @override
+  String get retry => 'Retry';
+
+  @override
+  String get pairTitle => 'Connect a host';
+
+  @override
+  String get pairCode => 'Pairing code';
+
+  @override
+  String get pairInvalid => 'Enter 6 digits';
+
+  @override
+  String get workspace => 'Workspace';
+
+  @override
+  String get selectHost => 'Choose host';
+
+  @override
+  String get confirm => 'Confirm';
+
+  @override
+  String get git => 'Git';
+
+  @override
+  String get gitBranches => 'Branches';
+
+  @override
+  String get gitHistory => 'History';
+
+  @override
+  String gitViewAll(String count) {
+    return 'View all $count changes';
+  }
+
+  @override
+  String terminalRunningCount(String count) {
+    return '$count running';
+  }
+
+  @override
+  String get gitUnstaged => 'Unstaged';
+
+  @override
+  String get gitStageFile => 'Stage';
+
+  @override
+  String gitCommitCount(String count) {
+    return 'Commit $count';
+  }
+
+  @override
+  String get gitRemote => 'Remote';
+
+  @override
+  String get gitCurrentShort => 'Current';
+
+  @override
+  String gitDiscardConfirm(String name) {
+    return 'Discard all changes to “$name”?';
+  }
+
+  @override
+  String gitTrashConfirm(String name) {
+    return 'Move “$name” to the host trash?';
+  }
+
+  @override
+  String get gitCommitOptions => 'Commit options';
+
+  @override
+  String get gitSkipHooks => 'Skip hooks';
+
+  @override
+  String get gitPushAfterCommit => 'Push after commit';
+
+  @override
+  String get fileShare => 'Share';
+
+  @override
+  String get fileTrash => 'Move to trash';
+
+  @override
+  String get gitActions => 'Git actions';
+
+  @override
+  String get gitFetch => 'Fetch';
+
+  @override
+  String get gitPull => 'Pull';
+
+  @override
+  String get gitPush => 'Push';
+
+  @override
+  String get gitCurrent => 'Current branch';
+
+  @override
+  String get gitCreateBranch => 'New branch';
+
+  @override
+  String get gitBranchName => 'Branch name';
+
+  @override
+  String get gitSwitch => 'Switch branch';
+
+  @override
+  String get gitMerge => 'Merge branch';
+
+  @override
+  String get gitDeleteBranch => 'Delete branch';
+
+  @override
+  String get review => 'Review';
+
+  @override
+  String get selectWorkspace => 'Project and worktree';
+
+  @override
+  String get searchFiles => 'Search files';
+
+  @override
+  String get src => 'Source';
+
+  @override
+  String get folder => 'Folder';
+
+  @override
+  String get modified => 'Modified';
+
+  @override
+  String get edit => 'Edit';
+
+  @override
+  String get unsaved => 'Unsaved';
+
+  @override
+  String get discard => 'Discard changes';
+
+  @override
+  String get connections => 'More resources';
+
+  @override
+  String get ssh => 'SSH';
+
+  @override
+  String get database => 'Database';
+
+  @override
+  String get ports => 'Port forwarding';
+
+  @override
+  String get browser => 'Web preview';
+
+  @override
+  String get openFile => 'Open file';
+
+  @override
+  String get closePort => 'Close forward';
+
+  @override
+  String get workingTree => 'Working tree';
+
+  @override
+  String get staged => 'Staged';
+
+  @override
+  String get stage => 'Stage all';
+
+  @override
+  String get unstage => 'Unstage';
+
+  @override
+  String get commit => 'Commit';
+
+  @override
+  String get commitMessage => 'Commit message';
+
+  @override
+  String get noChanges => 'No changes to commit';
+
+  @override
+  String get terminalKeyboard => 'Keyboard';
+
+  @override
+  String get terminalEnter => 'Enter';
+
+  @override
+  String get readOnly => 'Read only';
+
+  @override
+  String get tokens => 'Tokens';
+
+  @override
+  String get requests => 'Responses';
+
+  @override
+  String usageCoverage(String priced, String total) {
+    return '$priced / $total responses priced';
+  }
+
+  @override
+  String get usageEmpty => 'No usage data';
+
+  @override
+  String get estimatedCost => 'Estimated cost (USD)';
+
+  @override
+  String get partial => 'Partial data';
+
+  @override
+  String get input => 'Input';
+
+  @override
+  String get output => 'Output';
+
+  @override
+  String get cached => 'Cache hits';
+
+  @override
+  String get appearance => 'Appearance';
+
+  @override
+  String get notifications => 'Notifications';
+
+  @override
+  String get enabled => 'On';
+
+  @override
+  String get disabled => 'Off';
+
+  @override
+  String get add => 'Add';
+
+  @override
+  String get configName => 'Name';
+
+  @override
+  String get configEndpoint => 'Endpoint';
+
+  @override
+  String get configModels => 'Models';
+
+  @override
+  String get configEmpty => 'No entries';
+
+  @override
+  String get configDuplicate => 'Name already exists';
+
+  @override
+  String configDelete(String name) {
+    return 'Delete “$name”?';
+  }
+
+  @override
+  String get speechInput => 'Voice input';
+
+  @override
+  String get providers => 'Models and providers';
+
+  @override
+  String get speech => 'Speech';
+
+  @override
+  String get about => 'About Sailry';
+
+  @override
+  String get modelPicker => 'Choose model';
+
+  @override
+  String get team => 'Team';
+
+  @override
+  String get executionModel => 'Model only';
+
+  @override
+  String get teamDefault => 'Default team';
+
+  @override
+  String get teamLead => 'Lead';
+
+  @override
+  String get memberReset => 'Reset model';
+
+  @override
+  String get auto => 'Auto';
+
+  @override
+  String get manual => 'Ask each time';
+
+  @override
+  String get required => 'Describe your task first';
+
+  @override
+  String get hostConnectPrompt => 'Connect a host';
+
+  @override
+  String get hostDisconnected => 'Host is offline';
+
+  @override
+  String get hostUpdateRequired => 'Update the host to connect';
+
+  @override
+  String get appUpdateRequired => 'Update this app to connect';
+
+  @override
+  String get language => 'Language';
+
+  @override
+  String get languageSystem => 'System';
+
+  @override
+  String get languageChinese => '简体中文';
+
+  @override
+  String get languageEnglish => 'English';
+
+  @override
+  String get languageTraditionalChinese => '繁體中文';
+
+  @override
+  String get languageJapanese => '日本語';
+
+  @override
+  String get languageKorean => '한국어';
+
+  @override
+  String get languageFrench => 'Français';
+
+  @override
+  String get languageGerman => 'Deutsch';
+
+  @override
+  String get languageSpanish => 'Español';
+
+  @override
+  String get languagePortugueseBrazil => 'Português (Brasil)';
+
+  @override
+  String get languageRussian => 'Русский';
+
+  @override
+  String get backgroundConnection => 'Keep connected in background';
+
+  @override
+  String get backgroundConnectionActive => 'Keeping host connections active';
+
+  @override
+  String get backgroundConnectionFailed =>
+      'Background connection not enabled; retry';
+
+  @override
+  String get resetReasoning => 'Reset effort';
+
+  @override
+  String get completionAlerts => 'Completion alerts';
+
+  @override
+  String get preferencesFailed => 'Preferences not saved; retry';
+
+  @override
+  String get startupFailed => 'Startup failed';
+
+  @override
+  String get pairAction => 'Connect';
+
+  @override
+  String get pairFailed => 'Connection failed; retry';
+
+  @override
+  String get pairExpired => 'Pairing code expired; get a new code';
+
+  @override
+  String get pairing => 'Connecting';
+
+  @override
+  String get hostRemove => 'Remove host';
+
+  @override
+  String hostRemoveConfirm(String name) {
+    return 'Remove “$name” and revoke this device there? Host data remains. If this is your last device, an administrator must restore access.';
+  }
+
+  @override
+  String get hostRemoved => 'Host removed';
+
+  @override
+  String get hostOriginDirect => 'Direct pairing';
+
+  @override
+  String hostOriginSource(String name) {
+    return 'Via $name';
+  }
+
+  @override
+  String get hostRemoveFailed => 'Could not remove host';
+
+  @override
+  String get hostMetricsFailed => 'Cannot read host status';
+
+  @override
+  String get hostProcessesEmpty => 'No processes';
+
+  @override
+  String get hostRegisterProject => 'Add project';
+
+  @override
+  String get hostChooseDirectory => 'Choose directory';
+
+  @override
+  String get hostChooseFile => 'Choose file';
+
+  @override
+  String get hostParentDirectory => 'Parent directory';
+
+  @override
+  String get hostEmptyDirectory => 'Directory is empty';
+
+  @override
+  String get hostLoadMore => 'Load more';
+
+  @override
+  String get hostProjectName => 'Project name';
+
+  @override
+  String get hostProjectPath => 'Project path on host';
+
+  @override
+  String get hostRefresh => 'Refresh';
+
+  @override
+  String get hostMetricCpu => 'CPU';
+
+  @override
+  String get hostMetricMemory => 'Memory';
+
+  @override
+  String get hostMetricDisk => 'Disk';
+
+  @override
+  String get failureConflict => 'Content changed; reload and retry';
+
+  @override
+  String get failureUnknown =>
+      'Outcome unconfirmed; check the host state first';
+
+  @override
+  String get failureDenied => 'Permission denied';
+
+  @override
+  String get failureUnavailable => 'Host not connected';
+
+  @override
+  String get failureBusy => 'Service busy; retry later';
+
+  @override
+  String get failureGeneric => 'Operation failed';
+
+  @override
+  String get settingsSpeechLanguage => 'Language';
+
+  @override
+  String get settingsSpeechAuto => 'Auto-detect';
+
+  @override
+  String get settingsSpeechChinese => 'Chinese';
+
+  @override
+  String get settingsSpeechEnglish => 'English';
+
+  @override
+  String get settingsSpeechReady => 'Speech model ready';
+
+  @override
+  String get settingsSpeechDownload => 'Download speech model';
+
+  @override
+  String get settingsSpeechFailed => 'Speech model not ready; retry';
+
+  @override
+  String get settingsLoadFailed => 'Could not load';
+
+  @override
+  String get settingsSaveFailed => 'Save failed; draft kept';
+
+  @override
+  String get settingsConflict => 'Settings changed; reopen and retry';
+
+  @override
+  String get settingsUnknown => 'Outcome unconfirmed; refresh to check';
+
+  @override
+  String get settingsRequired => 'Enter a value';
+
+  @override
+  String get settingsApi => 'API format';
+
+  @override
+  String get settingsOpenCodeGo => 'OpenCode Go';
+
+  @override
+  String get settingsOpenCodeZen => 'OpenCode Zen';
+
+  @override
+  String get settingsApiKey => 'API Key';
+
+  @override
+  String get settingsEnabled => 'Enabled';
+
+  @override
+  String get apiChatCompletions => 'Chat Completions';
+
+  @override
+  String get apiResponses => 'Responses';
+
+  @override
+  String get apiAnthropic => 'Anthropic';
+
+  @override
+  String get apiGemini => 'Gemini';
+
+  @override
+  String get apiDeepSeek => 'DeepSeek';
+
+  @override
+  String get apiAzureOpenAi => 'Azure OpenAI';
+
+  @override
+  String get apiAzureAi => 'Azure AI';
+
+  @override
+  String get apiPlugin => 'Plugin';
+
+  @override
+  String get providerNew => 'New provider';
+
+  @override
+  String get providerEmpty => 'No providers';
+
+  @override
+  String get providerDesktopHint => 'Use Desktop for OAuth models';
+
+  @override
+  String get providerConnection => 'Connection';
+
+  @override
+  String get providerKeyUnset => 'Not set';
+
+  @override
+  String get providerShowKey => 'Show key';
+
+  @override
+  String get providerHideKey => 'Hide key';
+
+  @override
+  String providerModelCount(String count) {
+    return '$count models';
+  }
+
+  @override
+  String get providerFetch => 'Fetch';
+
+  @override
+  String get providerFetchTitle => 'Fetch models';
+
+  @override
+  String providerFetched(String count) {
+    return '$count returned';
+  }
+
+  @override
+  String get providerSelectAll => 'Select all';
+
+  @override
+  String get providerSelectNone => 'Deselect all';
+
+  @override
+  String get providerSearch => 'Search models';
+
+  @override
+  String get providerAdded => 'Added';
+
+  @override
+  String providerContext(String tokens) {
+    return '$tokens context';
+  }
+
+  @override
+  String providerAddCount(String count) {
+    return 'Add $count';
+  }
+
+  @override
+  String get providerModelId => 'Model ID';
+
+  @override
+  String get providerModelExists => 'Model already added';
+
+  @override
+  String get providerDefault => 'Default';
+
+  @override
+  String get providerBasic => 'Basic';
+
+  @override
+  String get providerContextLength => 'Context length';
+
+  @override
+  String get providerCapabilities => 'Capabilities';
+
+  @override
+  String get providerVision => 'Image';
+
+  @override
+  String get providerTools => 'Tools';
+
+  @override
+  String get providerReasoning => 'Reasoning';
+
+  @override
+  String get providerCapUnderstands => 'Understands';
+
+  @override
+  String get providerCapCan => 'Can';
+
+  @override
+  String get providerCapGenerates => 'Generates';
+
+  @override
+  String get providerGenerateImage => 'Image';
+
+  @override
+  String get providerGenerateVideo => 'Video';
+
+  @override
+  String get providerGenerateSpeech => 'Speech';
+
+  @override
+  String get providerDeploymentId => 'Deployment name';
+
+  @override
+  String get providerHeaders => 'Custom request headers';
+
+  @override
+  String get providerHeadersHint => 'One per line: Name: value';
+
+  @override
+  String get providerHeadersInvalid =>
+      'Each request header line needs a name and a colon';
+
+  @override
+  String get providerEfforts => 'Reasoning effort';
+
+  @override
+  String get providerEffortPlaceholder => 'Effort or token budget';
+
+  @override
+  String get providerEffortInvalid =>
+      'Invalid reasoning effort; check names, duplicates and API support';
+
+  @override
+  String get providerEffortDefault => 'Default effort';
+
+  @override
+  String get providerEffortSetDefault => 'Set as default';
+
+  @override
+  String get providerSetDefault => 'Set as default model';
+
+  @override
+  String get providerIsDefault => 'Default model';
+
+  @override
+  String get providerDeleteModel => 'Delete model';
+
+  @override
+  String get providerDelete => 'Delete provider';
+
+  @override
+  String get providerNumberInvalid => 'Enter a positive whole number';
+
+  @override
+  String get providerLimitsInvalid => 'Max output can\'t exceed context length';
+
+  @override
+  String get settingsUsageUnknown => 'Unknown';
+
+  @override
+  String get settingsUsagePartial => 'Some hosts are out of date';
+
+  @override
+  String get settingsUsageCache => 'Cached';
+
+  @override
+  String get settingsUsageInput => 'Uncached';
+
+  @override
+  String get settingsUsageOutput => 'Output';
+
+  @override
+  String get usageRange24h => '24 hours';
+
+  @override
+  String get usageRange7d => '7 days';
+
+  @override
+  String get usageRange30d => '30 days';
+
+  @override
+  String get usageRange90d => '90 days';
+
+  @override
+  String get usageRange1y => '1 year';
+
+  @override
+  String get usageReasoning => 'Reasoning';
+
+  @override
+  String get usageHitRate => 'Cache hit rate';
+
+  @override
+  String get usageSpeed => 'Average speed';
+
+  @override
+  String get usageSpeedUnit => 'tok/s';
+
+  @override
+  String get usageCostPartial => 'Partial';
+
+  @override
+  String get usageTrend => 'Token trend';
+
+  @override
+  String get usageLocalTime => 'Local time';
+
+  @override
+  String usageActiveDays(String count) {
+    return '$count active days';
+  }
+
+  @override
+  String get usageBreakdown => 'Breakdown';
+
+  @override
+  String get usageProvider => 'Provider';
+
+  @override
+  String get usageShowAll => 'Show all';
+
+  @override
+  String get usageCollapse => 'Show less';
+
+  @override
+  String get usageUnassigned => 'Unassigned';
+
+  @override
+  String usageHit(String value) {
+    return 'Hit $value';
+  }
+
+  @override
+  String usageResponseCount(String count) {
+    return '$count responses';
+  }
+
+  @override
+  String get artifactContents => 'Contents';
+
+  @override
+  String get artifactZoomIn => 'Zoom in';
+
+  @override
+  String get artifactZoomOut => 'Zoom out';
+
+  @override
+  String get artifactVersions => 'Versions';
+
+  @override
+  String get artifactFormRequired => 'Complete required fields';
+
+  @override
+  String get artifactFormInvalid => 'Could not submit answers';
+
+  @override
+  String get artifactRenderFailed => 'Could not render visual';
+
+  @override
+  String artifactReply(String id, String revision, String title, String form) {
+    return 'Reply to “$title” v$revision ($id/$form)';
+  }
+
+  @override
+  String get connectionRouteP2p => 'P2P';
+
+  @override
+  String get connectionRouteRelay => 'Relay';
+
+  @override
+  String get connectionRouteUnknown => '—';
+
+  @override
+  String get backgroundNoticeTitle => 'Background results';
+
+  @override
+  String get backgroundCompleted => 'Completed';
+
+  @override
+  String get backgroundFailed => 'Failed';
+
+  @override
+  String get backgroundCancelled => 'Cancelled';
+
+  @override
+  String get backgroundStopped => 'Stopped';
+
+  @override
+  String get backgroundTimedOut => 'Timed out';
+
+  @override
+  String get backgroundInterrupted => 'Interrupted';
+
+  @override
+  String get backgroundStalled => 'No recent output';
+
+  @override
+  String get backgroundUnknown => 'Outcome uncertain';
+
+  @override
+  String conversationSteps(String count) {
+    return '$count steps';
+  }
+
+  @override
+  String get conversationStep => '1 step';
+
+  @override
+  String get activityProgress => 'Progress';
+
+  @override
+  String get activityBackground => 'Background tasks';
+
+  @override
+  String get activityPorts => 'Ports';
+
+  @override
+  String get hostConnecting => 'Connecting';
+
+  @override
+  String get hostInfo => 'Host info';
+
+  @override
+  String get hostLatency => 'Latency';
+
+  @override
+  String hostLatencySummary(String average, String peak) {
+    return 'Avg $average  Max $peak';
+  }
+
+  @override
+  String get hostSystem => 'System';
+
+  @override
+  String get hostProcessor => 'Processor';
+
+  @override
+  String hostCores(String count) {
+    return '$count cores';
+  }
+
+  @override
+  String hostLoad(String value) {
+    return 'Load $value';
+  }
+
+  @override
+  String hostMemoryShare(String percent) {
+    return '$percent used';
+  }
+
+  @override
+  String get hostUptime => 'Uptime';
+
+  @override
+  String hostNodeUptime(String duration) {
+    return 'Service $duration';
+  }
+
+  @override
+  String hostDays(String count) {
+    return '$count days';
+  }
+
+  @override
+  String hostHours(String count) {
+    return '$count hours';
+  }
+
+  @override
+  String hostMinutes(String count) {
+    return '$count minutes';
+  }
+
+  @override
+  String get hostTrend => 'Trend';
+
+  @override
+  String get hostTrendWindow => 'Last minute';
+
+  @override
+  String get hostChartStart => '60s ago';
+
+  @override
+  String get hostChartNow => 'Now';
+
+  @override
+  String get hostMetricGpu => 'GPU';
+
+  @override
+  String get hostMemoryUsed => 'Used';
+
+  @override
+  String get hostMemoryCache => 'Cached';
+
+  @override
+  String get hostMemorySwap => 'Swap';
+
+  @override
+  String get hostGpuUsage => 'Usage';
+
+  @override
+  String get hostNetwork => 'Network';
+
+  @override
+  String hostNetworkTotals(String received, String sent) {
+    return 'Total ↓ $received  ↑ $sent';
+  }
+
+  @override
+  String get hostDownload => 'Download';
+
+  @override
+  String get hostUpload => 'Upload';
+
+  @override
+  String hostPartitions(String count) {
+    return '$count partitions';
+  }
+
+  @override
+  String get hostDiskRead => 'Read';
+
+  @override
+  String get hostDiskWrite => 'Write';
+
+  @override
+  String get hostProcesses => 'Processes';
+
+  @override
+  String get hostSortCpu => 'By CPU';
+
+  @override
+  String get hostSortMemory => 'By memory';
+
+  @override
+  String get hostSortRecent => 'Recent';
+
+  @override
+  String get hostSearchProcesses => 'Search processes';
+
+  @override
+  String get hostSearchProjects => 'Search projects';
+
+  @override
+  String hostProcessLimit(String count) {
+    return 'Top $count shown';
+  }
+
+  @override
+  String get hostNoMatches => 'No matches';
+
+  @override
+  String get modelFeatureOff => 'Standard';
+
+  @override
+  String get modelFeatureFast => 'Fast';
+
+  @override
+  String get modelFeatureSpeed => 'Speed';
+
+  @override
+  String get backgroundHeld => 'Result not delivered';
+
+  @override
+  String get backgroundHoldLimit => 'Not delivered; turn limit reached';
+
+  @override
+  String get backgroundHoldStopped => 'Not delivered; reply stopped';
+
+  @override
+  String get backgroundHoldInterrupted => 'Not delivered; reply interrupted';
+
+  @override
+  String get backgroundHoldFailed => 'Not delivered; reply failed';
+
+  @override
+  String get continuationRefused => 'Not continued';
+
+  @override
+  String get continuationPlan => 'Not continued in Plan mode';
+
+  @override
+  String get continuationChild => 'A subtask is not continued';
+
+  @override
+  String get continuationArchived => 'An archived chat is not continued';
+
+  @override
+  String get continuationWorktree => 'Not continued; worktree missing';
+
+  @override
+  String get continuationQueuePaused => 'Not continued; queue paused';
+
+  @override
+  String get continuationQueuedInput => 'Not continued; messages queued';
+
+  @override
+  String get continuationRunning => 'Not continued; a reply is running';
+
+  @override
+  String get continuationInteraction => 'Not continued; a request awaits you';
+
+  @override
+  String get continuationLimit => 'Automatic turn limit reached';
+
+  @override
+  String continuationLimitCount(String count, String limit) {
+    return 'Automatic turn limit reached · $count/$limit';
+  }
+
+  @override
+  String get continuationStale => 'Not continued; the chat has moved on';
+
+  @override
+  String get conversationContextOverflow => 'Model context limit exceeded';
+
+  @override
+  String get conversationOutputLimit => 'Reply cut at the output limit';
+
+  @override
+  String get demoHost => 'MacBook Pro';
+
+  @override
+  String get demoUnavailable => 'This action is unavailable.';
+
+  @override
+  String get demoConversationTitle => 'Improve the sign-in form';
+
+  @override
+  String get demoNotesTitle => 'Prepare the release review';
+
+  @override
+  String get demoUserMessage =>
+      'Improve the sign-in form spacing and keyboard focus. Keep the existing layout.';
+
+  @override
+  String get demoReply =>
+      'Updated the sign-in form spacing and touch targets.\n\n- Set the form gap to 20 px.\n- Set the button minimum height to 44 px.\n- Preserved the field order and keyboard navigation.\n\n```css\nmin-height: 44px;\n```\n\nThe changes are in `src/pages/Login.tsx` and `src/styles/login.css`.';
+
+  @override
+  String get demoReadme =>
+      '# Lumen Web\n\nA responsive sign-in page with accessible inputs and clear keyboard navigation.\n\n## Project structure\n\n- `src/pages/Login.tsx` — sign-in form.\n- `src/styles/login.css` — layout and interaction styles.\n- `docs/review.md` — release checklist.\n\n## Interface guidelines\n\nKeep 20 px between fields and use touch targets of at least 44 px. Preserve the field order and visible focus styles.\n';
+
+  @override
+  String get demoReviewNotes =>
+      '# Release review\n\n| Area | Review |\n| --- | --- |\n| Fields | Check labels and required-field messages |\n| Keyboard | Check tab order and visible focus |\n| Touch targets | Keep the sign-in button at least 44 px high |\n| Layout | Check narrow and wide screens |\n| Changes | Review the sign-in page and styles before release |\n';
+
+  @override
+  String get demoNotesPrompt =>
+      'Create a short release review checklist for the sign-in page.';
+
+  @override
+  String get demoSimulatedReply =>
+      'I\'ll focus on the sign-in page while preserving its layout.\n\n1. Review the field spacing and keyboard focus.\n2. Keep touch targets at least 44 px high.\n3. Check `src/pages/Login.tsx` and `src/styles/login.css` together.\n\nThe release checklist is in `docs/review.md`.';
+
+  @override
+  String get demoTerminalWelcome =>
+      'Last login: Sun Nov 15 09:00:00 on ttys001';
+
+  @override
+  String get personalKvConflict =>
+      'Personal data conflict: controller values kept';
+}

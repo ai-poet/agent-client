@@ -1,0 +1,168 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "brief",
+  "version": "0.1.12",
+  "extensions": {
+    "dev.sailry.platform": {
+      "api_version": "v1",
+      "min_sailry_version": "0.1.6",
+      "actions": [
+        "artifacts.read",
+        "artifacts.write"
+      ],
+      "display": {
+        "label": "HTML",
+        "locales": {
+          "zh-CN": "HTML",
+          "zh-TW": "HTML",
+          "ja": "HTML",
+          "ko": "HTML",
+          "de": "HTML",
+          "es": "HTML",
+          "fr": "HTML",
+          "pt-BR": "HTML",
+          "ru": "HTML"
+        },
+        "icon": "phosphor:file-html"
+      },
+      "description": {
+        "label": "Create HTML documents and previews",
+        "locales": {
+          "zh-CN": "生成 HTML 文档和交互预览",
+          "zh-TW": "產生 HTML 文件和互動預覽",
+          "ja": "HTML ドキュメントとプレビューを作成",
+          "ko": "HTML 문서와 미리보기 만들기",
+          "de": "HTML-Dokumente und Vorschauen erstellen",
+          "es": "Crear documentos HTML y vistas interactivas",
+          "fr": "Créer des documents HTML et des aperçus",
+          "pt-BR": "Criar documentos HTML e pré-visualizações",
+          "ru": "Создавать HTML-документы и макеты"
+        }
+      },
+      "instructions": "Create session-owned HTML documents, reports, diagrams, demos and interactive previews when the user requests or accepts HTML. An explicit HTML or HTML-preview request authorizes generation directly. Without a request, you may create one small kind=preview visual, such as a chart, diagram, UI mockup or interactive explainer, when it clearly helps the current answer more than text; keep the written answer complete without it, and skip it for simple facts, routine changes or when the user prefers text. For complex development, design or refactor plans, present the full ordinary plan in the conversation first, then end with exactly one concise offer to create an HTML version and wait for the user's choice. Do not repeat the offer for that plan. Do not offer HTML for pure questions or simple changes, and never generate a document or plan HTML version automatically without acceptance. HTML does not authorize execution or project writes. Load this package's brief skill before writing. For an explicitly requested worktree file path, create and verify that real file with available file or command tools and deliver its standalone Markdown link for preview; do not substitute write_brief or create an additional artifact unless separately requested. If writing is unavailable, report the limitation instead of claiming the file was saved. write_brief creates only a session-owned artifact, not a worktree file; its returned card already delivers it. Do not invent a file path or duplicate that card with a Markdown file link. A separately requested file copy must actually be created and verified. write_brief uses kind=document by default for a sanitized main-body fragment and kind=preview for self-contained HTML with inline CSS and local JavaScript in an isolated sandbox. Preview has no Node, tool, credential, filesystem or network bridge; do not rely on CDNs, imports or external images. In previews, keep the body background transparent, center the main element, use the host's --sailry-* theme variables with fallbacks and keep visuals modest in size. Only the main session can write. Read existing HTML before revising, preserve its kind, and pass the exact id and latest revision as expected_revision. Keep the card summary short; do not repeat the full HTML in the final answer. A document or preview cannot collect answers; use ask_user for missing choices or information when needed.",
+      "artifact_view": {
+        "template": "dev.sailry.platform/document/template.html",
+        "styles": [
+          "dev.sailry.platform/document/brief.css"
+        ],
+        "scripts": [
+          "dev.sailry.platform/document/charts.js",
+          "dev.sailry.platform/document/forms.js",
+          "dev.sailry.platform/document/brief.js"
+        ],
+        "libraries": [
+          "mermaid",
+          "echarts",
+          "mathjax"
+        ],
+        "allowed_classes": [
+          "lead",
+          "callout",
+          "info",
+          "warn",
+          "risk",
+          "ok",
+          "mermaid",
+          "math",
+          "math-inline",
+          "chart",
+          "steps",
+          "files",
+          "badge",
+          "new",
+          "changed",
+          "removed",
+          "compare",
+          "option",
+          "brief-form"
+        ]
+      },
+      "tools": [
+        {
+          "name": "write_brief",
+          "operation": "artifacts.write",
+          "presentation": "content",
+          "description": "Create or revise session-owned HTML requested or accepted by the user, or one small preview visual that clearly helps the current answer. Load the brief skill. Supply title, optional short summary, html, and kind=document for a sanitized main-body fragment or kind=preview for a self-contained interactive HTML document with inline CSS and JavaScript. Preview runs offline without a host or tool bridge. Omit id and expected_revision to create; to revise, read the latest artifact and pass its exact id and revision. This creates only a session-owned artifact, not a worktree file, and does not authorize execution. For a specifically requested worktree file path, use available file or command tools to create and verify that real file instead. Returns a versioned artifact card and metadata; do not invent a filepath or duplicate it with a Markdown file link.",
+          "display": {
+            "label": "Write HTML",
+            "locales": {
+              "zh-CN": "生成 HTML",
+              "zh-TW": "撰寫 HTML",
+              "ja": "HTML を作成",
+              "ko": "HTML 작성",
+              "de": "HTML schreiben",
+              "es": "Escribir HTML",
+              "fr": "Créer du HTML",
+              "pt-BR": "Escrever HTML",
+              "ru": "Создать HTML",
+              "en": "Write HTML"
+            },
+            "input": {
+              "summary": {
+                "path": "/title"
+              }
+            }
+          }
+        },
+        {
+          "name": "read_brief",
+          "operation": "artifacts.read",
+          "presentation": "summary",
+          "description": "Read the HTML source, kind and metadata of an artifact in this main session. Supply id and optional revision; omitted revision reads the latest. Preserve its kind and use the latest revision as expected_revision when revising. Historic reads do not establish the current revision.",
+          "display": {
+            "label": "Read HTML",
+            "locales": {
+              "zh-CN": "读取 HTML",
+              "zh-TW": "讀取 HTML",
+              "ja": "HTML を読む",
+              "ko": "HTML 읽기",
+              "de": "HTML lesen",
+              "es": "Leer HTML",
+              "fr": "Lire du HTML",
+              "pt-BR": "Ler HTML",
+              "ru": "Прочитать HTML",
+              "en": "Read HTML"
+            }
+          }
+        },
+        {
+          "name": "list_briefs",
+          "operation": "artifacts.list",
+          "presentation": "summary",
+          "description": "List HTML artifacts in this session without reading their source. To request another bounded page, pass the returned next_after cursor as after. Omit after for the first page.",
+          "display": {
+            "label": "List HTML",
+            "locales": {
+              "zh-CN": "HTML 列表",
+              "zh-TW": "列出 HTML",
+              "ja": "HTML 一覧",
+              "ko": "HTML 목록",
+              "de": "HTML auflisten",
+              "es": "Listar HTML",
+              "fr": "Lister les documents HTML",
+              "pt-BR": "Listar HTML",
+              "ru": "Список HTML",
+              "en": "List HTML"
+            }
+          }
+        }
+      ],
+      "desktop": {
+        "entry": "dev.sailry.platform/desktop/main.js",
+        "resources": [
+          "dev.sailry.platform/desktop/main.js",
+          "dev.sailry.platform/desktop/controller.js",
+          "dev.sailry.platform/desktop/view.js",
+          "dev.sailry.platform/desktop/locales.js",
+          "dev.sailry.platform/document/template.html",
+          "dev.sailry.platform/document/brief.css",
+          "dev.sailry.platform/document/charts.js",
+          "dev.sailry.platform/document/forms.js",
+          "dev.sailry.platform/document/brief.js"
+        ]
+      },
+      "category": "documents",
+      "tint": "violet"
+    }
+  }
+}

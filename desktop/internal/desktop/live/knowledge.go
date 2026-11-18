@@ -1,0 +1,257 @@
+package live
+
+import (
+	"encoding/hex"
+	"strings"
+
+	"github.com/egoist/mygo/ui"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/shell"
+	"github.com/ai-poet/agent-client/desktop/internal/node/knowledge"
+	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+)
+
+// knowledgeViewer pages one citation on the Node its link came from. Every
+// page is read again, so a source that changed reports it instead of showing
+// stale text.
+type knowledgeViewer struct {
+	read    func(protocol.KnowledgeCitationRequest, func(*ui.Context, protocol.Output, error))
+	shown   func() *shell.Reading
+	input   protocol.KnowledgeCitationRequest
+	page    protocol.KnowledgeCitationPage
+	history []uint32
+	view    *shell.Reading
+	close   func()
+}
+
+// knowledgeRequest is the first page a link asks for. The shell already
+// rejected a malformed link; the identifiers are checked here.
+func knowledgeRequest(source shell.Source) (protocol.KnowledgeCitationRequest, bool) {
+	collection, err := protocol.ParseKnowledgeID(source.Collection)
+	input := protocol.KnowledgeCitationRequest{Collection: collection, Chunk: source.Chunk, Revision: source.Revision, Limit: 16 * 1024}
+	if source.Node != "" {
+		decoded, nodeErr := hex.DecodeString(source.Node)
+		if nodeErr != nil || len(decoded) != len(input.Node) {
+			return input, false
+		}
+		copy(input.Node[:], decoded)
+	}
+	return input, err == nil && knowledge.ValidateCitation(input) == nil
+}
+
+// knowledgeMatches reports whether a page answers its request.
+func knowledgeMatches(page protocol.KnowledgeCitationPage, input protocol.KnowledgeCitationRequest) bool {
+	citation := page.Citation
+	return (input.Node == (protocol.NodeID{}) || citation.Node == input.Node) && citation.Collection == input.Collection && citation.Chunk == input.Chunk && citation.Revision == input.Revision &&
+		citation.Link == knowledge.CitationURL(citation) && page.Offset == input.Offset && page.Context == input.Context &&
+		page.Untrusted && len(page.Text) <= int(input.Limit) &&
+		(page.NextOffset == nil || *page.NextOffset > input.Offset && uint64(*page.NextOffset) == uint64(input.Offset)+uint64(len(page.Text)))
+}
+
+func knowledgeErrorKey(code protocol.ErrorCode) string {
+	switch code {
+	case protocol.ErrorCodeRevisionConflict, protocol.ErrorCodeNotFound:
+		return "knowledge_citation_changed"
+	case protocol.ErrorCodePermissionDenied:
+		return "knowledge_denied"
+	case protocol.ErrorCodeInvalidRequest:
+		return "knowledge_citation_invalid"
+	}
+	return "knowledge_citation_unavailable"
+}
+
+func knowledgePosition(c *ui.Context, position protocol.KnowledgePosition) string {
+	if value, ok := detail[protocol.KnowledgePositionLinesPayload](position.Data); ok {
+		return i18n.T(c, "knowledge_lines", "start", value.Start, "end", value.End)
+	}
+	if value, ok := detail[protocol.KnowledgePositionPagePayload](position.Data); ok {
+		return i18n.T(c, "knowledge_page", "page", value.Page)
+	}
+	if value, ok := detail[protocol.KnowledgePositionCellsPayload](position.Data); ok {
+		return i18n.T(c, "knowledge_cells", "sheet", value.Sheet, "start", value.Start, "end", value.End)
+	}
+	if value, ok := detail[protocol.KnowledgePositionSlidePayload](position.Data); ok {
+		return i18n.T(c, "knowledge_slide", "slide", value.Slide)
+	}
+	if value, ok := detail[protocol.KnowledgePositionSectionPayload](position.Data); ok {
+		return value.Name
+	}
+	value, _ := detail[protocol.KnowledgePositionValuePayload](position.Data)
+	return value.Key + value.Pointer
+}
+
+// knowledgePage decodes one answer, or names the toast its failure shows.
+func knowledgePage(output protocol.Output, err error, input protocol.KnowledgeCitationRequest) (protocol.KnowledgeCitationPage, string) {
+	if err != nil {
+		if code := faultCode(err); code != "" {
+			return protocol.KnowledgeCitationPage{}, knowledgeErrorKey(code)
+		}
+		return protocol.KnowledgeCitationPage{}, "knowledge_citation_unavailable"
+	}
+	page, ok := detail[protocol.KnowledgeCitationPage](output.Data)
+	if !ok || !knowledgeMatches(page, input) {
+		return page, "knowledge_citation_unavailable"
+	}
+	return page, ""
+}
+
+func (v *knowledgeViewer) show(c *ui.Context, input protocol.KnowledgeCitationRequest, page protocol.KnowledgeCitationPage) {
+	v.input, v.page = input, page
+	v.view.Title, v.view.Path, v.view.Text = page.Title, page.Citation.Path, page.Text
+	v.view.Position = knowledgePosition(c, page.Citation.Position)
+	v.view.First, v.view.Last = len(v.history) == 0, page.NextOffset == nil
+}
+
+// turn loads the adjacent page; the viewer keeps its page when that fails.
+func (v *knowledgeViewer) turn(forward bool) {
+	if v.view.Pending || v.view.Unavailable {
+		return
+	}
+	input := v.input
+	switch {
+	case forward && v.page.NextOffset != nil:
+		input.Offset = *v.page.NextOffset
+	case !forward && len(v.history) > 0:
+		input.Offset = v.history[len(v.history)-1]
+	default:
+		return
+	}
+	v.view.Pending = true
+	v.read(input, func(c *ui.Context, output protocol.Output, err error) {
+		v.view.Pending = false
+		if v.shown() != v.view {
+			return
+		}
+		page, failure := knowledgePage(output, err, input)
+		if failure != "" {
+			if restrictedResourceSource(protocol.ResourceSource{Fault: &protocol.Fault{Code: faultCode(err)}}) && v.close != nil {
+				v.close()
+			}
+			kit.Toast(c, kit.Failed, i18n.T(c, failure))
+			return
+		}
+		if forward {
+			v.history = append(v.history, v.page.Offset)
+		} else {
+			v.history = v.history[:len(v.history)-1]
+		}
+		v.show(c, input, page)
+	})
+}
+
+// openKnowledge reads a citation on the Node that named it and opens the
+// viewer on it. An identity the Node could not hold never sends a command.
+func (r *Runtime) openKnowledge(c *ui.Context, node string, source shell.Source) {
+	root := r.localRuntime()
+	input, valid := knowledgeRequest(source)
+	if !valid {
+		kit.Toast(c, kit.Failed, i18n.T(c, "knowledge_citation_invalid"))
+		return
+	}
+	if input.Node != (protocol.NodeID{}) {
+		node = input.Node.String()
+	}
+	owner := root.runtimeFor(node)
+	if owner == nil {
+		kit.Toast(c, kit.Failed, i18n.T(c, "knowledge_citation_unavailable"))
+		return
+	}
+	read := func(input protocol.KnowledgeCitationRequest, done func(*ui.Context, protocol.Output, error)) {
+		owner.execute(protocol.Command{Kind: "read_knowledge_citation", Data: input}, done)
+	}
+	root.readKnowledge(node, input, read, func(c *ui.Context) string {
+		if owner == root {
+			return i18n.T(c, "local_host_name")
+		}
+		if state := root.hostState(node); state != nil {
+			return state.view.Name
+		}
+		return node
+	})
+}
+
+// readKnowledge reads a link's first page and opens the viewer on it. The
+// viewer is the last link's: the answer of an earlier one is dropped.
+func (r *Runtime) readKnowledge(node string, input protocol.KnowledgeCitationRequest, read func(protocol.KnowledgeCitationRequest, func(*ui.Context, protocol.Output, error)), host func(*ui.Context) string) {
+	root := r.localRuntime()
+	if input.Node != (protocol.NodeID{}) {
+		node = input.Node.String()
+	} else if node == "" && root.controller != nil {
+		node = root.controller.Target().String()
+	}
+	wanted := node + "\x00" + input.Collection.String() + "\x00" + input.Chunk + "\x00" + input.Revision
+	root.knowledgeWanted = wanted
+	read(input, func(c *ui.Context, output protocol.Output, err error) {
+		if root.knowledgeWanted != wanted {
+			return
+		}
+		page, failure := knowledgePage(output, err, input)
+		if failure != "" {
+			kit.Toast(c, kit.Failed, i18n.T(c, failure))
+			return
+		}
+		viewer := &knowledgeViewer{read: read, shown: root.App.Reading, close: root.App.CloseKnowledge, view: &shell.Reading{Node: node, Collection: input.Collection.String()}}
+		viewer.view.Turn = viewer.turn
+		viewer.view.Host = host(c)
+		viewer.show(c, input, page)
+		if root.resourceCatalog != nil {
+			for _, source := range root.resourceCatalog.Sources {
+				if source.Node.String() == node && source.Fault != nil && !restrictedResourceSource(source) {
+					viewer.view.Unavailable = true
+				}
+			}
+		}
+		root.App.ShowKnowledge(viewer.view)
+	})
+}
+
+func (r *Runtime) pruneKnowledgeView() {
+	root := r.localRuntime()
+	if root.resourceCatalog == nil || root.App == nil {
+		return
+	}
+	state := func(node, collection string) (restricted, unavailable bool) {
+		for _, source := range root.resourceCatalog.Sources {
+			if source.Node.String() != node {
+				continue
+			}
+			if restrictedResourceSource(source) {
+				return true, false
+			}
+			if source.Fault != nil {
+				return false, true
+			}
+			for _, value := range source.Knowledge {
+				if value.ID.String() == collection {
+					return false, false
+				}
+			}
+			return true, false
+		}
+		return true, false
+	}
+	if wanted := strings.SplitN(root.knowledgeWanted, "\x00", 4); len(wanted) == 4 {
+		if restricted, _ := state(wanted[0], wanted[1]); restricted {
+			root.knowledgeWanted = ""
+		}
+	}
+	if view := root.App.Reading(); view != nil {
+		restricted, unavailable := state(view.Node, view.Collection)
+		if restricted {
+			root.App.CloseKnowledge()
+		} else {
+			view.Unavailable = unavailable
+		}
+	}
+}
+
+// knowledgeLink reports whether text is one citation link a Node can read.
+func knowledgeLink(text string) bool {
+	source, parsed := shell.ParseSource(text)
+	if !parsed {
+		return false
+	}
+	_, valid := knowledgeRequest(source)
+	return valid
+}

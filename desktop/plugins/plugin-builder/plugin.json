@@ -1,0 +1,29 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "plugin-builder",
+  "version": "0.1.18",
+  "description": "Create and update Sailry plugins in a conversation",
+  "extensions": {
+    "dev.sailry.platform": {
+      "api_version": "v1",
+      "min_sailry_version": "0.1.6",
+      "scope": "host",
+      "actions": [],
+      "display": {
+        "label": "Plugin builder",
+        "locales": {
+          "zh-CN": "插件开发"
+        },
+        "icon": "phosphor:puzzle-piece"
+      },
+      "description": {
+        "label": "Create and update plugins in a conversation",
+        "locales": {
+          "zh-CN": "在对话中创建与更新插件"
+        }
+      },
+      "category": "development",
+      "tint": "blue"
+    }
+  }
+}

@@ -1,4 +1,39 @@
-build/
-.mygo/
-/cheaprouter-desktop
-/cheaprouter-desktop.exe
+.preview/
+.runtime/
+/sailry
+/sailry-desktop
+*.test
+*.prof
+.DS_Store
+native/**/target/
+node_modules/
+services/pairing-relay/dist/
+# Native artifacts staged for packaging by `go run ./native/fetch -bundle`.
+/cmd/sailry-desktop/resources/*-*/
+
+# Credentials, signing material and machine-specific configuration.
+.env
+.env.*
+!.env.example
+!.env.*.example
+.npmrc
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+/.secrets/
+/.codex/
+/.claude/
+/.cursor/
+/.idea/
+/.vscode/
+
+# Local development plans.
+/plans/
+
+# Transient diagnostics.
+__pycache__/
+*.py[cod]
+*.log

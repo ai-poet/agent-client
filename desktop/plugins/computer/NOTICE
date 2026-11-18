@@ -1,0 +1,18 @@
+Computer operation package
+
+Permission settings reuse the reviewed Sailry UI from ab5251de:
+plugins/builtin/computer/desktop.rs
+plugins/builtin/computer/desktop/view.rs
+plugins/builtin/computer/desktop/messages.rs
+locales/en.yml and locales/zh-CN.yml
+
+Execution uses agent-desktop from vercel-labs/agent-desktop v1.2.0 at
+2b0a7334fc111730454b726e6800aa41cdafc093 (Apache-2.0). Sailry packages the
+unmodified official release executables; the application packaging notices
+retain its license and provenance. The package instructions adapt the
+agent-desktop skill guidance bundled with that release.
+
+This package declares the MCP service, its tool selection, instructions, tool
+display metadata and permission settings. Native helper selection, protected
+execution resources, ordinary approvals, cancellation and media projection stay
+in the Node.

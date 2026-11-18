@@ -1,0 +1,208 @@
+package theme
+
+import "github.com/egoist/mygo/ui"
+
+// neutral is the built-in default theme's Kit colors, by the keys of
+// theme.json's theme.colors. A package overlays them key by key, so what it
+// leaves out keeps these values.
+func neutral(dark bool) map[string]string {
+	base, fg, mfg := "#ffffff", "#000000e0", "#00000099"
+	// Secondary text steps further from the foreground than the other
+	// muted inks (ring, slider, scrollbar), so a description reads below
+	// its title.
+	muted := "#0000008c"
+	// Light fills step up from the page: the composer's inset fill reads as
+	// a box, the selected row is stronger than the hovered one, and a border
+	// (input edges, dashed empty states) shows on white.
+	surface, inset, hover, active, border := "#00000008", "#00000012", "#0000000d", "#00000014", "#0000001a"
+	box, button := "#00000000", "#00000000" // light group boxes and buttons are clear
+	m := map[string]string{
+		"sidebar.background":               "#fafafa",
+		"border":                           border,
+		"sidebar.border":                   "#00000014",
+		"popover.background":               base,
+		"primary.background":               "#2563eb", // blue-600
+		"primary.hover.background":         "#3b82f6", // blue-500
+		"primary.active.background":        "#1d4ed8", // blue-700
+		"button.primary.hover.background":  "#000000f0",
+		"button.primary.active.background": "#000000ff",
+		"selection.background":             "#00000018",
+		"tab.active.background":            "#ffffff",
+		"tab.active.foreground":            "#181818",
+	}
+	if dark {
+		base, fg, mfg, muted = "#181818", "#ffffffd9", "#ffffff99", "#ffffff8c"
+		surface, inset, hover, active, border = "#ffffff0a", "#ffffff12", "#ffffff0f", "#ffffff1f", "#ffffff10"
+		box, button = surface, surface
+		m = map[string]string{
+			"sidebar.background":               "#1d1d1d",
+			"border":                           "#ffffff0c",
+			"sidebar.border":                   "#ffffff14",
+			"popover.background":               "#242424",
+			"primary.background":               "#60a5fa", // blue-400
+			"primary.hover.background":         "#93c5fd", // blue-300
+			"primary.active.background":        "#3b82f6", // blue-500
+			"button.primary.hover.background":  "#fffffff0",
+			"button.primary.active.background": "#ffffffff",
+			"selection.background":             "#ffffff4d",
+			"tab.active.background":            "#454545",
+			"tab.active.foreground":            "#ffffff",
+		}
+	}
+	for k, v := range map[string]string{
+		"background": base, "title_bar.background": base,
+		"foreground": fg, "accent.foreground": fg, "group_box.foreground": fg,
+		"group_box.title.foreground": fg, "popover.foreground": fg, "secondary.foreground": fg,
+		"button.secondary.foreground": fg, "sidebar.foreground": fg,
+		"sidebar.accent.foreground": fg, "caret": fg,
+		"button.primary.background": fg, "progress.bar.background": fg,
+		"primary.foreground": base, "button.primary.foreground": base,
+		"muted.foreground": muted, "ring": mfg, "slider.background": mfg,
+		"scrollbar.thumb.hover.background": mfg,
+		"group_box.background":             box, "button.background": button, "button.secondary.background": button,
+		"list.background": surface, "table.background": surface,
+		"secondary.background": surface,
+		"muted.background":     inset,
+		"accent.background":    hover, "list.hover.background": hover,
+		"secondary.hover.background":         hover,
+		"button.secondary.hover.background":  hover,
+		"secondary.active.background":        active,
+		"button.secondary.active.background": active,
+		"input.border":                       border, "title_bar.border": border,
+		"tab.background":          "#00000000",
+		"slider.thumb.background": "#ffffff",
+	} {
+		m[k] = v
+	}
+	return m
+}
+
+// fallbacks are the keys Kit resolves from another key when neither the
+// package nor the neutral theme sets them: links take the emphasis color
+// and the switch thumb the background.
+var fallbacks = [][2]string{
+	{"link", "primary.background"},
+	{"switch.thumb.background", "background"},
+}
+
+// status colors are Kit's own, not package keys: Tailwind's blue, red,
+// green and amber 500.
+var (
+	info    = ui.Hex("#3b82f6")
+	danger  = ui.Hex("#ef4444")
+	success = ui.Hex("#22c55e")
+	warning = ui.Hex("#f59e0b")
+	white   = ui.Hex("#ffffff")
+	tooltip = ui.Hex("#3a3a3a") // the built-in dark theme's tooltips
+)
+
+// base are Kit's base colors (default-theme.json): Tailwind 600 in light,
+// 400 in dark, magenta being purple. Orange marks the selected theme
+// (500 dark, 600 light).
+var base = map[bool][5]ui.Color{
+	false: {ui.Hex("#2563eb"), ui.Hex("#16a34a"), ui.Hex("#ca8a04"), ui.Hex("#9333ea"), ui.Hex("#ea580c")},
+	true:  {ui.Hex("#60a5fa"), ui.Hex("#4ade80"), ui.Hex("#facc15"), ui.Hex("#c084fc"), ui.Hex("#f97316")},
+}
+
+// charts are the built-in theme's categorical chart colors, chart.1 to
+// chart.8: amber, blue, emerald, violet, rose, cyan, pink and a neutral gray
+// for what is left over. The first five are the hues the reference sets
+// (amber, blue, emerald, violet and rose 500). Each mode's set is tuned for
+// its surfaces: at least 3:1 against the popover and the background, a
+// narrow band of lightness and one saturation so no entry stands out, and
+// the lightness staggered inside that band so that every pair also differs
+// without red or green vision. Rose leans toward pink so it is not the
+// danger red.
+var charts = map[bool][ChartColors]ui.Color{
+	false: {ui.Hex("#d07c06"), ui.Hex("#3e90fd"), ui.Hex("#099562"), ui.Hex("#7e5bd6"), ui.Hex("#ec5a78"), ui.Hex("#0886a4"), ui.Hex("#cd67ce"), ui.Hex("#8b9198")},
+	true:  {ui.Hex("#f89a2b"), ui.Hex("#77b0fe"), ui.Hex("#02b77f"), ui.Hex("#a284f3"), ui.Hex("#ff7c92"), ui.Hex("#01afc6"), ui.Hex("#e782d6"), ui.Hex("#b9bec6")},
+}
+
+// chartKeys are the chart colors a theme package may set, in order.
+var chartKeys = [...]string{"chart.1", "chart.2", "chart.3", "chart.4", "chart.5"}
+
+// series is the order the application's own charts take the chart colors
+// in: blue first, as the emphasis color, then violet, emerald, amber, rose,
+// cyan, pink and the gray.
+var series = [ChartColors]int{1, 3, 2, 0, 4, 5, 6, 7}
+
+// Tints are the emblem gradients, top to bottom, under OnTint glyphs.
+var Tints = [][2]ui.Color{
+	{ui.Hex("#3da9fc"), ui.Hex("#2580f4")}, // blue
+	{ui.Hex("#9b7cf8"), ui.Hex("#7250e3")}, // violet
+	{ui.Hex("#35c5a9"), ui.Hex("#199b87")}, // teal
+	{ui.Hex("#f9b74e"), ui.Hex("#e68926")}, // amber
+	{ui.Hex("#9398a3"), ui.Hex("#656a75")}, // gray
+}
+
+// OnTint is the glyph color over Tints.
+var OnTint = white
+
+// Identicon are an agent mark's colors, in its order: Kit's cyan, blue, pink,
+// amber, teal, violet, orange and indigo at 400 (dark) and 600 (light).
+var Identicon = [8][2]ui.Color{
+	{ui.Hex("#22d3ee"), ui.Hex("#0891b2")}, {ui.Hex("#60a5fa"), ui.Hex("#2563eb")},
+	{ui.Hex("#f472b6"), ui.Hex("#db2777")}, {ui.Hex("#fbbf24"), ui.Hex("#d97706")},
+	{ui.Hex("#2dd4bf"), ui.Hex("#0d9488")}, {ui.Hex("#a78bfa"), ui.Hex("#7c3aed")},
+	{ui.Hex("#fb923c"), ui.Hex("#ea580c")}, {ui.Hex("#818cf8"), ui.Hex("#4f46e5")},
+}
+
+// Opacity is white at alpha a, the tint that fades a picture.
+func Opacity(a float32) ui.Color { return white.Alpha(a) }
+
+// fields maps the theme.colors keys the application paints with onto their
+// Palette fields. A package may set the other keys of themeColorKeys; they
+// color nothing here.
+var fields = map[string]func(*Palette) *ui.Color{
+	"background":                         func(p *Palette) *ui.Color { return &p.Background },
+	"foreground":                         func(p *Palette) *ui.Color { return &p.Foreground },
+	"muted.foreground":                   func(p *Palette) *ui.Color { return &p.MutedForeground },
+	"muted.background":                   func(p *Palette) *ui.Color { return &p.Muted },
+	"title_bar.background":               func(p *Palette) *ui.Color { return &p.TitleBar },
+	"title_bar.border":                   func(p *Palette) *ui.Color { return &p.TitleBarBorder },
+	"sidebar.background":                 func(p *Palette) *ui.Color { return &p.Sidebar },
+	"sidebar.foreground":                 func(p *Palette) *ui.Color { return &p.SidebarForeground },
+	"sidebar.border":                     func(p *Palette) *ui.Color { return &p.SidebarBorder },
+	"sidebar.accent.foreground":          func(p *Palette) *ui.Color { return &p.SidebarAccentForeground },
+	"group_box.background":               func(p *Palette) *ui.Color { return &p.Surface },
+	"group_box.foreground":               func(p *Palette) *ui.Color { return &p.SurfaceForeground },
+	"group_box.title.foreground":         func(p *Palette) *ui.Color { return &p.SurfaceTitle },
+	"popover.background":                 func(p *Palette) *ui.Color { return &p.Popover },
+	"popover.foreground":                 func(p *Palette) *ui.Color { return &p.PopoverForeground },
+	"border":                             func(p *Palette) *ui.Color { return &p.Border },
+	"input.border":                       func(p *Palette) *ui.Color { return &p.Input },
+	"ring":                               func(p *Palette) *ui.Color { return &p.Ring },
+	"link":                               func(p *Palette) *ui.Color { return &p.Link },
+	"primary.background":                 func(p *Palette) *ui.Color { return &p.Primary },
+	"primary.foreground":                 func(p *Palette) *ui.Color { return &p.PrimaryForeground },
+	"primary.hover.background":           func(p *Palette) *ui.Color { return &p.PrimaryHover },
+	"primary.active.background":          func(p *Palette) *ui.Color { return &p.PrimaryActive },
+	"button.primary.background":          func(p *Palette) *ui.Color { return &p.ButtonPrimary },
+	"button.primary.foreground":          func(p *Palette) *ui.Color { return &p.OnPrimary },
+	"button.primary.hover.background":    func(p *Palette) *ui.Color { return &p.ButtonPrimaryHi },
+	"button.primary.active.background":   func(p *Palette) *ui.Color { return &p.ButtonPrimaryActive },
+	"accent.background":                  func(p *Palette) *ui.Color { return &p.Hover },
+	"accent.foreground":                  func(p *Palette) *ui.Color { return &p.HoverForeground },
+	"secondary.background":               func(p *Palette) *ui.Color { return &p.Secondary },
+	"secondary.foreground":               func(p *Palette) *ui.Color { return &p.SecondaryForeground },
+	"secondary.hover.background":         func(p *Palette) *ui.Color { return &p.SecondaryHover },
+	"secondary.active.background":        func(p *Palette) *ui.Color { return &p.Active },
+	"button.background":                  func(p *Palette) *ui.Color { return &p.Button },
+	"button.secondary.background":        func(p *Palette) *ui.Color { return &p.ButtonSecondary },
+	"button.secondary.foreground":        func(p *Palette) *ui.Color { return &p.ButtonSecondaryForeground },
+	"button.secondary.hover.background":  func(p *Palette) *ui.Color { return &p.ButtonSecondaryHover },
+	"button.secondary.active.background": func(p *Palette) *ui.Color { return &p.ButtonSecondaryActive },
+	"tab.background":                     func(p *Palette) *ui.Color { return &p.Tab },
+	"tab.active.background":              func(p *Palette) *ui.Color { return &p.TabActive },
+	"tab.active.foreground":              func(p *Palette) *ui.Color { return &p.TabActiveText },
+	"switch.thumb.background":            func(p *Palette) *ui.Color { return &p.SwitchThumb },
+	"slider.background":                  func(p *Palette) *ui.Color { return &p.Slider },
+	"slider.thumb.background":            func(p *Palette) *ui.Color { return &p.SliderThumb },
+	"progress.bar.background":            func(p *Palette) *ui.Color { return &p.Progress },
+	"scrollbar.thumb.hover.background":   func(p *Palette) *ui.Color { return &p.ScrollbarThumbHover },
+	"selection.background":               func(p *Palette) *ui.Color { return &p.Selection },
+	"caret":                              func(p *Palette) *ui.Color { return &p.Caret },
+	"list.background":                    func(p *Palette) *ui.Color { return &p.List },
+	"list.hover.background":              func(p *Palette) *ui.Color { return &p.ListHover },
+	"table.background":                   func(p *Palette) *ui.Color { return &p.Table },
+}

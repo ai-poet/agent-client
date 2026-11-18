@@ -1,0 +1,1226 @@
+// Package live adapts the shared Client to the accepted desktop contracts.
+package live
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"maps"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/egoist/mygo/ui"
+	"github.com/ai-poet/agent-client/desktop/internal/client"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/preferences"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/shell"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/sidebar"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
+	"github.com/ai-poet/agent-client/desktop/internal/link"
+	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+)
+
+type Runtime struct {
+	pluginViews *pluginViewState
+	// demoModels is the model each demo conversation's composer is set to,
+	// by conversation: what the statistics package reads as its model.
+	demoModels               sync.Map
+	pluginStatus             map[string]*pluginStatusFeed
+	pluginControls           map[string]*pluginControlPresentation
+	pluginCards              *pluginCardState
+	terminals                *terminalState
+	browser                  *browserState
+	browserSources           *browserSources // a test's Chrome profile, key and cookie store
+	authorizations           *authorizationState
+	packages                 *packageState
+	parent                   *Runtime
+	network                  *Network
+	bindings                 map[string]*Runtime
+	resourceCatalog          *protocol.ResourceCatalog
+	unsubscribeNetwork       func()
+	nodeModels               []composer.Model
+	hosts                    map[string]*liveHost
+	connections              *connectionState
+	connectionReferences     map[string]*referenceCatalog
+	sshTransfers             *sshTransferStore
+	ports                    *livePorts
+	pickKeyFile              func(func(string))
+	teams                    *teamState
+	commands                 *liveCommands
+	openService              func(string)
+	attachmentSessionWaiters map[string][]attachmentSessionWaiter
+	attachments              *attachmentState
+	workspace                *workspaceState
+	workspaceSettings        workspaceSettingsState
+	workspaceSettingsOwner   *Runtime
+	settingsShown            *Runtime // the Node the settings pages hold, once settingsTurned (settings_target.go)
+	settingsTurned           bool
+	terminalSettings         terminalSettingsState
+	backupSettings           backupSettingsState
+	localModels              localModelState
+	knowledge                knowledgeState
+	media                    mediaState
+	dictation                dictationState
+	usage                    featureUsage
+	permissions              permissionState
+	knowledgeWanted          string // the citation the knowledge viewer was last asked for
+	pendingSession           string
+	transferDialogOwner      *Runtime
+	admittedSessions         map[string]protocol.Session
+
+	// acknowledged is the attention revision each shown session was marked
+	// read at (attentionFrame).
+	acknowledged map[string]uint64
+	// keptUnread is the shown session the user marked unread: it stays so
+	// until another one is shown.
+	keptUnread        string
+	composerRevisions map[string]uint64
+	composerSaving    map[string]bool
+	composerWaiters   map[string][]func(bool)
+	composerBases     map[*composer.State]protocol.SessionConfig
+	sessionBases      map[*composer.State]*sessionBaseStart
+	App               *shell.App
+	Preferences       *preferences.Store
+	controller        *client.Client
+	ctx               context.Context
+	// filePreview is the window's preview dialog (file_preview.go).
+	filePreview *filePreview
+	// memoryNext is when Settings › Experimental samples memory again.
+	memoryNext time.Time
+	// memoryBase is the last sample of the Go classes, beside which the
+	// plugins' group updates.
+	memoryBase                []kit.TreemapGroup
+	pluginMemory              *pluginMemoryState
+	cancel                    context.CancelFunc
+	unsubscribe               func()
+	unsubscribePrefs          func()
+	mu                        sync.Mutex
+	dirty                     bool
+	readsConnected            bool
+	closed                    bool
+	queue                     []func(*ui.Context)
+	invalidate                func()
+	update                    func(func())
+	workers                   sync.WaitGroup
+	observers                 sync.WaitGroup
+	openWindow                func(string)
+	pickDirectory             func(func(string))
+	savedProject              string // the project the editor saved, opened once projected
+	preferencesChanged        func()
+	busy                      map[string]bool
+	uncertain                 map[string]protocol.Request
+	drafts                    uint64
+	openDrafts                map[string]bool // drafts New session opened, on the local Runtime
+	draftsShown               map[string]bool // those a pane showed this frame
+	lastPreferences           string
+	lastMaterials             [3]float32
+	lastFeatures              string
+	lastKeys                  string
+	powerObservedRevision     uint64
+	compactionObserved        uint64
+	updates                   *Updates
+	updatesFocused            func() bool
+	updatesFlush              func() error
+	prefsRevision             uint64
+	conversationWatches       map[protocol.SessionID]func()
+	conversationSeen          map[protocol.SessionID]bool
+	childStops                map[protocol.TurnID]bool
+	composerInitialized       map[string]bool
+	composerObserved          map[string]string
+	readAloud                 func(string, string, string)
+	exportConversation        func(string, string, conversation.ExportFormat)
+	conversationEdits         map[string]conversationEdit
+	conversationPending       map[string]protocol.TurnID // the turn a fork or rewind in flight acts on
+	turnRetries               map[string]turnRetry
+	interactionFlows          map[string]*interactionFlow
+	conversationCreations     map[string]conversationCreation
+	conversationCreating      map[string]bool
+	providerPresets           map[string]protocol.ConversationPresetsEntry
+	providerBrands            map[string]string // brand names by presetBrand, offered or not
+	providerModels            map[string]map[string]protocol.ConversationModel
+	providerDraftBases        map[string]protocol.ConversationProvider
+	modelCatalogEntered       bool
+	modelCatalogLoading       bool
+	modelScores               map[string][]protocol.ConversationCatalogScoresEffortScore
+	modelScoreKey             string
+	snapshotMu                sync.Mutex
+	snapshotCopy              protocol.Snapshot
+	snapshotRevision          uint64
+	snapshotRead              bool
+	conversationCopies        map[protocol.SessionID]conversationCopy
+	conversationCache         map[protocol.SessionID]conversationCopy
+	conversationVersion       uint64
+	conversationPresentations map[protocol.SessionID]conversationPresentation
+	conversationsStale        atomic.Bool
+	// composerOutgoing holds the captured input until its Node projection arrives:
+	// ordinary sends appear in the transcript, and queued input in the tray.
+	composerOutgoing map[string]*conversationOutgoing
+	// guidanceSent is the guidance this desktop sent from the composer and
+	// has not seen settled, by conversation and turn: a message that did not
+	// join its recipient is reported once.
+	guidanceSent map[string]map[protocol.TurnID]sentGuidance
+	// queueHalts is the last halt read for each conversation's queue, by
+	// conversation: a halt is reported once, when it is first read.
+	queueHalts map[string]protocol.ConversationQueuePause
+	// usageFailed is whether each conversation's statistics were last read
+	// failed, by conversation: a failure is reported when it begins, once.
+	usageFailed map[string]bool
+	// overviews are the asset inventories the overview popover read.
+	overviews map[protocol.SessionID]*overviewRead
+}
+
+type conversationCopy struct {
+	state      client.ConversationState
+	ok         bool
+	generation uint64
+}
+
+// snapshot returns the Client's Node snapshot, copied once per Client
+// revision. Every reader shares the value and must not modify it; code that
+// edits a snapshot reads its own from the Client.
+func (r *Runtime) snapshot() protocol.Snapshot {
+	snapshot, _ := r.snapshotAt()
+	return snapshot
+}
+
+// snapshotAt also returns the Client revision the copy was taken for, which
+// identifies it to whatever is derived from it.
+func (r *Runtime) snapshotAt() (protocol.Snapshot, uint64) {
+	revision := r.controller.Revision()
+	r.snapshotMu.Lock()
+	defer r.snapshotMu.Unlock()
+	if !r.snapshotRead || revision != r.snapshotRevision {
+		r.snapshotCopy, r.snapshotRevision, r.snapshotRead = r.controller.Snapshot(), revision, true
+	}
+	return r.snapshotCopy, revision
+}
+
+// conversationState shares a read-only copy until an observation changes.
+// The persistent cache is attached only during UI frames; actions outside a
+// frame read the Client directly.
+func (r *Runtime) conversationState(id protocol.SessionID) (client.ConversationState, bool) {
+	if r.conversationCopies == nil {
+		return r.controller.Conversation(id)
+	}
+	if r.conversationsStale.Swap(false) {
+		clear(r.conversationCopies)
+	}
+	copied, ok := r.conversationCopies[id]
+	if !ok {
+		copied.state, copied.ok = r.controller.Conversation(id)
+		r.conversationVersion++
+		copied.generation = r.conversationVersion
+		r.conversationCopies[id] = copied
+	}
+	return copied.state, copied.ok
+}
+
+// conversationChanged redraws after an observed conversation changed. The frame reads that state itself, so the Node snapshot is not
+// projected again.
+func (r *Runtime) conversationChanged() {
+	r.conversationsStale.Store(true)
+	r.localRuntime().wake()
+}
+
+// New composes a window over an already started Client. Startup code should use
+// NewWithPreferences with a Store opened before Node.Start for onboarding.
+func New(ctx context.Context, controller *client.Client, profilePath string) (*Runtime, error) {
+	return NewWithPreferences(ctx, controller, preferences.Open(filepath.Join(profilePath, "desktop", "preferences.json")))
+}
+
+func NewWithPreferences(ctx context.Context, controller *client.Client, prefs *preferences.Store) (*Runtime, error) {
+	if controller == nil || prefs == nil {
+		return nil, errors.New("desktop requires a Client and profile preferences")
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	r := &Runtime{controller: controller, ctx: ctx, cancel: cancel, Preferences: prefs, busy: map[string]bool{}, uncertain: map[string]protocol.Request{}, readsConnected: controller.Connected()}
+	controller.OnDispatch(countSaved(controller))
+	snapshot := controller.Snapshot()
+	d := Sidebar(snapshot, prefs.Data)
+	d.Notices = Notices(controller.Notices())
+	r.App = shell.NewLive(d)
+	r.App.SetLocalHost(localHost(snapshot, d))
+	r.applyPreferences()
+	r.App.Hooks = shell.Hooks{BeforeFrame: r.drain, AfterFrame: r.afterFrame, Refresh: r.Refresh,
+		ReadNotice: r.markNotice, ReadNotices: r.readNotices, DismissRead: r.dismissRead, DismissNotices: r.dismissNotices, OpenKnowledge: r.openKnowledge,
+		CaptureSelection: func() { r.CaptureSelection(nil) }}
+	r.App.Messages.OpenLink = r.openChatLink
+	r.App.Messages.Embed = r.chatEmbed
+	r.App.Messages.SessionLink = func(link string) bool { return client.SessionLink(normalizeLink(link)) != nil }
+	r.App.Sidebar.Actions = &sidebar.Actions{Rename: r.rename, Archive: r.archive, Unarchive: r.unarchive, Read: r.read, Delete: r.removeSession,
+		Pin: r.pin, MovePin: r.movePin, MoveSession: r.moveSession, NewDraft: r.newDraft, RemoveProject: r.removeProject, Worktrees: r.sidebarWorkspaceAction, SaveProject: r.saveProject, Files: r.files, ForkHere: r.forkHere, ForkWorktree: r.forkWorkspaceConversation, Export: r.exportSession, OpenHost: r.App.OpenHost, OpenWindow: func(id string) {
+			if r.openWindow != nil {
+				r.openWindow(id)
+			}
+		}}
+	r.bindPicker()
+	r.initCommands()
+	r.initAttachments()
+	r.App.Hooks.DownloadDialog = r.transferDialogs
+	r.App.Hooks.FilePreview = r.renderFilePreview
+	r.initWorkspace()
+	r.App.Hooks.WorkspaceProject = r.workspaceProject
+	r.bindWorkspaceSettings()
+	r.App.Settings.SaveTelemetry = r.saveTelemetry
+	r.App.Settings.ResetTelemetry = r.resetTelemetry
+	r.App.Settings.SendDiagnostics = r.sendDiagnostics
+	r.App.Hooks.Conversation = r.conversation
+	r.App.Hooks.DemoConversation = r.demoConversation
+	r.App.Hooks.RenderChild = r.renderLiveChild
+	r.App.Hooks.Overview = r.sessionOverview
+	r.conversationWatches = map[protocol.SessionID]func(){}
+	r.conversationSeen = map[protocol.SessionID]bool{}
+	r.composerInitialized = map[string]bool{}
+	r.composerObserved = map[string]string{}
+	r.composerRevisions = map[string]uint64{}
+	r.composerSaving = map[string]bool{}
+	r.composerWaiters = map[string][]func(bool){}
+	r.composerBases = map[*composer.State]protocol.SessionConfig{}
+	r.sessionBases = map[*composer.State]*sessionBaseStart{}
+	r.admittedSessions = map[string]protocol.Session{}
+	r.conversationEdits = map[string]conversationEdit{}
+	r.conversationPending = map[string]protocol.TurnID{}
+	r.conversationCreations = map[string]conversationCreation{}
+	r.conversationCreating = map[string]bool{}
+	r.listSidebar()
+	if ids := r.App.Sidebar.Order(); len(ids) > 0 {
+		r.App.Sidebar.Selected = ids[0]
+	} else {
+		r.newDraft(nil)
+	}
+	r.unsubscribe = controller.OnChange(r.changed)
+	r.unsubscribePrefs = prefs.OnChange(r.wake)
+	if err := prefs.FinishStartup(); err != nil {
+		r.enqueue(func(c *ui.Context) { kit.Toast(c, kit.Failed, i18n.T(c, "preferences_read_failed")) })
+	}
+	r.prefsRevision = prefs.Revision()
+	r.readTelemetry()
+	r.readSandbox()
+	r.projectConversations()
+	r.initTeams()
+	r.initNodeSettings()
+	r.initConversationSearch()
+	r.initNetworkUI()
+	r.initB8Packages()
+	r.initPluginViews()
+	r.App.Panel.SetCreateResource(r.createPanelResource)
+	r.App.Hooks.PluginOverlays = r.renderPluginOverlays
+	r.App.Hooks.PluginTitle = r.renderPluginTitle
+	// A Client event may arrive between the first snapshot and subscription.
+	// Project its latest state on the first frame even if no later event arrives.
+	r.changed()
+	r.observeResourceCatalog()
+	return r, nil
+}
+
+func (r *Runtime) SetInvalidate(f func())         { r.mu.Lock(); r.invalidate = f; r.mu.Unlock(); r.wake() }
+func (r *Runtime) SetUpdate(f func(func()))       { r.mu.Lock(); r.update = f; r.mu.Unlock(); r.wake() }
+func (r *Runtime) SetPreferencesChanged(f func()) { r.preferencesChanged = f }
+
+func (r *Runtime) SetOpenWindow(f func(string)) {
+	r.openWindow = f
+	for _, bound := range r.bindings {
+		bound.SetOpenWindow(f)
+	}
+}
+func (r *Runtime) SetPickDirectory(f func(func(string))) {
+	r.pickDirectory = f
+	for _, bound := range r.bindings {
+		bound.SetPickDirectory(f)
+	}
+}
+
+// Report presents a native callback failure without changing page content.
+func (r *Runtime) Report(err error) {
+	r.enqueue(func(c *ui.Context) { r.report(c, err, "session_changed") })
+}
+
+func (r *Runtime) Close() error {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return nil
+	}
+	r.closed = true
+	r.mu.Unlock()
+	if r.updates != nil {
+		// A closing window no longer needs to acknowledge an installation's
+		// read-only frame. The remaining UI frames remove it from the wait.
+		r.updates.changed()
+	}
+	if r.unsubscribe != nil {
+		r.unsubscribe()
+	}
+	if r.unsubscribePrefs != nil {
+		r.unsubscribePrefs()
+	}
+	if r.unsubscribeNetwork != nil {
+		r.unsubscribeNetwork()
+	}
+	for _, bound := range r.bindings {
+		_ = bound.Close()
+	}
+	r.closeNetworkUI()
+	for _, release := range r.conversationWatches {
+		release()
+	}
+	r.closePluginViews()
+	r.closePluginStatus()
+	r.closePluginCards()
+	r.closePluginMemory()
+	r.closeCommands()
+	r.closeAttachments()
+	r.invalidateFilePreview(nil)
+	r.closeWorkspace()
+	r.cancel()
+	r.workers.Wait()
+	r.observers.Wait()
+	if r.dictation.manager != nil {
+		// A speech download ends with the context and leaves no partial
+		// write behind the closed window.
+		r.dictation.manager.Wait()
+	}
+	return nil
+}
+
+func (r *Runtime) wake() {
+	r.mu.Lock()
+	update, invalidate, closed := r.update, r.invalidate, r.closed
+	r.mu.Unlock()
+	if closed {
+		return
+	}
+	if update != nil {
+		update(func() {})
+	} else if invalidate != nil {
+		invalidate()
+	}
+}
+func (r *Runtime) changed() {
+	if r.parent != nil {
+		r.parent.changed()
+		return
+	}
+	r.mu.Lock()
+	r.dirty = true
+	r.mu.Unlock()
+	r.wake()
+}
+func (r *Runtime) enqueue(f func(*ui.Context)) {
+	if r.parent != nil {
+		r.parent.enqueue(f)
+		return
+	}
+	r.mu.Lock()
+	if !r.closed {
+		r.queue = append(r.queue, f)
+	}
+	r.mu.Unlock()
+	r.wake()
+}
+
+// drain is called only by App.View on MyGo's UI thread. Background callbacks
+// touch the mutex-protected queue, never presentation fields.
+func (r *Runtime) drain(c *ui.Context) {
+	r.beforeUpdateFrame()
+	r.beginConversationFrame()
+	r.syncNetwork()
+	for _, bound := range r.bindings {
+		bound.beginConversationFrame()
+	}
+	if revision := r.Preferences.Revision(); revision != r.prefsRevision {
+		r.applyPreferences()
+		r.prefsRevision = revision
+		r.project()
+	}
+	kit.SetPreferences(c, kit.Preferences{ToastSeconds: r.Preferences.Data.ToastSeconds, MessageTextSize: uint8(r.App.Settings.TextSize)})
+	r.App.Messages.CompactDisplay = r.App.Settings.MessageDisplay == 1
+	r.mu.Lock()
+	dirty, queue := r.dirty, r.queue
+	r.dirty = false
+	r.queue = nil
+	r.mu.Unlock()
+	if dirty {
+		r.project()
+	}
+	for _, f := range queue {
+		f(c)
+	}
+	r.resumeReadsOnReconnect()
+	for _, bound := range r.bindings {
+		bound.resumeReadsOnReconnect()
+	}
+	r.draftsShown = map[string]bool{}
+	r.listSidebar()
+	r.conversationPanelsFrame()
+	if r.savedProject != "" {
+		for _, project := range r.App.Data.Projects {
+			if project.ID == r.savedProject {
+				r.savedProject = ""
+				r.App.Sidebar.Reveal(project.ID)
+				r.openProjectOverview(project)
+				break
+			}
+		}
+	}
+	owner := r.selectedRuntime()
+	if owner != nil {
+		owner.workspaceFrame(c)
+	} else {
+		if r.workspace != nil {
+			r.releaseSelectedWorkspace()
+			r.workspace.selected = protocol.WorktreeID{}
+		}
+		r.App.Panel.Actions = nil
+		r.App.Panel.Data = &viewmodel.Workspace{}
+		r.App.Panel.Session = false
+	}
+	// A terminal starts in the shown conversation's worktree on a connected
+	// Node; without one the panel does not offer Terminal.
+	r.App.Panel.Worktree = owner != nil && r.packages != nil && r.packages.terminals != nil && owner.controller.Connected() &&
+		owner.workspace != nil && owner.workspace.selected != (protocol.WorktreeID{})
+	r.workspaceSettingsFrame()
+	r.terminalSettingsFrame()
+	r.backupSettingsFrame(c)
+	r.memoryMapFrame(c)
+	r.localModelsFrame()
+	r.dictationFrame(c)
+	r.permissionsFrame()
+	r.nodeSettingsFrame()
+	r.packagesFrame(c)
+	r.pluginViewsFrame(c)
+	r.terminalsFrame(c)
+	r.pluginCardsFrame(c)
+	r.networkFrame(c)
+	r.browserFrame()
+	r.aboutFrame(c)
+	r.attentionFrame()
+}
+
+// attentionFrame marks the conversation on screen read: a session whose
+// turn ended is unread until it is shown in the focused window, as the
+// reference acknowledges it (shell/session_scope/attention.rs). One
+// acknowledgement goes out per attention revision; one that lost to a newer
+// revision is sent again for that revision.
+func (r *Runtime) attentionFrame() {
+	if r.parent != nil || r.App.Page != shell.ConversationPage || r.updatesFocused != nil && !r.updatesFocused() {
+		return
+	}
+	cv := r.App.Data.Find(r.App.FocusedConversation())
+	if cv == nil || cv.ID == r.keptUnread {
+		return
+	}
+	r.keptUnread = ""
+	owner := r.conversationRuntime(cv, nil)
+	if owner == nil {
+		return
+	}
+	session, ok := owner.session(cv.ID)
+	if !ok || !session.Activity.Attention.Unread {
+		return
+	}
+	revision := session.Activity.Attention.Revision
+	if sent, ok := owner.acknowledged[cv.ID]; ok && sent == revision {
+		return
+	}
+	if owner.acknowledged == nil {
+		owner.acknowledged = map[string]uint64{}
+	}
+	owner.acknowledged[cv.ID] = revision
+	owner.execute(protocol.Command{Kind: "set_session_read", Data: protocol.CommandSetSessionReadPayload{Session: session.ID, ExpectedRevision: revision, Read: true}}, func(*ui.Context, protocol.Output, error) {})
+}
+
+func (r *Runtime) afterFrame() {
+	for _, bound := range r.bindings {
+		bound.finishFrame()
+		bound.finishConversationFrame()
+	}
+	r.finishFrame()
+	r.finishConversationFrame()
+	r.countFrame()
+	r.pluginViewsAfterFrame()
+	r.pruneDrafts()
+	// Each conversation has its own search bar: one whose conversation is no
+	// longer shown closes alone.
+	for _, id := range r.App.Messages.SearchSessions() {
+		if session, err := protocol.ParseSessionID(id); err == nil && !r.seenConversation(session) {
+			r.App.Messages.CloseSearchIn(id)
+		}
+	}
+	r.savePreferences()
+	r.afterUpdateFrame()
+}
+
+func (r *Runtime) finishFrame() {
+	r.pluginStatusAfterFrame()
+	r.pluginControlsAfterFrame()
+	r.pluginCardsAfterFrame()
+	r.pruneAttachmentImages()
+	r.pruneDocumentPreviews()
+	r.pruneCommands()
+	for id, release := range r.conversationWatches {
+		if !r.conversationSeen[id] {
+			release()
+			delete(r.conversationWatches, id)
+		}
+	}
+	// Leaving a conversation abandons its edit.
+	for id := range r.conversationEdits {
+		if session, err := protocol.ParseSessionID(id); err != nil || !r.conversationSeen[session] {
+			delete(r.conversationEdits, id)
+		}
+	}
+}
+
+func (r *Runtime) project() {
+	if r.parent != nil {
+		r.parent.project()
+		return
+	}
+	snapshot := r.snapshot()
+	r.projectAdmission(&snapshot)
+	d := Sidebar(snapshot, r.Preferences.Data)
+	d.Notices = Notices(r.controller.Notices())
+	r.appendResourceDirectory(d)
+	for _, bound := range r.bindings {
+		peerSnapshot := bound.snapshot()
+		d.Notices = append(d.Notices, Notices(bound.controller.Notices())...)
+		bound.projectModels()
+		bound.prunePins(peerSnapshot)
+		bound.pruneSessions(peerSnapshot)
+	}
+	r.projectHosts(d)
+	r.applyConversationData(d)
+	r.selectPendingSession()
+	r.projectConversations()
+	if owner := r.shownSettings(); owner != nil {
+		owner.projectProviderSnapshot()
+	}
+	r.prunePins(snapshot)
+	r.pruneSessions(snapshot)
+}
+
+func (r *Runtime) projectAdmission(snapshot *protocol.Snapshot) {
+	if len(r.admittedSessions) == 0 {
+		return
+	}
+	// The snapshot is shared, so admitted sessions go into this projection's own list.
+	snapshot.Sessions = slices.Clone(snapshot.Sessions)
+	for id, session := range r.admittedSessions {
+		present := false
+		for i, current := range snapshot.Sessions {
+			if current.ID == session.ID {
+				if current.Revision >= session.Revision {
+					delete(r.admittedSessions, id)
+				} else {
+					snapshot.Sessions[i] = session
+				}
+				present = true
+				break
+			}
+		}
+		if !present {
+			snapshot.Sessions = append(snapshot.Sessions, session)
+		}
+	}
+}
+
+// pruneSessions forgets what was kept for sessions the Node no longer has. A
+// draft is not a session yet and keeps its state.
+func (r *Runtime) pruneSessions(snapshot protocol.Snapshot) {
+	known := make(map[protocol.SessionID]bool, len(snapshot.Sessions))
+	for _, session := range snapshot.Sessions {
+		known[session.ID] = true
+	}
+	gone := func(id string) bool {
+		session, err := protocol.ParseSessionID(id)
+		return err == nil && !known[session]
+	}
+	maps.DeleteFunc(r.composerInitialized, func(id string, _ bool) bool { return gone(id) })
+	maps.DeleteFunc(r.composerObserved, func(id string, _ string) bool { return gone(id) })
+	maps.DeleteFunc(r.composerRevisions, func(id string, _ uint64) bool { return gone(id) })
+	maps.DeleteFunc(r.composerSaving, func(id string, saving bool) bool { return !saving && gone(id) })
+	maps.DeleteFunc(r.conversationEdits, func(id string, _ conversationEdit) bool { return gone(id) })
+	maps.DeleteFunc(r.composerOutgoing, func(id string, _ *conversationOutgoing) bool { return gone(id) })
+	for id, retry := range r.turnRetries {
+		if !r.busy[retry.key] && gone(id) {
+			r.forgetTurnRetry(id)
+		}
+	}
+	if r.teams != nil {
+		maps.DeleteFunc(r.teams.childParents, func(id string, _ protocol.SessionID) bool { return gone(id) })
+	}
+}
+
+func (r *Runtime) prunePins(snapshot protocol.Snapshot) {
+	if pins := r.Preferences.Data.Pins; pins != nil {
+		keep := map[string]bool{}
+		for _, s := range snapshot.Sessions {
+			if !s.Archived {
+				keep[preferences.PinKey(snapshot.Node, s.ID.String())] = true
+			}
+		}
+		for _, t := range snapshot.Terminals {
+			if t.Status.Kind != "closed" {
+				keep[preferences.PinKey(snapshot.Node, "terminal/"+t.ID.String())] = true
+			}
+		}
+		prefix := preferences.PinKey(snapshot.Node, "")
+		for key := range *pins {
+			if strings.HasPrefix(key, prefix) && !keep[key] {
+				delete(*pins, key)
+			}
+		}
+	}
+}
+
+func (r *Runtime) async(work func()) bool {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return false
+	}
+	r.workers.Add(1)
+	r.mu.Unlock()
+	go func() { defer r.workers.Done(); work() }()
+	return true
+}
+
+func (r *Runtime) observe(work func()) bool {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return false
+	}
+	r.observers.Add(1)
+	r.mu.Unlock()
+	go func() { defer r.observers.Done(); work() }()
+	return true
+}
+
+func (r *Runtime) Refresh() {
+	if r.parent == nil {
+		owner := r.selectedRuntime()
+		if r.App.Page == shell.HostPage {
+			owner = r.runtimeFor(r.App.Host)
+		}
+		if owner == nil {
+			r.Report(fileActionFault(protocol.ErrorCodeUnavailable, "the execution host is unavailable"))
+			return
+		}
+		if owner != r {
+			owner.Refresh()
+			return
+		}
+	}
+	if r.busy["refresh"] {
+		return
+	}
+	r.busy["refresh"] = true
+	r.async(func() {
+		err := r.controller.Refresh(r.ctx)
+		r.enqueue(func(c *ui.Context) {
+			delete(r.busy, "refresh")
+			if err != nil {
+				r.report(c, err, "session_changed")
+			} else {
+				r.retryFailedReads()
+			}
+			r.readSettings()
+		})
+	})
+}
+
+// execute captures immutable input and retains its request ID while its
+// outcome is open: the Node still runs it or could not be asked. The same
+// command, sent again, then carries the same ID and resolves it. Once the
+// Client reports the request applied, failed or released (client.Released),
+// the ID is dropped and the next attempt is a new request. All outcome
+// delivery and draft changes run on the UI thread.
+func (r *Runtime) execute(command protocol.Command, finished func(*ui.Context, protocol.Output, error)) {
+	r.executeScoped("", command, finished)
+}
+
+func (r *Runtime) executeScoped(scope string, command protocol.Command, finished func(*ui.Context, protocol.Output, error)) protocol.RequestID {
+	if r.parent != nil && !r.controller.Connected() {
+		r.enqueue(func(c *ui.Context) {
+			finished(c, protocol.Output{}, &protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "resource host is offline"})
+		})
+		return protocol.RequestID{}
+	}
+	b, err := json.Marshal(command)
+	if err != nil {
+		r.enqueue(func(c *ui.Context) { finished(c, protocol.Output{}, err) })
+		return protocol.RequestID{}
+	}
+	key := scope + "\x00" + string(b)
+	if r.busy[key] {
+		return protocol.RequestID{}
+	}
+	r.busy[key] = true
+	request, exists := r.uncertain[key]
+	if !exists {
+		request = r.controller.Prepare(command)
+	}
+	r.async(func() {
+		output, err := r.controller.Settle(r.ctx, request)
+		r.enqueue(func(c *ui.Context) {
+			delete(r.busy, key)
+			code := faultCode(err)
+			// A forwarded creation is the one request a Node resolves by
+			// replay: its unknown outcome
+			// is final in the local Node's ledger until the target answers,
+			// so the request is kept and the next Send asks the target.
+			forwarded := command.Kind == "create_session_at" && code == protocol.ErrorCodeOutcomeUnknown
+			if client.Retained(err) || forwarded || code == protocol.ErrorCodeUnavailable && !client.Released(err) && (strings.HasPrefix(scope, "teams/") || strings.HasPrefix(scope, "session-team/")) {
+				r.uncertain[key] = request
+			} else {
+				delete(r.uncertain, key)
+			}
+			finished(c, output, err)
+		})
+	})
+	return request.ID
+}
+
+// forgetCommand drops the request kept for an unscoped command whose outcome
+// was not confirmed, so the same command sent later is a new request.
+func (r *Runtime) forgetCommand(command protocol.Command) {
+	if b, err := json.Marshal(command); err == nil {
+		delete(r.uncertain, "\x00"+string(b))
+	}
+}
+
+func (r *Runtime) command(command protocol.Command, conflict string, done func(protocol.Output, bool)) {
+	r.execute(command, func(c *ui.Context, output protocol.Output, err error) {
+		if err != nil {
+			r.report(c, err, conflict)
+		}
+		if done != nil {
+			done(output, err == nil)
+		}
+	})
+}
+
+func faultCode(err error) protocol.ErrorCode {
+	var fault *link.FaultError
+	if errors.As(err, &fault) {
+		return fault.Fault.Code
+	}
+	var pointer *protocol.Fault
+	if errors.As(err, &pointer) {
+		return pointer.Code
+	}
+	var direct protocol.Fault
+	if errors.As(err, &direct) {
+		return direct.Code
+	}
+	return ""
+}
+func (r *Runtime) report(c *ui.Context, err error, conflict string) {
+	if err == nil {
+		return
+	}
+	o, key := kit.Failed, "chat_action_failed"
+	switch faultCode(err) {
+	case protocol.ErrorCodeConflict, protocol.ErrorCodeRevisionConflict:
+		o, key = kit.Conflict, conflict
+	case protocol.ErrorCodeOutcomeUnknown:
+		o, key = kit.Uncertain, "chat_action_unknown"
+	}
+	if faultMessage(err) == "resource host is offline" {
+		key = "resource_offline_action"
+	}
+	kit.Toast(c, o, i18n.T(c, key))
+}
+
+func (r *Runtime) rename(cv *viewmodel.Conversation, title string, done func(bool)) {
+	if owner := r.conversationRuntime(cv, nil); owner == nil {
+		r.Report(fileActionFault(protocol.ErrorCodeUnavailable, "the execution host is unavailable"))
+		done(false)
+		return
+	} else if owner != r {
+		owner.rename(cv, title, done)
+		return
+	}
+	if strings.HasPrefix(cv.ID, "draft/") {
+		cv.Title = title
+		done(true)
+		return
+	}
+	id, err := protocol.ParseSessionID(cv.ID)
+	if err != nil {
+		done(false)
+		return
+	}
+	r.command(protocol.Command{Kind: "rename_session", Data: protocol.CommandRenameSessionPayload{Session: id, ExpectedRevision: cv.Revision, Title: title}}, "session_changed", func(_ protocol.Output, ok bool) { done(ok) })
+}
+func (r *Runtime) archive(cv *viewmodel.Conversation) {
+	if owner := r.conversationRuntime(cv, nil); owner == nil {
+		r.Report(fileActionFault(protocol.ErrorCodeUnavailable, "the execution host is unavailable"))
+		return
+	} else if owner != r {
+		owner.archive(cv)
+		return
+	}
+	if strings.HasPrefix(cv.ID, "draft/") {
+		r.removeDraft(cv.ID)
+		return
+	}
+	id, err := protocol.ParseSessionID(cv.ID)
+	if err != nil {
+		return
+	}
+	r.command(protocol.Command{Kind: "set_session_archived", Data: protocol.CommandSetSessionArchivedPayload{Session: id, ExpectedRevision: cv.Revision, Archived: true}}, "session_changed", nil)
+}
+
+// unarchive returns an archived session to its project's rows.
+func (r *Runtime) unarchive(cv *viewmodel.Conversation) {
+	if owner := r.conversationRuntime(cv, nil); owner == nil {
+		r.Report(fileActionFault(protocol.ErrorCodeUnavailable, "the execution host is unavailable"))
+		return
+	} else if owner != r {
+		owner.unarchive(cv)
+		return
+	}
+	id, err := protocol.ParseSessionID(cv.ID)
+	if err != nil {
+		return
+	}
+	r.command(protocol.Command{Kind: "set_session_archived", Data: protocol.CommandSetSessionArchivedPayload{Session: id, ExpectedRevision: cv.Revision, Archived: false}}, "session_changed", nil)
+}
+func (r *Runtime) read(cv *viewmodel.Conversation, read bool) {
+	if !read {
+		r.localRuntime().keptUnread = cv.ID
+	}
+	if owner := r.conversationRuntime(cv, nil); owner == nil {
+		r.Report(fileActionFault(protocol.ErrorCodeUnavailable, "the execution host is unavailable"))
+		return
+	} else if owner != r {
+		owner.read(cv, read)
+		return
+	}
+	id, err := protocol.ParseSessionID(cv.ID)
+	if err != nil {
+		return
+	}
+	r.command(protocol.Command{Kind: "set_session_read", Data: protocol.CommandSetSessionReadPayload{Session: id, ExpectedRevision: cv.AttentionRevision, Read: read}}, "session_changed", nil)
+}
+func (r *Runtime) removeSession(cv *viewmodel.Conversation) {
+	if owner := r.conversationRuntime(cv, nil); owner == nil {
+		r.Report(fileActionFault(protocol.ErrorCodeUnavailable, "the execution host is unavailable"))
+		return
+	} else if owner != r {
+		owner.removeSession(cv)
+		return
+	}
+	id, err := protocol.ParseSessionID(cv.ID)
+	if err != nil {
+		r.removeDraft(cv.ID)
+		return
+	}
+	r.command(protocol.Command{Kind: "remove_session", Data: protocol.CommandRemoveSessionPayload{Session: id, ExpectedRevision: cv.Revision}}, "session_changed", nil)
+}
+
+func expectedProject(p *viewmodel.Project) (protocol.Project, error) {
+	id, err := protocol.ParseProjectID(p.ID)
+	return protocol.Project{ID: id, Name: p.Name, Path: p.Path, Appearance: protocol.ProjectsAppearance{Icon: p.Icon, Color: p.Color}, Owner: p.Owner, Visibility: p.Visibility}, err
+}
+
+// removeProject removes a project from its Node's inventory. The outcome is
+// a toast: removed, or why it stayed; after a failure the confirmation shows
+// again, as a retry is a new attempt.
+func (r *Runtime) removeProject(p *viewmodel.Project) {
+	if owner := r.runtimeFor(p.Host); owner == nil {
+		r.Report(fileActionFault(protocol.ErrorCodeUnavailable, "the execution host is unavailable"))
+		return
+	} else if owner != r {
+		owner.removeProject(p)
+		return
+	}
+	expected, err := expectedProject(p)
+	if err != nil {
+		return
+	}
+	root := r.localRuntime()
+	r.execute(protocol.Command{Kind: "remove_project", Data: protocol.CommandRemoveProjectPayload{Expected: expected}}, func(c *ui.Context, _ protocol.Output, err error) {
+		if err == nil {
+			kit.Toast(c, kit.Done, i18n.T(c, "project_removed"))
+			if node, project, shown := root.App.ProjectOwner(); shown && node == p.Host && project == p.ID {
+				root.App.Host = p.Host
+				root.App.Navigate(shell.HostPage)
+			}
+			return
+		}
+		outcome, key := projectRemovalFailure(err)
+		kit.Toast(c, outcome, i18n.T(c, key))
+		root.App.Sidebar.AskRemove(c, p)
+	})
+}
+
+// projectRemovalFailure names why a project stayed: an unknown outcome
+// first, then what the Node says of its tasks and terminals, then the code.
+func projectRemovalFailure(err error) (kit.Outcome, string) {
+	code := faultCode(err)
+	var removal *protocol.FaultDetailsProjectRemovalPayload
+	details := false
+	var fault *link.FaultError
+	if errors.As(err, &fault) && fault.Fault.Details != nil {
+		details = true
+		if value, ok := detail[protocol.FaultDetailsProjectRemovalPayload](fault.Fault.Details.Data); ok {
+			removal = &value
+		}
+	}
+	switch {
+	case code == protocol.ErrorCodeOutcomeUnknown || code == "" || code == protocol.ErrorCodeUnavailable && !details:
+		return kit.Uncertain, "project_remove_unknown"
+	case removal != nil && removal.TasksActive && removal.TerminalsMayBeClosed:
+		return kit.Failed, "project_remove_tasks_partial"
+	case removal != nil && removal.TasksActive:
+		return kit.Failed, "project_remove_tasks"
+	case removal != nil && removal.TerminalsMayBeClosed && code == protocol.ErrorCodeRevisionConflict:
+		return kit.Conflict, "project_remove_changed_partial"
+	case removal != nil && removal.TerminalsMayBeClosed:
+		return kit.Failed, "project_remove_failed"
+	case removal != nil:
+		return kit.Failed, "live_request_failed"
+	case code == protocol.ErrorCodeBusy:
+		return kit.Failed, "project_remove_busy"
+	case code == protocol.ErrorCodeRevisionConflict || code == protocol.ErrorCodeNotFound:
+		return kit.Conflict, "project_changed"
+	}
+	return kit.Failed, "live_request_failed"
+}
+
+// saveProject creates or updates a project on its host with the editor's
+// name, path and appearance; a clone goes into the destination folder under
+// the project's name. The outcome is a toast, and the draft stays on failure.
+func (r *Runtime) saveProject(e sidebar.Editor, host string, done func(bool)) {
+	if owner := r.runtimeFor(host); owner == nil {
+		r.Report(fileActionFault(protocol.ErrorCodeUnavailable, "the execution host is unavailable"))
+		done(false)
+		return
+	} else if owner != r {
+		owner.saveProject(e, host, done)
+		return
+	}
+	if host != "" && host != r.controller.Target().String() {
+		done(false)
+		return
+	}
+	clone := e.Clone == 1 && e.Project == nil
+	appearance := protocol.ProjectsAppearance{Icon: e.Icon, Color: e.Color}
+	if appearance.Icon == "" || appearance.Color == "" {
+		appearance = protocol.DefaultProjectsAppearance()
+	}
+	path := strings.TrimSpace(e.Path)
+	source := protocol.ProjectsSource{Kind: "local"}
+	if clone {
+		var branch *string
+		if strings.TrimSpace(e.Branch) != "" {
+			value := strings.TrimSpace(e.Branch)
+			branch = &value
+		}
+		path = sidebar.Destination(path, e.Name)
+		source = protocol.ProjectsSource{Kind: "clone", Data: protocol.ProjectsSourceClonePayload{Url: strings.TrimSpace(e.Repo), Branch: branch}}
+	}
+	visibility := protocol.ProjectVisibility(e.Visibility)
+	command := protocol.Command{Kind: "create_project", Data: protocol.ProjectsDraft{Name: e.Name, Path: path, Appearance: appearance, Source: source, Visibility: visibility}}
+	if e.Project != nil {
+		expected, err := expectedProject(e.Project)
+		if err != nil {
+			done(false)
+			return
+		}
+		var updatedVisibility *protocol.ProjectVisibility
+		if e.Visibility != "" {
+			updatedVisibility = &visibility
+		}
+		command = protocol.Command{Kind: "update_project", Data: protocol.CommandUpdateProjectPayload{Expected: expected, Name: e.Name, Path: path, Appearance: appearance, Visibility: updatedVisibility}}
+	}
+	root := r.localRuntime()
+	r.execute(command, func(c *ui.Context, output protocol.Output, err error) {
+		if err != nil {
+			outcome, key := kit.Failed, "live_request_failed"
+			switch code := faultCode(err); {
+			case code == protocol.ErrorCodeOutcomeUnknown || code == protocol.ErrorCodeUnavailable || code == "":
+				outcome, key = kit.Uncertain, "project_outcome_unknown"
+			case code == protocol.ErrorCodeRevisionConflict:
+				outcome, key = kit.Conflict, "project_changed"
+			case code == protocol.ErrorCodeBusy:
+				key = "project_path_in_use"
+			case clone && code == protocol.ErrorCodePermissionDenied:
+				key = "git_auth_failed"
+			case clone:
+				key = "project_clone_failed"
+			}
+			kit.Toast(c, outcome, i18n.T(c, key))
+			done(false)
+			return
+		}
+		done(true)
+		// The saved project opens once the Node's snapshot holds it.
+		if saved, ok := detail[protocol.Project](output.Data); ok {
+			root.savedProject = saved.ID.String()
+		}
+	})
+}
+
+func (r *Runtime) pin(cv *viewmodel.Conversation) {
+	if owner := r.conversationRuntime(cv, nil); owner == nil {
+		r.Report(fileActionFault(protocol.ErrorCodeUnavailable, "the execution host is unavailable"))
+		return
+	} else if owner != r {
+		owner.pin(cv)
+		return
+	}
+	if strings.HasPrefix(cv.ID, "draft/") {
+		r.enqueue(func(c *ui.Context) { kit.Toast(c, kit.Failed, i18n.T(c, "unavailable")) })
+		return
+	}
+	node := r.controller.Target()
+	r.Preferences.Data.SetPin(node, cv.ID, preferences.Pin{Pinned: !cv.Pinned})
+	r.project()
+}
+
+// moveSession saves the manual order of a project's sessions with source
+// before or after target. The Node checks the order it is given against
+// its own, so the order comes from the snapshot, which also holds the
+// sessions the sidebar does not list.
+func (r *Runtime) moveSession(source, target *viewmodel.Conversation, after bool) {
+	if owner := r.conversationRuntime(target, nil); owner == nil {
+		r.Report(fileActionFault(protocol.ErrorCodeUnavailable, "the execution host is unavailable"))
+		return
+	} else if owner != r {
+		owner.moveSession(source, target, after)
+		return
+	}
+	command, ok := sessionOrderCommand(r.snapshot().Sessions, source.ID, target.ID, after)
+	if !ok {
+		return
+	}
+	r.execute(command, func(c *ui.Context, _ protocol.Output, err error) {
+		if err != nil {
+			r.reportKeys(c, err, "live_request_failed", "session_changed", "project_outcome_unknown")
+			return
+		}
+		r.project()
+	})
+}
+
+// sessionOrderCommand is the command moving source before or after target
+// among their project's sessions, false when they share no project or
+// nothing moves.
+func sessionOrderCommand(sessions []protocol.Session, source, target string, after bool) (protocol.Command, bool) {
+	var project *protocol.ProjectID
+	for _, session := range sessions {
+		if session.ID.String() == target {
+			project = session.Project
+		}
+	}
+	if project == nil {
+		return protocol.Command{}, false
+	}
+	var expected []protocol.SessionID
+	var ids []string
+	for _, session := range sessions {
+		if session.Project != nil && *session.Project == *project {
+			expected, ids = append(expected, session.ID), append(ids, session.ID.String())
+		}
+	}
+	moved, ok := sidebar.MovePin(ids, source, target, after)
+	if !ok {
+		return protocol.Command{}, false
+	}
+	order := make([]protocol.SessionID, len(moved))
+	for i, id := range moved {
+		order[i] = expected[slices.Index(ids, id)]
+	}
+	return protocol.Command{Kind: "set_session_order", Data: protocol.CommandSetSessionOrderPayload{Project: *project, Expected: expected, Sessions: order}}, true
+}
+func (r *Runtime) movePin(source, target string, after bool) {
+	var pins []sidebar.Pin
+	add := func(list []*viewmodel.Conversation) {
+		for _, cv := range list {
+			if cv.Pinned {
+				pins = append(pins, sidebar.Pin{ID: cv.ID, Order: cv.PinOrder, LastRun: cv.Updated, Created: cv.Created})
+			}
+		}
+	}
+	add(r.App.Data.Unassigned)
+	for _, p := range r.App.Data.Projects {
+		add(p.Conversations)
+	}
+	var ids []string
+	for _, p := range sidebar.OrderPins(pins) {
+		ids = append(ids, p.ID)
+	}
+	moved, ok := sidebar.MovePin(ids, source, target, after)
+	if !ok {
+		return
+	}
+	for i, id := range moved {
+		order := uint64(i)
+		owner := r.conversationRuntime(r.App.Data.Find(id), nil)
+		if owner != nil {
+			r.Preferences.Data.SetPin(owner.controller.Target(), id, preferences.Pin{Pinned: true, Order: &order})
+		}
+	}
+	r.project()
+}
+
+// OpenSession and OpenNotice are called by window and notification callbacks on
+// the UI thread; asynchronous work still returns through the same queue.
+func (r *Runtime) OpenSession(id string) {
+	r.pendingSession = id
+	r.selectPendingSession()
+}
+func (r *Runtime) selectPendingSession() {
+	if r.pendingSession == "" || r.App.Data.Find(r.pendingSession) == nil {
+		return
+	}
+	r.App.Page = shell.ConversationPage
+	r.App.Sidebar.Selected = r.pendingSession
+	r.pendingSession = ""
+}
+func (r *Runtime) markNotice(id string) {
+	if r.parent == nil {
+		for _, bound := range r.bindings {
+			bound.markNotice(id)
+		}
+	}
+	for _, n := range r.controller.Notices() {
+		if noticeID(n) != id {
+			continue
+		}
+		if n.ID.Target.Kind == "notification" {
+			r.command(protocol.Command{Kind: "mark_notification_read", Data: protocol.CommandMarkNotificationReadPayload{ID: n.ID.Target.Notification}}, "notification_update_failed", nil)
+		} else {
+			r.controller.MarkAttentionRead(n.ID)
+		}
+		return
+	}
+}
+func (r *Runtime) OpenNotice(id string) {
+	r.markNotice(id)
+	for _, n := range r.App.Data.Notices {
+		if n.ID == id && n.Session != "" {
+			r.OpenSession(n.Session)
+			return
+		}
+	}
+}
+
+func (r *Runtime) SetOpenService(open func(string)) {
+	r.openService = open
+	for _, bound := range r.bindings {
+		bound.SetOpenService(open)
+	}
+}

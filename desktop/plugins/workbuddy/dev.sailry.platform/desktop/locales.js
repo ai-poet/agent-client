@@ -1,0 +1,13 @@
+const values = {
+  en:{checkin_unknown:"Daily credit claim outcome unknown",received:"Daily credits received",checkin_failed:"Unable to claim daily credits",credits:'Account credits',remaining:'Remaining',package:'Package',failed:'Unable to read credits',permission:'Channel unavailable'},
+  'zh-CN':{checkin_unknown:"每日积分领取结果不确定",received:"每日积分已领取",checkin_failed:"无法领取每日积分",credits:'账户积分',remaining:'剩余',package:'积分包',failed:'无法读取积分',permission:'渠道不可用'},
+  'zh-TW':{checkin_unknown:"每日點數領取結果不確定",received:"每日點數已領取",checkin_failed:"無法領取每日點數",credits:'帳戶積分',remaining:'剩餘',package:'點數包',failed:'無法讀取點數',permission:'管道無法使用'},
+  de:{checkin_unknown:"Ergebnis der täglichen Guthabenabholung unbekannt",received:"Tägliches Guthaben erhalten",checkin_failed:"Tägliches Guthaben konnte nicht abgeholt werden",credits:'Kontoguthaben',remaining:'Verbleibend',package:'Paket',failed:'Guthaben konnte nicht gelesen werden',permission:'Kanal nicht verfügbar'},
+  es:{checkin_unknown:"Resultado del canje diario desconocido",received:"Créditos diarios recibidos",checkin_failed:"No se pudieron reclamar los créditos diarios",credits:'Créditos de la cuenta',remaining:'Restantes',package:'Paquete',failed:'No se pudieron leer los créditos',permission:'Canal no disponible'},
+  fr:{checkin_unknown:"Résultat de la demande quotidienne inconnu",received:"Crédits quotidiens reçus",checkin_failed:"Impossible de réclamer les crédits quotidiens",credits:'Crédits du compte',remaining:'Restants',package:'Forfait',failed:'Impossible de lire les crédits',permission:'Canal indisponible'},
+  ja:{checkin_unknown:"毎日のクレジット受け取り結果が不明です",received:"毎日のクレジットを受け取りました",checkin_failed:"毎日のクレジットを受け取れません",credits:'アカウントクレジット',remaining:'残り',package:'パッケージ',failed:'クレジットを取得できません',permission:'チャネルを利用できません'},
+  ko:{checkin_unknown:"일일 크레딧 수령 결과를 알 수 없습니다",received:"일일 크레딧 수령 완료",checkin_failed:"일일 크레딧을 받을 수 없습니다",credits:'계정 크레딧',remaining:'잔여',package:'패키지',failed:'크레딧을 읽을 수 없습니다',permission:'채널을 사용할 수 없습니다'},
+  'pt-BR':{checkin_unknown:"Resultado do resgate diário desconhecido",received:"Créditos diários recebidos",checkin_failed:"Não foi possível resgatar os créditos diários",credits:'Créditos da conta',remaining:'Restantes',package:'Pacote',failed:'Não foi possível consultar os créditos',permission:'Canal indisponível'},
+  ru:{checkin_unknown:"Результат получения ежедневных кредитов неизвестен",received:"Ежедневные кредиты получены",checkin_failed:"Не удалось получить ежедневные кредиты",credits:'Кредиты аккаунта',remaining:'Осталось',package:'Пакет',failed:'Не удалось получить кредиты',permission:'Канал недоступен'},
+};
+export function messages(locale) {return values[locale] ?? values.en;}

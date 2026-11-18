@@ -1,0 +1,12 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "feishu": {
+      "type": "streamable-http",
+      "url": "https://mcp.feishu.cn/mcp",
+      "headers": {
+        "X-Lark-MCP-Allowed-Tools": "get-comments,fetch-doc"
+      }
+    }
+  }
+}

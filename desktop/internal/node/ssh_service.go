@@ -1,0 +1,68 @@
+package node
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+
+	"github.com/ai-poet/agent-client/desktop/internal/node/host"
+	"github.com/ai-poet/agent-client/desktop/internal/node/store"
+	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/ai-poet/agent-client/desktop/internal/ssh"
+)
+
+func (node *Node) runHost(ctx context.Context, caller protocol.NodeID, request protocol.Request) (protocol.Output, error) {
+	if handled, output, err := node.dispatchResource(ctx, caller, request); handled {
+		return output, err
+	}
+	if input, ok := request.Command.Data.(*protocol.CommandStopHostProcessPayload); ok {
+		err := host.StopProcess(ctx, input.Pid, input.StartedAtSecs, input.Force)
+		return protocol.Output{Kind: "host_process_signalled", Data: protocol.OutputHostProcessSignalledPayload{Pid: input.Pid, StartedAtSecs: input.StartedAtSecs}}, err
+	}
+	var id protocol.SshID
+	var revision uint64
+	var expected *protocol.NodeID
+	var network *protocol.NetworkSelection
+	switch input := request.Command.Data.(type) {
+	case *protocol.CommandCheckSshPayload:
+		id, revision = input.Profile, input.ExpectedRevision
+	case *protocol.CommandInstallHostPayload:
+		id, revision, network = input.Profile, input.ExpectedRevision, input.Network
+	case *protocol.CommandUpdateSshHostPayload:
+		id, revision = input.Profile, input.ExpectedRevision
+		expected = &input.Node
+	default:
+		return protocol.Output{}, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "SSH operation expected"}
+	}
+	if request.Command.Kind != "check_ssh" && node.Link() == nil {
+		return protocol.Output{}, &protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "Node Link is unavailable"}
+	}
+	var profile protocol.SshProfile
+	var credential protocol.SshCredential
+	if err := node.profile.Store.Node.Read(ctx, func(db *sql.Conn) error {
+		var err error
+		profile, credential, err = store.ReadSsh(ctx, db, id, revision)
+		return err
+	}); err != nil {
+		return protocol.Output{}, err
+	}
+	scoped, finish, err := node.hostInstalls.Begin(ctx, caller, request)
+	if err != nil {
+		return protocol.Output{}, err
+	}
+	defer finish()
+	connection, err := ssh.Connect(scoped, profile, credential)
+	if err != nil {
+		var required *ssh.HostKeyRequired
+		if errors.As(err, &required) {
+			return protocol.Output{Kind: "ssh_outcome", Data: required.Outcome()}, nil
+		}
+		return protocol.Output{}, err
+	}
+	defer connection.Close()
+	if request.Command.Kind == "check_ssh" {
+		return protocol.Output{Kind: "ssh_outcome", Data: protocol.SshOutcome{Kind: "connected"}}, nil
+	}
+	outcome, err := node.hostInstalls.Execute(scoped, connection, node.Link(), caller, request.ID, expected, network)
+	return protocol.Output{Kind: "ssh_outcome", Data: outcome}, err
+}

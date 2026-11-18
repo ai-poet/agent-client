@@ -1,0 +1,11 @@
+Sailry-owned implementation; Apache-2.0.
+
+Wire contracts were reviewed at these immutable primary sources. No source code was imported.
+
+Claude:
+- Wei-Shaw/sub2api 8f2cbb53d9d1c40e1865b07ac460571f7d4c48de, backend/internal/repository/claude_usage_service.go and backend/internal/service/account_usage_service.go (LGPL-3.0)
+- router-for-me/Cli-Proxy-API-Management-Center fe2963330f32a933f562282165f62ae52cf57145, src/services/api/claudeUsage.ts and src/utils/quota/constants.ts (MIT)
+
+GPT:
+- openai/codex e4568a3538c9cab6627d64ff8cdfc7d98b79b7db, codex-rs/backend-client/src/client/rate_limit_resets.rs (Apache-2.0)
+- Wei-Shaw/sub2api 8f2cbb53d9d1c40e1865b07ac460571f7d4c48de, backend/internal/service/openai_quota_service.go (LGPL-3.0)

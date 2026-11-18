@@ -1,0 +1,301 @@
+package shell
+
+import (
+	"image"
+	"math"
+	"runtime"
+	"testing"
+	"time"
+
+	"github.com/egoist/mygo/ui"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/preview"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/sidebar"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
+)
+
+// inkRows is the ink of each device row of img across r, from 6 DIPs above
+// it to 6 below: how far the row's pixels are from the color beside r's
+// left, summed. The first row is device row first.
+func inkRows(img *image.RGBA, scale float32, r ui.Rect) (first int, rows []float64) {
+	bg := img.RGBAAt(int((r.X-3)*scale), int((r.Y+r.H/2)*scale))
+	x0, x1 := int(r.X*scale), int(math.Ceil(float64((r.X+r.W)*scale)))
+	first = int((r.Y - 6) * scale)
+	for y := first; y < int(math.Ceil(float64((r.Y+r.H+6)*scale))); y++ {
+		sum := 0.0
+		for x := x0; x < x1; x++ {
+			p := img.RGBAAt(x, y)
+			sum += math.Abs(float64(p.R)-float64(bg.R)) + math.Abs(float64(p.G)-float64(bg.G)) + math.Abs(float64(p.B)-float64(bg.B))
+		}
+		rows = append(rows, sum)
+	}
+	return first, rows
+}
+
+// inkCentre is the height, in DIPs, of the middle of the ink in r by its
+// weight: the middle of the capitals of a text of capitals, and of the
+// body of ideographs.
+func inkCentre(img *image.RGBA, scale float32, r ui.Rect) float64 {
+	first, rows := inkRows(img, scale, r)
+	var sum, weighted float64
+	for i, v := range rows {
+		sum += v
+		weighted += v * (float64(first+i) + 0.5)
+	}
+	return weighted / sum / float64(scale)
+}
+
+// inkMiddle is the height, in DIPs, halfway between the ink's first row and
+// its last in r: the middle of an icon, whatever is drawn inside its
+// outline.
+func inkMiddle(img *image.RGBA, scale float32, r ui.Rect) float64 {
+	_, middle := inkHeight(img, scale, r)
+	return middle
+}
+
+// inkHeight is how high the ink in r is, in DIPs, and the height of its
+// middle.
+func inkHeight(img *image.RGBA, scale float32, r ui.Rect) (height, middle float64) {
+	first, rows := inkRows(img, scale, r)
+	peak := 0.0
+	for _, v := range rows {
+		peak = max(peak, v)
+	}
+	top, bottom := -1, -1
+	for i, v := range rows {
+		if v > peak/20 {
+			if top < 0 {
+				top = i
+			}
+			bottom = i
+		}
+	}
+	return float64(bottom-top+1) / float64(scale), (float64(first+top) + float64(first+bottom) + 1) / 2 / float64(scale)
+}
+
+// The demo's running conversation shows the loading marks in their places:
+// the loader on the sidebar's running rows and in the running capsules, no
+// larger than the capsules' icons, and the thinking marks on the phase row.
+// Each pending row's label and detail are within half a DIP of its icon
+// at scale 1 and 2, with matching painted baselines, the question's too.
+// Different fonts' ink centres need not coincide. A sidebar with no session running
+// has no loader and asks for no frame, and none with Reduce Motion.
+// $SAILRY_SNAPSHOTS takes the frames of the review's contact sheet.
+func testLoadingMarks(t *testing.T) {
+	running := i18n.In("zh-CN", "activity_running")
+	for _, mode := range []theme.Mode{theme.Dark, theme.Light} {
+		name := map[theme.Mode]string{theme.Dark: "dark", theme.Light: "light"}[mode]
+		a := New(preview.Load())
+		a.Mode = mode
+		a.Settings.Model.DemoMode = true
+		// The marks are measured at 14, the size they were drawn for.
+		a.Settings.TextSize = 14
+		var font ui.Font
+		tt := ui.NewTesterWith(func(c *ui.Context) {
+			a.View(c)
+			font = ui.Font{Family: c.Theme().Font, Size: c.Theme().FontSize}
+		}, 1280, 820, opaque)
+		tt.SetLocale("zh-CN")
+		tt.SetScale(2)
+		tt.Frame()
+		tt.Advance(time.Second)
+		snapshot(t, tt, "loading-demo-"+name)
+		// Compare the baselines the platform renderer paints, including fallback
+		// fonts and its device-pixel snapping.
+		baseline := func(box ui.Rect, span ui.Span, scale float32) float64 {
+			line := ui.ShapeRichText([]ui.Span{span}, font, 0).Lines()[0]
+			y := float64((box.Y + line.Baseline) * scale)
+			switch runtime.GOOS {
+			case "darwin":
+				y = math.Ceil(y - 1e-3)
+			case "linux":
+				y = math.Floor(y + 1e-3)
+			default:
+				y = math.Round(y)
+			}
+			return y / float64(scale)
+		}
+
+		// The first running row's loader, in the side column: with a
+		// session at rest shown, the header's tab has no loader of its own.
+		selected := a.Sidebar.Selected
+		for _, cv := range a.Data.Unassigned {
+			if cv.Status != preview.Running {
+				a.Sidebar.Selected = cv.ID
+				break
+			}
+		}
+		tt.Frame()
+		r, ok := tt.Find(running)
+		a.Sidebar.Selected = selected
+		tt.Frame()
+		if !ok || r.W != 12 || r.H != 12 || r.X > RailWidth+a.NavWidth {
+			t.Fatalf("%s: the sidebar's loader: %+v, %v", name, r, ok)
+		}
+		// A running capsule's loader is where the port capsule's globe is,
+		// 12 DIPs in, and no larger: both in the middle of the capsule.
+		img := tt.Image()
+		var inks [2]float64
+		for i, chip := range []string{i18n.In("zh-CN", "background_count", "count", 2) + ": " + i18n.In("zh-CN", "chat_running"), i18n.In("zh-CN", "port_mappings") + ": 8080"} {
+			b, ok := tt.AccessByRole(ui.RoleButton, chip)
+			if !ok {
+				// The ports' capsule opens a menu.
+				b, ok = tt.AccessByRole(ui.RoleMenuButton, chip)
+			}
+			if !ok {
+				t.Fatalf("%s: no capsule %q: %q", name, chip, tt.Texts())
+			}
+			// Inside the capsule's border.
+			height, middle := inkHeight(img, 2, ui.Rect{X: b.Bounds.X + 12, Y: b.Bounds.Y + 8, W: 14, H: b.Bounds.H - 16})
+			if off := math.Abs(middle - float64(b.Bounds.Y+b.Bounds.H/2)); height > 14 || off > 0.5 {
+				t.Errorf("%s: the mark of %q is %.2f DIPs high, %.2f off the capsule's middle", name, chip, height, off)
+			}
+			inks[i] = height
+		}
+		if inks[0] > inks[1]+1 {
+			t.Errorf("%s: the capsule's loader is %.2f DIPs high, its neighbour's icon %.2f", name, inks[0], inks[1])
+		}
+		t.Logf("%s: capsule loader %.2f DIPs high, globe %.2f", name, inks[0], inks[1])
+
+		// The pending rows, with texts whose ink has its middle at the
+		// capitals' and the ideographs'.
+		cv := a.Data.Find(preview.DemoStart)
+		reply := &cv.Turns[len(cv.Turns)-1].Reply
+		kept := append([]conversation.Block(nil), reply.Blocks...)
+		type row struct{ label, detail string }
+		for _, shown := range [][]row{{{"HIDE", "OXIDE"}, {"ECHO", ""}}, {{"田口", "CODEC"}}} {
+			pending := 0
+			for i := range reply.Blocks {
+				b := &reply.Blocks[i]
+				b.Calls = append([]conversation.Call(nil), b.Calls...)
+				for k := range b.Calls {
+					if call := &b.Calls[k]; call.Pending {
+						call.Label, call.Detail, call.Code = shown[0].label, shown[0].detail, true
+						pending++
+					}
+				}
+				if b.Question != nil {
+					q := *b.Question
+					q.Prompt = "ECHO"
+					b.Question = &q
+				}
+			}
+			if pending == 0 {
+				t.Fatalf("%s: no pending call", name)
+			}
+			for _, scale := range []float32{1, 2} {
+				tt.SetScale(scale)
+				tt.Frame()
+				img = tt.Image()
+				for _, r := range shown {
+					label, ok := tt.Find(r.label)
+					if !ok {
+						t.Fatalf("%s: no row %q: %q", name, r.label, tt.Texts())
+					}
+					// The icon is the 16 DIPs before the label's 8 DIP gap.
+					icon := inkMiddle(img, scale, ui.Rect{X: label.X - 24, Y: label.Y, W: 16, H: label.H})
+					text := inkCentre(img, scale, label)
+					off := math.Abs(text - icon)
+					if r.detail != "" {
+						detail, ok := tt.Find(r.detail)
+						if !ok {
+							t.Fatalf("%s: no detail %q", name, r.detail)
+						}
+						// The capitals' geometric middle is independent of how
+						// their strokes distribute ink above and below it.
+						mono := inkMiddle(img, scale, detail)
+						off = max(off, math.Abs(mono-icon))
+						labelY := baseline(label, ui.Span{Text: r.label, Size: 14}, scale)
+						detailY := baseline(detail, ui.Span{Text: r.detail, Font: "monospace", Size: 13}, scale)
+						if labelY != detailY {
+							t.Errorf("%s, scale %v, %q: label baseline %.9f, detail %.9f", name, scale, r.label, labelY, detailY)
+						}
+						t.Logf("%s, scale %v, %q: icon %.9f, label %+.9f, detail cap %+.9f (ink centroid %+.9f)", name, scale, r.label, icon, text-icon, mono-icon, inkCentre(img, scale, detail)-icon)
+					} else {
+						t.Logf("%s, scale %v, %q: icon %.2f, label %+.2f", name, scale, r.label, icon, text-icon)
+					}
+					if off > 0.5 {
+						t.Errorf("%s, scale %v: the row %q is %.9f DIPs off level", name, scale, r.label, off)
+					}
+				}
+			}
+		}
+		tt.SetScale(2)
+
+		// With nothing pending the phase row shows: thinking, then replying.
+		reply.Blocks = kept[:1]
+		for _, phase := range []struct {
+			phase conversation.Phase
+			key   string
+		}{{conversation.Thinking, "turn_thinking"}, {conversation.Generating, "turn_generating"}} {
+			reply.Phase = phase.phase
+			a.Messages.List(cv.ID).ScrollToEnd()
+			tt.Frame()
+			tt.Advance(300 * time.Millisecond)
+			text := i18n.In("zh-CN", phase.key)
+			label, ok := tt.Find(text)
+			if !ok {
+				t.Fatalf("%s: no phase row %q", name, phase.key)
+			}
+			// LevelSpan puts the 14-DIP text's baseline 5 DIPs below the mark's
+			// centre. The CJK fallback font's line-box centre is a different point.
+			middle := baseline(label, ui.Span{Text: text, Size: 14}, 2) - 5
+			mark := false
+			var candidates []ui.Rect
+			for _, e := range tt.AccessAll() {
+				b := e.Bounds
+				if e.Role != ui.RoleProgress || b.W != 16 || b.H != 16 {
+					continue
+				}
+				candidates = append(candidates, b)
+				mark = mark || !e.Offscreen && b.X < label.X && label.X-b.X-b.W == 8 && math.Abs(float64(b.Y+b.H/2)-middle) < 1
+			}
+			if !mark {
+				t.Errorf("%s: no visible 16-DIP mark before %q at %v, cap centre %.3f, progress marks %v", name, phase.key, label, middle, candidates)
+			}
+			snapshot(t, tt, "loading-"+phase.key+"-"+name)
+		}
+		reply.Blocks = kept
+	}
+
+	// The sidebar alone: its loaders are all that moves.
+	d := preview.Demo("zh-CN", "local")
+	side := sidebar.New(d, preview.DemoStart)
+	tt := ui.NewTesterWith(func(c *ui.Context) {
+		theme.Apply(c, "", theme.Dark)
+		ui.Column(c).Fill().Background(theme.Of(c).Sidebar).Children(func() { sidebar.View(c, side) })
+	}, NavWidth, 700, opaque)
+	tt.SetLocale("zh-CN")
+	settle := func() {
+		tt.Frame()
+		tt.Advance(time.Second)
+		tt.Frame()
+	}
+	settle()
+	loader := func() bool {
+		r, ok := tt.Find(running)
+		return ok && r.W == 12 && r.H == 12
+	}
+	if !loader() || !tt.FramePending() {
+		t.Fatalf("the sidebar's running rows: loader %v, frame pending %v", loader(), tt.FramePending())
+	}
+	tt.SetPreferences(ui.Preferences{ReduceMotion: true, ReduceTransparency: true})
+	settle()
+	if !loader() || tt.FramePending() {
+		t.Errorf("Reduce Motion: loader %v, frame pending %v", loader(), tt.FramePending())
+	}
+	tt.SetPreferences(opaque.Preferences)
+	for _, p := range d.Projects {
+		for _, c := range p.Conversations {
+			c.Status = preview.Idle
+		}
+	}
+	for _, c := range d.Unassigned {
+		c.Status = preview.Idle
+	}
+	settle()
+	if _, ok := tt.Find(running); ok || tt.FramePending() {
+		t.Errorf("no session runs: loader %v, frame pending %v", ok, tt.FramePending())
+	}
+}

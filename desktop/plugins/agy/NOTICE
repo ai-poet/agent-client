@@ -1,0 +1,18 @@
+The Antigravity package references two third-party projects for the behaviour
+of `agy acp`. No source file of either is included.
+
+chengdidididi/agy-acp2api, MIT License, Copyright (c) 2026 chengdidididi:
+the stripped custom agent with a tool-denying hook, the text tool-call
+convention, the `_meta.antigravity.systemPrompt.append` system text and the
+`-low`, `-medium` and `-high` model variants. Its credential copying into a
+second profile, traffic redirection, `SSH_CONNECTION` override, HTTP gateway
+and reporting of errors as assistant text are not used.
+
+DylanLIiii/magpie-plugins, package agy-cli, MIT License:
+placing the agent under `.agents/agents/` of the working directory so `agy`
+keeps its own profile, the 112 KiB replay budget below `agy`'s prompt limit,
+the session options for models and thought levels, and the in-band failure
+marker. Its MCP bridge through `--ide-mcp-port` is not used.
+
+Both licenses are reproduced in LICENSE. This package is not an official
+Google integration. Antigravity is a trademark of its owner.

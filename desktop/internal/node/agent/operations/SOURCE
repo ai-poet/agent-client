@@ -1,0 +1,12 @@
+Native operation schemas and descriptions captured independently from revision
+ eaad1b7f18e448c8c4e9e9286e19560c8a351ae1.
+Source: crates/node-runtime/src/agent/plugins/operations/{schema,files,commands,repository,artifacts,connections}.rs
+Capture: agent::plugins::operations::tests::go_b5_workspace_schema_capture
+44 source operations (the nine connection operations were transcribed from connections.rs), source parameter JSON and read-only/concurrency policy.
+The capture ran the source functions and did not read Go output.
+Bundled declarations come from this repository's immutable plugin snapshot.
+The three code index operations (code.search, code.outline, code.graph) were transcribed from operations/code.rs with the policy in operations.rs.
+The six knowledge operations (knowledge.query, knowledge.read, knowledge.collections, knowledge.create, knowledge.rebuild, knowledge.remove) were transcribed from operations/knowledge.rs with the policy in operations.rs.
+The plugin storage operations (storage.get, storage.list, storage.set, storage.delete) were transcribed from operations/schema.rs and progress.update from operations/progress.rs, with the policy in operations.rs.
+The two local model operations (models.install, models.remove) were transcribed from operations/models.rs and the four role operations (roles.list, roles.save, roles.remove, roles.apply) from operations/roles.rs, with the policy in operations.rs.
+The three media tools in media.json (inspect_image, generate_image, generate_video) keep the schemas, argument policy and display of Sailry 5d0ac251 plugins/builtin/media/agent/{mod,generation}.rs, which the withdrawn media package carried; their descriptions state the direct-assignment rule.

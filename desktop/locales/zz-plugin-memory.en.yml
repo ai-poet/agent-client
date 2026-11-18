@@ -1,0 +1,3 @@
+ram_plugins: "Plugins (estimated)"
+ram_plugins_partial: "%{bytes} · partial"
+ram_plugins_error: "Could not read plugin memory"

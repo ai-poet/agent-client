@@ -1,0 +1,61 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "task-plaza",
+  "version": "0.1.10",
+  "description": "Project rooms and session activity",
+  "extensions": {
+    "dev.sailry.platform": {
+      "api_version": "v1",
+      "min_sailry_version": "0.1.6",
+      "actions": [
+        "activity.read",
+        "conversation.read",
+        "conversation.control"
+      ],
+      "display": {
+        "label": "Task Plaza",
+        "locales": {
+          "zh-CN": "任务广场"
+        },
+        "icon": "phosphor:users-three"
+      },
+      "description": {
+        "label": "Project rooms and session activity",
+        "locales": {
+          "zh-CN": "项目房间与会话动态"
+        }
+      },
+      "desktop": {
+        "entry": "dev.sailry.platform/desktop/main.js",
+        "resources": [
+          "dev.sailry.platform/desktop/main.js",
+          "dev.sailry.platform/desktop/state.js",
+          "dev.sailry.platform/desktop/view.js",
+          "dev.sailry.platform/desktop/locales.js",
+          "dev.sailry.platform/desktop/floor.js",
+          "dev.sailry.platform/desktop/geometry.js",
+          "dev.sailry.platform/desktop/scene.js",
+          "dev.sailry.platform/desktop/details.js",
+          "dev.sailry.platform/desktop/ground.js",
+          "dev.sailry.platform/desktop/art.js",
+          "dev.sailry.platform/desktop/assets/workers.png"
+        ],
+        "navigation": {
+          "label": "Task Plaza",
+          "locales": {
+            "zh-CN": "任务广场"
+          },
+          "icon": "reicon:building/buildings"
+        },
+        "navigation_options": {
+          "pinned": true,
+          "details": true,
+          "order": 110,
+          "target": "node"
+        }
+      },
+      "category": "automation",
+      "tint": "amber"
+    }
+  }
+}

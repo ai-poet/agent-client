@@ -1,0 +1,62 @@
+# Review rule index
+
+Select one rule file for each reviewed path. Match the worktree-relative path against the patterns below in order; the first match wins. Matching ignores case, `**` spans directories and `{a,b}` lists alternatives. Use `default.md` when no pattern matches.
+
+A `.m` file uses `objc.md` instead of `matlab.md` when its first non-blank line starts with `#import`, `#include`, `#pragma`, `#if`, `#define`, `@import`, `@interface`, `@implementation`, `@class`, `@protocol`, `//` or `/*`.
+
+| Pattern | Rule |
+| --- | --- |
+| `**/*.properties` | properties.md |
+| `**/*{mapper,dao}*.xml` | mapper_dao_xml.md |
+| `**/pom.xml` | pom_xml.md |
+| `**/build.gradle` | build_gradle.md |
+| `**/package.json` | package_json.md |
+| `**/Cargo.toml` | cargo_toml.md |
+| `**/composer.json` | composer_json.md |
+| `**/*.{json,json5}` | json.md |
+| `.github/workflows/**/*.{yaml,yml}` | github_workflows.md |
+| `.github/**/*.{yaml,yml}` | github_config.md |
+| `**/*.{yaml,yml}` | yaml.md |
+| `**/*.java` | java.md |
+| `**/*.go` | go.md |
+| `**/*.{ftl,ftlh,ftlx}` | freemarker.md |
+| `**/*.{hbs,mustache}` | handlebars_mustache.md |
+| `**/*.{jinja2,j2}` | jinja.md |
+| `**/*.pug` | pug.md |
+| `**/*.ets` | arkts.md |
+| `**/*.astro` | astro.md |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}` | ts_js_tsx_jsx.md |
+| `**/*.{kt,kts}` | kotlin.md |
+| `**/*.{fs,fsi,fsx}` | fsharp.md |
+| `**/*.rs` | rust.md |
+| `**/*.{cpp,cc,cxx,hpp,hxx}` | cpp.md |
+| `**/*.c` | c.md |
+| `**/*.{py,pyi,ipynb}` | python.md |
+| `**/*.{php,phtml}` | php.md |
+| `**/*.proto` | protobuf.md |
+| `**/*.po` | po.md |
+| `**/*.pot` | pot.md |
+| `**/*.{graphql,gql}` | graphql.md |
+| `**/*.prisma` | prisma.md |
+| `**/*.jl` | julia.md |
+| `**/*.R` | r.md |
+| `**/*.{tf,hcl,tfvars}` | terraform.md |
+| `**/*.bicep` | bicep.md |
+| `**/*.nix` | nix.md |
+| `**/*.{hs,lhs}` | haskell.md |
+| `**/*.{nim,nims,nimble}` | nim.md |
+| `**/*.swift` | swift.md |
+| `**/*.elm` | elm.md |
+| `**/*.{jsonnet,libsonnet}` | jsonnet.md |
+| `**/*.zig` | zig.md |
+| `**/*.thrift` | thrift.md |
+| `**/*.capnp` | capnp.md |
+| `**/*.{ml,mli}` | ocaml.md |
+| `**/*.{re,rei}` | ocaml.md |
+| `**/*.{v,sv,vh}` | verilog.md |
+| `**/*.{vhd,vhdl}` | vhdl.md |
+| `**/*.m` | matlab.md |
+| `**/*.mm` | objc.md |
+| `**/*.sol` | solidity.md |
+| `**/*.vy` | vyper.md |
+| `**/*.rego` | rego.md |

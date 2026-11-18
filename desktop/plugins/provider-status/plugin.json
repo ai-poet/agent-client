@@ -1,0 +1,151 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "provider-status",
+  "version": "0.1.10",
+  "description": "Account usage for configured OAuth model channels",
+  "license": "Apache-2.0",
+  "extensions": {
+    "dev.sailry.platform": {
+      "api_version": "v1",
+      "min_sailry_version": "0.1.6",
+      "scope": "host",
+      "actions": [
+        "http.request"
+      ],
+      "display": {
+        "label": "Account usage",
+        "locales": {
+          "zh-CN": "账户用量",
+          "zh-TW": "帳戶用量",
+          "de": "Kontonutzung",
+          "es": "Uso de la cuenta",
+          "fr": "Utilisation du compte",
+          "ja": "アカウント使用量",
+          "ko": "계정 사용량",
+          "pt-BR": "Uso da conta",
+          "ru": "Использование аккаунта"
+        },
+        "icon": "phosphor:gauge"
+      },
+      "description": {
+        "label": "Usage for connected model accounts",
+        "locales": {
+          "zh-CN": "已连接模型账户的用量",
+          "zh-TW": "已連線模型帳戶的用量",
+          "de": "Nutzung verbundener Modellkonten",
+          "es": "Uso de cuentas de modelos conectadas",
+          "fr": "Utilisation des comptes de modèles connectés",
+          "ja": "接続済みモデルアカウントの使用量",
+          "ko": "연결된 모델 계정 사용량",
+          "pt-BR": "Uso da conta",
+          "ru": "Использование подключённых аккаунтов моделей"
+        }
+      },
+      "category": "data",
+      "tint": "teal",
+      "model_resources": [
+        {
+          "authentication": "chat_gpt",
+          "requests": {
+            "usage": {
+              "method": "GET",
+              "url": "https://chatgpt.com/backend-api/wham/usage",
+              "headers": {
+                "Accept": "application/json",
+                "User-Agent": "Sailry/0.1"
+              },
+              "cache_ttl_ms": 180000
+            }
+          }
+        },
+        {
+          "authentication": "chat_gpt_oauth",
+          "requests": {
+            "usage": {
+              "method": "GET",
+              "url": "https://chatgpt.com/backend-api/wham/usage",
+              "headers": {
+                "Accept": "application/json",
+                "User-Agent": "Sailry/0.1"
+              },
+              "cache_ttl_ms": 180000
+            }
+          }
+        },
+        {
+          "authentication": "claude_oauth",
+          "requests": {
+            "usage": {
+              "method": "GET",
+              "url": "https://api.anthropic.com/api/oauth/usage",
+              "headers": {
+                "Accept": "application/json",
+                "User-Agent": "claude-cli/2.1.280",
+                "anthropic-beta": "oauth-2025-04-20"
+              },
+              "cache_ttl_ms": 180000
+            }
+          }
+        }
+      ],
+      "ui": [
+        {
+          "id": "usage",
+          "slot": "footer",
+          "kind": "metric",
+          "label": {
+            "label": "Remaining usage",
+            "locales": {
+              "zh-CN": "剩余用量",
+              "zh-TW": "剩餘用量",
+              "de": "Verbleibendes Kontingent",
+              "es": "Uso restante",
+              "fr": "Quota restant",
+              "ja": "残りの使用量",
+              "ko": "남은 사용량",
+              "pt-BR": "Uso restante",
+              "ru": "Остаток лимита"
+            }
+          },
+          "icon": "gauge",
+          "order": 10
+        },
+        {
+          "id": "provider_usage",
+          "slot": "provider",
+          "kind": "metric",
+          "label": {
+            "label": "Remaining usage",
+            "locales": {
+              "zh-CN": "剩余用量",
+              "zh-TW": "剩餘用量",
+              "de": "Verbleibendes Kontingent",
+              "es": "Uso restante",
+              "fr": "Quota restant",
+              "ja": "残りの使用量",
+              "ko": "남은 사용량",
+              "pt-BR": "Uso restante",
+              "ru": "Остаток лимита"
+            }
+          },
+          "icon": "gauge",
+          "order": 10
+        }
+      ],
+      "desktop": {
+        "ui_shared": true,
+        "ui_entry": "dev.sailry.platform/desktop/footer.js",
+        "resources": [
+          "dev.sailry.platform/desktop/footer.js",
+          "dev.sailry.platform/desktop/format.js",
+          "dev.sailry.platform/desktop/locales.js",
+          "dev.sailry.platform/adapters/response.js",
+          "dev.sailry.platform/adapters/claude.js",
+          "dev.sailry.platform/adapters/codex.js",
+          "dev.sailry.platform/desktop/providers.js",
+          "dev.sailry.platform/desktop/visibility.js"
+        ]
+      }
+    }
+  }
+}

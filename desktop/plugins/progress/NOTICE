@@ -1,0 +1,7 @@
+Progress package
+
+Tool description, schema, validation and display metadata are adapted from
+Sailry ef5e82ea, plugins/builtin/progress/agent/mod.rs and
+plugins/builtin/progress/desktop/messages.rs.
+
+The core records authoritative tool history and reduces task progress.
