@@ -8,7 +8,7 @@ const root = new URL('../',import.meta.url);
 const manifest = JSON.parse(await readFile(new URL('plugin.json',root),'utf8'));
 const extension = manifest.extensions['dev.sailry.platform'];
 const source = (await readFile(new URL('dev.sailry.platform/host/main.js',root),'utf8')).replace(/^export \{[^\n]+\} from [^\n]+;\n/gm,'').replace(/^export /gm,'');
-const host = vm.runInNewContext(`${source}\n({list,read,write,edit,apply,remove,move,mkdir,find,search,office,notebook_read,notebook_edit})`);
+const host = vm.runInNewContext(`${source}\n({list,read,write,edit,apply,remove,move,mkdir,find,search,notebook_read,notebook_edit})`);
 const plain = value => JSON.parse(JSON.stringify(value));
 const tool = name => extension.tools.find(tool => tool.name === name);
 
@@ -24,7 +24,6 @@ test('tool declarations preserve operations and unformatted native outputs', () 
     ['create_directory','mkdir','files.mkdir','summary'],
     ['find_files','find','files.find','summary'],
     ['search_files','search','files.search','summary'],
-    ['read_office','office','office.read','summary'],
     ['read_notebook','notebook_read','notebook.read','summary'],
     ['edit_notebook','notebook_edit','notebook.edit','details'],
   ];
@@ -52,7 +51,6 @@ test('tool declarations preserve operations and unformatted native outputs', () 
   assert.match(tool('write_file').description,/conflict requires reading the current file/);
   assert.match(tool('read_file').description,/one page is not the whole file/);
   assert.equal(tool('get_office_runtime'),undefined);
-  assert.match(tool('read_office').description,/including continuations of long parts/);
 });
 
 test('directory schema and pagination retain cursor identity and root spelling', () => {
@@ -109,18 +107,6 @@ test('search defaults keep original expressions and globs without interpreting t
   assert.deepEqual(args,{query:'^a.*[中]$',regex:true,case_sensitive:true,globs});
 });
 
-test('Office inspection retains section offsets and defaults', () => {
-  assert.deepEqual(tool('read_office').handler.parameters,{
-    $schema:'https://json-schema.org/draft/2020-12/schema',title:'Read',type:'object',
-    properties:{source:{type:'object',properties:{kind:{type:'string',enum:['path','attachment']},value:{type:'string',description:'Worktree-relative path or visible conversation attachment ID'}},required:['kind','value'],additionalProperties:false},offset:{
-      type:'integer',format:'uint',minimum:0,default:0,
-      description:'Zero-based section offset. Long document parts continue in subsequent sections.',
-    }},required:['source'],additionalProperties:false,
-  });
-  assert.deepEqual(plain(host.office({source:{kind:'path',value:'报告.docx'}})),{source:{kind:'path',value:'报告.docx'},offset:0});
-  assert.deepEqual(plain(host.office({source:{kind:'attachment',value:'attachment-id'},offset:41})),{source:{kind:'attachment',value:'attachment-id'},offset:41});
-});
-
 test('invalid argument shapes fail before requesting an operation', () => {
   const examples = {
     list:{path:'.'},read:{path:'file.txt'},write:{path:'file.txt',text:'x',expected_revision:null},
@@ -129,7 +115,7 @@ test('invalid argument shapes fail before requesting an operation', () => {
     remove:{path:'file.txt',expected_revision:'a'.repeat(64)},
     move:{path:'file.txt',destination:'new.txt',expected_revision:'a'.repeat(64)},
     mkdir:{path:'folder'},
-    find:{globs:['**/*.txt']},search:{query:'x'},office:{source:{kind:'path',value:'book.xlsx'}},
+    find:{globs:['**/*.txt']},search:{query:'x'},
   };
   for (const [name,valid] of Object.entries(examples)) {
     for (const args of [null,[],true,'path',42,...['worktree','session','node','turn','unexpected'].map(key => ({...valid,[key]:'foreign'}))]) {
@@ -149,7 +135,6 @@ test('invalid argument shapes fail before requesting an operation', () => {
     find:[{}, {globs:[]},{globs:['']},{globs:[4]}],
     write:[{path:'a'}, {path:'a',text:[]}, {path:'a',text:'x',expected_revision:4}],
     search:[{}, {query:4}, {query:'x',regex:null}, {query:'x',case_sensitive:1}, {query:'x',globs:'*'}, {query:'x',globs:[4]}],
-    office:[{}, {source:{kind:'other',value:'a'}}, {source:{kind:'path',value:''}}, {source:{kind:'attachment',value:'a'},offset:null}, {source:{kind:'path',value:'a'},offset:-1}, {source:{kind:'path',value:'a'},offset:1.5}, {source:{kind:'path',value:'a'},offset:Number.MAX_SAFE_INTEGER + 1}],
   };
   for (const [name,examples] of Object.entries(invalid)) {
     for (const args of examples) assert.equal(host[name](args).error.code,'invalid_request',`${name}: ${JSON.stringify(args)}`);
@@ -161,7 +146,6 @@ test('captured display selectors retain path and first-line query presentation',
   for (const name of ['read_file','write_file']) {
     assert.deepEqual(tool(name).display.input.summary,{path:'/path',code:true});
   }
-  assert.deepEqual(tool('read_office').display.input.summary,{path:'/source/value',code:true,result_path:'/data/path'});
   assert.deepEqual(tool('write_file').display.input.target,{path:'/path'});
 });
 
@@ -181,10 +165,6 @@ test('result recipes refer to original data and preserve file-specific choices',
   assert.equal(prompts[0].message.label,'Create %{path}');
   assert.equal(prompts[1].message.label,'Replace %{path}');
   assert.deepEqual(prompts[1].values.path,reference('arguments','/path'));
-  const office = tool('read_office').display.output.preview.parts[0].rows;
-  assert.deepEqual(office.value,reference('result','/data/sections'));
-  assert.deepEqual(office.text.parts,[{value:reference('item','/text')}]);
-  assert.equal(office.separator,'\n\n');
   const partial = tool('list_directory').display.output.notices[0];
   assert.deepEqual(partial.when.any,[
     {value:reference('result','/data/truncated'),equals:true},
@@ -226,8 +206,6 @@ test('image reads keep recent images and describe non-vision facts', () => {
     assert.match(declaration.description,pattern);
   }
   assert.match(extension.instructions,/worktree image with read_file/);
-  assert.match(tool('read_office').description,/attachment/);
-  assert.equal(tool('read_office').keep_images,undefined);
 });
 
 test('batch edits preserve atomic arguments and enforce exclusive forms', () => {

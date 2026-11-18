@@ -32,14 +32,14 @@ func BundledDefaults() []DefaultPackage {
 		{"commands", true}, {"external-browser", false}, {"browser", true}, {"computer", false},
 		{"brief", true}, {"memory", true}, {"files", true}, {"code", true}, {"statistics", true}, {"provider-status", true},
 		{"openai-auth", true}, {"claude-auth", true}, {"copilot-auth", true}, {"workbuddy", true}, {"worktrees", true},
-		{"git", true}, {"context7", true}, {"github", true}, {"code-review", true}, {"office", true},
+		{"git", true}, {"context7", true}, {"github", true}, {"code-review", true},
 	}
 }
 
 // RetiredBundled names packages the application once bundled and now provides
 // itself. Startup removes a bundled installation of one; the removal record
 // and the captured versions stay, so earlier turns still resolve.
-func RetiredBundled() []string { return []string{"media", "ssh", "databases"} }
+func RetiredBundled() []string { return []string{"media", "ssh", "databases", "office"} }
 
 func manifestCatalogEntry(manifest Manifest) protocol.PluginCatalogEntry {
 	entry := protocol.DefaultPluginCatalogEntry()

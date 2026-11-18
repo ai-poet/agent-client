@@ -6,16 +6,15 @@ import (
 	"slices"
 
 	"github.com/jonboulle/clockwork"
-	"lukechampine.com/blake3"
 
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/localmodels"
 	"github.com/ai-poet/agent-client/desktop/internal/localmodels/embedding"
 	"github.com/ai-poet/agent-client/desktop/internal/node/admission"
 	knowledgeservice "github.com/ai-poet/agent-client/desktop/internal/node/knowledge/service"
-	"github.com/ai-poet/agent-client/desktop/internal/node/knowledge/source"
+
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
-	"github.com/ai-poet/agent-client/desktop/internal/office"
+
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
@@ -185,21 +184,6 @@ func (node *Node) knowledgeOptions() knowledgeservice.Options {
 				offsets, err := engine.(*embedding.Engine).Offsets(text)
 				return offsets, embeddingFailure(err)
 			})
-		},
-		OCR: &source.OCR{
-			Signature: func() ([32]byte, error) {
-				resource, err := node.ocrResource(node.ctx)
-				if notConfigured(err) {
-					return [32]byte{}, nil
-				}
-				if err != nil {
-					return [32]byte{}, err
-				}
-				return blake3.Sum256([]byte(resource.ID)), nil
-			},
-			Parts: func(ctx context.Context, name string, data []byte) ([]office.Part, error) {
-				return node.documentParts(ctx, name, data, localmodels.Background)
-			},
 		},
 		Sources: func(ctx context.Context, stored store.KnowledgeStored, after *string) (page store.KnowledgeStoragePage, err error) {
 			err = node.profile.Store.Node.Read(ctx, func(db *sql.Conn) error {

@@ -36,5 +36,4 @@ test('lifecycle prepares exact native operations without configuration writes', 
   assert.equal(tools[1].handler.operation,'models.install');
   assert.equal(tools[2].handler.operation,'models.remove');
   assert.ok(extension.host.resources.includes('dev.sailry.platform/host/models.js'));
-  assert.match(extension.tools.find(tool=>tool.name==='read_office').description,/visible in this conversation/);
 });

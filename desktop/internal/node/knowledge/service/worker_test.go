@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ai-poet/agent-client/desktop/internal/node/knowledge/source"
-	"github.com/ai-poet/agent-client/desktop/internal/office"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
@@ -70,54 +67,21 @@ func TestWorker(t *testing.T) {
 		fixture := newHarness(t)
 		root := t.TempDir()
 		write(t, filepath.Join(root, "a.md"), "alpha notes\n")
-		write(t, filepath.Join(root, "broken.png"), "not an image")
 		write(t, filepath.Join(root, "c.md"), "gamma notes\n")
 		write(t, filepath.Join(root, "locked", "inside.md"), "inside notes\n")
 		fixture.selectEmbedding(false)
-		// The reader fails the way the Node's does for an undecodable image.
-		recognized, corrupt := 0, true
-		fixture.service.options.OCR = &source.OCR{
-			Signature: func() ([32]byte, error) { return [32]byte{1}, nil },
-			Parts: func(_ context.Context, name string, _ []byte) ([]office.Part, error) {
-				recognized++
-				if corrupt {
-					return nil, newFault(protocol.ErrorCodeUnavailable, "OCR failed: image: unknown format")
-				}
-				return []office.Part{{Name: name, Text: "recognized text", Position: protocol.KnowledgePosition{Kind: "page", Data: protocol.KnowledgePositionPagePayload{Page: 1}}}}, nil
-			},
-		}
 		fixture.create("Docs", directory(root))
 		progress := func() protocol.KnowledgeProgress {
 			t.Helper()
 			fixture.sweep()
 			return fixture.collections()[0].Progress
 		}
-		broken := filepath.Join(root, "broken.png")
 		first := progress()
-		if first.Status != protocol.KnowledgeStatusReady || first.Sources != 3 || first.Completed != 3 || first.Failed != 1 ||
-			!slices.Equal(first.Failures, []protocol.KnowledgeFailure{{Path: broken, Reason: "OCR failed: image: unknown format"}}) {
+		if first.Status != protocol.KnowledgeStatusReady || first.Sources != 3 || first.Completed != 3 || first.Failed != 0 {
 			t.Fatalf("first pass = %+v", first)
 		}
-		// The files after the failed one are indexed.
 		if found := names(fixture.query("gamma", nil).Hits); !slices.Equal(found, []string{"c.md"}) {
 			t.Fatalf("later file = %v", found)
-		}
-		if !fixture.service.retry {
-			t.Fatal("no retry was scheduled for the failed source")
-		}
-
-		// It is read again on the next passes, at most three times while
-		// its metadata is unchanged, and stays reported.
-		for pass := 2; pass <= 5; pass++ {
-			if again := progress(); again.Failed != 1 || again.Status != protocol.KnowledgeStatusReady {
-				t.Fatalf("pass %d = %+v", pass, again)
-			}
-			if want := min(pass, attempts); recognized != want {
-				t.Fatalf("pass %d read the source %d times, want %d", pass, recognized, want)
-			}
-			if want := pass < attempts; fixture.service.retry != want {
-				t.Fatalf("pass %d retry = %v", pass, fixture.service.retry)
-			}
 		}
 
 		// A directory that cannot be entered keeps what was published
@@ -138,7 +102,7 @@ func TestWorker(t *testing.T) {
 			t.Log("this user reads directories without permission; the directory case is not covered")
 		} else {
 			denied := progress()
-			if denied.Status != protocol.KnowledgeStatusReady || denied.Failed != 2 || denied.Sources != 3 ||
+			if denied.Status != protocol.KnowledgeStatusReady || denied.Failed != 1 || denied.Sources != 3 ||
 				!slices.ContainsFunc(denied.Failures, func(failure protocol.KnowledgeFailure) bool {
 					return failure.Path == locked && failure.Reason == "knowledge source cannot be read"
 				}) {
@@ -149,20 +113,6 @@ func TestWorker(t *testing.T) {
 			}
 		}
 		restore()
-
-		// Invalidate, as a changed model set does, forgets the attempts.
-		corrupt = false
-		if stale := progress(); stale.Failed != 1 {
-			t.Fatalf("exhausted source was read again: %+v", stale)
-		}
-		fixture.service.Invalidate()
-		healed := progress()
-		if healed.Failed != 0 || len(healed.Failures) != 0 || healed.Sources != 4 || fixture.service.retry {
-			t.Fatalf("after the source became readable = %+v retry %v", healed, fixture.service.retry)
-		}
-		if found := names(fixture.query("recognized", nil).Hits); !slices.Equal(found, []string{"broken.png"}) {
-			t.Fatalf("recovered source = %v", found)
-		}
 
 		// A collection that fails as a whole reports its reason and is
 		// retried a bounded number of times.

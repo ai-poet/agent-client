@@ -13,7 +13,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/ai-poet/agent-client/desktop/internal/office"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
@@ -258,8 +257,7 @@ func (fetcher *Fetcher) readResponse(response *http.Response, parsed *url.URL) (
 	contentType, _, _ := strings.Cut(declared, ";")
 	contentType = strings.ToLower(strings.TrimSpace(contentType))
 	isHTML := contentType == "text/html" || contentType == "application/xhtml+xml"
-	isPDF := contentType == "application/pdf"
-	if !isHTML && !isPDF && !strings.HasPrefix(contentType, "text/") && contentType != "application/json" && !strings.HasSuffix(contentType, "+json") && contentType != "application/xml" && !strings.HasSuffix(contentType, "+xml") {
+	if !isHTML && !strings.HasPrefix(contentType, "text/") && contentType != "application/json" && !strings.HasSuffix(contentType, "+json") && contentType != "application/xml" && !strings.HasSuffix(contentType, "+xml") {
 		return webDocument{}, webUnavailable("unsupported web content type: " + contentType)
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, webBodyLimit+1))
@@ -271,17 +269,7 @@ func (fetcher *Fetcher) readResponse(response *http.Response, parsed *url.URL) (
 	}
 	var title *string
 	var content string
-	if isPDF {
-		parts, err := office.Parts("page.pdf", body)
-		if err != nil {
-			return webDocument{}, err
-		}
-		sections := make([]string, 0, len(parts))
-		for _, part := range parts {
-			sections = append(sections, "## "+part.Name+"\n\n"+part.Text)
-		}
-		content = strings.Join(sections, "\n\n")
-	} else {
+	{
 		content = decodeWebBody(body, declared, isHTML)
 		if isHTML {
 			title, content, err = convertHTML(content)

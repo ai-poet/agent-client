@@ -86,10 +86,7 @@ func Command(operation protocol.ToolOperation, arguments json.RawMessage, worktr
 		defaultValue("multiline", false)
 		defaultValue("globs", []string{})
 		values = map[string]any{"worktree": worktree, "options": values}
-	case "office.read":
-		kind = "read_office"
-		defaultValue("offset", 0)
-		values = map[string]any{"worktree": worktree, "options": values}
+
 	case "notebook.read":
 		kind = "read_notebook"
 		defaultValue("offset", 0)

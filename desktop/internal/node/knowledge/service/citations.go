@@ -166,7 +166,6 @@ func (service *Service) context(ctx context.Context, definition protocol.Knowled
 	if !matched {
 		return "", changedSource()
 	}
-	scan.SetOCR(service.options.OCR)
 	entry, err := scan.Next(func(string, source.Stat) (bool, error) { return false, nil }, func([]source.Watch) {})
 	if err != nil {
 		return "", err

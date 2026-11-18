@@ -494,7 +494,6 @@ func (service *Service) scan(ctx context.Context, selected store.KnowledgeSource
 	if err != nil {
 		return nil, err
 	}
-	scan.SetOCR(service.options.OCR)
 	return scan, nil
 }
 

@@ -98,8 +98,7 @@ func commandWorktree(command protocol.Command) (protocol.WorktreeID, bool) {
 		return input.Worktree, true
 	case *protocol.CommandFindFilesPayload:
 		return input.Worktree, true
-	case *protocol.CommandReadOfficePayload:
-		return input.Worktree, true
+
 	case *protocol.CommandReadNotebookPayload:
 		return input.Worktree, true
 	case *protocol.CommandEditNotebookPayload:

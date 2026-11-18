@@ -139,8 +139,7 @@ func pluginNativeOperationAction(operation protocol.ToolOperation) protocol.Plug
 
 	case protocol.ToolOperationDelegateAgent, protocol.ToolOperationGuideAgent, protocol.ToolOperationWaitAgent:
 		return protocol.PluginActionDelegateAgents
-	case protocol.ToolOperationListDirectory, protocol.ToolOperationReadFile, protocol.ToolOperationReadFileLines, protocol.ToolOperationFindFiles,
-		protocol.ToolOperationSearchFiles, protocol.ToolOperationReadOffice, protocol.ToolOperationReadNotebook:
+	case protocol.ToolOperationListDirectory, protocol.ToolOperationReadFile, protocol.ToolOperationReadFileLines, protocol.ToolOperationFindFiles, protocol.ToolOperationSearchFiles, protocol.ToolOperationReadNotebook:
 		return protocol.PluginActionReadFiles
 	case protocol.ToolOperationWriteFile, protocol.ToolOperationEditFile, protocol.ToolOperationEditNotebook, protocol.ToolOperationDeleteFile,
 		protocol.ToolOperationMoveFile, protocol.ToolOperationApplyChanges, protocol.ToolOperationCreateDirectory:

@@ -2687,7 +2687,6 @@
         "files.mkdir",
         "files.find",
         "files.search",
-        "office.read",
         "notebook.read",
         "notebook.edit",
         "media.inspect",

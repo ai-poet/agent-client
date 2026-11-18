@@ -42,8 +42,7 @@ func operationAction(operation protocol.ToolOperation) (protocol.PluginAction, b
 
 	case protocol.ToolOperationDelegateAgent, protocol.ToolOperationGuideAgent, protocol.ToolOperationWaitAgent:
 		return protocol.PluginActionDelegateAgents, true
-	case protocol.ToolOperationListDirectory, protocol.ToolOperationReadFile, protocol.ToolOperationReadFileLines, protocol.ToolOperationFindFiles,
-		protocol.ToolOperationSearchFiles, protocol.ToolOperationReadOffice, protocol.ToolOperationReadNotebook:
+	case protocol.ToolOperationListDirectory, protocol.ToolOperationReadFile, protocol.ToolOperationReadFileLines, protocol.ToolOperationFindFiles, protocol.ToolOperationSearchFiles, protocol.ToolOperationReadNotebook:
 		return protocol.PluginActionReadFiles, true
 	case protocol.ToolOperationWriteFile, protocol.ToolOperationEditFile, protocol.ToolOperationEditNotebook, protocol.ToolOperationDeleteFile,
 		protocol.ToolOperationMoveFile, protocol.ToolOperationApplyChanges, protocol.ToolOperationCreateDirectory:
@@ -95,8 +94,8 @@ var (
 		protocol.ToolOperationCodeReferences, protocol.ToolOperationCodeHover, protocol.ToolOperationCodeSymbols,
 	}
 	retiredActions = []protocol.PluginAction{
-        protocol.PluginActionReadDatabases, protocol.PluginActionControlDatabases, protocol.PluginActionManageDatabases,
-        protocol.PluginActionReadSsh, protocol.PluginActionControlSsh, protocol.PluginActionManageSsh,
+		protocol.PluginActionReadDatabases, protocol.PluginActionControlDatabases, protocol.PluginActionManageDatabases,
+		protocol.PluginActionReadSsh, protocol.PluginActionControlSsh, protocol.PluginActionManageSsh,
 		protocol.PluginActionReadCode, protocol.PluginActionManageCode, protocol.PluginActionReadCodeSettings, protocol.PluginActionSaveCodeSettings,
 	}
 	// A flow step has no approval of its own, so it runs only the operations

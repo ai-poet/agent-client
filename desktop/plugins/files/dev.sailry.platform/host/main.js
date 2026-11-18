@@ -125,14 +125,6 @@ export function search(args) {
   return {query,regex,case_sensitive,globs,path:path === '.' ? '' : path,mode,context,type,limit,offset,multiline};
 }
 
-export function office(args) {
-  if (!object(args,['source','offset'])) return invalid();
-  const {source,offset = 0} = args;
-  if (!object(source,['kind','value']) || !['path','attachment'].includes(source.kind) || typeof source.value !== 'string' || !source.value || !Number.isSafeInteger(offset) || offset < 0) return invalid();
-  return {source,offset};
-}
-
-
 export function notebook_read(args) {
   if (!object(args,['path','offset','limit']) || typeof args.path !== 'string') return invalid();
   const {offset = 0,limit = 20} = args;

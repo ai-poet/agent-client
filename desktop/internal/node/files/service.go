@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"github.com/ai-poet/agent-client/desktop/internal/core"
-	"github.com/ai-poet/agent-client/desktop/internal/office"
+
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 	"lukechampine.com/blake3"
 	"strings"
@@ -33,17 +33,13 @@ func validRevision(value string) bool {
 }
 func SupportsRead(kind string) bool {
 	switch kind {
-	case "browse_files", "list_directory", "read_file", "read_file_lines", "find_files", "search_files", "read_image", "read_notebook", "read_office":
+	case "browse_files", "list_directory", "read_file", "read_file_lines", "find_files", "search_files", "read_image", "read_notebook":
 		return true
 	}
 	return false
 }
 
-// Document inspects the bytes of a document or image file. The Node supplies
-// it so that images and scanned pages are read with its OCR model.
-type Document func(ctx context.Context, name string, data []byte, offset uint64) (protocol.OfficeInspection, error)
-
-func Inspect(ctx context.Context, root string, command protocol.Command, access core.FileAccess, document Document) (protocol.Output, error) {
+func Inspect(ctx context.Context, root string, command protocol.Command, access core.FileAccess) (protocol.Output, error) {
 	timeout := 5 * time.Second
 	if command.Kind == "find_files" || command.Kind == "search_files" {
 		timeout = 20 * time.Second
@@ -91,30 +87,7 @@ func Inspect(ctx context.Context, root string, command protocol.Command, access 
 		v := command.Data.(*protocol.CommandReadImagePayload)
 		kind = "file_image"
 		value, err = ReadImage(ctx, fs, v.Path)
-	case "read_office":
-		v := command.Data.(*protocol.CommandReadOfficePayload)
-		kind = "office_content"
-		if v.Options.Source.Kind != "path" {
-			return protocol.Output{}, invalid("attachment inspection requires a captured turn")
-		}
-		path, ok := v.Options.Source.Data.(string)
-		if !ok {
-			pointer, yes := v.Options.Source.Data.(*string)
-			if !yes || pointer == nil {
-				return protocol.Output{}, invalid("invalid Office source")
-			}
-			path = *pointer
-		}
-		file, e := fs.Open(path)
-		if e != nil {
-			return protocol.Output{}, e
-		}
-		defer file.Close()
-		data, e := readBounded(ctx, file, office.Limit)
-		if e != nil {
-			return protocol.Output{}, e
-		}
-		value, err = document(ctx, path, data, v.Options.Offset)
+
 	default:
 		return protocol.Output{}, invalid("invalid file inspection command")
 	}

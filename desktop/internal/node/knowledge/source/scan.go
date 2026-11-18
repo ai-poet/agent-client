@@ -121,7 +121,6 @@ type target struct {
 // Scan walks one source depth first.
 type Scan struct {
 	ctx       context.Context
-	ocr       *OCR
 	frames    []*frame
 	inherited []layer
 	pending   *target
@@ -223,9 +222,6 @@ func fileScan(ctx context.Context, directory *os.Root, name, base string) (*Scan
 	return &Scan{ctx: ctx, base: base, pending: &target{directory, name, name}, watches: []Watch{{file: name}}}, nil
 }
 
-// SetOCR lets the scan read images and scanned PDF pages.
-func (scan *Scan) SetOCR(ocr *OCR) { scan.ocr = ocr }
-
 // Close releases the directories a scan still holds.
 func (scan *Scan) Close() {
 	for _, frame := range scan.frames {
@@ -297,7 +293,7 @@ func (scan *Scan) Next(reuse func(path string, stat Stat) (bool, error), watch f
 func (scan *Scan) extract(file *target, reuse func(string, Stat) (bool, error)) (*Entry, error) {
 	defer file.directory.Close()
 	path := scan.locator(file.relative)
-	entry, err := read(scan.ctx, file, path, reuse, scan.ocr)
+	entry, err := read(scan.ctx, file, path, reuse)
 	if err != nil && code(err) != protocol.ErrorCodeCancelled {
 		// One unreadable file never ends the scan.
 		return unread(path, err, false), nil

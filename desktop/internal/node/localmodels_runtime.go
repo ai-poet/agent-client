@@ -9,7 +9,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/localmodels/embedding"
 	"github.com/ai-poet/agent-client/desktop/internal/localmodels/ocr"
 	"github.com/ai-poet/agent-client/desktop/internal/localmodels/onnx"
-	"github.com/ai-poet/agent-client/desktop/internal/office"
+
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
@@ -134,24 +134,4 @@ func (node *Node) recognize(ctx context.Context, resource localmodels.Resource, 
 		}
 		return strings.Join(texts, "\n"), nil
 	})
-}
-
-// imageParts reads an image file as one page of recognized text.
-func (node *Node) imageParts(ctx context.Context, data []byte, lane localmodels.Lane) ([]office.Part, error) {
-	image, err := ocr.Decode(data)
-	if errors.Is(err, ocr.ErrImageSize) {
-		return nil, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: err.Error()}
-	}
-	if err != nil {
-		return nil, ocrFailure(err)
-	}
-	resource, err := node.ocrResource(ctx)
-	if err != nil {
-		return nil, err
-	}
-	text, err := node.recognize(ctx, resource, image, lane)
-	if err != nil {
-		return nil, err
-	}
-	return []office.Part{{Name: "Image", Text: text, Position: protocol.KnowledgePosition{Kind: "page", Data: protocol.KnowledgePositionPagePayload{Page: 1}}}}, nil
 }

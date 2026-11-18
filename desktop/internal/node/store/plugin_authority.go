@@ -105,9 +105,9 @@ func checkPluginRequest(ctx context.Context, db *sql.Conn, request protocol.Requ
 		return nil
 	}
 	action, allowed, err := pluginExternalBrowserAction(ctx, db, request)
-    if err != nil {
-        return err
-    }
+	if err != nil {
+		return err
+	}
 	if !allowed {
 		action, allowed = pluginAction(request.Command.Kind)
 	}
@@ -495,7 +495,7 @@ func pluginAction(kind string) (protocol.PluginAction, bool) {
 		return protocol.PluginActionReadWorktrees, true
 	case "register_worktree", "create_worktree", "create_managed_worktree", "remove_worktree":
 		return protocol.PluginActionWriteWorktrees, true
-	case "list_directory", "read_file", "read_file_lines", "read_image", "read_notebook", "find_files", "download_file", "search_files", "read_office":
+	case "list_directory", "read_file", "read_file_lines", "read_image", "read_notebook", "find_files", "download_file", "search_files":
 		return protocol.PluginActionReadFiles, true
 	case "upload_file", "write_file", "edit_file", "edit_notebook", "delete_file", "move_file", "apply_changes", "finish_file_upload", "create_directory", "rename_entry", "copy_entry", "copy_entry_to", "move_entry_to", "trash_entry", "trash_file":
 		return protocol.PluginActionWriteFiles, true

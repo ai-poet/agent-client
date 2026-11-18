@@ -6,14 +6,13 @@ import (
 	"io"
 	"math"
 	"os"
-	"path/filepath"
+
 	"strings"
 
 	"lukechampine.com/blake3"
 
 	"github.com/ai-poet/agent-client/desktop/internal/core"
-	"github.com/ai-poet/agent-client/desktop/internal/localmodels/ocr"
-	"github.com/ai-poet/agent-client/desktop/internal/office"
+
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
@@ -43,7 +42,7 @@ func Lines(text string) []string {
 	return lines
 }
 
-func read(ctx context.Context, file *target, path string, reuse func(string, Stat) (bool, error), reader *OCR) (*Entry, error) {
+func read(ctx context.Context, file *target, path string, reuse func(string, Stat) (bool, error)) (*Entry, error) {
 	if err := cancelled(ctx); err != nil {
 		return nil, err
 	}
@@ -66,21 +65,14 @@ func read(ctx context.Context, file *target, path string, reuse func(string, Sta
 	if !os.SameFile(listed, before) {
 		return nil, newFault(protocol.ErrorCodeRevisionConflict, "knowledge source changed during inspection")
 	}
-	if before.Size() > office.Limit {
+	if before.Size() > (32 << 20) {
 		return nil, invalid("knowledge source exceeds 32 MiB")
 	}
 	modified := before.ModTime()
 	if modified.Unix() < 0 {
 		return nil, invalid("knowledge source modification time predates the epoch")
 	}
-	extension := strings.ToLower(strings.TrimPrefix(filepath.Ext(file.name), "."))
-	image := ocr.Supported(file.name)
 	stat := Stat{Size: uint64(before.Size()), ModifiedSeconds: uint64(modified.Unix()), ModifiedNanos: uint32(modified.Nanosecond())}
-	if reader != nil && (extension == "pdf" || image) {
-		if stat.Extractor, err = reader.Signature(); err != nil {
-			return nil, err
-		}
-	}
 	cached, err := reuse(path, stat)
 	if err != nil {
 		return nil, err
@@ -105,7 +97,7 @@ func read(ctx context.Context, file *target, path string, reuse func(string, Sta
 			return nil, err
 		}
 		count, err := opened.Read(buffer)
-		if len(data)+count > office.Limit {
+		if len(data)+count > (32 << 20) {
 			return nil, invalid("knowledge source exceeds 32 MiB")
 		}
 		data = append(data, buffer[:count]...)
@@ -123,36 +115,17 @@ func read(ctx context.Context, file *target, path string, reuse func(string, Sta
 	if int64(len(data)) != before.Size() || !same(before, after) {
 		return nil, newFault(protocol.ErrorCodeRevisionConflict, "knowledge source changed during extraction")
 	}
-	var parts []Part
-	switch {
-	case image && stat.Extractor == [32]byte{}:
-		return excluded(path, "OCR is unavailable"), nil
-	case image || extension == "pdf" || extension == "docx" || extension == "xlsx" || extension == "pptx":
-		var extracted []office.Part
-		if reader != nil {
-			extracted, err = reader.Parts(ctx, file.name, data)
-		} else {
-			extracted, err = office.Parts(file.name, data)
-		}
-		if err != nil {
-			return nil, err
-		}
-		for _, part := range extracted {
-			parts = append(parts, Part{Title: part.Name, Text: part.Text, Position: part.Position})
-		}
-	default:
-		text, err := core.DecodeText(data)
-		if err != nil {
-			return nil, invalid(err.Error())
-		}
-		lines := max(len(Lines(text)), 1)
-		if lines > math.MaxUint32 {
-			return nil, invalid("knowledge source has too many lines")
-		}
-		parts = []Part{{Title: file.name, Text: text, Position: protocol.KnowledgePosition{
-			Kind: "lines", Data: protocol.KnowledgePositionLinesPayload{Start: 1, End: uint32(lines)},
-		}}}
+	text, err := core.DecodeText(data)
+	if err != nil {
+		return nil, invalid(err.Error())
 	}
+	lines := max(len(Lines(text)), 1)
+	if lines > math.MaxUint32 {
+		return nil, invalid("knowledge source has too many lines")
+	}
+	parts := []Part{{Title: file.name, Text: text, Position: protocol.KnowledgePosition{
+		Kind: "lines", Data: protocol.KnowledgePositionLinesPayload{Start: 1, End: uint32(lines)},
+	}}}
 	if err := cancelled(ctx); err != nil {
 		return nil, err
 	}

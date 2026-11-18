@@ -3,50 +3,19 @@ package node
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+
 	"time"
 
 	"github.com/ai-poet/agent-client/desktop/internal/core"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/operations"
 	"github.com/ai-poet/agent-client/desktop/internal/node/files"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
-	"github.com/ai-poet/agent-client/desktop/internal/office"
+
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
 func (node *Node) inspectWorkspaceFiles(ctx context.Context, request protocol.Request, root string, access core.FileAccess) (protocol.Output, error) {
-	if input, ok := request.Command.Data.(*protocol.CommandReadOfficePayload); ok && input.Options.Source.Kind == "attachment" {
-		if request.Plugin == nil || request.Plugin.Turn == nil {
-			return protocol.Output{}, &protocol.Fault{Code: protocol.ErrorCodePermissionDenied, Message: "attachment inspection requires a captured turn"}
-		}
-		raw, _ := json.Marshal(input.Options.Source.Data)
-		var id protocol.AttachmentID
-		if err := json.Unmarshal(raw, &id); err != nil {
-			return protocol.Output{}, err
-		}
-		var attachment protocol.Attachment
-		err := node.profile.Store.Node.Read(ctx, func(db *sql.Conn) error {
-			var err error
-			attachment, err = store.ResolveTurnAttachment(ctx, db, *request.Plugin.Turn, id)
-			return err
-		})
-		if err != nil {
-			return protocol.Output{}, err
-		}
-		if attachment.Spec.Worktree != input.Worktree {
-			return protocol.Output{}, &protocol.Fault{Code: protocol.ErrorCodePermissionDenied, Message: "attachment belongs to another worktree"}
-		}
-		if attachment.Spec.Size > office.Limit {
-			return protocol.Output{}, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "Office file exceeds 32 MiB"}
-		}
-		data, err := node.transfers.AttachmentBytes(ctx, attachment)
-		if err != nil {
-			return protocol.Output{}, err
-		}
-		value, err := node.inspectDocument(ctx, attachment.Spec.Name, data, input.Options.Offset)
-		return protocol.Output{Kind: "office_content", Data: value}, err
-	}
-	return files.Inspect(ctx, root, request.Command, access, node.inspectDocument)
+	return files.Inspect(ctx, root, request.Command, access)
 }
 func (node *Node) readWorkspaceArtifact(ctx context.Context, request protocol.Request) (protocol.Output, error) {
 	var capture store.ArtifactRead

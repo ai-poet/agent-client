@@ -10,7 +10,7 @@ import (
 	"lukechampine.com/blake3"
 
 	"github.com/ai-poet/agent-client/desktop/internal/node/knowledge"
-	"github.com/ai-poet/agent-client/desktop/internal/node/knowledge/source"
+
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
@@ -57,9 +57,7 @@ type Options struct {
 	// Materialize reads the values a plugin storage search selected and
 	// reports a selection that went stale.
 	Materialize func(ctx context.Context, request protocol.Request, plan store.SemanticPlan, selection store.SemanticSelection) (protocol.PluginStorageSearchPage, bool, error)
-	// OCR reads images and scanned PDF pages.
-	OCR   *source.OCR
-	Clock clockwork.Clock
+	Clock       clockwork.Clock
 	// Working, when set, brackets a collection from its first changed source
 	// to the end of its pass.
 	Working func() func()

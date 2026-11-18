@@ -12,7 +12,7 @@ import (
 	"unicode"
 
 	"github.com/ai-poet/agent-client/desktop/internal/node/knowledge"
-	"github.com/ai-poet/agent-client/desktop/internal/office"
+
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
@@ -53,13 +53,6 @@ type Entry struct {
 	Excluded  bool
 	Failed    bool
 	Directory bool
-}
-
-// OCR reads images and scanned PDF pages. Signature identifies the selected
-// model, or is zero when OCR is not configured.
-type OCR struct {
-	Signature func() ([32]byte, error)
-	Parts     func(ctx context.Context, name string, data []byte) ([]office.Part, error)
 }
 
 func newFault(code protocol.ErrorCode, message string) error {

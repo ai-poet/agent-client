@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "files",
-  "version": "0.1.29",
+  "version": "0.1.30",
   "extensions": {
     "dev.sailry.platform": {
       "api_version": "v1",
@@ -1534,108 +1534,6 @@
           ]
         },
         {
-          "name": "read_office",
-          "presentation": "summary",
-          "description": "Read DOCX/PDF text, XLSX cell values and formulas, or PPTX slide text and notes from a worktree path or an attachment visible in this conversation. Use source.kind \"path\" with a worktree-relative path, or \"attachment\" with its attachment ID. Earlier attachments must belong to completed, failed or cancelled turns still visible in this conversation; queued or running future inputs are unavailable. Images and scanned PDF pages use OCR when an OCR model is installed on the Node. File sources return the revision for edits. Follow next offsets to read every section, including continuations of long parts.",
-          "handler": {
-            "name": "office",
-            "operation": "office.read",
-            "parameters": {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
-              "title": "Read",
-              "type": "object",
-              "properties": {
-                "source": {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "path",
-                        "attachment"
-                      ]
-                    },
-                    "value": {
-                      "type": "string",
-                      "description": "Worktree-relative path or visible conversation attachment ID"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "value"
-                  ],
-                  "additionalProperties": false
-                },
-                "offset": {
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 0,
-                  "description": "Zero-based section offset. Long document parts continue in subsequent sections.",
-                  "default": 0
-                }
-              },
-              "required": [
-                "source"
-              ],
-              "additionalProperties": false
-            }
-          },
-          "display": {
-            "label": "Read document",
-            "locales": {
-              "zh-CN": "读取文档",
-              "zh-TW": "讀取文件",
-              "ja": "文書を読む",
-              "ko": "문서 읽기",
-              "fr": "Lire le document",
-              "de": "Dokument lesen",
-              "es": "Leer documento",
-              "pt-BR": "Ler documento",
-              "ru": "Прочитать документ",
-              "en": "Read document"
-            },
-            "icon": {
-              "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" ><path d=\"M12 7v14\" /><path d=\"M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z\" /></svg>"
-            },
-            "input": {
-              "summary": {
-                "path": "/source/value",
-                "code": true,
-                "result_path": "/data/path"
-              }
-            },
-            "output": {
-              "preview": {
-                "parts": [
-                  {
-                    "rows": {
-                      "value": {
-                        "source": "result",
-                        "path": "/data/sections"
-                      },
-                      "text": {
-                        "parts": [
-                          {
-                            "value": {
-                              "source": "item",
-                              "path": "/text"
-                            }
-                          }
-                        ]
-                      },
-                      "separator": "\n\n"
-                    }
-                  }
-                ]
-              }
-            }
-          },
-          "contexts": [
-            "plugin",
-            "workspace"
-          ]
-        },
-        {
           "name": "read_notebook",
           "presentation": "summary",
           "description": "Read numbered nbformat 4 cells without executing a kernel. Use next_offset to continue. Returned cell JSON retains source, metadata and saved outputs; truncated cells omit oversized content and include a bounded source preview.",
@@ -1900,7 +1798,6 @@
           "mkdir",
           "find",
           "search",
-          "office",
           "notebook_read",
           "notebook_edit"
         ]
@@ -1955,7 +1852,7 @@
           "application/x-ipynb+json"
         ]
       },
-      "instructions": "Use find_files and search_files for file discovery and content search rather than shell commands. Read a worktree image with read_file when you need to see it, such as a screenshot, diagram or design; read_office extracts document text and reads conversation attachments.",
+      "instructions": "Use find_files and search_files for file discovery and content search rather than shell commands. Read a worktree image with read_file when you need to see it, such as a screenshot, diagram or design.",
       "category": "development",
       "tint": "blue"
     }
