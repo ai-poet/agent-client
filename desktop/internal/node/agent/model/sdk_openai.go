@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	fantasyopenai "charm.land/fantasy/providers/openai"
 	openaisdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
@@ -78,7 +77,7 @@ func (model *sdkModel) streamResponses(ctx context.Context, raw []byte, call fan
 		if reasoning[id] {
 			return true
 		}
-		metadata := &fantasyopenai.ResponsesReasoningMetadata{ItemID: id}
+		metadata := &openAIResponsesReasoningMetadata{ItemID: id}
 		if encrypted, ok := item["encrypted_content"].(string); ok {
 			metadata.EncryptedContent = &encrypted
 		}
@@ -91,7 +90,7 @@ func (model *sdkModel) streamResponses(ctx context.Context, raw []byte, call fan
 			return true
 		}
 		reasoning[id] = true
-		return emitter.emit(fantasy.StreamPart{Type: fantasy.StreamPartTypeReasoningEnd, ID: id, ProviderMetadata: fantasy.ProviderMetadata{fantasyopenai.Name: metadata}})
+		return emitter.emit(fantasy.StreamPart{Type: fantasy.StreamPartTypeReasoningEnd, ID: id, ProviderMetadata: fantasy.ProviderMetadata{openAIName: metadata}})
 	}
 	// The terminal response carries final output and usage. Its success does
 	// not depend on the server closing the HTTP body afterward.

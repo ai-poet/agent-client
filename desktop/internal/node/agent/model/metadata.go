@@ -7,7 +7,6 @@ import (
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/google"
-	"charm.land/fantasy/providers/openai"
 	"github.com/MoeForge/moego/base64"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
 )
@@ -58,8 +57,8 @@ func ApplyStreamMetadata(block *canonical.Block, part fantasy.StreamPart) error 
 				block.Kind = "thinking"
 				block.Data = &thinking
 			}
-		case openai.Name:
-			value, ok := raw.(*openai.ResponsesReasoningMetadata)
+		case openAIName:
+			value, ok := raw.(*openAIResponsesReasoningMetadata)
 			if !ok || value == nil {
 				continue
 			}

@@ -8,7 +8,6 @@ import (
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/google"
-	"charm.land/fantasy/providers/openai"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/clock"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
@@ -236,7 +235,7 @@ func outputPart(part fantasy.StreamPart) bool {
 				if metadata.Signature != "" {
 					return true
 				}
-			case *openai.ResponsesReasoningMetadata:
+			case *openAIResponsesReasoningMetadata:
 				if metadata.EncryptedContent != nil || len(metadata.Summary) > 0 {
 					return true
 				}

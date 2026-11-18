@@ -8,7 +8,6 @@ import (
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/google"
-	"charm.land/fantasy/providers/openai"
 
 	"github.com/MoeForge/moego/base64"
 )
@@ -140,7 +139,7 @@ func requestJSON(config transportConfig, call fantasy.Call) (map[string]any, err
 					}
 					input = append(input, map[string]any{"type": "message", "role": string(message.Role), "content": []any{content}})
 				case fantasy.ContentTypeReasoning:
-					if metadata, ok := part.Options()[openai.Name].(*openai.ResponsesReasoningMetadata); ok && metadata.EncryptedContent != nil {
+					if metadata, ok := part.Options()[openAIName].(*openAIResponsesReasoningMetadata); ok && metadata.EncryptedContent != nil {
 						summary := []any{}
 						for _, text := range metadata.Summary {
 							summary = append(summary, map[string]any{"type": "summary_text", "text": text})
@@ -172,7 +171,7 @@ func requestJSON(config transportConfig, call fantasy.Call) (map[string]any, err
 		if call.MaxOutputTokens != nil {
 			body["max_output_tokens"] = *call.MaxOutputTokens
 		}
-		if options, ok := call.ProviderOptions[openai.Name].(*openai.ResponsesProviderOptions); ok {
+		if options, ok := call.ProviderOptions[openAIName].(*openAIResponsesProviderOptions); ok {
 			if options.Instructions != nil {
 				body["instructions"] = *options.Instructions
 			}

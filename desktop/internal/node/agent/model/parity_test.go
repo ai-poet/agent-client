@@ -21,10 +21,9 @@ import (
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/google"
-	"charm.land/fantasy/providers/openai"
-	"github.com/cespare/xxhash/v2"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/cespare/xxhash/v2"
 )
 
 const sessionID = "11111111-1111-4111-8111-111111111111"
@@ -161,7 +160,7 @@ func requestCall(t *testing.T, kind string) fantasy.Call {
 	if kind == "responses" {
 		call.Prompt = call.Prompt[1:]
 		instructions := systemText
-		call.ProviderOptions = openai.NewResponsesProviderOptions(&openai.ResponsesProviderOptions{Instructions: &instructions})
+		call.ProviderOptions = newOpenAIResponsesProviderOptions(&openAIResponsesProviderOptions{Instructions: &instructions})
 	}
 	return call
 }
@@ -192,7 +191,7 @@ func replay(call *fantasy.Call, kind string) {
 		parts = append(parts, fantasy.ReasoningPart{ProviderOptions: fantasy.ProviderOptions{google.Name: &google.ReasoningMetadata{Signature: "signed-thought", ToolID: "stable-call"}}})
 	case "responses":
 		encrypted := "encrypted-fixture"
-		parts = append(parts, fantasy.ReasoningPart{Text: "Previous reasoning", ProviderOptions: fantasy.ProviderOptions{openai.Name: &openai.ResponsesReasoningMetadata{ItemID: "reasoning", EncryptedContent: &encrypted}}})
+		parts = append(parts, fantasy.ReasoningPart{Text: "Previous reasoning", ProviderOptions: fantasy.ProviderOptions{openAIName: &openAIResponsesReasoningMetadata{ItemID: "reasoning", EncryptedContent: &encrypted}}})
 	}
 	parts = append(parts, tool)
 	call.Prompt = append(call.Prompt,
@@ -1321,9 +1320,9 @@ func encryptedFixture(t *testing.T) {
 	}
 	call := requestCall(t, "responses")
 	first := collect(t, model, call)
-	var metadata *openai.ResponsesReasoningMetadata
+	var metadata *openAIResponsesReasoningMetadata
 	for _, part := range first {
-		if value, ok := part.ProviderMetadata[openai.Name].(*openai.ResponsesReasoningMetadata); ok {
+		if value, ok := part.ProviderMetadata[openAIName].(*openAIResponsesReasoningMetadata); ok {
 			metadata = value
 		}
 	}
@@ -1336,7 +1335,7 @@ func encryptedFixture(t *testing.T) {
 	}
 	call.Prompt = append(call.Prompt,
 		fantasy.Message{Role: fantasy.MessageRoleAssistant, Content: []fantasy.MessagePart{
-			fantasy.ReasoningPart{ProviderOptions: fantasy.ProviderOptions{openai.Name: metadata}},
+			fantasy.ReasoningPart{ProviderOptions: fantasy.ProviderOptions{openAIName: metadata}},
 			fantasy.ToolCallPart{ToolCallID: "stable-call", ToolName: "read", Input: "{}"},
 		}},
 		fantasy.Message{Role: fantasy.MessageRoleTool, Content: []fantasy.MessagePart{fantasy.ToolResultPart{ToolCallID: "stable-call", Output: fantasy.ToolResultOutputContentText{Text: "File contents"}}}},

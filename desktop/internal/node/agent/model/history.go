@@ -10,7 +10,6 @@ import (
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/google"
-	"charm.land/fantasy/providers/openai"
 	"github.com/MoeForge/moego/base64"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/output"
@@ -126,7 +125,7 @@ func BuildCall(binding Binding, request Request) (fantasy.Call, error) {
 					case "anthropic":
 						part.ProviderOptions[anthropic.Name] = &anthropic.ReasoningOptionMetadata{Signature: *value.Signature}
 					case "responses":
-						part.ProviderOptions[openai.Name] = &openai.ResponsesReasoningMetadata{EncryptedContent: value.Signature, Summary: []string{value.Text}}
+						part.ProviderOptions[openAIName] = &openAIResponsesReasoningMetadata{EncryptedContent: value.Signature, Summary: []string{value.Text}}
 					case "gemini":
 						decoded, err := base64.StdEncoding.DecodeString(*value.Signature)
 						if err != nil {
