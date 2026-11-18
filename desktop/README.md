@@ -138,6 +138,22 @@ curl -fsSL https://github.com/ai-poet/agent-client/desktop/releases/latest/downl
 
 Guides: [Models](docs/models.md) · [Remote hosts](docs/hosts.md) · [Projects and sessions](docs/projects.md)
 
+## 登录与模型网关
+
+桌面端通过 CheapRouter 账号连接模型网关。未登录或网关尚未配置完成时，应用会显示中文登录页；已有功能和其他模型 provider 配置不会被删除或改写。
+
+- 可选择主站 `https://cheaprouter.cc` 或 CDN `https://cdn.cheaprouter.cc`，两者连接同一账号和网关。
+- 浏览器登录使用 PKCE S256 和 `127.0.0.1` 临时端口回跳。浏览器不会把 URL fragment 发给本地服务，因此回跳页会通过本地 POST 将一次性登录码交给应用。无法使用 loopback 时，可直接粘贴登录码或完整回跳链接。
+- OAuth 凭据保存在 profile 下的 `cheaprouter-account.json`，文件权限为 0600。访问令牌会在到期前 120 秒刷新；令牌和 PKCE verifier 不写入日志，也不会出现在错误提示中。
+- 登录后，应用读取 `auth/me`、模型目录和 `keys`，将网关 `base_url` 与所选 API key 写入 sailry 现有的 OpenAI 兼容 provider。模型对话仍走既有的重试、流式响应和凭据保护链路，没有新增协议 wire 类型。
+- 登录成功会显示账号、套餐、余额和可用模型数。退出登录会撤销本地会话并禁用 CheapRouter provider，不影响其他 provider。
+
+可用标准库 `httptest` 假服务验证完整鉴权与模型请求，无需真实账号：
+
+```sh
+GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0 go test ./internal/cheapauth/... ./internal/node/providers/... ./internal/node/agent/model/...
+```
+
 ## Community
 
 Join the [Discord](https://discord.gg/MCDktmDey) or add the maintainer on WeChat for the group
