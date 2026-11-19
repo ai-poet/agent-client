@@ -84,7 +84,9 @@ func TestHistoryReadStopsWaitingForRejectedConversationSequence(t *testing.T) {
 	controller := New(transport)
 	defer controller.Close()
 	projection := NewConversationProjection(snapshot.Node, snapshot.Page.Session, 1)
-	projection.snapshot = &snapshot
+	if _, err := projection.Apply(1, protocol.Update{Kind: "conversation_snapshot", Data: snapshot}); err != nil {
+		t.Fatal(err)
+	}
 	watch := &conversationWatch{session: snapshot.Page.Session, ctx: t.Context(), projection: projection, signal: make(chan struct{}), state: ConversationState{Err: fault(protocol.ErrorCodeWrongTarget, "run belongs to another conversation")}}
 	controller.conversations = map[protocol.SessionID]*conversationWatch{snapshot.Page.Session: watch}
 	defer func() { controller.conversations = nil }()

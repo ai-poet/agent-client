@@ -743,6 +743,14 @@ observation while the Node process continues, available through terminal activit
 Explicitly closing a right-panel terminal stops its shell. Project overview lists
 active and archived conversations separately.
 
+Client restores the previously loaded history range after a new authoritative
+conversation snapshot, preserving that target even if another reconnect
+interrupts paging. The last observer drops the body and may leave one of 64
+range bookmarks. A matching history revision does not make detached pages
+current. Full-range recovery can request up to 1,000 entries per turn page;
+interactive reads and partial-range recovery retain their smaller entry limit.
+Node byte and wire frame limits apply to both.
+
 Desktop reuses read-only conversation source copies until a Client observation
 changes, including pagination and connection state. Completed history projections
 are reused within the visible view model; controls and mutable presentation
