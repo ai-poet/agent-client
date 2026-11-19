@@ -79,24 +79,55 @@ func (r *Runtime) followModelCatalog() {
 // for the pages; an answer for a Node they left is dropped.
 func (r *Runtime) readProviders() {
 	r.compactionObserved = r.snapshot().CompactionSettingsRevision
-	r.async(func() {
+	r.providerPresetsRefresh = true
+	r.async(r.fetchCompaction)
+	r.projectProviderSnapshot()
+}
+
+func (r *Runtime) readProviderPresets(packages []protocol.PluginSummary) {
+	if r.providerPresetsLoading || !r.controller.Connected() {
+		return
+	}
+	if !r.providerPresetsRefresh && r.providerPresetsLoaded && samePresetPackages(r.providerPresetPackages, packages) {
+		return
+	}
+	r.providerPresetsRefresh, r.providerPresetsLoaded = false, false
+	r.providerPresetsLoading = r.async(func() {
 		out, err := r.controller.Do(r.ctx, protocol.Command{Kind: "list_channel_presets", Data: protocol.CommandListChannelPresetsPayload{}})
 		r.enqueue(func(c *ui.Context) {
+			r.providerPresetsLoading = false
 			if !r.showsSettings() {
 				return
 			}
-			if err != nil {
-				r.reportKeys(c, err, "provider_catalog_failed", "provider_catalog_failed", "provider_catalog_failed")
+			current := r.snapshot().Plugins
+			if r.providerPresetsRefresh || !samePresetPackages(packages, current) {
+				r.readProviderPresets(current)
 				return
 			}
-			if listing, ok := detail[protocol.ConversationPresetsListing](out.Data); ok {
+			if err != nil {
+				root := r.localRuntime()
+				if root.App.Page == shell.SettingsPage && root.App.Settings.Section == settings.Providers {
+					r.reportKeys(c, err, "provider_catalog_failed", "provider_catalog_failed", "provider_catalog_failed")
+				}
+				return
+			}
+			if listing, ok := detail[protocol.ConversationPresetsListing](out.Data); out.Kind == "channel_presets" && ok {
 				r.applyPresets(listing)
+				r.providerPresetPackages = packages
+				r.providerPresetsLoaded = true
 				r.projectProviderSnapshot()
 			}
 		})
-		r.fetchCompaction()
 	})
-	r.projectProviderSnapshot()
+}
+
+// A preset captures its package and settings revision. Other package summary
+// changes, such as an observation revision alone, do not change the directory.
+func samePresetPackages(a, b []protocol.PluginSummary) bool {
+	return slices.EqualFunc(a, b, func(x, y protocol.PluginSummary) bool {
+		return x.Name == y.Name && x.Digest == y.Digest && x.SettingsRevision == y.SettingsRevision &&
+			x.Enabled == y.Enabled && x.Compatibility.Kind == y.Compatibility.Kind
+	})
 }
 
 // fetchCompaction reads the Node's compaction threshold off the UI thread.
@@ -343,6 +374,7 @@ func (r *Runtime) projectProviderSnapshot() {
 		return
 	}
 	snapshot := r.snapshot()
+	r.readProviderPresets(snapshot.Plugins)
 	credentialKey := r.providerCredentialKey(snapshot.Providers)
 	r.readProviderCredentials(credentialKey)
 	credentialsKnown := r.authorizations != nil && credentialKey == r.authorizations.credentialKey

@@ -140,6 +140,10 @@ type Runtime struct {
 	conversationCreations     map[string]conversationCreation
 	conversationCreating      map[string]bool
 	providerPresets           map[string]protocol.ConversationPresetsEntry
+	providerPresetPackages    []protocol.PluginSummary
+	providerPresetsLoaded     bool
+	providerPresetsLoading    bool
+	providerPresetsRefresh    bool              // An explicit readProviders request also refreshes built-in presets.
 	providerBrands            map[string]string // brand names by presetBrand, offered or not
 	providerModels            map[string]map[string]protocol.ConversationModel
 	providerDraftBases        map[string]protocol.ConversationProvider
