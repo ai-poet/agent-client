@@ -755,8 +755,10 @@ Desktop reuses read-only conversation source copies until a Client observation
 changes, including pagination and connection state. Completed history projections
 are reused within the visible view model; controls and mutable presentation
 overlays still refresh. Active runs and streaming drafts keep their timing and
-update path. Leaving a conversation releases its presentation cache, and command
-admission reads current Client state independently of rendering.
+update path. Leaving a conversation releases its presentation cache and unbinds
+the transcript payload without resetting scroll. Historical command output opens
+on its original tool row; closing the disclosure releases the read, not the process.
+Command admission reads current Client state independently of rendering.
 
 Terminal rendering uses MyGo's terminal package and libghostty-vt. Mermaid uses
 CrychicUI, chart variants use the conversation painter over limu, and math uses

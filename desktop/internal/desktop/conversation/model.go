@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
+	"github.com/egoist/mygo/ui"
 )
 
 // This file is the transcript's contract: the view models a backend fills
@@ -378,8 +378,12 @@ type Call struct {
 	// Background is the command the call sent to the background; nil for a
 	// call that ran in place. Its outcome contributes to the row's status color.
 	Background *Background
+	// BackgroundDetail is evaluated only while the historical command disclosure is open.
+	BackgroundDetail func() BackgroundDetail `json:"-"`
 	// Load requests revision-scoped details when this disclosure first opens.
 	Load func()
+	// TrackLoad ties a live read to the open disclosure for each rendered frame.
+	TrackLoad bool `json:"-"`
 
 	wrap bool // view-only: the label wraps rather than truncates
 }
@@ -394,6 +398,13 @@ type Background struct {
 	Exit *int
 	// Waiting is a result no turn has taken yet: it joins the next one.
 	Waiting bool
+}
+
+// BackgroundDetail is the retained command result fetched on disclosure.
+type BackgroundDetail struct {
+	Status *Background
+	Output *Output
+	Denied bool
 }
 
 // Output is a call's result, one or more of its parts.

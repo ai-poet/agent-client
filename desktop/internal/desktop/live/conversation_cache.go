@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ai-poet/agent-client/desktop/internal/client"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
@@ -16,8 +17,8 @@ import (
 type conversationPresentation struct {
 	generation uint64
 	language   string
-	view       *viewmodel.Conversation
 	connection conversation.Connection
+	mounted    bool
 }
 
 func (r *Runtime) beginConversationFrame() {
@@ -34,35 +35,55 @@ func (r *Runtime) finishConversationFrame() {
 			delete(r.conversationCache, id)
 		}
 	}
-	for id := range r.conversationPresentations {
-		if !r.conversationSeen[id] {
-			delete(r.conversationPresentations, id)
+	for cv, presentation := range r.conversationPresentations {
+		if presentation.mounted {
+			presentation.mounted = false
+			r.conversationPresentations[cv] = presentation
+			continue
+		}
+		cv.Turns, cv.Queue = nil, nil
+		cv.Waiting, cv.Animating = composer.Interactions{}, false
+		delete(r.conversationPresentations, cv)
+		if r.childConversations[cv.ID] == cv {
+			delete(r.childConversations, cv.ID)
 		}
 	}
 	r.conversationCopies = nil
 }
 
+func (r *Runtime) saveConversationPresentation(cv *viewmodel.Conversation, presentation conversationPresentation) {
+	if r.conversationPresentations == nil {
+		r.conversationPresentations = map[*viewmodel.Conversation]conversationPresentation{}
+	}
+	r.conversationPresentations[cv] = presentation
+}
+
+// A bulk projection or an optimistic edit invalidates reuse, not ownership of
+// the view. This still lets the frame release a detached presentation.
+func (r *Runtime) invalidateConversationPresentation(cv *viewmodel.Conversation) {
+	r.saveConversationPresentation(cv, conversationPresentation{mounted: r.conversationPresentations[cv].mounted})
+}
+
 func (r *Runtime) projectConversation(cv *viewmodel.Conversation, id protocol.SessionID, state client.ConversationState, now time.Time, language string) {
 	copy := r.conversationCopies[id]
-	pending := r.composerOutgoing[cv.ID] != nil
-	if saved, ok := r.conversationPresentations[id]; ok && !pending && copy.generation != 0 &&
-		saved.generation == copy.generation && saved.language == language && saved.view == cv {
+	cacheable := copy.generation != 0 && r.composerOutgoing[cv.ID] == nil
+	saved := r.conversationPresentations[cv]
+	if cacheable && saved.generation == copy.generation && saved.language == language {
 		// The Node's connection override is applied later in conversation.
 		// Restore the observed connection when that Node becomes available.
 		cv.Session.Connection = saved.connection
+		saved.mounted = true
+		r.conversationPresentations[cv] = saved
 		return
 	}
-	delete(r.conversationPresentations, id)
 	cv.Turns, cv.Session, cv.Waiting, cv.Queue = conversationAt(state, now, language)
-	// Active clocks and streaming drafts are time-dependent; keep the existing
-	// projection/timer path. Injected copies without a generation are uncached.
-	if pending || copy.generation == 0 || len(state.Snapshot.Drafts) != 0 || slices.ContainsFunc(state.Snapshot.Page.Runs, func(run protocol.ConversationRun) bool {
+	cacheable = cacheable && len(state.Snapshot.Drafts) == 0 && !slices.ContainsFunc(state.Snapshot.Page.Runs, func(run protocol.ConversationRun) bool {
 		return run.Status == protocol.ConversationStatusQueued || run.Status == protocol.ConversationStatusRunning || run.Status == protocol.ConversationStatusStopping
-	}) {
-		return
+	})
+	presentation := conversationPresentation{mounted: true}
+	if cacheable {
+		presentation.generation, presentation.language = copy.generation, language
+		presentation.connection = cv.Session.Connection
 	}
-	if r.conversationPresentations == nil {
-		r.conversationPresentations = map[protocol.SessionID]conversationPresentation{}
-	}
-	r.conversationPresentations[id] = conversationPresentation{generation: copy.generation, language: language, view: cv, connection: cv.Session.Connection}
+	r.saveConversationPresentation(cv, presentation)
 }

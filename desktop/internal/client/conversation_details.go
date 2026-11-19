@@ -24,6 +24,7 @@ type conversationDetail struct {
 }
 
 type conversationDetailRead struct {
+	ctx   context.Context
 	done  chan struct{}
 	value protocol.ToolDetail
 	err   error
@@ -43,12 +44,15 @@ func (c *Client) ConversationDetail(ref protocol.ToolDetailReference) (protocol.
 
 // ReadConversationDetail validates bounded pages against the captured revision.
 func (c *Client) ReadConversationDetail(ctx context.Context, ref protocol.ToolDetailReference) (protocol.ToolDetail, error) {
+	if err := ctx.Err(); err != nil {
+		return protocol.ToolDetail{}, err
+	}
 	if v, ok := c.ConversationDetail(ref); ok {
 		return v, nil
 	}
 	key := detailKey(ref)
 	c.conversationMu.Lock()
-	if pending := c.conversationDetailReads[key]; pending != nil {
+	if pending := c.conversationDetailReads[key]; pending != nil && pending.ctx.Err() == nil {
 		c.conversationMu.Unlock()
 		select {
 		case <-ctx.Done():
@@ -60,13 +64,15 @@ func (c *Client) ReadConversationDetail(ctx context.Context, ref protocol.ToolDe
 	if c.conversationDetailReads == nil {
 		c.conversationDetailReads = map[string]*conversationDetailRead{}
 	}
-	pending := &conversationDetailRead{done: make(chan struct{})}
+	pending := &conversationDetailRead{ctx: ctx, done: make(chan struct{})}
 	c.conversationDetailReads[key] = pending
 	c.conversationMu.Unlock()
 	value, err := c.readConversationDetail(ctx, ref)
 	c.conversationMu.Lock()
 	pending.value, pending.err = copyValue(value), err
-	delete(c.conversationDetailReads, key)
+	if c.conversationDetailReads[key] == pending {
+		delete(c.conversationDetailReads, key)
+	}
 	close(pending.done)
 	c.conversationMu.Unlock()
 	return value, err
@@ -132,6 +138,10 @@ func (c *Client) readConversationDetail(ctx context.Context, ref protocol.ToolDe
 	allocation := retainedDetailBytes(reflect.ValueOf(value)) + retainedDetailBytes(reflect.ValueOf(ref))
 	key := detailKey(ref)
 	c.conversationMu.Lock()
+	if err := ctx.Err(); err != nil {
+		c.conversationMu.Unlock()
+		return protocol.ToolDetail{}, err
+	}
 	if !c.currentConversationDetail(ref) {
 		c.conversationMu.Unlock()
 		return protocol.ToolDetail{}, fault(protocol.ErrorCodeRevisionConflict, "tool detail changed during transfer")

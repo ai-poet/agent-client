@@ -7,9 +7,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
 )
 
 func TestReplyContentSpacing(t *testing.T) {
@@ -58,13 +58,15 @@ func TestReplyContentSpacing(t *testing.T) {
 					{ID: "plan", Name: "plan", Label: "Update plan", Output: &Output{Text: "Plan output"}},
 					{ID: "command", Name: "command", Label: "Command", Output: &Output{Text: "Command output"}},
 				}
-				state.toggle("tool-sequence-scope-1")
 				tester := ui.NewTester(func(c *ui.Context) {
 					theme.Apply(c, "", theme.Light)
 					kit.SetPreferences(c, kit.Preferences{MessageTextSize: size})
 					state.tools(c, calls, false)
 				}, 900, 700)
 				tester.Frame()
+				if err := tester.Click("Command"); err != nil {
+					t.Fatal(err)
+				}
 				scope, plan := spacingRow(t, tester, "Review scope"), spacingRow(t, tester, "Update plan")
 				var rows []ui.Rect
 				for _, item := range tester.AccessAll() {

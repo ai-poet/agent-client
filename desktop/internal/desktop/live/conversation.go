@@ -59,7 +59,7 @@ func (r *Runtime) projectConversations() {
 			}
 			if id, err := protocol.ParseSessionID(cv.ID); err == nil {
 				if state, ok := owner.conversationState(id); ok {
-					delete(owner.conversationPresentations, id)
+					owner.invalidateConversationPresentation(cv)
 					cv.Turns, cv.Session, cv.Waiting, cv.Queue = Conversation(state)
 					owner.projectOutgoing(cv, state.Snapshot.Page)
 					owner.enrichDetails(cv, state)
@@ -200,12 +200,14 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 	snapshot := r.snapshot()
 	var page protocol.ConversationPage
 	unsynced := false
-	if id, err := protocol.ParseSessionID(cv.ID); err == nil {
+	id, idErr := protocol.ParseSessionID(cv.ID)
+	if idErr == nil {
 		r.conversationSeen[id] = true
 		if _, ok := r.conversationWatches[id]; !ok {
 			release, err := r.controller.WatchConversation(r.ctx, id, r.conversationChanged)
 			if err == nil {
 				r.conversationWatches[id] = release
+				delete(r.conversationCache, id)
 			} else {
 				r.report(c, err, "session_changed")
 			}
@@ -296,6 +298,10 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 		}
 		cv.Offline = true
 		markOfflineConversation(cv)
+		// The Node can disconnect before the conversation observation changes.
+		if idErr == nil {
+			r.invalidateConversationPresentation(cv)
+		}
 	}
 	ctx.Models = r.offeredModels(cv.ID, ctx.Models)
 	r.nameModelSources(c, cv.ID, ctx.Models)

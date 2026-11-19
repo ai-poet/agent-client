@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/editor"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 )
 
 // Layout metrics.
@@ -230,14 +230,15 @@ func (s *State) disclosure(c *ui.Context, key string, head func(hovered, open bo
 
 // wrapping is a disclosure whose row may wrap its label (rowSize).
 func (s *State) wrapping(c *ui.Context, key string, wrap bool, head func(hovered, open bool, sw *kit.Sweep), top, bottom float32, body func()) {
-	open := s.opened(key)
+	ownerKey := s.renderSession + "\x00" + key
+	open := s.opened(ownerKey)
 	size := textSize(c)
 	ui.Column(c.Key(key)).Children(func() {
 		t := rowSize(ui.ButtonBase(c), size, wrap).Gap(8).AlignSelf(ui.Start).MaxWidthPercent(100).
 			Justify(ui.Start).Expanded(open).Cursor(ui.CursorPointer)
 		hovered := t.Hovered() || t.FocusVisible()
 		sw := &kit.Sweep{}
-		t.Children(func() { head(hovered, open, sw) }).OnClick(func() { s.toggle(key) })
+		t.Children(func() { head(hovered, open, sw) }).OnClick(func() { s.toggle(ownerKey) })
 		sw.Frame(t)
 		if open {
 			Rail(c).Padding(top, 0, bottom, railPad(size)).Children(body)
@@ -253,8 +254,6 @@ func Rail(c *ui.Context) ui.Element {
 	return ui.Column(c).MarginStart(railMargin(textSize(c))).BorderWidth(0, 0, 0, 1).BorderColor(theme.Of(c).Border).Gap(railGap)
 }
 
-// tools builds a tool block. continuing marks the last call running while
-// the turn goes on, so the shimmer stays on the latest activity.
 func (s *State) tools(c *ui.Context, calls []Call, continuing bool) {
 	if continuing {
 		calls = append([]Call(nil), calls...)
@@ -291,7 +290,7 @@ func (s *State) groups(c *ui.Context, calls []Call) {
 // group is calls of one name under the last one's summary.
 func (s *State) group(c *ui.Context, run []Call) {
 	head := Summary(run)
-	if len(run) == 1 && run[0].Output == nil {
+	if len(run) == 1 && run[0].Output == nil && run[0].BackgroundDetail == nil {
 		plain(c, "tool-group-"+run[0].ID, head)
 		return
 	}
@@ -303,7 +302,9 @@ func (s *State) group(c *ui.Context, run []Call) {
 				s.pathRow(c, path)
 			}
 			for _, call := range run {
-				if call.Output != nil && call.Output.Failure != "" {
+				if call.BackgroundDetail != nil {
+					s.row(c, call)
+				} else if call.Output != nil && call.Output.Failure != "" {
 					notice(c, call.Output.Failure, failureTone(c, call.Output))
 				}
 			}
@@ -324,34 +325,68 @@ func (s *State) row(c *ui.Context, call Call) {
 		output.Images = nil
 		call.Output = &output
 	}
-	if call.Load != nil {
+	if call.Load != nil && !call.TrackLoad {
 		if s.requestedDetails == nil {
 			s.requestedDetails = map[string]bool{}
 		}
-		if s.opened("tools-" + call.ID) {
-			if !s.requestedDetails[call.ID] {
-				s.requestedDetails[call.ID] = true
+		ownerKey := s.renderSession + "\x00tools-" + call.ID
+		if s.opened(ownerKey) {
+			if !s.requestedDetails[ownerKey] {
+				s.requestedDetails[ownerKey] = true
 				call.Load()
 			}
 		} else {
-			delete(s.requestedDetails, call.ID)
+			delete(s.requestedDetails, ownerKey)
 		}
 	}
 	// A call whose loaded output has nothing to draw does not open: its
 	// row already says all there is.
 	card := s.toolCards[s.renderSession][call.ID]
-	if call.Output == nil || call.Load == nil && card == nil && bare(call) {
+	if call.BackgroundDetail == nil && (call.Output == nil || call.Load == nil && card == nil && bare(call)) {
 		plain(c, "tools-"+call.ID, call)
 		return
 	}
 	s.disclosure(c, "tools-"+call.ID, func(hovered, open bool, sw *kit.Sweep) {
 		summary(c, call, hovered, true, open, sw)
 	}, 4, 8, func() {
-		s.output(c, call.Output)
+		if call.TrackLoad && call.Load != nil {
+			call.Load()
+		}
+		if call.BackgroundDetail != nil {
+			detail := call.BackgroundDetail()
+			if detail.Denied {
+				notice(c, i18n.T(c, "permission_denied"), theme.Of(c).Warning)
+			}
+			if detail.Status != nil {
+				withStatus := call
+				withStatus.Background = detail.Status
+				notice(c, backgroundStatus(c, detail.Status), rowColor(theme.Of(c), withStatus))
+			}
+			if detail.Output != nil {
+				s.output(c, detail.Output)
+			}
+		}
+		if call.Output != nil {
+			s.output(c, call.Output)
+		}
 		if card != nil {
 			card(c)
 		}
 	})
+}
+
+func backgroundStatus(c *ui.Context, b *Background) string {
+	if b.Running {
+		return i18n.T(c, "background_running")
+	}
+	label := i18n.T(c, outcomeKey(b.Outcome))
+	if b.Exit != nil {
+		label = i18n.T(c, "background_exit", "code", *b.Exit)
+	}
+	if b.Waiting {
+		label += " · " + i18n.T(c, "background_result_waiting")
+	}
+	return label
 }
 
 // bare reports an output with nothing to display below its row.

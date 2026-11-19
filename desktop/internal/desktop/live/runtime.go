@@ -158,7 +158,9 @@ type Runtime struct {
 	conversationCopies        map[protocol.SessionID]conversationCopy
 	conversationCache         map[protocol.SessionID]conversationCopy
 	conversationVersion       uint64
-	conversationPresentations map[protocol.SessionID]conversationPresentation
+	conversationPresentations map[*viewmodel.Conversation]conversationPresentation
+	childConversations        map[string]*viewmodel.Conversation
+	toolDetailReads           map[toolDetailViewKey]*toolDetailViewRead
 	conversationsStale        atomic.Bool
 	// composerOutgoing holds the captured input until its Node projection arrives:
 	// ordinary sends appear in the transcript, and queued input in the tray.
@@ -379,6 +381,7 @@ func (r *Runtime) Close() error {
 	r.closePluginCards()
 	r.closePluginMemory()
 	r.closeCommands()
+	clear(r.toolDetailReads) // Runtime cancellation stops these transfers.
 	r.closeAttachments()
 	r.invalidateFilePreview(nil)
 	r.closeWorkspace()
@@ -561,6 +564,7 @@ func (r *Runtime) finishFrame() {
 	r.pruneAttachmentImages()
 	r.pruneDocumentPreviews()
 	r.pruneCommands()
+	r.pruneToolDetails()
 	for id, release := range r.conversationWatches {
 		if !r.conversationSeen[id] {
 			release()

@@ -325,7 +325,11 @@ func (a *App) View(c *ui.Context) {
 	// The panel is the selected conversation's before anything opens a tab
 	// in it (panels.go).
 	a.clock = c.Now()
+	previousMessages := a.Messages
 	a.syncDemo(c)
+	if previousMessages != a.Messages {
+		previousMessages.FinishFrame()
+	}
 	a.MountPanel()
 	if a.Hooks.BeforeFrame != nil {
 		a.underneath(func() { a.Hooks.BeforeFrame(c) })
@@ -333,6 +337,7 @@ func (a *App) View(c *ui.Context) {
 	if a.Hooks.AfterFrame != nil {
 		defer a.underneath(a.Hooks.AfterFrame)
 	}
+	defer a.Messages.FinishFrame()
 	if a.Mode != a.applied && a.OnMode != nil {
 		a.OnMode(a.Mode)
 	}

@@ -3,7 +3,6 @@ package live
 import (
 	"strings"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/client"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
@@ -11,6 +10,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 func delegated(session protocol.Session) bool {
@@ -120,7 +120,15 @@ func (r *Runtime) renderLiveChild(c *ui.Context, id string) {
 	if state, ready := r.conversationState(parent); ready {
 		page = &state.Snapshot.Page
 	}
-	cv := &viewmodel.Conversation{Node: r.controller.Target().String(), ID: id, Title: childTitle(page, child, c.Locale())}
+	cv := r.childConversations[id]
+	if cv == nil {
+		if r.childConversations == nil {
+			r.childConversations = make(map[string]*viewmodel.Conversation)
+		}
+		cv = &viewmodel.Conversation{Node: r.controller.Target().String(), ID: id}
+		r.childConversations[id] = cv
+	}
+	cv.Title = childTitle(page, child, c.Locale())
 	comp := r.App.Composer(id)
 	ctx, actions := r.conversation(c, cv, comp)
 	ctx.Readonly = true

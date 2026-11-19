@@ -1,23 +1,25 @@
 package live
 
 import (
-	"fmt"
+	"context"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/client"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 func (r *Runtime) enrichDetails(cv *viewmodel.Conversation, state client.ConversationState, locales ...string) {
 	type source struct {
-		ref     protocol.ToolDetailReference
-		summary *protocol.ToolDetailSummary
+		ref        protocol.ToolDetailReference
+		summary    *protocol.ToolDetailSummary
+		historical *client.HistoricalCommandReference
 	}
+	page := state.Snapshot.Page
 	sources := map[string]source{}
 	pending := map[string][]toolAssociation{}
-	for _, entry := range state.Snapshot.Page.Entries {
+	for _, entry := range page.Entries {
 		for index, part := range entry.Parts {
 			var id *string
 			var name string
@@ -48,12 +50,16 @@ func (r *Runtime) enrichDetails(cv *viewmodel.Conversation, state client.Convers
 			if summary == nil {
 				continue
 			}
-			if !summary.HasDetails {
+			ref := protocol.ToolDetailReference{Session: page.Session, Turn: entry.Turn, Entry: entry.ID, Index: uint64(index), Call: id, Revision: summary.Revision}
+			var historical *client.HistoricalCommandReference
+			if part.Kind == "tool_result" {
+				historical = client.HistoricalCommandDetail(page, ref, name, summary)
+			}
+			if !summary.HasDetails && historical == nil {
 				delete(sources, key)
 				continue
 			}
-			ref := protocol.ToolDetailReference{Session: state.Snapshot.Page.Session, Turn: entry.Turn, Entry: entry.ID, Index: uint64(index), Call: id, Revision: summary.Revision}
-			sources[key] = source{ref, summary}
+			sources[key] = source{ref, summary, historical}
 		}
 	}
 	for ti := range cv.Turns {
@@ -61,39 +67,87 @@ func (r *Runtime) enrichDetails(cv *viewmodel.Conversation, state client.Convers
 		for bi := range turn.Reply.Blocks {
 			for ci := range turn.Reply.Blocks[bi].Calls {
 				call := &turn.Reply.Blocks[bi].Calls[ci]
+				call.Load, call.TrackLoad, call.BackgroundDetail = nil, false, nil
 				source, ok := sources[call.ID]
 				if !ok {
 					continue
 				}
-				if loaded, ok := r.controller.ConversationDetail(source.ref); ok {
-					r.bindPluginCards(cv, call.ID, loaded)
-					ProjectToolDetail(call, source.summary, loaded, locales...)
+				var loaded bool
+				if source.summary.HasDetails {
+					var value protocol.ToolDetail
+					if value, loaded = r.controller.ConversationDetail(source.ref); loaded {
+						r.bindPluginCards(cv, call.ID, value)
+						ProjectToolDetail(call, source.summary, value, locales...)
+					}
+				}
+				if ref := source.historical; ref != nil && state.Connected && !call.Pending && call.State != conversation.Denied && call.State != conversation.StateInterrupted {
+					binding := *ref
+					call.BackgroundDetail = func() conversation.BackgroundDetail {
+						return r.historicalCommandDetail(cv, binding)
+					}
+				}
+				if !source.summary.HasDetails || loaded || !state.Connected || call.BackgroundDetail != nil {
 					continue
 				}
 				if call.Output == nil {
 					call.Output = &conversation.Output{}
 				}
 				ref := source.ref
-				call.Load = func() {
-					key := fmt.Sprintf("detail/%s/%s/%d/%s", ref.Session, ref.Entry, ref.Index, ref.Revision)
-					if r.busy[key] {
-						return
-					}
-					r.busy[key] = true
-					r.async(func() {
-						_, err := r.controller.ReadConversationDetail(r.ctx, ref)
-						r.enqueue(func(c *ui.Context) {
-							delete(r.busy, key)
-							if err != nil {
-								r.report(c, err, "session_changed")
-							} else {
-								r.projectConversations()
-							}
-						})
-					})
-				}
+				call.TrackLoad = true
+				call.Load = func() { r.openToolDetail(cv, ref) }
 			}
 		}
+	}
+}
+
+// The Client caches authorized detail data by canonical reference. Desktop
+// separately owns each presentation's pending read and its completion.
+type toolDetailViewKey struct {
+	owner *viewmodel.Conversation
+	ref   protocol.ToolDetailReference
+	call  string
+}
+
+type toolDetailViewRead struct {
+	cancel context.CancelFunc
+	seen   bool
+}
+
+func (r *Runtime) openToolDetail(owner *viewmodel.Conversation, ref protocol.ToolDetailReference) {
+	key := toolDetailViewKey{owner: owner, ref: ref}
+	if ref.Call != nil {
+		key.call, key.ref.Call = *ref.Call, nil
+	}
+	if pending := r.toolDetailReads[key]; pending != nil {
+		pending.seen = true
+		return
+	}
+	ctx, cancel := context.WithCancel(r.ctx)
+	read := &toolDetailViewRead{cancel: cancel, seen: true}
+	if r.toolDetailReads == nil {
+		r.toolDetailReads = make(map[toolDetailViewKey]*toolDetailViewRead)
+	}
+	r.toolDetailReads[key] = read
+	if !r.async(func() {
+		_, err := r.controller.ReadConversationDetail(ctx, ref)
+		r.enqueue(func(c *ui.Context) {
+			if ctx.Err() == nil && r.toolDetailReads[key] == read && err != nil {
+				r.report(c, err, "session_changed")
+			}
+		})
+	}) {
+		cancel()
+		delete(r.toolDetailReads, key)
+	}
+}
+
+func (r *Runtime) pruneToolDetails() {
+	for key, read := range r.toolDetailReads {
+		if !read.seen || !r.conversationSeen[key.ref.Session] {
+			read.cancel()
+			delete(r.toolDetailReads, key)
+		}
+		read.seen = false
 	}
 }
 
