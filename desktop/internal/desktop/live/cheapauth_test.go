@@ -301,16 +301,29 @@ func (d *cheapDesktop) stored() *core.Credentials {
 }
 
 // signedIn saves a session of endpoint, as a previous run left it.
-func (d *cheapDesktop) signedIn(endpoint string, expires time.Duration) {
+func (d *cheapDesktop) signedIn(endpoint, access string, expires time.Duration) {
 	d.t.Helper()
 	store, err := core.NewStore(d.profile)
 	if err == nil {
-		err = store.Save(core.Credentials{AccessToken: cheapTestAccess, RefreshToken: cheapTestRefresh,
+		err = store.Save(core.Credentials{AccessToken: access, RefreshToken: cheapTestRefresh,
 			ExpiresAt: time.Now().Add(expires).Unix(), Endpoint: endpoint, APIKey: cheapTestKey})
 	}
 	if err != nil {
 		d.t.Fatal(err)
 	}
+}
+
+// saveGateway saves the enabled CheapRouter provider an earlier sign-in at
+// endpoint left on the Node.
+func (d *cheapDesktop) saveGateway(endpoint string) protocol.ConversationProvider {
+	d.t.Helper()
+	provider, secret, err := providers.CheapRouterProvider(core.Gateway{BaseURL: endpoint + "/v1", APIKey: cheapTestKey,
+		Models: []core.Model{{ID: "cheap-chat", ContextWindow: 64000}}})
+	if err != nil {
+		d.t.Fatal(err)
+	}
+	saved, _ := detail[protocol.ConversationProvider](d.do(protocol.Command{Kind: "save_provider", Data: protocol.CommandSaveProviderPayload{Provider: provider, Secret: secret}}).Data)
+	return saved
 }
 
 // A profile without credentials opens on the workspace; the sign-in is
@@ -355,7 +368,7 @@ func TestCheapAccountIsOptionalAtStartup(t *testing.T) {
 func TestCheapGatewayOutageKeepsWorkspace(t *testing.T) {
 	gateway := newCheapGateway(t)
 	gateway.down = true
-	d := openCheapDesktop(t, func(d *cheapDesktop) { d.signedIn(gateway.URL, time.Hour) })
+	d := openCheapDesktop(t, func(d *cheapDesktop) { d.signedIn(gateway.URL, cheapTestAccess, time.Hour) })
 	d.workspace("startup with an unreachable gateway")
 	d.await("the gateway sync to fail", func() bool { return d.account().Stage == cheapauthui.GatewayFailed })
 	failure := (&core.AuthError{Kind: core.ErrorNetwork}).Error()
@@ -474,4 +487,50 @@ func TestCheapSignInAddsProviderAndSignOutDisablesOnlyIt(t *testing.T) {
 	})
 	d.click(i18n.In("zh-CN", "settings"))
 	d.workspace("after signing out")
+}
+
+// A session the service rejects ends as a sign-out does: the credentials are
+// removed and the CheapRouter provider alone is disabled, in a window that
+// shows the workspace throughout.
+func TestCheapSessionRejectionDisablesOnlyGateway(t *testing.T) {
+	for name, fixture := range map[string]struct {
+		access  string
+		expires time.Duration
+		failure core.ErrorKind
+	}{
+		"refresh token refused": {cheapTestAccess, -time.Hour, core.ErrorRefresh},
+		"access token refused":  {"stale-access", time.Hour, core.ErrorUnauthorized},
+	} {
+		t.Run(name, func(t *testing.T) {
+			gateway := newCheapGateway(t)
+			gateway.rejected = true
+			var enabled protocol.ConversationProvider
+			d := openCheapDesktop(t, func(d *cheapDesktop) {
+				d.signedIn(gateway.URL, fixture.access, fixture.expires)
+				enabled = d.saveGateway(gateway.URL)
+			})
+			d.workspace("startup with a rejected session")
+			d.await("the session to end", func() bool { return d.account().Stage == cheapauthui.SignedOut && d.account().Failure != "" })
+			failure := (&core.AuthError{Kind: fixture.failure, Status: http.StatusUnauthorized}).Error()
+			if d.account().Failure != failure {
+				t.Fatalf("the rejected session is reported as %q, want %q", d.account().Failure, failure)
+			}
+			disabled := enabled
+			disabled.Enabled, disabled.Revision = false, enabled.Revision+1
+			if after := d.gateway(false); !reflect.DeepEqual(after, disabled) {
+				t.Fatalf("the rejected session did more than disable the provider: %+v", after)
+			}
+			d.untouched("after the session ended")
+			if d.stored() != nil {
+				t.Fatal("the rejected session's credentials were kept")
+			}
+			d.workspace("after the session ended")
+			d.accountPage()
+			for _, text := range []string{failure, i18n.In("zh-CN", "cheaprouter_signed_out"), cheapSignIn} {
+				if !d.tester.HasText(text) {
+					t.Errorf("the account page lacks %q: %q", text, d.tester.Texts())
+				}
+			}
+		})
+	}
 }

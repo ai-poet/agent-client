@@ -146,7 +146,7 @@ CheapRouter 账号登录是可选的，用来快速接入模型网关。未登�
 - 浏览器登录使用 PKCE S256 和 `127.0.0.1` 临时端口回跳。浏览器不会把 URL fragment 发给本地服务，因此回跳页会通过本地 POST 将一次性登录码交给应用。无法使用 loopback 时，可直接粘贴登录码或完整回跳链接。
 - OAuth 凭据保存在 profile 下的 `cheaprouter-account.json`，文件权限为 0600。访问令牌会在到期前 120 秒刷新；令牌和 PKCE verifier 不写入日志，也不会出现在错误提示中。
 - 登录后，应用读取 `auth/me`、模型目录和 `keys`，将网关 `base_url` 与所选 API key 写入 sailry 现有的 OpenAI 兼容 provider。模型对话仍走既有的重试、流式响应和凭据保护链路，没有新增协议 wire 类型。
-- 登录成功会显示账号、套餐、余额和可用模型数。退出登录会撤销本地会话并禁用 CheapRouter provider，不影响其他 provider。
+- 登录成功会显示账号、套餐、余额和可用模型数。退出登录会撤销本地会话并禁用 CheapRouter provider，不影响其他 provider。登录状态被服务端拒绝（续期失败或令牌失效）时同样清除本地凭据并禁用 CheapRouter provider，账号页回到未登录并说明原因。
 
 可用标准库 `httptest` 假服务验证完整鉴权与模型请求，无需真实账号：
 

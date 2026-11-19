@@ -245,6 +245,7 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 		}
 
 		var modelCount int
+		var disableErr error
 		if ctx.Err() == nil {
 			if cheapAuthRejected(authErr) {
 				account.effects.Lock()
@@ -252,6 +253,9 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 					// Refresh rejection is already cleared by Service. A
 					// bearer rejection from /me or the gateway clears here.
 					authErr = errors.Join(authErr, account.service.Invalidate())
+					// The session is over as after a sign-out: its gateway
+					// stops routing, and nothing else of the Node changes.
+					disableErr = r.disableCheapGateway(account, generation)
 				}
 				account.effects.Unlock()
 			} else if gatewayErr == nil {
@@ -266,6 +270,9 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 			account.stopSync = nil
 			if cheapAuthRejected(authErr) {
 				account.state.Stage, account.state.Failure = cheapauthui.SignedOut, cheapAuthError(authErr)
+				if disableErr != nil {
+					account.state.Failure += "；CheapRouter provider 未能停用，请在模型设置中关闭"
+				}
 				account.state.Account, account.state.ModelCount = core.User{}, 0
 				return
 			}
