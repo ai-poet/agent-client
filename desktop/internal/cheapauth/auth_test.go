@@ -483,6 +483,44 @@ func TestLogoutRevokesAndClearsLocalCredentials(t *testing.T) {
 	}
 }
 
+// A credential file that cannot be removed is emptied, and an empty file is
+// a signed-out profile: the next launch must not sign the user back in.
+func TestSignOutEmptiesFileItCannotRemove(t *testing.T) {
+	profile := t.TempDir()
+	service, err := NewService(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(service.store.Path(), []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Restore(); err != nil || service.SignedIn() {
+		t.Fatalf("an empty file restored a session: %v", err)
+	}
+	saved := Credentials{AccessToken: testAccess, RefreshToken: testRefresh, Endpoint: "https://cheap.example", ExpiresAt: time.Now().Add(time.Hour).Unix()}
+	if err := service.store.Save(saved); err != nil {
+		t.Fatal(err)
+	}
+	// Without write access to its directory a file cannot be removed, yet
+	// its owner can still write it.
+	if err := os.Chmod(profile, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(profile, 0o700)
+	if err := os.Remove(service.store.Path()); err == nil {
+		t.Skip("this user removes files from a read-only directory")
+	}
+	if err := service.store.Clear(); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := os.ReadFile(service.store.Path()); err != nil || len(raw) != 0 {
+		t.Fatalf("the credential file keeps %d bytes, %v", len(raw), err)
+	}
+	if err := service.Restore(); err != nil || service.SignedIn() {
+		t.Fatalf("the emptied file restored a session: %v", err)
+	}
+}
+
 func TestAccountAcceptsNestedPlan(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/api/v1/auth/me" || request.Header.Get("Authorization") != "Bearer "+testAccess {

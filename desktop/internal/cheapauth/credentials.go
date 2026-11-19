@@ -1,6 +1,7 @@
 package cheapauth
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -24,7 +25,7 @@ func (s *Store) Path() string { return s.path }
 
 func (s *Store) Load() (*Credentials, error) {
 	raw, err := os.ReadFile(s.path)
-	if errors.Is(err, os.ErrNotExist) {
+	if errors.Is(err, os.ErrNotExist) || err == nil && len(bytes.TrimSpace(raw)) == 0 {
 		return nil, nil
 	}
 	if err != nil {
@@ -87,9 +88,14 @@ func (s *Store) Save(credentials Credentials) error {
 	return nil
 }
 
+// Clear removes the stored session. A file that cannot be removed, as one a
+// scanner holds open on Windows, is emptied instead: Load reads an empty file
+// as signed out, where leaving it would sign the user back in on the next
+// launch.
 func (s *Store) Clear() error {
-	if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return &AuthError{Kind: ErrorStorage, Op: "clear"}
+	err := os.Remove(s.path)
+	if err == nil || errors.Is(err, os.ErrNotExist) || os.WriteFile(s.path, nil, 0o600) == nil {
+		return nil
 	}
-	return nil
+	return &AuthError{Kind: ErrorStorage, Op: "clear"}
 }
