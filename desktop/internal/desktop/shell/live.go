@@ -26,9 +26,6 @@ type Hooks struct {
 	FilePreview func(*ui.Context)
 	BeforeFrame func(*ui.Context)
 	AfterFrame  func()
-	// AuthGate draws the account sign-in gate and returns true while the
-	// ordinary workspace must remain hidden. Preview leaves it nil.
-	AuthGate func(*ui.Context) bool
 	// DemoChanged runs when Demo mode went on, off or into another
 	// language, before the frame's other hooks.
 	DemoChanged      func()

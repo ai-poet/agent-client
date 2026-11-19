@@ -8,14 +8,9 @@ import (
 	"testing"
 
 	core "github.com/ai-poet/agent-client/desktop/internal/cheapauth"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/egoist/mygo/ui"
 )
-
-func loginTester(state *State) *ui.Tester {
-	tt := ui.NewTester(func(c *ui.Context) { Gate(c, state) }, 960, 720)
-	tt.SetLocale("zh-CN")
-	return tt
-}
 
 func accountTester(state *State) *ui.Tester {
 	tt := ui.NewTester(func(c *ui.Context) { Page(c, state) }, 960, 720)
@@ -45,7 +40,7 @@ func TestLoginEndpointsAndStartActions(t *testing.T) {
 			state := NewState()
 			var started []bool
 			state.Start = func(manual bool) { started = append(started, manual) }
-			tt := loginTester(state)
+			tt := accountTester(state)
 			tt.SetDark(dark)
 			primary, cdn := "主站 · "+core.PrimaryEndpoint, "CDN · "+core.CDNEndpoint
 			for _, name := range []string{primary, cdn, "在浏览器中登录", "使用粘贴登录码方式"} {
@@ -94,7 +89,7 @@ func TestPasteLoginSubmissionAndBrowserActions(t *testing.T) {
 		state.Exchanging = true
 	}
 	state.Cancel = func() { cancellations++ }
-	tt := loginTester(state)
+	tt := accountTester(state)
 	for _, pasted := range []string{"", " \t "} {
 		state.Pasted = pasted
 		tt.Frame()
@@ -146,34 +141,60 @@ func TestPasteLoginSubmissionAndBrowserActions(t *testing.T) {
 	}
 }
 
-func TestLoginGateFollowsCredentialState(t *testing.T) {
+// The account page states every credential stage itself, the signed-out one
+// included: no stage has a page of its own outside Settings.
+func TestAccountPageFollowsCredentialState(t *testing.T) {
+	signedOut, signIn := i18n.In("zh-CN", "cheaprouter_signed_out"), "在浏览器中登录"
 	for _, tc := range []struct {
-		name   string
-		state  *State
-		blocks bool
+		name         string
+		state        *State
+		signedIn     bool
+		shows, hides []string
 	}{
-		{"nil", nil, true},
-		{"signed out", &State{Stage: SignedOut}, true},
-		{"starting", &State{Stage: Starting}, true},
-		{"waiting", &State{Stage: WaitingForCode}, true},
-		{"syncing", &State{Stage: SyncingGateway}, false},
-		{"gateway failed", &State{Stage: GatewayFailed, Failure: "连接模型网关失败"}, false},
-		{"ready", &State{Stage: Ready}, false},
-		{"account read failed", &State{Stage: Ready, AccountFailure: "无法读取账号信息"}, false},
+		{"nil", nil, false, []string{"CheapRouter 账号不可用"}, []string{signIn}},
+		{"signed out", &State{Stage: SignedOut}, false, []string{signedOut, i18n.In("zh-CN", "cheaprouter_signed_out_description"), signIn, "使用粘贴登录码方式"}, []string{"已连接 CheapRouter", "退出登录"}},
+		{"session ended", &State{Stage: SignedOut, Failure: "登录状态已失效，请重新登录"}, false, []string{signedOut, "登录状态已失效，请重新登录", signIn}, nil},
+		{"starting", &State{Stage: Starting}, false, []string{signedOut, "正在准备安全登录"}, nil},
+		{"waiting", &State{Stage: WaitingForCode}, false, []string{"一次性登录码", "取消本次登录"}, []string{signedOut, signIn}},
+		{"syncing", &State{Stage: SyncingGateway}, true, []string{"正在连接模型网关", "取消本次配置"}, []string{signedOut, signIn}},
+		{"gateway failed", &State{Stage: GatewayFailed, Failure: "连接模型网关失败"}, true, []string{"连接模型网关失败", "重试网关配置"}, []string{signedOut, signIn}},
+		{"ready", &State{Stage: Ready}, true, []string{"已连接 CheapRouter", "退出登录"}, []string{signedOut, signIn}},
+		{"account read failed", &State{Stage: Ready, AccountFailure: "无法读取账号信息"}, true, []string{"已连接 CheapRouter", "无法读取账号信息"}, []string{signedOut, signIn}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.state.RequiresLogin() != tc.blocks {
-				t.Fatalf("RequiresLogin() = %t, want %t", !tc.blocks, tc.blocks)
+			if tc.state.SignedIn() != tc.signedIn {
+				t.Fatalf("SignedIn() = %t, want %t", !tc.signedIn, tc.signedIn)
 			}
-			tt := ui.NewTester(func(c *ui.Context) {
-				if !Gate(c, tc.state) {
-					ui.Text(c, "shell")
+			tt := accountTester(tc.state)
+			for _, text := range tc.shows {
+				if !tt.HasText(text) {
+					t.Errorf("missing %q: %q", text, tt.Texts())
 				}
-			}, 960, 720)
-			if tt.HasText("shell") == tc.blocks || tt.HasText("登录 CheapRouter") != tc.blocks {
-				t.Fatalf("unexpected gate contents: %q", tt.Texts())
+			}
+			for _, text := range tc.hides {
+				if tt.HasText(text) {
+					t.Errorf("unexpected %q: %q", text, tt.Texts())
+				}
 			}
 		})
+	}
+}
+
+// A gateway that cannot be reached fails the account read the same way; the
+// page says it once.
+func TestAccountPageShowsOneAlertForOneFailure(t *testing.T) {
+	const failure = "无法连接 CheapRouter，请检查网络或切换主站/CDN 后重试"
+	alerts := func(state *State) (count int) {
+		for _, text := range accountTester(state).Texts() {
+			if text == failure {
+				count++
+			}
+		}
+		return count
+	}
+	once := alerts(&State{Stage: GatewayFailed, Failure: failure})
+	if once == 0 || alerts(&State{Stage: GatewayFailed, Failure: failure, AccountFailure: failure}) != once {
+		t.Fatalf("the shared failure is not shown exactly as often as a single one (%d)", once)
 	}
 }
 
@@ -277,7 +298,7 @@ func TestLoginSnapshots(t *testing.T) {
 	}{{"mygo-login-lobe.png", SignedOut}, {"mygo-login-paste.png", WaitingForCode}} {
 		state := NewState()
 		state.Stage, state.LoginURL = shot.stage, "https://example.com/login"
-		tt := loginTester(state)
+		tt := accountTester(state)
 		file, err := os.Create(filepath.Join(dir, shot.name))
 		if err != nil {
 			t.Fatal(err)

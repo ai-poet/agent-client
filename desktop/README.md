@@ -140,7 +140,7 @@ Guides: [Models](docs/models.md) · [Remote hosts](docs/hosts.md) · [Projects a
 
 ## 登录与模型网关
 
-桌面端通过 CheapRouter 账号连接模型网关。未登录或网关尚未配置完成时，应用会显示中文登录页；已有功能和其他模型 provider 配置不会被删除或改写。
+CheapRouter 账号登录是可选的，用来快速接入模型网关。未登录、没有网络或网关同步失败时，应用照常进入主界面，本地项目、会话、终端和其他模型 provider 不受影响。登录入口在 **设置 → CheapRouter 账号**；已有功能和其他模型 provider 配置不会被删除或改写。
 
 - 可选择主站 `https://cheaprouter.cc` 或 CDN `https://cdn.cheaprouter.cc`，两者连接同一账号和网关。
 - 浏览器登录使用 PKCE S256 和 `127.0.0.1` 临时端口回跳。浏览器不会把 URL fragment 发给本地服务，因此回跳页会通过本地 POST 将一次性登录码交给应用。无法使用 loopback 时，可直接粘贴登录码或完整回跳链接。

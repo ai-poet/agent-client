@@ -1,5 +1,6 @@
-// Package cheapauth presents CheapRouter sign-in and account state. Network
-// and credential mutations stay in the live Runtime's background workers.
+// Package cheapauth presents the optional CheapRouter sign-in and account
+// state on its settings page. Network and credential mutations stay in the
+// live Runtime's background workers.
 package cheapauth
 
 import core "github.com/ai-poet/agent-client/desktop/internal/cheapauth"
@@ -40,8 +41,9 @@ type State struct {
 
 func NewState() *State { return &State{Endpoint: core.PrimaryEndpoint} }
 
-func (s *State) RequiresLogin() bool {
-	return s == nil || s.Stage == SignedOut || s.Stage == Starting || s.Stage == WaitingForCode
+// SignedIn reports whether credentials are established, whatever the gateway's state.
+func (s *State) SignedIn() bool {
+	return s != nil && (s.Stage == SyncingGateway || s.Stage == Ready || s.Stage == GatewayFailed)
 }
 func (s *State) Busy() bool {
 	return s != nil && (s.Stage == Starting || s.Stage == SyncingGateway)

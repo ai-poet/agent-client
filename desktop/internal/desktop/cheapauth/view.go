@@ -16,29 +16,6 @@ import (
 	lobetheme "github.com/lobehub/lobe-mygo/pkg/theme"
 )
 
-// Gate renders the full-window sign-in page until credentials are established.
-// Returning true tells the shell not to render other pages.
-func Gate(c *ui.Context, state *State) bool {
-	if !state.RequiresLogin() {
-		return false
-	}
-	lobetheme.Apply(c)
-	p := lobetheme.TokensOf(c)
-	c.Root().Background(p.BgLayout)
-	ui.Column(c.Key("cheaprouter-login")).Fill().Padding(32).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
-		ui.Column(c).FillWidth().MaxWidth(480).Padding(28).Gap(20).Border(1, p.BorderSecondary).Radius(p.BorderRadiusLG).Background(p.BgContainer).Children(func() {
-			ui.Column(c).Gap(6).Children(func() {
-				ui.Text(c, "登录 CheapRouter").FontSize(22).FontWeight(600)
-				ui.Text(c, "使用 CheapRouter 账号连接模型网关。登录码通过 PKCE 保护，应用不会接触你的账号密码。").FontSize(14).TextColor(p.TextSecondary)
-			})
-			if state != nil {
-				content(c, state)
-			}
-		})
-	})
-	return true
-}
-
 // Page renders Settings → CheapRouter 账号.
 func Page(c *ui.Context, state *State) {
 	if state == nil {
@@ -62,13 +39,17 @@ func content(c *ui.Context, state *State) {
 	if state.Failure != "" {
 		feedback.Alert(c.Key("failure"), state.Failure, feedback.AlertProps{Type: feedback.Error, Selectable: true})
 	}
-	if !state.RequiresLogin() && state.AccountFailure != "" {
+	if state.SignedIn() && state.AccountFailure != "" && state.AccountFailure != state.Failure {
 		feedback.Alert(c.Key("account-failure"), state.AccountFailure, feedback.AlertProps{Type: feedback.Error, Selectable: true})
 	}
 	switch state.Stage {
 	case SignedOut, Starting:
 		disabled := state.Stage == Starting || state.LoggingOut
 		ui.Column(c.Key("signed-out")).Gap(16).Children(func() {
+			ui.Column(c).Gap(6).Children(func() {
+				ui.Text(c, i18n.T(c, "cheaprouter_signed_out")).FontSize(16).FontWeight(600)
+				ui.Text(c, i18n.T(c, "cheaprouter_signed_out_description")).FontSize(13).TextColor(p.TextSecondary)
+			})
 			ui.Column(c).Gap(6).Children(func() {
 				ui.Text(c, "选择服务入口").FontSize(14).FontWeight(600)
 				ui.Text(c, "主站与 CDN 连接同一账号和模型网关；网络失败时可切换后重试。").FontSize(13).TextColor(p.TextSecondary)

@@ -10,8 +10,8 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/client"
 	core "github.com/ai-poet/agent-client/desktop/internal/cheapauth"
 	cheapauthui "github.com/ai-poet/agent-client/desktop/internal/desktop/cheapauth"
-	"github.com/ai-poet/agent-client/desktop/internal/desktop/settings"
-	"github.com/ai-poet/agent-client/desktop/internal/desktop/shell"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/node/providers"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 	"github.com/egoist/mygo/ui"
@@ -175,7 +175,7 @@ func (r *Runtime) finishCheapLogin(attempt *cheapLoginAttempt, credentials core.
 				account.effects.Lock()
 				saveErr := account.service.Establish(attempt.ctx, credentials)
 				account.effects.Unlock()
-				r.enqueue(func(*ui.Context) {
+				r.enqueue(func(c *ui.Context) {
 					if account.attempt != attempt || attempt.ctx.Err() != nil {
 						return
 					}
@@ -190,8 +190,9 @@ func (r *Runtime) finishCheapLogin(attempt *cheapLoginAttempt, credentials core.
 					account.state.Endpoint = credentials.Endpoint
 					generation := account.advance(r.ctx)
 					r.startCheapSync(account, generation)
-					r.App.Settings.Open(settings.CheapAccount)
-					r.App.Navigate(shell.SettingsPage)
+					// The browser round trip may end on any page; the sign-in
+					// reports there instead of taking the window to Settings.
+					kit.Toast(c, kit.Done, i18n.T(c, "cheaprouter_signed_in"))
 				})
 			})
 		})
@@ -224,7 +225,8 @@ func (r *Runtime) stopCheapSync() {
 }
 
 // startCheapSync is one cancellable pass. The account projection is optional;
-// only a definite authentication rejection blocks access to the shell.
+// only a definite authentication rejection ends the session, and no outcome
+// of the pass hides the workspace.
 func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAuthGeneration) {
 	ctx, cancel := context.WithCancel(generation.ctx)
 	account.stopSync = cancel
@@ -411,15 +413,6 @@ func (r *Runtime) disableCheapGateway(account *cheapAuthRuntime, generation *che
 	return r.writeCheapProvider(ctx, account, generation, protocol.CommandSaveProviderPayload{
 		Provider: *existing, ExpectedRevision: existing.Revision,
 	})
-}
-
-// CheapAuthGate is installed by the desktop composition root. Embedders and
-// isolated view tests can render the shared shell without an account gate.
-func (r *Runtime) CheapAuthGate(c *ui.Context) bool {
-	if r.cheapAuth == nil {
-		return false
-	}
-	return cheapauthui.Gate(c, r.cheapAuth.state)
 }
 
 // cheapAuthError turns the sync failure into what the user can act on. A

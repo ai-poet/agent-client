@@ -44,6 +44,9 @@ settings_conversation: 会話
 settings_shortcuts: キーボードショートカット
 cheaprouter_account: CheapRouter account
 cheaprouter_account_description: Manage sign-in, plan details and the model gateway connection
+cheaprouter_signed_out: Not signed in
+cheaprouter_signed_out_description: Sign in to connect the CheapRouter model gateway. Other models and local features work without an account.
+cheaprouter_signed_in: Signed in to CheapRouter
 settings_providers: モデル
 settings_providers_description: セッションプロバイダ、認証、モデルの管理Name
 settings_connectors: コネクター

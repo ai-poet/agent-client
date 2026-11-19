@@ -352,10 +352,6 @@ func (a *App) View(c *ui.Context) {
 		kit.ToastHost(c)
 		return
 	}
-	if a.Hooks.AuthGate != nil && a.Hooks.AuthGate(c) {
-		kit.ToastHost(c)
-		return
-	}
 	a.shortcuts(c)
 	a.MountPanel()
 	a.followSelection()

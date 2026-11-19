@@ -189,15 +189,11 @@ func run() error {
 		if options.Preview {
 			entry.app = shell.New(preview.Load())
 		} else {
-			runtime, err := live.NewWithPreferences(ctx, backend.Client, backend.Preferences)
+			runtime, err := liveWindow(ctx, backend, len(windows) == 0)
 			if err != nil {
 				return err
 			}
 			entry.live = runtime
-			runtime.App.Hooks.AuthGate = runtime.CheapAuthGate
-			runtime.SetMigrationService(backend.Migration, len(windows) == 0)
-			runtime.SetNetwork(backend.Network)
-			runtime.SetLogFolder(logging.Directory())
 			entry.app = entry.live.App
 		}
 		app := entry.app
@@ -425,6 +421,19 @@ func run() error {
 		return err
 	}
 	return composition
+}
+
+// liveWindow composes a window over the profile's Node. A CheapRouter account
+// is optional, so nothing here waits for a sign-in or hides the workspace.
+func liveWindow(ctx context.Context, backend *desktopBackend, first bool) (*live.Runtime, error) {
+	runtime, err := live.NewWithPreferences(ctx, backend.Client, backend.Preferences)
+	if err != nil {
+		return nil, err
+	}
+	runtime.SetMigrationService(backend.Migration, first)
+	runtime.SetNetwork(backend.Network)
+	runtime.SetLogFolder(logging.Directory())
+	return runtime, nil
 }
 
 func preferenceLocale(language *string) string {

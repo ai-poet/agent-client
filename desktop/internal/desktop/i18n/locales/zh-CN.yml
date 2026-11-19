@@ -44,6 +44,9 @@ settings_conversation: 会话
 settings_shortcuts: 快捷键
 cheaprouter_account: CheapRouter 账号
 cheaprouter_account_description: 管理账号登录、套餐信息和模型网关连接
+cheaprouter_signed_out: 未登录
+cheaprouter_signed_out_description: 登录后自动接入 CheapRouter 模型网关；不登录也可使用其他模型和本地功能。
+cheaprouter_signed_in: 已登录 CheapRouter
 settings_providers: 模型
 settings_providers_description: 管理会话使用的供应商、认证和模型
 settings_connectors: 连接器
