@@ -45,6 +45,8 @@ settings_appearance
 settings_appearance_description
 settings_conversation
 settings_shortcuts
+cheaprouter_account
+cheaprouter_account_description
 settings_providers
 settings_providers_description
 settings_connectors

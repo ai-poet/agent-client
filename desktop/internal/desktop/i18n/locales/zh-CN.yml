@@ -42,6 +42,8 @@ settings_appearance: 外观
 settings_appearance_description: 调整界面主题与窗口外观
 settings_conversation: 会话
 settings_shortcuts: 快捷键
+cheaprouter_account: CheapRouter 账号
+cheaprouter_account_description: 管理账号登录、套餐信息和模型网关连接
 settings_providers: 模型
 settings_providers_description: 管理会话使用的供应商、认证和模型
 settings_connectors: 连接器

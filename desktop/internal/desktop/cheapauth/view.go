@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	core "github.com/ai-poet/agent-client/desktop/internal/cheapauth"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
 	"github.com/egoist/mygo/ui"
@@ -44,7 +45,7 @@ func Page(c *ui.Context, state *State) {
 		kit.Result(c, kit.ResultProps{Title: "CheapRouter 账号不可用", SubTitle: "请重启应用后重试", Card: true})
 		return
 	}
-	kit.Page(c, "cheaprouter-account", "CheapRouter 账号", "管理账号登录、套餐信息和模型网关连接。", func() {
+	kit.Page(c, "cheaprouter-account", i18n.T(c, "cheaprouter_account"), i18n.T(c, "cheaprouter_account_description"), func() {
 		kit.Card(c, func() {
 			if state.Stage == Ready {
 				ui.Column(c).Padding(20).Gap(18).Children(func() { content(c, state) })

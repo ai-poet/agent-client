@@ -42,6 +42,8 @@ settings_appearance: Внешний вид
 settings_appearance_description: Настройка темы и внешнего вида окна
 settings_conversation: Разговор
 settings_shortcuts: Горячие клавиши
+cheaprouter_account: CheapRouter account
+cheaprouter_account_description: Manage sign-in, plan details and the model gateway connection
 settings_providers: Модели
 settings_providers_description: Управление поставщиками сеансов, проверкой подлинности и моделями
 settings_connectors: Коннекторы

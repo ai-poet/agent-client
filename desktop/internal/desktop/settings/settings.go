@@ -117,9 +117,6 @@ func (s *State) Open(sec Section) {
 
 // Title is the header's title for the section.
 func Title(c *ui.Context, s *State) string {
-	if s.Section == CheapAccount {
-		return "CheapRouter 账号"
-	}
 	for _, page := range s.pluginPages {
 		if page.Section == s.Section {
 			return page.Label

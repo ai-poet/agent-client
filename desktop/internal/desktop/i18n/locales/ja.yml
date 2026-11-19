@@ -42,6 +42,8 @@ settings_appearance: 外観
 settings_appearance_description: テーマとウィンドウの外観を調整Name
 settings_conversation: 会話
 settings_shortcuts: キーボードショートカット
+cheaprouter_account: CheapRouter account
+cheaprouter_account_description: Manage sign-in, plan details and the model gateway connection
 settings_providers: モデル
 settings_providers_description: セッションプロバイダ、認証、モデルの管理Name
 settings_connectors: コネクター

@@ -56,12 +56,8 @@ func (section Section) navigationOrder() uint16 {
 func settingsGroupNavigation(view *ui.Context, group string, core []Item, pages []PluginPage) []PluginPage {
 	entries := make([]PluginPage, 0, len(core)+len(pages))
 	for _, item := range core {
-		label := i18n.T(view, string(item.Section))
-		if item.Section == CheapAccount {
-			label = "CheapRouter 账号"
-		}
 		entries = append(entries, PluginPage{
-			Section: item.Section, Label: label, Icon: item.Icon,
+			Section: item.Section, Label: i18n.T(view, string(item.Section)), Icon: item.Icon,
 			Order: item.Section.navigationOrder(),
 		})
 	}

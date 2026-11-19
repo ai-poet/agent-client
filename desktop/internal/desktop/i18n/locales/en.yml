@@ -42,6 +42,8 @@ settings_appearance: Appearance
 settings_appearance_description: Adjust theme and window appearance
 settings_conversation: Conversation
 settings_shortcuts: Keyboard shortcuts
+cheaprouter_account: CheapRouter account
+cheaprouter_account_description: Manage sign-in, plan details and the model gateway connection
 settings_providers: Models
 settings_providers_description: Manage session providers, authentication and models
 settings_connectors: Connectors

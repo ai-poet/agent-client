@@ -42,6 +42,8 @@ settings_appearance: 外觀
 settings_appearance_description: 調整介面主題與視窗外觀
 settings_conversation: 會話
 settings_shortcuts: 快捷鍵
+cheaprouter_account: CheapRouter account
+cheaprouter_account_description: Manage sign-in, plan details and the model gateway connection
 settings_providers: 模型
 settings_providers_description: 管理會話使用的供應商、認證和模型
 settings_connectors: 連接器
