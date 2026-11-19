@@ -154,7 +154,7 @@ func TestOneRequestPerStep(t *testing.T) {
 				}
 			case "turn panic":
 				mustHaveText(t, state.Records, "Recovered")
-				if !strings.Contains(responses["stuck"], "interrupted before completing") {
+				if !strings.Contains(responses["stuck"], "did not start") || !strings.Contains(responses["stuck"], string(protocol.ErrorCodeCancelled)) {
 					t.Fatalf("failed turn left its call unsettled: %v", responses)
 				}
 			case "credential renewed mid-turn":
@@ -324,6 +324,32 @@ func TestParallelReadOnlyOrder(t *testing.T) {
 		f.waitRun(turn, protocol.ConversationStatusCancelled)
 		if starts.Load() != 8 {
 			t.Fatalf("stopped turn started %d calls", starts.Load())
+		}
+		observed := map[string]protocol.ErrorCode{}
+		for _, record := range f.state().Records {
+			message := record.Message()
+			if message == nil {
+				continue
+			}
+			for _, block := range message.Content {
+				result, ok := block.Data.(*canonical.ToolResponse)
+				if !ok || result.Name != "read" {
+					continue
+				}
+				var fault struct{ Data protocol.Fault }
+				if err := json.Unmarshal(result.Result.Value, &fault); err != nil {
+					t.Fatal(err)
+				}
+				observed[result.ID] = fault.Data.Code
+			}
+		}
+		if len(observed) != 9 || observed["i"] != protocol.ErrorCodeCancelled {
+			t.Fatalf("stopped call outcomes: %v", observed)
+		}
+		for id := 'a'; id < 'i'; id++ {
+			if observed[string(id)] != protocol.ErrorCodeOutcomeUnknown {
+				t.Fatalf("started call %c was not reported as uncertain: %v", id, observed)
+			}
 		}
 	})
 	t.Run("tied stream slots keep arrival order", func(t *testing.T) {
@@ -592,6 +618,12 @@ func TestStopSealsInterrupted(t *testing.T) {
 				for _, block := range message.Content {
 					if value, ok := block.Data.(*canonical.ToolResponse); ok {
 						order = append(order, "response "+value.ID)
+						if value.ID == "gated" {
+							var fault struct{ Data protocol.Fault }
+							if err := json.Unmarshal(value.Result.Value, &fault); err != nil || fault.Data.Code != protocol.ErrorCodeCancelled {
+								t.Fatalf("unapproved call outcome: %s (%v)", value.Result.Value, err)
+							}
+						}
 					}
 				}
 			}
