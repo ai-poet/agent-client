@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/model"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/operations"
 	"github.com/ai-poet/agent-client/desktop/internal/node/plugins"
@@ -582,7 +583,7 @@ func TestGoalLoop(t *testing.T) {
 		if len(runs) != 3 || !runs[1].Notice || len(runs[1].Notices) != 1 || runs[2].Continuation == nil || runs[2].Notice {
 			t.Fatalf("turns after the result = %+v", runs)
 		}
-		if notice := f.prompt(2); !strings.Contains(notice, "Node background completion data follows") {
+		if notice := f.prompt(2); !strings.Contains(notice, canonical.BackgroundLabel) || !strings.Contains(notice, `"outcome":"completed"`) {
 			t.Fatalf("the notice turn carried no result: %q", notice)
 		}
 		// The notice turn counts toward the goal's one limit.
