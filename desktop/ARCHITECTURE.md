@@ -428,7 +428,12 @@ bounded installation queue shared by plugins, models and language packages.
 canonical state, settles approvals and tool results, consumes guidance and child
 outcomes, compacts when needed and requests the next model step. Effects commit
 through Store before publication. The engine keeps ownership until turn settlement
-is durable and drains admitted operations before finalizing the turn.
+is durable and drains admitted operations before finalizing the turn. A committed
+Stop cancels the running turn and its delegated work before publishing changes.
+A stopped or failed parent settles its cancelled children and consumes their
+completion records before ending normally. Settlement retries only storage work,
+without replaying the model, tools or hooks. On shutdown, recovery handles any
+owners whose settlement could not finish.
 
 The model boundary supports provider SDK adapters, package-declared translations
 and Agent Client Protocol programs. Fantasy supplies the per-step
