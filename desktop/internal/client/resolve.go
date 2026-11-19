@@ -47,10 +47,8 @@ func (client *Client) Resolve(ctx context.Context, request protocol.Request) (Re
 	switch outcome.Kind {
 	case "not_admitted":
 		// Older Nodes used not_admitted for every missing row, even after pruning.
-		if created, known := request.ID.CreatedAt(); known {
-			if age := time.Since(created); age >= -protocol.RequestRetention && age < protocol.RequestRetention {
-				return Resolution{State: RequestAbsent}, nil
-			}
+		if created, known := request.ID.CreatedAt(); known && time.Since(created) < protocol.RequestRetention {
+			return Resolution{State: RequestAbsent}, nil
 		}
 		fallthrough
 	case "unrecorded":
