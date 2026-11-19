@@ -315,17 +315,35 @@ func (r *Runtime) saveCheapGateway(ctx context.Context, account *cheapAuthRuntim
 	if err != nil {
 		return 0, err
 	}
-	existing, err := r.readCheapProvider(ctx)
-	if err != nil {
-		return 0, err
-	}
-	if existing != nil {
-		provider.Revision = existing.Revision
-	}
-	err = r.writeCheapProvider(ctx, account, generation, protocol.CommandSaveProviderPayload{
-		Provider: provider, ExpectedRevision: provider.Revision, Secret: secret,
+	err = r.updateCheapProvider(ctx, account, generation, func(existing *protocol.ConversationProvider) *protocol.CommandSaveProviderPayload {
+		provider.Revision = 0
+		if existing != nil {
+			provider.Revision = existing.Revision
+		}
+		return &protocol.CommandSaveProviderPayload{Provider: provider, ExpectedRevision: provider.Revision, Secret: secret}
 	})
 	return len(provider.Models), err
+}
+
+// updateCheapProvider writes next's answer over the stored CheapRouter
+// provider at its current revision; nil leaves the provider as it is. Another
+// window's sync or an edit in Settings can move the revision between the read
+// and the write: the change is then made once more, to what is stored now.
+func (r *Runtime) updateCheapProvider(ctx context.Context, account *cheapAuthRuntime, generation *cheapAuthGeneration, next func(existing *protocol.ConversationProvider) *protocol.CommandSaveProviderPayload) error {
+	for reread := false; ; reread = true {
+		existing, err := r.readCheapProvider(ctx)
+		if err != nil {
+			return err
+		}
+		input := next(existing)
+		if input == nil {
+			return nil
+		}
+		err = r.writeCheapProvider(ctx, account, generation, *input)
+		if reread || faultCode(err) != protocol.ErrorCodeRevisionConflict {
+			return err
+		}
+	}
 }
 
 func (r *Runtime) readCheapProvider(ctx context.Context) (*protocol.ConversationProvider, error) {
@@ -411,14 +429,13 @@ func (r *Runtime) disableCheapGateway(account *cheapAuthRuntime, generation *che
 			return err // An admitted enable may still be running.
 		}
 	}
-	existing, err := r.readCheapProvider(ctx)
-	if err != nil || existing == nil || !existing.Enabled {
-		return err
-	}
 	// Disable only CheapRouter; do not alter other providers or captured tasks.
-	existing.Enabled = false
-	return r.writeCheapProvider(ctx, account, generation, protocol.CommandSaveProviderPayload{
-		Provider: *existing, ExpectedRevision: existing.Revision,
+	return r.updateCheapProvider(ctx, account, generation, func(existing *protocol.ConversationProvider) *protocol.CommandSaveProviderPayload {
+		if existing == nil || !existing.Enabled {
+			return nil
+		}
+		existing.Enabled = false
+		return &protocol.CommandSaveProviderPayload{Provider: *existing, ExpectedRevision: existing.Revision}
 	})
 }
 

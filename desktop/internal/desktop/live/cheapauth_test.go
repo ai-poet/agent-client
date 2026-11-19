@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -135,10 +136,26 @@ type cheapDesktop struct {
 	t          *testing.T
 	profile    string
 	controller *client.Client
-	runtime    *Runtime
-	tester     *ui.Tester
-	own        protocol.ConversationProvider
-	session    protocol.Session
+	// another is a second window's Client on the same Node.
+	another *client.Client
+	// before runs as the window dispatches a command, ahead of the Node.
+	before  atomic.Pointer[func(protocol.Request)]
+	runtime *Runtime
+	tester  *ui.Tester
+	own     protocol.ConversationProvider
+	session protocol.Session
+}
+
+type cheapDesktopTransport struct {
+	link.Transport
+	desktop *cheapDesktop
+}
+
+func (t cheapDesktopTransport) Dispatch(ctx context.Context, request protocol.Request) (link.Admission, error) {
+	if before := t.desktop.before.Load(); before != nil {
+		(*before)(request)
+	}
+	return t.Transport.Dispatch(ctx, request)
 }
 
 // openCheapDesktop starts the Node, lets prepare seed the profile and the
@@ -153,11 +170,14 @@ func openCheapDesktop(t *testing.T, prepare func(*cheapDesktop)) *cheapDesktop {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { owner.Stop(context.Background()) })
-	d.controller = client.New(link.NewLocal(owner.ID(), owner.ID(), owner))
-	if err := d.controller.Start(ctx); err != nil {
-		t.Fatal(err)
+	d.controller = client.New(cheapDesktopTransport{link.NewLocal(owner.ID(), owner.ID(), owner), d})
+	d.another = client.New(link.NewLocal(owner.ID(), owner.ID(), owner))
+	for _, controller := range []*client.Client{d.controller, d.another} {
+		if err := controller.Start(ctx); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { controller.Close() })
 	}
-	t.Cleanup(func() { d.controller.Close() })
 	d.own = protocol.DefaultConversationProvider()
 	d.own.ID, d.own.Name, d.own.Api = protocol.NewProviderID(), "Own", protocol.ConversationModelApiChatCompletions
 	d.own.Authentication, d.own.Endpoint = protocol.AuthenticationApiKey, "http://127.0.0.1:9/v1"
@@ -533,4 +553,65 @@ func TestCheapSessionRejectionDisablesOnlyGateway(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A CheapRouter provider that another window wrote between this window's
+// read and its write fails neither the gateway sync nor the sign-out: the
+// change is made to what is stored now.
+func TestCheapGatewayWriteSurvivesRevisionRace(t *testing.T) {
+	gateway := newCheapGateway(t)
+	var saved protocol.ConversationProvider
+	var lost [2]atomic.Bool // by the enabled state this window writes
+	d := openCheapDesktop(t, func(d *cheapDesktop) {
+		d.signedIn(gateway.URL, cheapTestAccess, time.Hour)
+		saved = d.saveGateway(gateway.URL)
+		race := func(request protocol.Request) {
+			input, ok := detail[protocol.CommandSaveProviderPayload](request.Command.Data)
+			if !ok || input.Provider.ID != providers.CheapRouterProviderID {
+				return
+			}
+			index := 0
+			if input.Provider.Enabled {
+				index = 1
+			}
+			if lost[index].Swap(true) {
+				return
+			}
+			// The other window saves the provider as it is stored.
+			output, err := d.another.Do(d.t.Context(), protocol.Command{Kind: "list_providers"})
+			if err != nil {
+				d.t.Error(err)
+				return
+			}
+			list, _ := detail[[]protocol.ConversationProvider](output.Data)
+			for _, stored := range list {
+				if stored.ID == providers.CheapRouterProviderID {
+					if _, err := d.another.Do(d.t.Context(), protocol.Command{Kind: "save_provider", Data: protocol.CommandSaveProviderPayload{Provider: stored, ExpectedRevision: stored.Revision}}); err != nil {
+						d.t.Error(err)
+					}
+				}
+			}
+		}
+		d.before.Store(&race)
+	})
+	d.await("the gateway sync", func() bool { return d.account().Stage != cheapauthui.SyncingGateway })
+	if state := d.account(); state.Stage != cheapauthui.Ready || state.Failure != "" || !lost[1].Load() {
+		t.Fatalf("the raced sync ended in stage %d with %q", state.Stage, state.Failure)
+	}
+	// Each of this window's writes lands after the other window's.
+	stored := func(enabled bool, revision uint64) func() bool {
+		return func() bool {
+			provider := d.provider(providers.CheapRouterProviderID)
+			return provider != nil && provider.Enabled == enabled && provider.Revision == revision
+		}
+	}
+	d.await("the synced provider", stored(true, saved.Revision+2))
+	d.accountPage()
+	d.click("退出登录")
+	d.await("the sign-out", func() bool { return d.account().Stage == cheapauthui.SignedOut && !d.account().LoggingOut })
+	if d.account().Failure != "" || !lost[0].Load() {
+		t.Fatalf("the raced sign-out reports %q", d.account().Failure)
+	}
+	d.await("the disabled provider", stored(false, saved.Revision+4))
+	d.untouched("after the raced writes")
 }
