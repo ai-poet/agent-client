@@ -90,7 +90,7 @@ func (state *pluginNativeState) composerSource() (*viewmodel.Conversation, *comp
 	}
 	config.Mode = []protocol.WorkMode{"code", "plan", "flagship"}[min(max(int(comp.Mode), 0), 2)]
 	config.Permission = []protocol.Permission{"ask", "project", "full"}[min(max(int(comp.Permission), 0), 2)]
-	if selected, _, err := state.runtime.composerConfig(comp, composer.Message{
+	if selected, _, err := state.runtime.composerConfig(view.ID, comp, composer.Message{
 		Model: comp.Model, Effort: comp.EffortName(nil, comp.Chosen(state.runtime.models())),
 		Features: comp.Features, Mode: comp.Mode, Permission: comp.Permission,
 	}); err == nil {

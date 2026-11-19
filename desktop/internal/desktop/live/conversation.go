@@ -94,11 +94,10 @@ func modelKey(provider protocol.ProviderID, model string) string {
 func (r *Runtime) projectModels() {
 	var models []composer.Model
 	var providers []viewmodel.Provider
-	own := len(r.snapshot().Providers)
-	for i, p := range r.composerProviders() {
-		if i < own {
-			providers = append(providers, viewmodel.Provider{ID: p.ID.String(), Name: p.Name})
-		}
+	for _, p := range r.snapshot().Providers {
+		providers = append(providers, viewmodel.Provider{ID: p.ID.String(), Name: p.Name})
+	}
+	for _, p := range r.composerProviders() {
 		if !p.Enabled {
 			continue
 		}
@@ -271,7 +270,7 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 				comp.Permission = permissionChoice(saved.Permission)
 				if m := saved.Model; m != nil && (m.Source == snapshot.Node || r.forwards(m.Provider) && m.Source == r.parent.controller.Target()) {
 					for _, p := range r.composerProviders() {
-						if p.ID == m.Provider && p.Enabled && slices.ContainsFunc(p.Models, func(v protocol.ConversationModel) bool { return v.ID == m.Model }) {
+						if p.ID == m.Provider && p.Enabled && r.draftProviderUsable(p.ID) && slices.ContainsFunc(p.Models, func(v protocol.ConversationModel) bool { return v.ID == m.Model }) {
 							config := protocol.DefaultSessionConfig()
 							config.Provider = m.Provider
 							config.Model = m.Model
@@ -291,9 +290,9 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 		r.defaultComposer(comp)
 	}
 	if s, ok := r.session(cv.ID); ok && s.Revision != r.composerRevisions[cv.ID] && !r.composerSaving[cv.ID] {
-		if key := r.composerKey(comp); key == r.composerObserved[cv.ID] {
+		if key := r.composerKey(cv.ID, comp); key == r.composerObserved[cv.ID] {
 			r.applyComposer(comp, s.Config)
-			r.composerObserved[cv.ID] = r.composerKey(comp)
+			r.composerObserved[cv.ID] = r.composerKey(cv.ID, comp)
 		}
 		r.composerRevisions[cv.ID] = s.Revision
 	}
@@ -368,7 +367,7 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 		selectedEffort = comp.EffortName(nil, chosen)
 	}
 	teamUnsettled := r.teams != nil && r.teams.composers[cv.ID] != nil && (r.teams.composers[cv.ID].saving || r.teams.composers[cv.ID].pending != nil)
-	config, _, err := r.composerConfig(comp, composer.Message{Model: comp.Model, Mode: comp.Mode, Permission: comp.Permission, Features: comp.Features, Effort: selectedEffort})
+	config, _, err := r.composerConfig(cv.ID, comp, composer.Message{Model: comp.Model, Mode: comp.Mode, Permission: comp.Permission, Features: comp.Features, Effort: selectedEffort})
 	// A new turn needs a configured model and no creation under way; the
 	// running reply's guidance uses that turn's.
 	outgoing := r.composerOutgoing[cv.ID]
@@ -447,11 +446,11 @@ func (r *Runtime) applyComposer(c *composer.State, config protocol.SessionConfig
 	}
 }
 
-func (r *Runtime) composerConfig(comp *composer.State, m composer.Message) (protocol.SessionConfig, uint64, error) {
-	for _, p := range r.composerProviders() {
-		if !p.Enabled {
-			continue
-		}
+func (r *Runtime) composerConfig(id string, comp *composer.State, m composer.Message) (protocol.SessionConfig, uint64, error) {
+	providerKey, _, _ := strings.Cut(m.Model, "/")
+	providerID, _ := protocol.ParseProviderID(providerKey)
+	p, allowed := r.composerProvider(id, providerID)
+	if allowed && p.Enabled {
 		for _, model := range p.Models {
 			if modelKey(p.ID, model.ID) != m.Model {
 				continue
@@ -746,7 +745,7 @@ func (x *conversationActions) submit(m composer.Message, guide, queue bool, draf
 			return
 		}
 	}
-	config, revision, err := x.r.composerConfig(x.comp, m)
+	config, revision, err := x.r.composerConfig(x.cv.ID, x.comp, m)
 	if err != nil {
 		x.r.discardUnsubmitted(x.cv.ID)
 		if _, exists := x.r.session(x.cv.ID); exists {

@@ -6,17 +6,17 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
-func (r *Runtime) composerKey(c *composer.State) string {
+func (r *Runtime) composerKey(id string, c *composer.State) string {
 	effort := ""
 	if chosen := c.Chosen(r.models()); chosen.Reasoning {
 		effort = c.EffortName(nil, chosen)
 	}
-	config, _, err := r.composerConfig(c, composer.Message{Model: c.Model, Mode: c.Mode, Permission: c.Permission, Features: c.Features, Effort: effort})
+	config, _, err := r.composerConfig(id, c, composer.Message{Model: c.Model, Mode: c.Mode, Permission: c.Permission, Features: c.Features, Effort: effort})
 	if err != nil {
 		return ""
 	}
@@ -28,20 +28,14 @@ func (r *Runtime) defaultComposer(c *composer.State) {
 	snapshot := r.snapshot()
 	if config := snapshot.Defaults.Config; config != nil {
 		for _, p := range snapshot.Providers {
-			if p.Enabled && p.ID == config.Provider && slices.ContainsFunc(p.Models, func(m protocol.ConversationModel) bool { return m.ID == config.Model }) {
+			if p.Enabled && r.listedProviderUsable(p) && p.ID == config.Provider && slices.ContainsFunc(p.Models, func(m protocol.ConversationModel) bool { return m.ID == config.Model }) {
 				r.applyComposer(c, *config)
 				return
 			}
 		}
 	}
-	providers := snapshot.Providers
-	if r.parent != nil {
-		// Another Node without a provider of its own starts on the local
-		// Node's, forwarded.
-		providers = append(slices.Clone(providers), r.parent.snapshot().Providers...)
-	}
-	for _, p := range providers {
-		if !p.Enabled || len(p.Models) == 0 {
+	for _, p := range r.composerProviders() {
+		if !p.Enabled || len(p.Models) == 0 || !r.draftProviderUsable(p.ID) {
 			continue
 		}
 		model := p.Models[0]

@@ -3,9 +3,9 @@ package live
 import (
 	"encoding/json"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 type attachmentSessionWaiter func(*ui.Context, protocol.Session, error)
@@ -41,7 +41,7 @@ func (x *conversationActions) ensureAttachmentSession(done func(*ui.Context, pro
 	if chosen := x.comp.Chosen(r.models()); chosen.Reasoning {
 		message.Effort = x.comp.EffortName(x.c, chosen)
 	}
-	config, revision, err := r.composerConfig(x.comp, message)
+	config, revision, err := r.composerConfig(before, x.comp, message)
 	if err != nil {
 		done(x.c, protocol.Session{}, err)
 		return

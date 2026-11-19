@@ -6,13 +6,13 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 type teamComposer struct {
@@ -433,7 +433,7 @@ func (r *Runtime) withComposerTeam(session protocol.Session, comp *composer.Stat
 		if chosen := comp.Chosen(r.models()); chosen.Reasoning {
 			effort = comp.EffortName(nil, chosen)
 		}
-		if config, _, err := r.composerConfig(comp, composer.Message{Model: comp.Model, Effort: effort, Features: comp.Features, Mode: comp.Mode, Permission: comp.Permission}); err == nil {
+		if config, _, err := r.composerConfig(id, comp, composer.Message{Model: comp.Model, Effort: effort, Features: comp.Features, Mode: comp.Mode, Permission: comp.Permission}); err == nil {
 			r.applyComposer(comp, composerConfigAfterTeam(state.baseConfig, config, current.Config))
 			baseline, _ := json.Marshal(current.Config)
 			r.composerObserved[id] = string(baseline)

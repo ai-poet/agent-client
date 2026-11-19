@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/ai-poet/agent-client/desktop/internal/client"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
@@ -18,10 +19,19 @@ func TestComposerProvidersMergeFollowedChannelsByIdentity(t *testing.T) {
 	controllerSnapshot, executorSnapshot := protocol.DefaultSnapshot(), protocol.DefaultSnapshot()
 	controllerSnapshot.Node, executorSnapshot.Node = protocol.NodeID{1}, protocol.NodeID{2}
 	controllerSnapshot.Providers = []protocol.ConversationProvider{provider(shared, "Controller copy"), provider(controllerOnly, "Controller only")}
-	executorSnapshot.Providers = []protocol.ConversationProvider{provider(shared, "Execution copy"), provider(executorOnly, "Execution only")}
+	foreign := provider(protocol.ProviderID{5}, "Foreign")
+	foreign.Credential = &protocol.CredentialRef{Node: protocol.NodeID{3}, ID: protocol.CredentialID{1}}
+	followed := provider(shared, "Execution copy")
+	followed.Source = &protocol.ConfigurationOrigin{Node: controllerSnapshot.Node, Revision: 1}
+	followed.Credential = &protocol.CredentialRef{Node: controllerSnapshot.Node, ID: protocol.CredentialID{2}}
+	controllerSnapshot.Providers[1].Credential = followed.Credential // Local API key, including CheapAuth.
+	executorSnapshot.Providers = []protocol.ConversationProvider{followed, provider(executorOnly, "Execution only"), foreign}
 	captured := protocol.DefaultSessionProfile()
+	captured.Source = controllerSnapshot.Node
 	captured.Provider = provider(private, "Captured")
-	executorSnapshot.Sessions = []protocol.Session{{ID: protocol.SessionID{1}, Profile: &captured}}
+	captured.Provider.Credential = followed.Credential
+	session := protocol.SessionID{1}
+	executorSnapshot.Sessions = []protocol.Session{{ID: session, Profile: &captured}}
 	controller := client.New(&conversationTestTransport{snapshot: controllerSnapshot})
 	executor := client.New(&conversationTestTransport{snapshot: executorSnapshot})
 	defer controller.Close()
@@ -52,7 +62,26 @@ func TestComposerProvidersMergeFollowedChannelsByIdentity(t *testing.T) {
 	if r.forwards(shared) || !r.forwards(controllerOnly) {
 		t.Fatal("offered provider precedence differs from the creation route")
 	}
-	if len(r.snapshot().Providers) != 2 || len(root.snapshot().Providers) != 2 {
+	if len(r.snapshot().Providers) != 3 || len(root.snapshot().Providers) != 2 {
 		t.Fatal("merging channels modified a source snapshot")
 	}
+	comp := composer.New("")
+	for _, tc := range []struct {
+		id       string
+		provider protocol.ProviderID
+		allowed  bool
+	}{
+		{"draft/1", foreign.ID, false},
+		{"draft/1", shared, true},
+		{"draft/1", controllerOnly, true},
+		{"draft/1", private, false},
+		{session.String(), private, true},
+		{session.String(), controllerOnly, false},
+	} {
+		config, _, err := r.composerConfig(tc.id, comp, composer.Message{Model: modelKey(tc.provider, "gpt-6-sol")})
+		if (err == nil) != tc.allowed || tc.allowed && (config.Credential == nil || *config.Credential != *followed.Credential) {
+			t.Errorf("%s on %s: config=%+v, err=%v", tc.provider, tc.id, config, err)
+		}
+	}
+
 }

@@ -5,12 +5,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 type conversationCreation struct {
@@ -29,24 +29,43 @@ func creationKey(c *composer.State, m composer.Message) string {
 	return string(value)
 }
 
+// listedProviderUsable mirrors the credential owners this controller can use.
+// A followed provider keeps its source identity in the executor's cache;
+// a controller-owned provider forwarded to another Node is checked at entry.
+func (r *Runtime) listedProviderUsable(p protocol.ConversationProvider) bool {
+	if p.Credential == nil {
+		return true
+	}
+	if p.Source == nil {
+		return p.Credential.Node == r.controller.Target()
+	}
+	return r.parent != nil && p.Source.Node == r.parent.controller.Target() && p.Credential.Node == p.Source.Node
+}
+
+func (r *Runtime) capturedProviderUsable(profile *protocol.SessionProfile) bool {
+	return profile != nil && (profile.Provider.Credential == nil ||
+		profile.Provider.Credential.Node == r.controller.Target() ||
+		r.parent != nil && profile.Source == r.parent.controller.Target() && profile.Provider.Credential.Node == profile.Source)
+}
+
 // composerProviders are the providers a composer of this Node resolves its
 // model in: the Node's own; on another Node the local Node's as well, whose
 // configuration a new session there is forwarded with; and the private
 // provider of each session that was created that way.
 func (r *Runtime) composerProviders() []protocol.ConversationProvider {
 	snapshot := r.snapshot()
-	providers := slices.Clone(snapshot.Providers)
+	providers := slices.DeleteFunc(slices.Clone(snapshot.Providers), func(p protocol.ConversationProvider) bool { return !r.listedProviderUsable(p) })
 	if r.parent != nil {
 		for _, provider := range r.parent.snapshot().Providers {
 			// A followed provider already resolves on this execution Node. Keep
 			// that copy, as creationCommand does, and offer its models once.
-			if !slices.ContainsFunc(providers, func(p protocol.ConversationProvider) bool { return p.ID == provider.ID }) {
+			if r.parent.listedProviderUsable(provider) && !slices.ContainsFunc(snapshot.Providers, func(p protocol.ConversationProvider) bool { return p.ID == provider.ID }) {
 				providers = append(providers, provider)
 			}
 		}
 	}
 	private := func(session protocol.Session) {
-		if session.Profile != nil && !slices.ContainsFunc(providers, func(p protocol.ConversationProvider) bool { return p.ID == session.Profile.Provider.ID }) {
+		if r.capturedProviderUsable(session.Profile) && !slices.ContainsFunc(providers, func(p protocol.ConversationProvider) bool { return p.ID == session.Profile.Provider.ID }) {
 			providers = append(providers, session.Profile.Provider)
 		}
 	}
@@ -63,7 +82,34 @@ func (r *Runtime) composerProviders() []protocol.ConversationProvider {
 // another: a session created with it is forwarded by the local Node.
 func (r *Runtime) forwards(provider protocol.ProviderID) bool {
 	is := func(p protocol.ConversationProvider) bool { return p.ID == provider }
-	return r.parent != nil && !slices.ContainsFunc(r.snapshot().Providers, is) && slices.ContainsFunc(r.parent.snapshot().Providers, is)
+	return r.parent != nil && !slices.ContainsFunc(r.snapshot().Providers, is) && slices.ContainsFunc(r.parent.snapshot().Providers, func(p protocol.ConversationProvider) bool { return is(p) && r.parent.listedProviderUsable(p) })
+}
+
+func (r *Runtime) listedComposerProvider(id protocol.ProviderID) (protocol.ConversationProvider, bool) {
+	for _, p := range r.snapshot().Providers {
+		if p.ID == id && r.listedProviderUsable(p) {
+			return p, true
+		}
+	}
+	return protocol.ConversationProvider{}, false
+}
+
+func (r *Runtime) draftProviderUsable(id protocol.ProviderID) bool {
+	_, listed := r.listedComposerProvider(id)
+	return listed || r.forwards(id)
+}
+
+// composerProvider resolves a selection using the same credential scope as
+// the Node. A capture applies to its own session, never to another draft.
+func (r *Runtime) composerProvider(id string, provider protocol.ProviderID) (protocol.ConversationProvider, bool) {
+	if session, exists := r.session(id); exists {
+		if profile := session.Profile; profile != nil && profile.Provider.ID == provider {
+			return profile.Provider, r.capturedProviderUsable(profile)
+		}
+	} else if r.forwards(provider) {
+		return r.parent.listedComposerProvider(provider)
+	}
+	return r.listedComposerProvider(provider)
 }
 
 // offeredModels are the models conversation id's composer offers: those of
@@ -72,16 +118,20 @@ func (r *Runtime) forwards(provider protocol.ProviderID) bool {
 func (r *Runtime) offeredModels(id string, models []composer.Model) []composer.Model {
 	allowed := map[string]bool{}
 	for _, provider := range r.snapshot().Providers {
-		allowed[provider.ID.String()] = true
+		if r.listedProviderUsable(provider) {
+			allowed[provider.ID.String()] = true
+		}
 	}
 	if session, exists := r.session(id); !exists {
 		if r.parent != nil {
 			for _, provider := range r.parent.snapshot().Providers {
-				allowed[provider.ID.String()] = true
+				if r.forwards(provider.ID) {
+					allowed[provider.ID.String()] = true
+				}
 			}
 		}
-	} else if session.Profile != nil {
-		allowed[session.Profile.Provider.ID.String()] = true
+	} else if profile := session.Profile; profile != nil {
+		allowed[profile.Provider.ID.String()] = r.capturedProviderUsable(profile)
 	}
 	var offered []composer.Model
 	for _, model := range models {
