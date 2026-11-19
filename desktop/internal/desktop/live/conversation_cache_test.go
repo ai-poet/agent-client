@@ -82,6 +82,21 @@ func TestConversationFrameCachePagination(t *testing.T) {
 		if &first.Snapshot.Page.Runs[0] != &second.Snapshot.Page.Runs[0] || retained != &cv.Turns[0] {
 			t.Fatal("an unchanged frame recopied or reprojected completed history")
 		}
+		readFault := &protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "older page unavailable"}
+		source.handle = func(request protocol.Request) (link.Response, bool) {
+			if request.Command.Kind != "read_conversation" {
+				return link.Response{}, false
+			}
+			return link.Response{Fault: readFault}, true
+		}
+		if err := r.controller.LoadOlderConversation(t.Context(), id); faultCode(err) != readFault.Code {
+			t.Fatalf("older-page failure = %v", err)
+		}
+		failed := cacheTestFrame(t, r, cv, id)
+		if !failed.SameViewSnapshot(first) || &cv.Turns[0] != retained || !cv.Session.OlderFailed {
+			t.Fatal("failed page replaced rows or failed to update paging controls")
+		}
+
 		started, proceed := make(chan struct{}), make(chan struct{})
 		source.handle = func(request protocol.Request) (link.Response, bool) {
 			if request.Command.Kind != "read_conversation" {
@@ -97,8 +112,11 @@ func TestConversationFrameCachePagination(t *testing.T) {
 		go func() { loaded <- r.controller.LoadOlderConversation(t.Context(), id) }()
 		<-started
 		loading := cacheTestFrame(t, r, cv, id)
-		if !loading.LoadingOlder || !cv.Session.LoadingOlder {
-			t.Fatal("history loading did not invalidate the presentation")
+		if !loading.LoadingOlder || !cv.Session.LoadingOlder || cv.Session.OlderFailed {
+			t.Fatal("pending retry did not update paging controls")
+		}
+		if !loading.SameViewSnapshot(first) || retained != &cv.Turns[0] || &loading.Snapshot.Page.Entries[0] != &first.Snapshot.Page.Entries[0] {
+			t.Fatal("a pending history read recopied or reprojected unchanged entries")
 		}
 		close(proceed)
 		if err := <-loaded; err != nil {
@@ -106,7 +124,7 @@ func TestConversationFrameCachePagination(t *testing.T) {
 		}
 		synctest.Wait()
 		after := cacheTestFrame(t, r, cv, id)
-		if after.Snapshot.Sequence != first.Snapshot.Sequence || after.Snapshot.Page.Revision != first.Snapshot.Page.Revision ||
+		if after.SameViewSnapshot(first) || after.Snapshot.Sequence != first.Snapshot.Sequence || after.Snapshot.Page.Revision != first.Snapshot.Page.Revision ||
 			len(cv.Turns) != 2 || cv.Turns[0].User != "Older input" || cv.Session.LoadingOlder {
 			t.Fatalf("same-revision pagination stayed stale: %#v", cv)
 		}

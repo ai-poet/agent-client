@@ -784,10 +784,12 @@ current. Full-range recovery can request up to 1,000 entries per turn page;
 interactive reads and partial-range recovery retain their smaller entry limit.
 Node byte and wire frame limits apply to both.
 
-Desktop reuses read-only conversation source copies until a Client observation
-changes, including pagination and connection state. Completed history projections
-are reused within the visible view model; controls and mutable presentation
-overlays still refresh. Active runs and streaming drafts keep their timing and
+Desktop reuses the read-only conversation payload and completed projected rows
+while an older-page request is pending or fails. A merged page or a fresh
+authoritative snapshot replaces the payload even at the same history revision;
+connection and access changes still refresh the presentation. Controls and
+mutable overlays still refresh within the visible view model. Active runs and
+streaming drafts keep their timing and
 update path. Leaving a conversation releases its presentation cache and unbinds
 the transcript payload without resetting scroll. Historical command output opens
 on its original tool row; closing the disclosure releases the read, not the process.

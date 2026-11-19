@@ -180,6 +180,7 @@ type Runtime struct {
 }
 
 type conversationCopy struct {
+	stale      bool
 	state      client.ConversationState
 	ok         bool
 	generation uint64
@@ -213,13 +214,26 @@ func (r *Runtime) conversationState(id protocol.SessionID) (client.ConversationS
 		return r.controller.Conversation(id)
 	}
 	if r.conversationsStale.Swap(false) {
-		clear(r.conversationCopies)
+		for key, copied := range r.conversationCopies {
+			copied.stale = true
+			r.conversationCopies[key] = copied
+		}
 	}
 	copied, ok := r.conversationCopies[id]
-	if !ok {
-		copied.state, copied.ok = r.controller.Conversation(id)
-		r.conversationVersion++
-		copied.generation = r.conversationVersion
+	if !ok || copied.stale {
+		previous := copied.state
+		copied.state, copied.ok = r.controller.ConversationView(id, previous)
+		current := copied.state
+		// Pending and failed page reads do not replace the rows. A changed
+		// snapshot, disconnection or revocation still takes the normal path.
+		keepRows := current.SameViewSnapshot(previous) &&
+			current.Connected && previous.Connected && !current.Loading && !previous.Loading &&
+			!current.Removed && !previous.Removed && current.Err == nil && previous.Err == nil
+		if !keepRows {
+			r.conversationVersion++
+			copied.generation = r.conversationVersion
+		}
+		copied.stale = false
 		r.conversationCopies[id] = copied
 	}
 	return copied.state, copied.ok

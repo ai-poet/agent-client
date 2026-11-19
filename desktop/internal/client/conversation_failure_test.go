@@ -100,3 +100,45 @@ func TestHistoryReadStopsWaitingForRejectedConversationSequence(t *testing.T) {
 		t.Fatal("failed history read changed pagination")
 	}
 }
+
+func TestConversationViewIdentitySeparatesWatchStatusAndReplacement(t *testing.T) {
+	snapshot := conversationFixture()
+	id := snapshot.Page.Session
+	controller := New(&clientTransport{})
+	w := &conversationWatch{session: id, ctx: t.Context(), projection: NewConversationProjection(snapshot.Node, id, 1)}
+	controller.conversations = map[protocol.SessionID]*conversationWatch{id: w}
+	apply := func(generation uint64) {
+		t.Helper()
+		got, err := controller.applyConversationUpdate(w, generation, protocol.Update{Kind: "conversation_snapshot", Data: snapshot})
+		if err != nil || got != Applied {
+			t.Fatalf("apply snapshot: %v, %v", got, err)
+		}
+	}
+	apply(1)
+	initial, _ := controller.ConversationView(id, ConversationState{})
+	action, _ := controller.Conversation(id)
+	action.Snapshot.Page.Runs[0].Revision++
+	w.state.Connected = false
+	w.state.Err = fault(protocol.ErrorCodeUnavailable, "disconnected")
+	offline, _ := controller.ConversationView(id, initial)
+	if offline.Connected || offline.Err == nil || !offline.SameViewSnapshot(initial) ||
+		&offline.Snapshot.Page.Runs[0] != &initial.Snapshot.Page.Runs[0] ||
+		offline.Snapshot.Page.Runs[0].Revision != snapshot.Page.Runs[0].Revision {
+		t.Fatal("disconnect did not preserve the detached payload and report fresh status")
+	}
+	if err := w.projection.Reconnect(2); err != nil {
+		t.Fatal(err)
+	}
+	apply(2)
+	recovered, _ := controller.ConversationView(id, offline)
+	if !recovered.Connected || recovered.Err != nil || recovered.SameViewSnapshot(offline) ||
+		recovered.Snapshot.Sequence != offline.Snapshot.Sequence || recovered.Snapshot.Page.Revision != offline.Snapshot.Page.Revision {
+		t.Fatal("same-revision authoritative recovery reused the old payload")
+	}
+	w.discardHistory()
+	w.state.Connected, w.state.Removed = false, true
+	revoked, _ := controller.ConversationView(id, recovered)
+	if !revoked.Removed || revoked.SameViewSnapshot(recovered) || len(revoked.Snapshot.Page.Runs) != 0 {
+		t.Fatal("revoked watch yielded the previous authorized payload")
+	}
+}

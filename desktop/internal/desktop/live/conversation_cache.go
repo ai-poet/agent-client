@@ -70,12 +70,15 @@ func (r *Runtime) invalidateConversationPresentation(cv *viewmodel.Conversation)
 
 func (r *Runtime) projectConversation(cv *viewmodel.Conversation, id protocol.SessionID, state client.ConversationState, now time.Time, language string) {
 	copy := r.conversationCopies[id]
-	cacheable := copy.generation != 0 && r.composerOutgoing[cv.ID] == nil
+	// An outgoing row can temporarily hide initial loading without changing
+	// the snapshot. Reproject that placeholder after the row is discarded.
+	cacheable := copy.generation != 0 && !state.Loading && r.composerOutgoing[cv.ID] == nil
 	saved := r.conversationPresentations[cv]
 	if cacheable && saved.generation == copy.generation && saved.language == language {
 		// The Node's connection override is applied later in conversation.
 		// Restore the observed connection when that Node becomes available.
 		cv.Session.Connection = saved.connection
+		cv.Session.LoadingOlder, cv.Session.OlderFailed = state.LoadingOlder, state.OlderErr != nil
 		saved.mounted = true
 		r.conversationPresentations[cv] = saved
 		return

@@ -19,11 +19,13 @@ type ConversationState struct {
 	// StatisticsErr is the fault of the Node's last statistics refresh, until
 	// statistics or a snapshot arrive.
 	StatisticsErr error
+	viewSnapshot  *byte
 }
 
 type conversationWatch struct {
 	session         protocol.SessionID
 	projection      *ConversationProjection
+	viewSnapshot    *byte
 	state           ConversationState
 	ctx             context.Context
 	generationCtx   context.Context
@@ -46,11 +48,12 @@ type conversationBookmark struct {
 
 func (w *conversationWatch) discardHistory() {
 	w.projection.snapshot = nil
+	w.viewSnapshot = nil
 	w.projection.liveStart = nil
 	w.projection.statisticsErr = nil
 	w.projection.hidden, w.projection.revealed = nil, nil
 	w.extent = conversationExtent{}
-	w.state.OlderErr = nil
+	w.state.LoadingOlder, w.state.OlderErr = false, nil
 }
 
 // A second reconnect during automatic paging must recover the original range,
@@ -62,6 +65,23 @@ func (w *conversationWatch) rememberExtent() {
 }
 
 func (c *Client) Conversation(session protocol.SessionID) (ConversationState, bool) {
+	return c.readConversationState(session, nil)
+}
+
+// ConversationView returns a detached read-only snapshot, which may share the
+// previous view's payload. Callers that need a mutable copy use Conversation.
+func (c *Client) ConversationView(session protocol.SessionID, previous ConversationState) (ConversationState, bool) {
+	return c.readConversationState(session, &previous)
+}
+
+// SameViewSnapshot compares complete read-only payloads, not watch status,
+// history revision or stream sequence alone. Paging can change the payload
+// without changing the latter two.
+func (s ConversationState) SameViewSnapshot(other ConversationState) bool {
+	return s.viewSnapshot != nil && s.viewSnapshot == other.viewSnapshot
+}
+
+func (c *Client) readConversationState(session protocol.SessionID, previous *ConversationState) (ConversationState, bool) {
 	c.conversationMu.Lock()
 	defer c.conversationMu.Unlock()
 	w := c.conversations[session]
@@ -70,8 +90,18 @@ func (c *Client) Conversation(session protocol.SessionID) (ConversationState, bo
 	}
 	s := w.state
 	s.StatisticsErr = w.projection.statisticsErr
-	if w.projection.snapshot != nil {
-		s.Snapshot = copyValue(*w.projection.snapshot)
+	if snapshot := w.projection.snapshot; snapshot != nil {
+		if previous != nil {
+			if w.viewSnapshot == nil {
+				w.viewSnapshot = new(byte)
+			}
+			s.viewSnapshot = w.viewSnapshot
+			if s.SameViewSnapshot(*previous) {
+				s.Snapshot = previous.Snapshot
+				return s, true
+			}
+		}
+		s.Snapshot = copyValue(*snapshot)
 	}
 	return s, true
 }
@@ -382,6 +412,7 @@ func (c *Client) applyConversationUpdate(w *conversationWatch, generation uint64
 	}
 	applied, err := w.projection.Apply(generation, update)
 	if err == nil && applied == Applied {
+		w.viewSnapshot = nil
 		w.state.Loading = false
 		w.state.Connected = true
 		w.state.Err = nil
