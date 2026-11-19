@@ -23,6 +23,7 @@ type Projection struct {
 	snapshot   *protocol.Snapshot
 	recovery   bool
 	changes    pluginChangeCursors
+	credential uint64
 }
 
 func NewProjection(node protocol.NodeID, generation uint64) *Projection {
@@ -71,6 +72,7 @@ func (projection *Projection) Apply(generation uint64, update protocol.Update) (
 			return Ignored, err
 		}
 		projection.snapshot, projection.recovery = &snapshot, false
+		projection.credential++
 		return Applied, nil
 	case "event":
 		envelope, err := payload[protocol.EventEnvelope](update.Data)
@@ -108,6 +110,9 @@ func (projection *Projection) Apply(generation uint64, update protocol.Update) (
 			return Ignored, err
 		}
 		projection.snapshot.Cursor = envelope.Cursor
+		if envelope.Event.Kind == "credential_changed" {
+			projection.credential++
+		}
 		return Applied, nil
 	default:
 		// A kind of update this build does not declare carries nothing it

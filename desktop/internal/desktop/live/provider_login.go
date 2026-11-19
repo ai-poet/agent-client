@@ -11,11 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/settings"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 type authorizationState struct {
@@ -428,38 +428,48 @@ func (r *Runtime) cancelProviderLogin() {
 	})
 }
 
-func (r *Runtime) readProviderCredentials() {
-	if r.authorizations == nil || r.authorizations.credentialLoad {
-		return
-	}
+func (r *Runtime) providerCredentialKey(providers []protocol.ConversationProvider) string {
 	var key strings.Builder
-	for _, provider := range r.snapshot().Providers {
-		if provider.Credential != nil {
+	for _, provider := range providers {
+		if provider.Authentication != protocol.AuthenticationApiKey && provider.Credential != nil {
+			key.WriteString(provider.Credential.Node.String())
+			key.WriteByte(':')
 			key.WriteString(provider.Credential.ID.String())
+			key.WriteByte(':')
 			key.WriteString(strconv.FormatUint(provider.Revision, 10))
+			key.WriteByte('/')
 		}
 	}
-	if key.String() == r.authorizations.credentialKey {
+	if key.Len() != 0 {
+		key.WriteString(strconv.FormatUint(r.controller.CredentialMetadataRevision(), 10))
+	}
+	return key.String()
+}
+
+func (r *Runtime) readProviderCredentials(expected string) {
+	state := r.authorizations
+	if state == nil || state.credentialLoad || expected == "" || expected == state.credentialKey || !r.controller.Connected() {
 		return
 	}
-	r.authorizations.credentialLoad = true
-	expected := key.String()
-	r.execute(protocol.Command{Kind: "list_credentials"}, func(c *ui.Context, output protocol.Output, err error) {
-		r.authorizations.credentialLoad = false
-		if err != nil {
-			r.reportKeys(c, err, "provider_login_failed", "provider_revision_changed", "provider_login_unknown")
-			return
-		}
-		values, ok := detail[[]protocol.Credential](output.Data)
-		if !ok {
-			return
-		}
-		r.authorizations.credentials = map[protocol.CredentialID]protocol.Credential{}
-		for _, value := range values {
-			r.authorizations.credentials[value.ID] = value
-		}
-		r.authorizations.credentialKey = expected
-		r.projectProviderSnapshot()
+	state.credentialLoad = r.async(func() {
+		output, err := r.controller.Do(r.ctx, protocol.Command{Kind: "list_credentials"})
+		r.enqueue(func(*ui.Context) {
+			state.credentialLoad = false
+			if expected != r.providerCredentialKey(r.snapshot().Providers) {
+				r.projectProviderSnapshot()
+				return
+			}
+			values, ok := detail[[]protocol.Credential](output.Data)
+			if err != nil || output.Kind != "credentials" || !ok {
+				return
+			}
+			state.credentials = make(map[protocol.CredentialID]protocol.Credential, len(values))
+			for _, value := range values {
+				state.credentials[value.ID] = value
+			}
+			state.credentialKey = expected
+			r.projectProviderSnapshot()
+		})
 	})
 }
 

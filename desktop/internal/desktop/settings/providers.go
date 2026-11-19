@@ -7,13 +7,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preview"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
+	"github.com/egoist/mygo/ui"
 )
 
 // The Providers page (settings/providers): the model catalog with the
@@ -35,7 +35,7 @@ func ProviderStatus(ch *preview.Channel) string {
 	switch {
 	case ch.Auth == preview.AuthKey && !ch.KeySet:
 		return "provider_status_missing_key"
-	case ch.Auth == preview.AuthOAuth && !ch.SignedIn:
+	case ch.Auth == preview.AuthOAuth && !ch.SignedIn && !ch.AccountPending:
 		return "provider_status_signed_out"
 	}
 	return ""
@@ -372,7 +372,7 @@ func channelMenu(c *ui.Context, m *Model, ch *preview.Channel) {
 		}
 		if ch.Auth == preview.AuthOAuth && (!ch.ConfigurationReadOnly || ch.Source != "") {
 			key := "provider_connect"
-			if ch.Account != "" || ch.SignedIn {
+			if ch.Account != "" || ch.SignedIn || ch.AccountPending {
 				key = "provider_reconnect"
 			}
 			if menu.Item(i18n.T(c, key)).Icon(icons.CircleUser).Chosen() {

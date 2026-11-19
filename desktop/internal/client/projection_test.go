@@ -32,6 +32,42 @@ func mustApply(t *testing.T, projection *Projection, generation uint64, update p
 	}
 }
 
+func TestCredentialMetadataRevision(t *testing.T) {
+	t.Parallel()
+	projection := NewProjection(protocol.NodeID{1}, 1)
+	controller := &Client{project: projection}
+	check := func(want uint64) {
+		t.Helper()
+		if got := controller.CredentialMetadataRevision(); got != want {
+			t.Fatalf("credential metadata revision = %d, want %d", got, want)
+		}
+	}
+	check(0)
+	mustApply(t, projection, 1, protocol.Update{Kind: "snapshot", Data: projectionSnapshot(0)}, Applied)
+	check(1)
+	mustApply(t, projection, 1, projectionEvent(1, "power_settings_changed", protocol.EventPowerSettingsChangedPayload{Revision: 1}), Applied)
+	check(1)
+
+	credential := protocol.CredentialRef{Node: protocol.NodeID{1}, ID: protocol.CredentialID{1}}
+	changed := protocol.EventCredentialChangedPayload{Credential: credential, Revision: 2}
+	event := projectionEvent(2, "credential_changed", changed)
+	mustApply(t, projection, 1, event, Applied)
+	check(2)
+	mustApply(t, projection, 1, event, Ignored)
+	mustApply(t, projection, 1, protocol.Update{Kind: "snapshot", Data: projectionSnapshot(1)}, Ignored)
+	check(2)
+	mustApply(t, projection, 1, projectionEvent(4, "credential_changed", changed), Recover)
+	check(2)
+
+	if err := projection.Reconnect(2); err != nil {
+		t.Fatal(err)
+	}
+	mustApply(t, projection, 1, projectionEvent(3, "credential_changed", changed), Ignored)
+	check(2)
+	mustApply(t, projection, 2, protocol.Update{Kind: "snapshot", Data: projectionSnapshot(4)}, Applied)
+	check(3)
+}
+
 func TestProjectionOrder(t *testing.T) {
 	t.Parallel()
 	t.Run("conversation", testConversationProjectionOrder)

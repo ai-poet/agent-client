@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/settings"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/shell"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	nodeproviders "github.com/ai-poet/agent-client/desktop/internal/node/providers"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 // initProviders prepares what this Runtime keeps of its Node's providers and
@@ -342,8 +342,10 @@ func (r *Runtime) projectProviderSnapshot() {
 	if !r.showsSettings() {
 		return
 	}
-	r.readProviderCredentials()
 	snapshot := r.snapshot()
+	credentialKey := r.providerCredentialKey(snapshot.Providers)
+	r.readProviderCredentials(credentialKey)
+	credentialsKnown := r.authorizations != nil && credentialKey == r.authorizations.credentialKey
 	now := uint64(time.Now().UnixMilli())
 	r.refreshQuotaReset(now, snapshot.ProviderQuotas)
 	var channels []viewmodel.Channel
@@ -355,12 +357,11 @@ func (r *Runtime) projectProviderSnapshot() {
 		}
 		if p.Authentication != "api_key" {
 			ch.Auth = viewmodel.AuthOAuth
-			if p.Credential != nil && r.authorizations != nil {
-				if credential, ok := r.authorizations.credentials[p.Credential.ID]; ok {
-					ch.SignedIn = !credential.Revoked
-					if credential.ExpiresAtMs != nil && *credential.ExpiresAtMs <= uint64(time.Now().UnixMilli()) {
-						ch.SignedIn = false
-					}
+			if p.Credential != nil {
+				ch.AccountPending = !credentialsKnown
+				if credentialsKnown {
+					credential, ok := r.authorizations.credentials[p.Credential.ID]
+					ch.SignedIn = ok && !credential.Revoked && (credential.ExpiresAtMs == nil || *credential.ExpiresAtMs > now)
 					if credential.AccountLabel != nil {
 						ch.Account = *credential.AccountLabel
 					}
