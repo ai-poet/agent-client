@@ -128,6 +128,44 @@ func TestTopicEstablishment(t *testing.T) {
 	})
 }
 
+type interruptedTopic struct {
+	started chan struct{}
+	closed  chan struct{}
+}
+
+func (topic *interruptedTopic) Next(context.Context) (protocol.Update, error) {
+	close(topic.started)
+	<-topic.closed
+	return protocol.Update{}, fault(protocol.ErrorCodeUnavailable, "fixture route disconnected")
+}
+
+func (topic *interruptedTopic) Close() error {
+	close(topic.closed)
+	return nil
+}
+
+func TestTopicCloseWinsOverTransportFailure(t *testing.T) {
+	t.Parallel()
+	underlying := &interruptedTopic{started: make(chan struct{}), closed: make(chan struct{})}
+	controller := New(&topicTransport{clientTransport: &clientTransport{}, subscribe: func(context.Context, protocol.Topic) (link.Subscription, error) {
+		return underlying, nil
+	}})
+	t.Cleanup(func() { _ = controller.Close() })
+	stream, err := controller.Subscribe(t.Context(), protocol.Topic{Kind: "status"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := stream.Next(t.Context()); done <- err }()
+	<-underlying.started
+	if err := stream.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("closed topic returned a transport error: %v", err)
+	}
+}
+
 func TestTopicRecovery(t *testing.T) {
 	t.Run("serve browser", testServeBrowser)
 	t.Parallel()
