@@ -231,8 +231,8 @@ func (s *Service) ReadSetup(ctx context.Context) (User, error, Gateway, error) {
 // that owns none, matching the name the Rust client uses.
 const CheapRouterKeyName = "CheapRouter desktop"
 
-// Gateway fetches catalog and keys after login. It prefers the bridge-minted
-// key when it is still listed, otherwise the first active listed key.
+// Gateway fetches catalog and keys after login. The key is the one accountKey
+// picks among the listed ones, or a newly minted one.
 func (s *Service) Gateway(ctx context.Context) (Gateway, error) {
 	credentials, client, err := s.session(ctx)
 	if err != nil {
@@ -251,24 +251,7 @@ func readGateway(ctx context.Context, client *Client, credentials Credentials) (
 	if err != nil {
 		return Gateway{}, err
 	}
-	key := ""
-	available := map[string]bool{}
-	for _, candidate := range keys {
-		candidate.Key = strings.TrimSpace(candidate.Key)
-		if candidate.Key == "" || candidate.Status != "" && !strings.EqualFold(candidate.Status, "active") && !strings.EqualFold(candidate.Status, "enabled") {
-			continue
-		}
-		available[candidate.Key] = true
-		if key == "" {
-			key = candidate.Key
-		}
-	}
-	if available[bridgeKey] {
-		key = bridgeKey
-	}
-	if key == "" && bridgeKey != "" && len(keys) == 0 {
-		key = bridgeKey
-	}
+	key := accountKey(keys, bridgeKey)
 	if key == "" {
 		// A new account owns no key yet: mint one, as the Rust client does,
 		// instead of failing a sign-in the user cannot fix from here.
@@ -286,6 +269,42 @@ func readGateway(ctx context.Context, client *Client, credentials Credentials) (
 		baseURL = client.Endpoint() + "/v1"
 	}
 	return Gateway{BaseURL: baseURL, APIKey: key, Models: catalog.Items}, nil
+}
+
+// accountKey picks the key the whole catalog is routed with: the bridge's
+// while the listing shows it usable, else an account-level key, which no
+// group restricts, before one bound to a group. A bridge key the listing
+// cannot have shown, because it is empty or holds more keys than its first
+// page, is merely unseen and kept. No usable key is the empty string.
+func accountKey(page KeyPage, bridgeKey string) string {
+	var unbound, bound string
+	for _, candidate := range page.Items {
+		key := strings.TrimSpace(candidate.Key)
+		if key == "" {
+			continue
+		}
+		if candidate.Status != "" && !strings.EqualFold(candidate.Status, "active") && !strings.EqualFold(candidate.Status, "enabled") {
+			if key == bridgeKey {
+				bridgeKey = ""
+			}
+			continue
+		}
+		switch {
+		case key == bridgeKey:
+			return key
+		case candidate.GroupID == nil && unbound == "":
+			unbound = key
+		case candidate.GroupID != nil && bound == "":
+			bound = key
+		}
+	}
+	if bridgeKey != "" && (len(page.Items) == 0 || page.Total > int64(len(page.Items))) {
+		return bridgeKey
+	}
+	if unbound != "" {
+		return unbound
+	}
+	return bound
 }
 
 // Logout always clears local credentials, even when remote revocation cannot

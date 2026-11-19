@@ -535,6 +535,70 @@ func TestGatewayFetchesCatalogAndSelectsListedKey(t *testing.T) {
 	}
 }
 
+// The catalog is routed with one key: the bridge's while the account still
+// lists it usable, else an account-level key before one bound to a group.
+func TestAccountKeySelection(t *testing.T) {
+	group := int64(3)
+	key := func(value, status string, bound bool) APIKey {
+		listed := APIKey{Key: value, Status: status}
+		if bound {
+			listed.GroupID = &group
+		}
+		return listed
+	}
+	for name, tc := range map[string]struct {
+		page         KeyPage
+		bridge, want string
+	}{
+		"the listed bridge key":             {KeyPage{Items: []APIKey{key("sk-account", "active", false), key("sk-bridge", "", true)}, Total: 2}, "sk-bridge", "sk-bridge"},
+		"an account-level key over a bound": {KeyPage{Items: []APIKey{key("sk-bound", "active", true), key("sk-account", "active", false)}, Total: 2}, "", "sk-account"},
+		"a bound key when it is the only":   {KeyPage{Items: []APIKey{key("sk-bound", "enabled", true)}, Total: 1}, "", "sk-bound"},
+		"a deleted bridge key":              {KeyPage{Items: []APIKey{key("sk-account", "active", false)}, Total: 1}, "sk-bridge", "sk-account"},
+		"a disabled bridge key":             {KeyPage{Items: []APIKey{key("sk-bridge", "disabled", false), key("sk-bound", "active", true)}, Total: 60}, "sk-bridge", "sk-bound"},
+		"a bridge key past the first page":  {KeyPage{Items: []APIKey{key("sk-bound", "active", true)}, Total: 51}, "sk-bridge", "sk-bridge"},
+		"a bridge key not listed yet":       {KeyPage{}, "sk-bridge", "sk-bridge"},
+		"no usable key":                     {KeyPage{Items: []APIKey{key(" ", "active", false), key("sk-off", "disabled", false), key("sk-spent", "quota_exhausted", true)}, Total: 3}, "", ""},
+	} {
+		if got := accountKey(tc.page, tc.bridge); got != tc.want {
+			t.Errorf("%s: %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+// The listing's group bindings and total decide the key as the service sends
+// them, and a key that can be reused is not minted again.
+func TestGatewayReusesAccountLevelKey(t *testing.T) {
+	for name, tc := range map[string]struct{ keys, want string }{
+		"an account-level key over a bound one": {`{"items":[{"id":1,"key":"sk-bound","group_id":3,"status":"active"},{"id":2,"key":"sk-account","group_id":null,"status":"active"}],"total":2}`, "sk-account"},
+		"the bridge key past the first page":    {`{"items":[{"id":1,"key":"sk-bound","group_id":3,"status":"active"}],"total":51}`, testGateway},
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				switch {
+				case request.URL.Path == "/api/v1/models/catalog":
+					writeEnvelope(t, writer, 200, `{"code":0,"data":{"items":[{"model":"gpt-test"}]}}`)
+				case request.URL.Path == "/api/v1/keys" && request.Method == http.MethodGet:
+					writeEnvelope(t, writer, 200, `{"code":0,"data":`+tc.keys+`}`)
+				default:
+					t.Errorf("unexpected %s %s", request.Method, request.URL.Path)
+					http.NotFound(writer, request)
+				}
+			}))
+			defer server.Close()
+			service, _ := NewService(t.TempDir())
+			service.credentials = &Credentials{AccessToken: testAccess, RefreshToken: testRefresh, Endpoint: server.URL, ExpiresAt: time.Now().Add(time.Hour).Unix(), APIKey: testGateway}
+			service.client, _ = NewClient(server.URL, server.Client())
+			if err := service.store.Save(*service.credentials); err != nil {
+				t.Fatal(err)
+			}
+			gateway, err := service.Gateway(t.Context())
+			if err != nil || gateway.APIKey != tc.want {
+				t.Fatalf("gateway key %q, %v; want %q", gateway.APIKey, err, tc.want)
+			}
+		})
+	}
+}
+
 // TestGatewayMintsKeyWhenAccountOwnsNone pins the new-account path: a
 // sign-in must not fail because no key exists yet, and the minted key is the
 // one the provider receives.

@@ -205,6 +205,13 @@ type APIKey struct {
 	Status  string `json:"status"`
 }
 
+// KeyPage is the first page of the account's gateway keys. Total counts the
+// keys on every page.
+type KeyPage struct {
+	Items []APIKey `json:"items"`
+	Total int64    `json:"total"`
+}
+
 // Model is the part of model_catalog needed to configure sailry.
 type Model struct {
 	ID            string `json:"model"`

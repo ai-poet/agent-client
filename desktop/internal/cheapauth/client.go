@@ -177,12 +177,10 @@ func (c *Client) Me(ctx context.Context, accessToken string) (User, error) {
 	return user, err
 }
 
-func (c *Client) Keys(ctx context.Context, accessToken string) ([]APIKey, error) {
-	var page struct {
-		Items []APIKey `json:"items"`
-	}
+func (c *Client) Keys(ctx context.Context, accessToken string) (KeyPage, error) {
+	var page KeyPage
 	err := c.do(ctx, http.MethodGet, "/keys?page=1&page_size=50", accessToken, nil, &page)
-	return page.Items, err
+	return page, err
 }
 
 // CreateKey mints a gateway key. Only a key, never the account tokens, is
