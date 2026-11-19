@@ -10,7 +10,6 @@ import (
 	"charm.land/fantasy"
 	"github.com/MoeForge/moego/base64"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
-	"github.com/ai-poet/agent-client/desktop/internal/node/agent/output"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
@@ -154,7 +153,7 @@ func pluginRequest(binding Binding, request Request) (protocol.PluginModelAdapte
 		}
 	}
 	for _, record := range records {
-		record = output.Audience(record)
+		record = request.audienceRecord(record)
 		message, background, err := record.ModelContent()
 		if err != nil {
 			return input, err
