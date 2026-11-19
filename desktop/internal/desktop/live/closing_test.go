@@ -6,7 +6,6 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/client"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
@@ -16,6 +15,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 // closeTestWindow drains the runtime's queue in frames that also draw the
@@ -56,7 +56,7 @@ func TestCloseGuard(t *testing.T) {
 			fixture := newPluginLocationTestFixture(t)
 			root := fixture.root
 			project := closeTestDraft(fixture)
-			if names := root.UnsavedDocuments(); !slices.Equal(names, []string{"fixture/a.go"}) || root.SavingDocuments() {
+			if names := root.UnsavedDocuments(); (len(names) != 1 || names[0].Name != "fixture/a.go" || names[0].Project != project.panel) || root.SavingDocuments() {
 				t.Fatalf("unsaved documents = %v", names)
 			}
 			var written []protocol.CommandWriteFilePayload
@@ -117,7 +117,7 @@ func TestCloseGuard(t *testing.T) {
 			synctest.Wait()
 			window.Frame()
 			window.Frame()
-			if names := root.UnsavedDocuments(); !slices.Equal(names, []string{"fixture/a.go", "fixture/b.go"}) || root.SavingDocuments() {
+			if names := root.UnsavedDocuments(); (len(names) != 2 || names[0].Name != "fixture/a.go" || names[1].Name != "fixture/b.go") || root.SavingDocuments() {
 				t.Fatalf("after the failure: unsaved %v, saving %v", names, root.SavingDocuments())
 			}
 			if text, dirty := project.panel.FileDraft("a.go"); text != "two\n" || !dirty {
@@ -167,6 +167,16 @@ func TestCloseGuard(t *testing.T) {
 				t.Fatalf("unsaved %v, saving %v, texts %q", root.UnsavedDocuments(), root.SavingDocuments(), window.Texts())
 			}
 		})
+	})
+	t.Run("edits to an already unsaved document change its close snapshot", func(t *testing.T) {
+		fixture := newPluginLocationTestFixture(t)
+		project := closeTestDraft(fixture)
+		before := fixture.root.UnsavedDocuments()
+		project.panel.FileChanged("a.go", "a later edit")
+		after := fixture.root.UnsavedDocuments()
+		if len(before) != 1 || len(after) != 1 || before[0].Name != after[0].Name || before[0].Digest == after[0].Digest {
+			t.Fatal("the changed draft did not invalidate its discard confirmation")
+		}
 	})
 	t.Run("only running local work asks before a quit", func(t *testing.T) {
 		idle := protocol.DefaultSnapshot()
