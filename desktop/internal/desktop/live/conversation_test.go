@@ -2036,6 +2036,7 @@ func testSessionForwarding(t *testing.T) {
 	// execution Node. Its receipt continues the original send, not newer input.
 	var lost protocol.RequestID
 	reveal := false
+	recovered := protocol.SessionID{22}
 	transports[1].mu.Lock()
 	previous := transports[1].handle
 	transports[1].handle = func(request protocol.Request) (link.Response, bool) {
@@ -2047,7 +2048,7 @@ func testSessionForwarding(t *testing.T) {
 			outcome := protocol.RequestOutcome{Kind: "admitted"}
 			if reveal {
 				session := protocol.DefaultSession()
-				session.ID, session.Project, session.Worktree, session.Revision = protocol.SessionID{22}, &project, worktree, 1
+				session.ID, session.Project, session.Worktree, session.Revision = recovered, &project, worktree, 1
 				session.Config.Provider, session.Config.Model = remoteProvider, "fixture"
 				output := protocol.Output{Kind: "session", Data: session}
 				outcome = protocol.RequestOutcome{Kind: "completed", Data: protocol.Result[protocol.Output, protocol.Fault]{Ok: &output}}
@@ -2074,6 +2075,34 @@ func testSessionForwarding(t *testing.T) {
 	if len(own) != 2 || cv.ID != (protocol.SessionID{22}).String() || lastTurn.Session != (protocol.SessionID{22}) ||
 		lastTurn.Message.Text != "Captured draft" || comp.Draft != "Newer input" {
 		t.Fatalf("direct recovery: creates=%d session=%s last turn=%+v draft=%q", len(own), cv.ID, lastTurn, comp.Draft)
+	}
+	// Replacing a binding retains only the receipt in the window. Loading
+	// that receipt leaves the captured turn in the composer, not on the Node.
+	transports[1].mu.Lock()
+	reveal, recovered = false, protocol.SessionID{23}
+	transports[1].mu.Unlock()
+	cv, comp, actions = draft(modelKey(remoteProvider, "fixture"))
+	send(actions, comp)
+	draftID := cv.ID
+	remote.detachConversationCreations()
+	_ = remote.Close()
+	delete(local.bindings, remoteNode.String())
+	if pending, ok := local.detachedCreations[draftID]; !ok || pending.request.ID == (protocol.RequestID{}) ||
+		pending.execution != remoteNode || !local.draftSubmitted(cv) {
+		t.Fatalf("lost original receipt while detaching: %+v", pending)
+	}
+	transports[1].mu.Lock()
+	reveal = true
+	transports[1].mu.Unlock()
+	remote = local.newBinding(controllers[1])
+	defer remote.Close()
+	local.bindings[remoteNode.String()] = remote
+	remote.restoreConversationCreations()
+	settle()
+	if cv.ID != recovered.String() || comp.Draft != "Captured draft" ||
+		len(sent(1, "create_session")) != 3 || len(sent(1, "submit_turn")) != len(turns) ||
+		len(local.detachedCreations) != 0 || len(remote.conversationCreations) != 0 {
+		t.Fatalf("rebound receipt did not preserve an unsent draft: session=%s draft=%q", cv.ID, comp.Draft)
 	}
 	transports[1].mu.Lock()
 	transports[1].handle = previous

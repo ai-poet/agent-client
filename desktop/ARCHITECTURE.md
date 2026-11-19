@@ -46,6 +46,9 @@ Desktop first sends use separate session creation and turn admission. While
 creation is uncertain, Desktop checks the original creation receipt at its
 receiving Node before it can send the captured turn. Only the entry Node's
 explicitly replayable forward can repeat the create with the same request ID.
+An ordinary draft keeps its creation receipt when a host binding is replaced.
+Recovery through the replacement can open the session but leaves the turn
+unsent in the composer.
 Link authenticates peers and transports requests and observations. Client reduces
 those observations into ordered controller state. MyGo and Flutter own view state.
 The initiating controller's Node is the resource entry. Its directory combines

@@ -17,6 +17,63 @@ type conversationCreation struct {
 	request protocol.Request
 	actions *conversationActions
 	finish  func(protocol.Output, bool)
+	// A replacement binding may recover an empty session, but it must not
+	// implicitly submit the captured turn through that replacement.
+	detached bool
+}
+
+type detachedConversationCreation struct {
+	execution protocol.NodeID
+	request   protocol.Request
+	message   *composer.Message
+	draft     string
+}
+
+// The window retains the exact receipt, not the previous binding's callbacks
+// or attachment ownership. Plugin drafts end with their mounted views.
+func (r *Runtime) detachConversationCreations() {
+	root := r.localRuntime()
+	for id, pending := range r.conversationCreations {
+		delete(r.conversationCreations, id)
+		delete(r.conversationCreating, id)
+		r.discardOutgoing(id)
+		if !root.openDrafts[id] || root.App.Data.Find(id) == nil {
+			continue
+		}
+		x := pending.actions
+		var message *composer.Message
+		if x.restore != nil && len(x.restore.Attachments) == 0 {
+			message = x.restore
+		}
+		x.comp.SetAttachmentCallbacks(nil)
+		if root.detachedCreations == nil {
+			root.detachedCreations = map[string]detachedConversationCreation{}
+		}
+		root.detachedCreations[id] = detachedConversationCreation{
+			execution: r.controller.Target(), request: pending.request, message: message, draft: x.restoreDraft,
+		}
+	}
+}
+
+func (r *Runtime) restoreConversationCreations() {
+	root := r.localRuntime()
+	for id, pending := range root.detachedCreations {
+		if pending.execution != r.controller.Target() {
+			continue
+		}
+		delete(root.detachedCreations, id)
+		cv := r.App.Data.Find(id)
+		if cv == nil || !unsentDraft(cv) {
+			continue
+		}
+		comp := r.App.Composer(id)
+		cv.Node, comp.Host = pending.execution.String(), pending.execution.String()
+		r.conversationCreations[id] = conversationCreation{
+			request: pending.request, detached: true,
+			actions: &conversationActions{r: r, cv: cv, comp: comp, restore: pending.message, restoreDraft: pending.draft},
+		}
+		r.readsConnected = false
+	}
 }
 
 // listedProviderUsable mirrors the credential owners this controller can use.
@@ -198,7 +255,7 @@ func (r *Runtime) creationOwner(command protocol.Command) *Runtime {
 
 // resumeCreation observes a dispatched creation on the Node that received it.
 // Only an explicitly replayable forward can execute again with its original ID.
-func (r *Runtime) resumeCreation(before string, pending conversationCreation, first bool) {
+func (r *Runtime) resumeCreation(before string, pending conversationCreation, first, explicit bool) {
 	owner := r.creationOwner(pending.request.Command)
 	if r.conversationCreating[before] || !r.controller.Connected() ||
 		!owner.controller.Connected() || owner.controller.Target() != pending.request.Target {
@@ -217,7 +274,7 @@ func (r *Runtime) resumeCreation(before string, pending conversationCreation, fi
 			resolution, failure := owner.controller.Resolve(r.ctx, pending.request)
 			if failure != nil {
 				err = fileActionFault(protocol.ErrorCodeOutcomeUnknown, "session creation outcome is unavailable")
-			} else if resolution.State == client.RequestReplayable {
+			} else if resolution.State == client.RequestReplayable && (!pending.detached || explicit) {
 				out, err = owner.controller.Settle(r.ctx, pending.request)
 				// Replay can fail after a prior effect. Resolve that receipt on
 				// the next recovery rather than release it based on this failure.
@@ -227,6 +284,20 @@ func (r *Runtime) resumeCreation(before string, pending conversationCreation, fi
 				// A denied inspection can hide an already-applied result.
 				terminal = resolution.State == client.RequestApplied || resolution.State == client.RequestAbsent ||
 					resolution.State == client.RequestFailed && faultCode(err) != protocol.ErrorCodePermissionDenied
+			}
+		}
+		// The entry receipt alone does not establish the replacement
+		// executor's current access to a forwarded session.
+		if pending.detached && owner != r && err == nil {
+			if session, ok := detail[protocol.Session](out.Data); out.Kind == "session" && ok && session.ID != (protocol.SessionID{}) {
+				visible, failure := r.controller.Do(r.ctx, protocol.Command{Kind: "read_session", Data: protocol.CommandReadSessionPayload{Session: session.ID}})
+				current, valid := detail[protocol.Session](visible.Data)
+				if failure != nil || visible.Kind != "session" || !valid || current.ID != session.ID || current.Revision < session.Revision {
+					err = fileActionFault(protocol.ErrorCodeOutcomeUnknown, "recovered session is unavailable on its execution Node")
+					terminal = false
+				} else {
+					out = visible
+				}
 			}
 		}
 		r.enqueue(func(c *ui.Context) {
@@ -242,7 +313,7 @@ func (r *Runtime) resumeCreation(before string, pending conversationCreation, fi
 				if terminal {
 					delete(r.conversationCreations, before)
 				}
-				if terminal && x.restoreDraft != composerFingerprint(x.comp) {
+				if terminal && x.restore != nil && x.restoreDraft != composerFingerprint(x.comp) {
 					x.offerRestore(c, err)
 				} else {
 					r.reportCreation(c, err)
@@ -256,16 +327,20 @@ func (r *Runtime) resumeCreation(before string, pending conversationCreation, fi
 				return
 			}
 			delete(r.conversationCreations, before)
-			x.adoptCreation(before, session, pending.finish)
+			x.adoptCreation(before, session, pending.finish, !pending.detached)
 		})
 	}) {
 		delete(r.conversationCreating, before)
 	}
 }
 
-func (x *conversationActions) adoptCreation(before string, session protocol.Session, finish func(protocol.Output, bool)) {
-	m := *x.restore
-	x.stageOutgoing(m)
+func (x *conversationActions) adoptCreation(before string, session protocol.Session, finish func(protocol.Output, bool), submit bool) {
+	if submit {
+		x.stageOutgoing(*x.restore)
+	} else if x.restore != nil && x.comp.Draft == "" && len(x.comp.References) == 0 && len(x.comp.Attachments) == 0 {
+		x.comp.Draft = x.restore.Text
+		x.comp.References = slices.Clone(x.restore.References)
+	}
 	x.r.admittedSessions[session.ID.String()] = session
 	x.r.App.ReplaceConversationID(before, session.ID.String())
 	if pending := x.r.composerOutgoing[before]; pending != nil {
@@ -285,7 +360,9 @@ func (x *conversationActions) adoptCreation(before string, session protocol.Sess
 	if x.created != nil {
 		x.created(session)
 	}
-	x.r.withComposerTeam(session, x.comp, func(current protocol.Session) {
-		x.turn(protocol.Command{Kind: "submit_turn", Data: protocol.CommandSubmitTurnPayload{Session: current.ID, ExpectedRevision: current.Revision, Message: conversationInput(m)}}, finish)
-	})
+	if submit {
+		x.r.withComposerTeam(session, x.comp, func(current protocol.Session) {
+			x.turn(protocol.Command{Kind: "submit_turn", Data: protocol.CommandSubmitTurnPayload{Session: current.ID, ExpectedRevision: current.Revision, Message: conversationInput(*x.restore)}}, finish)
+		})
+	}
 }

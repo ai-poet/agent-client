@@ -71,7 +71,7 @@ func (r *Runtime) draftSubmitted(cv *viewmodel.Conversation) bool {
 		_, captured := owner.conversationCreations[cv.ID]
 		return captured || owner.conversationCreating[cv.ID]
 	}
-	if submitted(root) {
+	if _, retained := root.detachedCreations[cv.ID]; retained || submitted(root) {
 		return true
 	}
 	for _, bound := range root.bindings {

@@ -181,11 +181,13 @@ func (r *Runtime) syncNetwork() {
 		}
 		present[id] = true
 		if old := r.bindings[id]; old != nil && old.controller != peer.controller {
+			old.detachConversationCreations()
 			_ = old.Close()
 			delete(r.bindings, id)
 		}
 		if peer.controller != nil && r.bindings[id] == nil {
 			r.bindings[id] = r.newBinding(peer.controller)
+			r.bindings[id].restoreConversationCreations()
 		}
 	}
 	for id, bound := range r.bindings {
@@ -201,6 +203,7 @@ func (r *Runtime) syncNetwork() {
 				// selected host's.
 				r.showNodeSettings(nil)
 			}
+			bound.detachConversationCreations()
 			_ = bound.Close()
 			delete(r.bindings, id)
 		}

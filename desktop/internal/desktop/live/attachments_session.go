@@ -18,15 +18,15 @@ func (x *conversationActions) ensureAttachmentSession(done func(*ui.Context, pro
 	}
 	r := x.r
 	before := x.cv.ID
-	if _, recovering := r.conversationCreations[before]; recovering {
-		done(x.c, protocol.Session{}, fileActionFault(protocol.ErrorCodeOutcomeUnknown, "session creation is awaiting its receipt"))
-		return
-	}
 	if r.attachmentSessionWaiters == nil {
 		r.attachmentSessionWaiters = map[string][]attachmentSessionWaiter{}
 	}
 	if waiters, ok := r.attachmentSessionWaiters[before]; ok {
 		r.attachmentSessionWaiters[before] = append(waiters, done)
+		return
+	}
+	if r.draftSubmitted(x.cv) {
+		done(x.c, protocol.Session{}, fileActionFault(protocol.ErrorCodeOutcomeUnknown, "session creation is awaiting its receipt"))
 		return
 	}
 	if start := r.pendingSessionBase(x.comp); start != nil {

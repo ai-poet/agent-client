@@ -16,7 +16,7 @@ func (r *Runtime) retryFailedReads() {
 		return
 	}
 	for id, pending := range r.conversationCreations {
-		r.resumeCreation(id, pending, false)
+		r.resumeCreation(id, pending, false, false)
 	}
 	if r.workspace != nil {
 		node, projectID, overview := r.localRuntime().App.ProjectOwner()

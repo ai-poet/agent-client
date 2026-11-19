@@ -691,10 +691,10 @@ func (x *conversationActions) submit(m composer.Message, guide, queue bool, draf
 		return
 	}
 	if pending, ok := x.r.conversationCreations[x.cv.ID]; ok {
-		x.r.resumeCreation(x.cv.ID, pending, false)
+		x.r.resumeCreation(x.cv.ID, pending, false, true)
 		return
 	}
-	if x.r.conversationCreating[x.cv.ID] {
+	if unsentDraft(x.cv) && x.r.draftSubmitted(x.cv) {
 		return
 	}
 	for _, attachment := range m.Attachments {
@@ -815,7 +815,7 @@ func (x *conversationActions) submit(m composer.Message, guide, queue bool, draf
 	}
 	pending := conversationCreation{request: ownerRuntime.controller.Prepare(command), actions: x, finish: finish}
 	x.r.conversationCreations[x.cv.ID] = pending
-	x.r.resumeCreation(x.cv.ID, pending, true)
+	x.r.resumeCreation(x.cv.ID, pending, true, true)
 }
 
 func (x *conversationActions) activeRun() (protocol.ConversationRun, bool) {

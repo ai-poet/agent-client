@@ -139,6 +139,7 @@ type Runtime struct {
 	turnRetries               map[string]turnRetry
 	interactionFlows          map[string]*interactionFlow
 	conversationCreations     map[string]conversationCreation
+	detachedCreations         map[string]detachedConversationCreation // window-owned receipts awaiting their original execution Node
 	conversationCreating      map[string]bool
 	providerPresets           map[string]protocol.ConversationPresetsEntry
 	providerPresetPackages    []protocol.PluginSummary
