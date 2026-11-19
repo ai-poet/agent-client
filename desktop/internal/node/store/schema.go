@@ -12,9 +12,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/ai-poet/agent-client/desktop/internal/core"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/google/uuid"
 )
 
 const applicationID = 0x5341494c
@@ -190,6 +190,22 @@ func (definition currentSchema) initialize(ctx context.Context, connection *sql.
 			return err
 		}
 		if err := applyUpgrades(ctx, connection); err != nil {
+			return err
+		}
+	}
+	if definition.plan.added[schemaObject{"agent_delegations", "stop_requested"}] {
+		// Older stores recorded explicit child stops only in the expiring request ledger.
+		// A receipt for an already finished cancellation does not prove a stop.
+		if _, err := connection.ExecContext(ctx, `UPDATE agent_delegations SET stop_requested=1 WHERE turn IN (
+			SELECT json_extract(result,'$.Ok.data.turn') FROM requests WHERE status='completed'
+			AND CASE WHEN json_valid(body) AND json_valid(result) THEN
+				json_extract(body,'$.command.kind')='stop_turn'
+				AND json_extract(body,'$.command.data.turn')=json_extract(result,'$.Ok.data.turn')
+				AND json_extract(result,'$.Ok.kind')='run'
+				AND (json_extract(result,'$.Ok.data.status')='stopping'
+					OR (json_extract(result,'$.Ok.data.status')='cancelled'
+						AND json_extract(result,'$.Ok.data.started_ms') IS NULL
+						AND json_extract(result,'$.Ok.data.finished_ms') IS NULL)) END)`); err != nil {
 			return err
 		}
 	}

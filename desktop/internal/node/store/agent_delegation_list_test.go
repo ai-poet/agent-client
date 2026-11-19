@@ -148,6 +148,12 @@ func TestListSubagentsAcrossParentTurns(t *testing.T) {
 	if fresh, err := read(parent, SubagentListOptions{}); err != nil || fresh.NextBefore != nil || len(fresh.Subagents) != 3 || fresh.Subagents[0].Session != newest.Session.ID {
 		t.Fatalf("fresh page did not include each owned child once: %+v, %v", fresh, err)
 	}
+	// A current execution may never inherit access merely from its session's founding row.
+	schemaExecute(t, storage.Node, "UPDATE agent_delegations SET body=json_set(body,'$.session',?2) WHERE turn=?1", continued.Run.Turn.String(), foreign.Session.ID.String())
+	var fault *protocol.Fault
+	if _, err = read(parent, SubagentListOptions{}); !errors.As(err, &fault) || fault.Code != protocol.ErrorCodePermissionDenied {
+		t.Fatalf("listed a current execution owned by a different parent: %v", err)
+	}
 }
 
 func TestListSubagentsStopEvidence(t *testing.T) {
@@ -159,6 +165,22 @@ func TestListSubagentsStopEvidence(t *testing.T) {
 		reason string
 	}
 	want := map[protocol.TurnID]outcome{}
+	var cancelled protocol.TurnID
+	stop := func(db *sql.Conn, turn protocol.TurnID) error {
+		request := protocol.NewRequest(node, protocol.Command{Kind: "stop_turn", Data: &protocol.CommandStopTurnPayload{Turn: turn}})
+		body, err := encode(request)
+		if err != nil {
+			return err
+		}
+		if _, err = admission.Admit(ctx, db, node, request, body); err != nil {
+			return err
+		}
+		output, _, err := ExecuteAgentCommand(ctx, db, node, storage.Profile, node, request, now)
+		if err != nil {
+			return err
+		}
+		return admission.Complete(ctx, db, node, request.ID, link.Response{Output: output})
+	}
 	err := storage.Node.Write(ctx, func(db *sql.Conn) error {
 		for _, row := range []struct {
 			outcome
@@ -178,19 +200,7 @@ func TestListSubagentsStopEvidence(t *testing.T) {
 				return err
 			}
 			if row.receipt {
-				request := protocol.NewRequest(node, protocol.Command{Kind: "stop_turn", Data: &protocol.CommandStopTurnPayload{Turn: child.Run.Turn}})
-				body, err := encode(request)
-				if err != nil {
-					return err
-				}
-				if _, err = admission.Admit(ctx, db, node, request, body); err != nil {
-					return err
-				}
-				output, _, err := ExecuteAgentCommand(ctx, db, node, storage.Profile, node, request, now)
-				if err != nil {
-					return err
-				}
-				if err = admission.Complete(ctx, db, node, request.ID, link.Response{Output: output}); err != nil {
+				if err = stop(db, child.Run.Turn); err != nil {
 					return err
 				}
 			}
@@ -203,25 +213,55 @@ func TestListSubagentsStopEvidence(t *testing.T) {
 				return err
 			}
 			want[child.Run.Turn] = row.outcome
+			if row.status == protocol.ConversationStatusCancelled && row.reason == "" {
+				cancelled = child.Run.Turn
+			}
 		}
-		return nil
+		// The legacy ledger can contain a successful Stop receipt after cancellation.
+		return stop(db, cancelled)
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var page SubagentPage
-	if err = storage.Node.Read(ctx, func(db *sql.Conn) error {
-		var err error
-		page, err = ListSubagents(ctx, db, parent, SubagentListOptions{})
-		return err
-	}); err != nil || len(page.Subagents) != len(want) {
-		t.Fatalf("list with stops = %+v, %v", page, err)
-	}
-	for _, child := range page.Subagents {
-		if exact, exists := want[child.Turn]; !exists || (outcome{child.Status, child.StopReason}) != exact {
-			t.Fatalf("child %s has status %q and reason %q, want %+v", child.Turn, child.Status, child.StopReason, exact)
+	check := func(storage *Store) {
+		t.Helper()
+		var page SubagentPage
+		if err := storage.Node.Read(ctx, func(db *sql.Conn) error {
+			var err error
+			page, err = ListSubagents(ctx, db, parent, SubagentListOptions{})
+			return err
+		}); err != nil || len(page.Subagents) != len(want) {
+			t.Fatalf("list with stops = %+v, %v", page, err)
+		}
+		for _, child := range page.Subagents {
+			if exact, exists := want[child.Turn]; !exists || (outcome{child.Status, child.StopReason}) != exact {
+				t.Fatalf("child %s has status %q and reason %q, want %+v", child.Turn, child.Status, child.StopReason, exact)
+			}
 		}
 	}
+	check(storage)
+	// Simulate the pre-marker schema with active stop receipts and reopen it
+	// through the normal migration before expiring the old request ledger.
+	schemaExecute(t, storage.Node, "ALTER TABLE agent_delegations DROP COLUMN stop_requested")
+	if err = storage.Close(); err != nil {
+		t.Fatal(err)
+	}
+	upgraded := reopenSchemaFixture(t, storage.Profile, node)
+	if err = upgraded.Node.Write(ctx, func(db *sql.Conn) error {
+		removed, err := admission.Prune(ctx, db, time.Now().Add(admission.Retention+time.Hour))
+		if err == nil && removed < 3 {
+			return fmt.Errorf("did not prune the stop receipts: %d", removed)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err = upgraded.Node.Write(ctx, func(db *sql.Conn) error {
+		return stop(db, cancelled)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	check(upgraded)
 }
 
 func listFixtureChild(ctx context.Context, db *sql.Conn, node protocol.NodeID, parent protocol.TurnID, now time.Time, args map[string]any) (AgentInvocation, error) {
