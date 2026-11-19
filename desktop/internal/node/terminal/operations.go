@@ -28,7 +28,18 @@ func (value *handle) owns(caller protocol.NodeID, revision uint64) error {
 	return nil
 }
 
+// Claim preserves the transient v1 operation, including an unchanged lease
+// when the caller already owns the terminal.
 func (service *Service) Claim(caller protocol.NodeID, id protocol.TerminalID, expected uint64) (protocol.TerminalInfo, error) {
+	return service.claim(caller, id, expected, false)
+}
+
+// Takeover rotates the lease even when two controllers share an entry identity.
+func (service *Service) Takeover(caller protocol.NodeID, id protocol.TerminalID, expected uint64) (protocol.TerminalInfo, error) {
+	return service.claim(caller, id, expected, true)
+}
+
+func (service *Service) claim(caller protocol.NodeID, id protocol.TerminalID, expected uint64, rotate bool) (protocol.TerminalInfo, error) {
 	value, err := service.get(id)
 	if err != nil {
 		return protocol.TerminalInfo{}, err
@@ -42,7 +53,7 @@ func (service *Service) Claim(caller protocol.NodeID, id protocol.TerminalID, ex
 		value.mu.Unlock()
 		return protocol.TerminalInfo{}, fault(protocol.ErrorCodeConflict, "terminal process is not running")
 	}
-	if value.info.Owner == nil || *value.info.Owner != caller {
+	if rotate || value.info.Owner == nil || *value.info.Owner != caller {
 		value.info.Owner = &caller
 		value.info.Revision++
 	}

@@ -4,9 +4,9 @@ import (
 	"errors"
 	"io"
 
+	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 	myterminal "github.com/egoist/mygo/plugins/terminal"
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
 func (connection *terminalConn) current() protocol.TerminalInfo {
@@ -55,9 +55,11 @@ func (connection *terminalConn) Read(destination []byte) (int, error) {
 		}
 		connection.mu.Lock()
 		previous := connection.info
-		connection.info = info
+		if info.Revision >= previous.Revision {
+			connection.info = info
+		}
 		connection.mu.Unlock()
-		if previous.Revision != info.Revision {
+		if previous.Revision < info.Revision {
 			// Ownership or status changed: the view's control state follows.
 			connection.owner.localRuntime().wake()
 		}
@@ -179,20 +181,23 @@ func (connection *terminalConn) sendAppearance(appearance protocol.TerminalAppea
 
 // claimed records the ownership the Node granted and sends the size and
 // appearance this view asked for while it was not the owner.
-func (connection *terminalConn) claimed(info protocol.TerminalInfo) {
+func (connection *terminalConn) claimed(info protocol.TerminalInfo) bool {
 	connection.mu.Lock()
-	if info.Revision > connection.info.Revision {
-		connection.info = info
+	if info.Revision < connection.info.Revision {
+		connection.mu.Unlock()
+		return false
 	}
+	connection.info = info
 	viewport, appearance := connection.viewport, connection.appearance
 	connection.rejected = false
 	connection.mu.Unlock()
 	if viewport != nil {
-		_ = connection.sendViewport(*viewport)
+		_, _ = connection.owner.controller.Do(connection.ctx, protocol.Command{Kind: "resize_terminal", Data: protocol.CommandResizeTerminalPayload{Terminal: info.ID, Revision: info.Revision, Viewport: *viewport}})
 	}
 	if appearance != nil {
-		_ = connection.sendAppearance(*appearance)
+		_, _ = connection.owner.controller.Do(connection.ctx, protocol.Command{Kind: "set_terminal_appearance", Data: protocol.CommandSetTerminalAppearancePayload{Terminal: info.ID, Revision: info.Revision, Appearance: *appearance}})
 	}
+	return true
 }
 
 func (connection *terminalConn) clearScreen() {

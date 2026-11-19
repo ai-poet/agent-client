@@ -133,6 +133,10 @@ func testPluginControllerAuthority(t *testing.T) {
 			denied  bool
 		}{
 			{"native desktop open", protocol.Command{Kind: "open_terminal", Data: &open}, nil, false},
+			{"native desktop takeover", protocol.Command{Kind: "takeover_terminal", Data: &protocol.CommandTakeoverTerminalPayload{Terminal: terminal.ID, ExpectedRevision: 1}}, nil, false},
+			{"takeover outside captured worktree", protocol.Command{Kind: "takeover_terminal", Data: &protocol.CommandTakeoverTerminalPayload{Terminal: terminal.ID, ExpectedRevision: 1}}, func(scope *protocol.PluginContext) {
+				scope.Worktree = new(protocol.NewWorktreeID())
+			}, true},
 			{"native read", protocol.Command{Kind: "inspect_terminal", Data: &protocol.CommandInspectTerminalPayload{Terminal: terminal.ID}}, nil, false},
 			{"unrestricted script input", protocol.Command{Kind: "input_terminal", Data: &protocol.CommandInputTerminalPayload{Terminal: terminal.ID}}, nil, true},
 			{"another worktree", protocol.Command{Kind: "inspect_terminal", Data: &protocol.CommandInspectTerminalPayload{Terminal: terminal.ID}}, func(scope *protocol.PluginContext) {
@@ -455,7 +459,7 @@ func testPluginPlanActions(t *testing.T) {
 			}}}, protocol.PluginActionReadBrowser, false},
 			{protocol.Command{Kind: "dispatch", Data: &protocol.CommandDispatchPayload{Action: protocol.DispatchCommand{Kind: "list_handlers"}}}, protocol.PluginActionDispatch, true},
 		}
-		for _, kind := range []string{"claim_terminal", "input_terminal", "resize_terminal", "set_terminal_appearance"} {
+		for _, kind := range []string{"claim_terminal", "takeover_terminal", "input_terminal", "resize_terminal", "set_terminal_appearance"} {
 			cases = append(cases, struct {
 				command protocol.Command
 				action  protocol.PluginAction

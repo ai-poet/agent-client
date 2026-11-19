@@ -15,7 +15,7 @@ import (
 
 func terminalCommand(kind string) bool {
 	switch kind {
-	case "create_terminal", "open_tool_terminal", "open_terminal", "list_terminal_tools", "close_terminal", "list_terminals", "inspect_terminal", "claim_terminal", "input_terminal", "resize_terminal", "set_terminal_appearance", "read_terminal_settings", "save_terminal_settings", "list_shells":
+	case "create_terminal", "open_tool_terminal", "open_terminal", "list_terminal_tools", "close_terminal", "list_terminals", "inspect_terminal", "claim_terminal", "takeover_terminal", "input_terminal", "resize_terminal", "set_terminal_appearance", "read_terminal_settings", "save_terminal_settings", "list_shells":
 		return true
 	}
 	return false
@@ -117,6 +117,8 @@ func (node *Node) terminalIO(ctx context.Context, caller protocol.NodeID, reques
 		return protocol.Output{Kind: "terminal_snapshot", Data: snapshot}, err
 	case *protocol.CommandClaimTerminalPayload:
 		info, err = service.Claim(caller, input.Terminal, input.ExpectedRevision)
+	case *protocol.CommandTakeoverTerminalPayload:
+		info, err = service.Takeover(caller, input.Terminal, input.ExpectedRevision)
 	case *protocol.CommandInputTerminalPayload:
 		info, err = service.Input(caller, *input)
 		return protocol.Output{Kind: "terminal_input", Data: protocol.OutputTerminalInputPayload{Terminal: info.ID}}, err

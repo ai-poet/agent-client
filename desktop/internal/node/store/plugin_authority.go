@@ -536,7 +536,7 @@ func pluginAction(kind string) (protocol.PluginAction, bool) {
 		return protocol.PluginActionControlComputer, true
 	case "list_terminals", "list_terminal_tools", "inspect_terminal":
 		return protocol.PluginActionReadTerminals, true
-	case "create_terminal", "open_tool_terminal", "open_terminal", "close_terminal", "claim_terminal", "input_terminal", "resize_terminal", "set_terminal_appearance":
+	case "create_terminal", "open_tool_terminal", "open_terminal", "close_terminal", "claim_terminal", "takeover_terminal", "input_terminal", "resize_terminal", "set_terminal_appearance":
 		return protocol.PluginActionControlTerminals, true
 	case "read_hooks":
 		return protocol.PluginActionReadCodeSettings, true

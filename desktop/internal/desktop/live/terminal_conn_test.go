@@ -155,7 +155,7 @@ func TestTerminalControl(t *testing.T) {
 			info.Owner = &other
 			source.respond = func(request protocol.Request) link.Response {
 				switch request.Command.Kind {
-				case "claim_terminal":
+				case "takeover_terminal":
 					claimed, self := info, root.controller.Target()
 					claimed.Owner, claimed.Revision = &self, info.Revision+1
 					return link.Response{Output: protocol.Output{Kind: "terminal", Data: claimed}}
@@ -180,11 +180,11 @@ func TestTerminalControl(t *testing.T) {
 			}
 			synctest.Wait()
 			pluginViewRunQueue(root)
-			claims := source.sent("claim_terminal")
+			claims := source.sent("takeover_terminal")
 			if len(claims) != 1 {
-				t.Fatalf("claim_terminal commands = %d, want 1", len(claims))
+				t.Fatalf("takeover_terminal commands = %d, want 1", len(claims))
 			}
-			claim, valid := detail[protocol.CommandClaimTerminalPayload](claims[0].Data)
+			claim, valid := detail[protocol.CommandTakeoverTerminalPayload](claims[0].Data)
 			if !valid || claim.Terminal != info.ID || claim.ExpectedRevision != info.Revision {
 				t.Fatalf("unexpected claim: %+v", claim)
 			}
@@ -218,7 +218,7 @@ func TestTerminalControl(t *testing.T) {
 			root.packages.terminals[id] = state
 			root.claimLiveTerminal(id, state)
 			synctest.Wait()
-			if len(source.sent("claim_terminal")) != 1 || terminalConnQueued(root) != 1 {
+			if len(source.sent("takeover_terminal")) != 1 || terminalConnQueued(root) != 1 {
 				t.Fatal("a refused claim did not queue its outcome")
 			}
 			if connection.controlling() || connection.current().Revision != info.Revision {
@@ -250,5 +250,82 @@ func TestTerminalControl(t *testing.T) {
 				t.Fatal("Retry tried to recreate a terminal that was already attaching")
 			}
 		})
+	})
+}
+
+func TestTerminalTakeoverRecoversOriginalLease(t *testing.T) {
+	t.Run("a superseded receipt cannot apply the old lease", func(t *testing.T) {
+		testTerminalTakeoverRecovery(t, false)
+	})
+	t.Run("a released unknown does not create a new lease", func(t *testing.T) {
+		testTerminalTakeoverRecovery(t, true)
+	})
+}
+
+func testTerminalTakeoverRecovery(t *testing.T, unknown bool) {
+	t.Helper()
+	synctest.Test(t, func(t *testing.T) {
+		root, source := terminalTabsFixture(t)
+		info := terminalTabsTestInfo(1, protocol.WorktreeID{1}, "running")
+		other, self := protocol.NodeID{9}, root.controller.Target()
+		info.Owner, info.Revision = &other, 3
+		granted := info
+		granted.Owner, granted.Revision = &self, 4
+		var original protocol.RequestID
+		var inspections []protocol.CommandInspectRequestPayload
+		source.respond = func(request protocol.Request) link.Response {
+			switch request.Command.Kind {
+			case "takeover_terminal":
+				original = request.ID
+				return link.Response{Fault: &protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown}}
+			case "inspect_request":
+				query, _ := detail[protocol.CommandInspectRequestPayload](request.Command.Data)
+				inspections = append(inspections, query)
+				outcome := protocol.RequestOutcome{Kind: "admitted"}
+				if len(inspections) > 1 && unknown {
+					outcome.Kind = "unknown"
+				} else if len(inspections) == 2 {
+					result := protocol.Output{Kind: "terminal", Data: granted}
+					outcome.Kind, outcome.Data = "completed", protocol.Result[protocol.Output, protocol.Fault]{Ok: &result}
+				}
+				return link.Response{Output: protocol.Output{Kind: "request_outcome", Data: protocol.OutputRequestOutcomePayload{ID: original, Outcome: outcome}}}
+			}
+			return link.Response{Fault: &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest}}
+		}
+		connection := terminalConnFixture(t, root, info)
+		if err := connection.Resize(100, 30); err != nil {
+			t.Fatal(err)
+		}
+		id := info.ID.String()
+		state := &liveTerminal{owner: root, conn: connection}
+		root.packages.terminals[id] = state
+		run := func() {
+			root.claimLiveTerminal(id, state)
+			synctest.Wait()
+			runTerminalCallbacks(root)
+		}
+		run()
+		if state.claimRequest == nil || state.claimRequest.ID != original {
+			t.Fatal("the original ambiguous takeover was not retained")
+		}
+		wantRevision := info.Revision
+		if !unknown {
+			wantRevision = 5 // A newer stream update, not the lease this request obtained.
+			connection.mu.Lock()
+			connection.info.Revision = wantRevision
+			connection.mu.Unlock()
+		}
+		run()
+		if unknown {
+			run()
+		}
+		if len(source.sent("takeover_terminal")) != 1 || len(inspections) != 2 ||
+			inspections[0] != inspections[1] || inspections[0].ID != original || inspections[0].Digest == "" {
+			t.Fatalf("the takeover was not inspected by its original ID and digest: %+v", inspections)
+		}
+		if state.claimRequest != nil || connection.current().Revision != wantRevision || connection.controlling() ||
+			len(source.sent("resize_terminal")) != 0 {
+			t.Fatal("the stale receipt superseded the newer lease or changed its size")
+		}
 	})
 }

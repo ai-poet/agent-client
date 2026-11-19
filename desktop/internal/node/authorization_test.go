@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/ai-poet/agent-client/desktop/internal/link"
@@ -74,6 +75,21 @@ func TestProjectUsersAndSubscriptionRevocation(t *testing.T) {
 		t.Fatal("owner snapshot missing resources or identity")
 	}
 	tree := own.Worktrees[0].ID
+	terminal := protocol.DefaultTerminalInfo()
+	terminal.ID, terminal.Worktree, terminal.Owner = protocol.NewTerminalID(), &tree, &owner
+	terminal.Status.Kind, terminal.Revision = "running", 1
+	node.terminalChanged(terminal)
+	takeover := protocol.Command{Kind: "takeover_terminal", Data: protocol.CommandTakeoverTerminalPayload{
+		Terminal: terminal.ID, ExpectedRevision: terminal.Revision,
+	}}
+	var refused *protocol.Fault
+	if accepted, err := node.Dispatch(ctx, other, protocol.NewRequest(node.ID(), takeover)); !errors.As(err, &refused) ||
+		refused.Code != protocol.ErrorCodePermissionDenied || accepted.Receipt.ID != (protocol.RequestID{}) {
+		t.Fatalf("a private terminal takeover was not rejected before admission: %+v, %v", accepted.Receipt, err)
+	}
+	if seen, hidden := snapshot(owner).Terminals, snapshot(other).Terminals; len(seen) != 1 || seen[0].ID != terminal.ID || len(hidden) != 0 {
+		t.Fatalf("private terminal snapshot coverage: owner %v, other %v", seen, hidden)
+	}
 	denied := send(other, protocol.Command{Kind: "read_worktree_catalog", Data: protocol.CommandReadWorktreeCatalogPayload{Worktree: tree}})
 	if denied.Fault == nil || denied.Fault.Code != protocol.ErrorCodePermissionDenied {
 		t.Fatalf("private raw ID access: %+v", denied)

@@ -3,9 +3,6 @@ package live
 import (
 	"strings"
 
-	myterminal "github.com/egoist/mygo/plugins/terminal"
-	"github.com/egoist/mygo/transfer"
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/panel"
@@ -13,6 +10,9 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	myterminal "github.com/egoist/mygo/plugins/terminal"
+	"github.com/egoist/mygo/transfer"
+	"github.com/egoist/mygo/ui"
 )
 
 // terminalViewport is a terminal's size before its view measures it.
@@ -117,16 +117,12 @@ func (r *Runtime) createLiveTerminal(owner *Runtime, worktree protocol.WorktreeI
 				return
 			}
 			if state.closing {
-				owner.executeScoped("terminal-close/"+id, protocol.Command{Kind: "close_terminal", Data: protocol.CommandCloseTerminalPayload{Worktree: worktree, Terminal: info.ID}}, func(c *ui.Context, _ protocol.Output, err error) {
-					if err != nil && faultCode(err) != protocol.ErrorCodeNotFound {
-						state.closing = false
-						root.reportKeys(c, err, "workspace_action_failed", "workspace_changed", "workspace_action_unknown")
-						if root.packages.terminals[id] == state {
-							root.attachLiveTerminal(state, info)
-						}
-						return
+				command := protocol.Command{Kind: "close_terminal", Data: protocol.CommandCloseTerminalPayload{Worktree: worktree, Terminal: info.ID}}
+				root.closeTerminalCommand(owner, id, command, func() {
+					state.closing = false
+					if root.packages.terminals[id] == state {
+						root.attachLiveTerminal(state, info)
 					}
-					root.dropTerminalTab(id)
 				})
 				return
 			}

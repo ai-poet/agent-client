@@ -16,6 +16,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 // terminalTabsTestNode answers terminal commands with captured responses and
@@ -102,6 +103,19 @@ func terminalTabsTestTabs(root *Runtime) []string {
 		}
 	}
 	return ids
+}
+
+func runTerminalCallbacks(root *Runtime) {
+	root.mu.Lock()
+	callbacks := root.queue
+	root.queue = nil
+	root.mu.Unlock()
+	ui.NewTester(func(c *ui.Context) {
+		for _, callback := range callbacks {
+			callback(c)
+		}
+		callbacks = nil
+	}, 400, 200).Frame()
 }
 
 // testTerminalTabsPrune covers PANEL-056 and PANE-016: only a terminal its
@@ -288,6 +302,59 @@ func testTerminalTabsClosePending(t *testing.T) {
 			t.Fatalf("a terminal closed while pending stayed: %v", got)
 		}
 	})
+}
+
+func TestRejectedTerminalCloseKeepsSurface(t *testing.T) {
+	for _, pending := range []bool{false, true} {
+		name := "running"
+		if pending {
+			name = "pending creation"
+		}
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				worktree := protocol.WorktreeID{1}
+				info := terminalTabsTestInfo(1, worktree, "running")
+				root, source := terminalTabsFixture(t, info)
+				source.respond = func(request protocol.Request) link.Response {
+					if request.Command.Kind == "create_terminal" {
+						created := info
+						created.ID = protocol.TerminalID(request.ID)
+						return link.Response{Output: protocol.Output{Kind: "terminal", Data: created}}
+					}
+					return link.Response{Fault: &protocol.Fault{Code: protocol.ErrorCodePermissionDenied, Message: "close denied"}}
+				}
+				id := info.ID.String()
+				root.App.PanelOpen = true
+				if pending {
+					var created bool
+					id, created = root.createLiveTerminal(root, worktree, terminalPanel)
+					if !created {
+						t.Fatal("terminal creation did not start")
+					}
+				}
+				tab := panel.Tab{Kind: panel.Terminal, ID: id}
+				root.App.Panel.Show(tab)
+				root.closeLiveTerminal(id)
+				for range 2 {
+					synctest.Wait()
+					runTerminalCallbacks(root)
+				}
+				if len(source.sent("close_terminal")) != 1 || !root.App.HasPanelTab(tab) {
+					t.Fatal("a rejected close removed the terminal surface")
+				}
+				if pending {
+					state := root.packages.terminals[id]
+					if state == nil || state.closing || state.cancel == nil {
+						t.Fatal("the terminal did not resume attachment after the rejected close")
+					}
+				}
+				root.dropTerminalTab(id)
+				if !root.App.PanelOpen || root.App.HasPanelTab(tab) {
+					t.Fatal("a later passive exit folded the panel after a rejected close")
+				}
+			})
+		})
+	}
 }
 
 func TestProjectTerminalPlacement(t *testing.T) {

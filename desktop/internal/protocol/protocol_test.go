@@ -25,6 +25,44 @@ func TestRequestIDCaptureTime(t *testing.T) {
 	}
 }
 
+func TestTerminalTakeoverWireCompatibility(t *testing.T) {
+	id := NewTerminalID()
+	for _, tc := range []struct {
+		kind    string
+		payload any
+		durable bool
+	}{
+		{"claim_terminal", &CommandClaimTerminalPayload{Terminal: id, ExpectedRevision: 7}, false},
+		{"takeover_terminal", &CommandTakeoverTerminalPayload{Terminal: id, ExpectedRevision: 7}, true},
+	} {
+		// Both commands use the same v1 payload fields; the kind, not an
+		// optional field an older peer may ignore, distinguishes the guarantees.
+		body := []byte(`{"kind":"` + tc.kind + `","data":{"terminal":"` + id.String() + `","expected_revision":7}}`)
+		var decoded Command
+		if err := DecodeAs(PeerCommand, body, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(decoded.Data, tc.payload) || decoded.Durable() != tc.durable {
+			t.Fatalf("%s changed payload or receipt semantics: %#v", tc.kind, decoded)
+		}
+		encoded, err := json.Marshal(decoded)
+		if err != nil || !reflect.DeepEqual(fixtureJSON(t, encoded), fixtureJSON(t, body)) {
+			t.Fatalf("%s did not retain its wire shape: %s, %v", tc.kind, encoded, err)
+		}
+	}
+	open := DefaultCommandOpenTerminalPayload()
+	open.Terminal = id
+	open.Appearance.ColorScheme = TerminalColorSchemeLight
+	body, err := json.Marshal(Command{Kind: "open_terminal", Data: open})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Command
+	if err := DecodeAs(PeerCommand, body, &decoded); err != nil || !decoded.Durable() {
+		t.Fatalf("legacy open_terminal must still decode with a durable receipt: %v", err)
+	}
+}
+
 func TestFixtureRoundTrip(t *testing.T) {
 	t.Parallel()
 	eachFixture(t, func(t *testing.T, _ string, original []byte, target func() any) {
@@ -139,7 +177,7 @@ func TestCommandKinds(t *testing.T) {
 		}
 	}
 	got := CommandKinds()
-	if extensions := []string{"apply_git_hunk", "synthesize_speech", "count_feature", "read_plugin_memory", "identity", "configuration_follow", "read_resource_catalog", "read_knowledge_candidates", "call_host_handler", "resume_controller_login"}; len(got) != len(want)+len(extensions) || !reflect.DeepEqual(got[:len(want)], want) || !reflect.DeepEqual(got[len(want):], extensions) {
+	if extensions := []string{"apply_git_hunk", "synthesize_speech", "count_feature", "read_plugin_memory", "identity", "configuration_follow", "read_resource_catalog", "read_knowledge_candidates", "call_host_handler", "resume_controller_login", "takeover_terminal"}; len(got) != len(want)+len(extensions) || !reflect.DeepEqual(got[:len(want)], want) || !reflect.DeepEqual(got[len(want):], extensions) {
 		t.Fatalf("command kinds differ from the captured inventory plus the documented native extensions\nwant: %v + %v\n got: %v", want, extensions, got)
 	}
 	t.Run("native Git hunk extension validates captured revisions", func(t *testing.T) {

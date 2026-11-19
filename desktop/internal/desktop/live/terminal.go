@@ -4,9 +4,7 @@ import (
 	"context"
 	"sync"
 
-	myterminal "github.com/egoist/mygo/plugins/terminal"
-	"github.com/egoist/mygo/transfer"
-	"github.com/egoist/mygo/ui"
+	"github.com/ai-poet/agent-client/desktop/internal/client"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
@@ -14,6 +12,9 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	myterminal "github.com/egoist/mygo/plugins/terminal"
+	"github.com/egoist/mygo/transfer"
+	"github.com/egoist/mygo/ui"
 )
 
 type liveTerminal struct {
@@ -26,14 +27,16 @@ type liveTerminal struct {
 	// closing marks a tab closed before its create_terminal answered: the
 	// answer closes the terminal instead of attaching it.
 	closing bool
-	// claiming holds while claim_terminal is unanswered; claimed is the
+	// claiming holds while takeover_terminal is unanswered; claimed is the
 	// revision an unowned terminal was last claimed at, so one refused
 	// automatic claim is not repeated every frame.
-	claiming bool
-	claimed  uint64
-	query    string
-	find     bool
-	selected int
+	claiming     bool
+	claimed      uint64
+	claimRequest *protocol.Request
+	claimUnknown *uint64
+	query        string
+	find         bool
+	selected     int
 }
 
 func (r *Runtime) initLiveTerminals() {
@@ -245,25 +248,59 @@ func (r *Runtime) terminalControl(c *ui.Context, id string, state *liveTerminal)
 	})
 }
 
-// claimLiveTerminal sends claim_terminal at the revision this view holds. A
-// refusal leaves the terminal with its controller.
+// claimLiveTerminal takes over at the revision this view holds, or inspects
+// an earlier unanswered takeover without issuing another one.
 func (r *Runtime) claimLiveTerminal(id string, state *liveTerminal) {
 	root, connection := r.localRuntime(), state.conn
 	if connection == nil || state.claiming {
 		return
 	}
 	info := connection.current()
+	if state.claimUnknown != nil && *state.claimUnknown == info.Revision {
+		return
+	}
 	state.claiming, state.claimed = true, info.Revision
+	request := state.claimRequest
+	recovering := request != nil
+	if !recovering {
+		request = new(state.owner.controller.Prepare(protocol.Command{Kind: "takeover_terminal", Data: protocol.CommandTakeoverTerminalPayload{
+			Terminal: info.ID, ExpectedRevision: info.Revision,
+		}}))
+	}
+	expected := request.Command.Data.(protocol.CommandTakeoverTerminalPayload).ExpectedRevision
 	if !state.owner.async(func() {
-		output, err := state.owner.controller.Do(connection.ctx, protocol.Command{Kind: "claim_terminal", Data: protocol.CommandClaimTerminalPayload{Terminal: info.ID, ExpectedRevision: info.Revision}})
+		controller := state.owner.controller
+		var output protocol.Output
+		var err error
+		if recovering {
+			var resolution client.Resolution
+			if resolution, err = controller.Resolve(connection.ctx, *request); err == nil {
+				output, err = resolution.Result()
+			} else {
+				err = pluginNativeFault(protocol.ErrorCodeOutcomeUnknown, "terminal takeover outcome could not be confirmed")
+			}
+		} else {
+			output, err = controller.Settle(connection.ctx, *request)
+		}
 		claimed, valid := detail[protocol.TerminalInfo](output.Data)
-		if err == nil && valid {
-			connection.claimed(claimed)
+		if err == nil {
+			if output.Kind != "terminal" || !valid || claimed.ID != info.ID || claimed.Owner == nil || *claimed.Owner != connection.self ||
+				claimed.Revision != expected+1 || claimed.Status.Kind != "running" {
+				err = pluginNativeFault(protocol.ErrorCodeInternal, "terminal takeover returned an unexpected lease")
+			} else if !connection.claimed(claimed) {
+				err = pluginNativeFault(protocol.ErrorCodeRevisionConflict, "terminal ownership changed")
+			}
 		}
 		root.enqueue(func(c *ui.Context) {
 			state.claiming = false
 			if root.packages.terminals[id] != state || state.conn != connection || connection.ctx.Err() != nil {
 				return
+			}
+			state.claimRequest = nil
+			if client.Retained(err) {
+				state.claimRequest = request
+			} else if client.Released(err) && faultCode(err) == protocol.ErrorCodeOutcomeUnknown {
+				state.claimUnknown = &expected
 			}
 			root.reportKeys(c, err, "workspace_action_failed", "workspace_changed", "workspace_action_unknown")
 			if err == nil {
@@ -304,12 +341,20 @@ func (r *Runtime) closeLiveTerminal(id string) {
 		return
 	}
 	command := protocol.Command{Kind: "close_terminal", Data: protocol.CommandCloseTerminalPayload{Worktree: *info.Worktree, Terminal: info.ID}}
+	root.closeTerminalCommand(owner, id, command, nil)
+}
+
+// The close can resolve after the original view has moved or been detached.
+func (r *Runtime) closeTerminalCommand(owner *Runtime, id string, command protocol.Command, rejected func()) {
 	owner.executeScoped("terminal-close/"+id, command, func(c *ui.Context, _ protocol.Output, err error) {
-		if err != nil && faultCode(err) != protocol.ErrorCodeNotFound {
-			root.reportKeys(c, err, "workspace_action_failed", "workspace_changed", "workspace_action_unknown")
+		if err == nil || faultCode(err) == protocol.ErrorCodeNotFound {
+			r.dropTerminalTab(id)
 			return
 		}
-		root.dropTerminalTab(id)
+		r.reportKeys(c, err, "workspace_action_failed", "workspace_changed", "workspace_action_unknown")
+		if rejected != nil {
+			rejected()
+		}
 	})
 }
 

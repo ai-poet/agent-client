@@ -6,17 +6,19 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"github.com/ai-poet/agent-client/desktop/internal/client"
-	"github.com/ai-poet/agent-client/desktop/internal/link"
-	"github.com/ai-poet/agent-client/desktop/internal/node/process"
-	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/ai-poet/agent-client/desktop/internal/client"
+	"github.com/ai-poet/agent-client/desktop/internal/link"
+	"github.com/ai-poet/agent-client/desktop/internal/node/process"
+	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
 func TestMain(suite *testing.M) {
@@ -155,6 +157,60 @@ func TestTerminalControllerIntegration(test *testing.T) {
 				}
 			}
 			wait("fixture 中文", 80)
+			checkTerminal := func(command protocol.Command, durable bool, revision uint64) protocol.Request {
+				test.Helper()
+				request := controller.Prepare(command)
+				admitted, err := controller.Dispatch(ctx, request)
+				if err != nil || admitted.Receipt.ID != request.ID || admitted.Receipt.Durable != durable {
+					test.Fatalf("%s receipt: %+v, %v", command.Kind, admitted.Receipt, err)
+				}
+				select {
+				case reply := <-admitted.Completion:
+					value, ok := dispatchPayload[protocol.TerminalInfo](reply.Output.Data)
+					if reply.Fault != nil || reply.Output.Kind != "terminal" || !ok || value.ID != info.ID || value.Revision != revision {
+						test.Fatalf("%s result: %+v, %v", command.Kind, value, reply.Fault)
+					}
+				case <-ctx.Done():
+					test.Fatal(ctx.Err())
+				}
+				return request
+			}
+			oldRevision := info.Revision
+			checkTerminal(protocol.Command{Kind: "open_terminal", Data: protocol.CommandOpenTerminalPayload{
+				Terminal: info.ID, Viewport: launch.Viewport, Appearance: launch.Appearance,
+			}}, true, oldRevision)
+			checkTerminal(protocol.Command{Kind: "claim_terminal", Data: protocol.CommandClaimTerminalPayload{
+				Terminal: info.ID, ExpectedRevision: oldRevision,
+			}}, false, oldRevision)
+			takeover := checkTerminal(protocol.Command{Kind: "takeover_terminal", Data: protocol.CommandTakeoverTerminalPayload{
+				Terminal: info.ID, ExpectedRevision: oldRevision,
+			}}, true, oldRevision+1)
+			replay, err = controller.Execute(ctx, takeover)
+			info, valid = dispatchPayload[protocol.TerminalInfo](replay.Data)
+			if err != nil || !valid || info.Revision != oldRevision+1 {
+				test.Fatalf("takeover replay: %+v, %v", info, err)
+			}
+			state, err := controller.Resolve(ctx, takeover)
+			stored, valid := dispatchPayload[protocol.TerminalInfo](state.Output.Data)
+			if err != nil || state.State != client.RequestApplied || !valid || stored.ID != info.ID || stored.Revision != info.Revision {
+				test.Fatalf("takeover inspection: %+v, %v", state, err)
+			}
+			output, err = controller.Do(ctx, protocol.Command{Kind: "inspect_terminal", Data: protocol.CommandInspectTerminalPayload{Terminal: info.ID}})
+			mirror, valid := dispatchPayload[protocol.TerminalSnapshot](output.Data)
+			if err != nil || !valid || mirror.Info.ID != info.ID || mirror.Info.Revision != info.Revision {
+				test.Fatalf("takeover snapshot: %+v, %v", mirror.Info, err)
+			}
+			inventory, err := owner.Snapshot(ctx)
+			if err != nil || len(inventory.Terminals) != 1 || inventory.Terminals[0].ID != info.ID || inventory.Terminals[0].Revision != info.Revision {
+				test.Fatalf("takeover inventory: %+v, %v", inventory.Terminals, err)
+			}
+			var conflict *link.FaultError
+			_, err = controller.Do(ctx, protocol.Command{Kind: "resize_terminal", Data: protocol.CommandResizeTerminalPayload{
+				Terminal: info.ID, Revision: oldRevision, Viewport: launch.Viewport,
+			}})
+			if !errors.As(err, &conflict) || conflict.Fault.Code != protocol.ErrorCodeRevisionConflict {
+				test.Fatalf("the previous lease was not rejected: %v", err)
+			}
 			if _, err := controller.Do(ctx, protocol.Command{Kind: "resize_terminal", Data: protocol.CommandResizeTerminalPayload{Terminal: info.ID, Revision: info.Revision, Viewport: protocol.TerminalViewport{Columns: 53, Rows: 18}}}); err != nil {
 				test.Fatal(err)
 			}
