@@ -288,7 +288,10 @@ func (store *controllerStore) pair(ctx context.Context, id protocol.NodeID, dire
 				continue
 			}
 			if resume {
-				if peer.Removed || peer.DirectoryOnly || !peer.Direction.AllowsInbound() {
+				if peer.Removed || peer.DirectoryOnly || !peer.Direct || !peer.DirectDirection.AllowsInbound() || !peer.Direction.AllowsInbound() {
+					return pairingRejected()
+				}
+				if hasNode != nil && !sameClaimKind(peer.HasNode, hasNode) {
 					return pairingRejected()
 				}
 				peer.Address = address

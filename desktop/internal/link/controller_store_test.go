@@ -216,3 +216,37 @@ func TestControllerPeerDirectionsMigrateAndPersist(t *testing.T) {
 		t.Fatalf("revoked directions: %#v, %v", values, err)
 	}
 }
+
+func TestControllerPairingResumeRefreshesAddressOnly(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	_, store, err := openControllerStore(filepath.Join(t.TempDir(), "controller"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	peer := protocol.NodeID{8}
+	first := EndpointAddress{ID: peer, Addrs: []json.RawMessage{json.RawMessage(`{"Ip":"127.0.0.1:4321"}`)}}
+	updated := EndpointAddress{ID: peer, Addrs: []json.RawMessage{json.RawMessage(`{"Ip":"127.0.0.1:4322"}`)}}
+	scope := InvitationScope{Kind: protocol.InvitationOtherUser}
+	hasNode := true
+	if err := store.SavePairing(ctx, first, DirectionController, scope, &hasNode, false); err != nil {
+		t.Fatal(err)
+	}
+	before, err := store.Relationships(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePairing(ctx, updated, DirectionController, scope, &hasNode, true); err != nil {
+		t.Fatal(err)
+	}
+	after, err := store.Relationships(ctx)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("resume changed membership: %+v -> %+v, %v", before, after, err)
+	}
+	addresses, err := store.Addresses(ctx)
+	if err != nil || !reflect.DeepEqual(addresses, []EndpointAddress{updated}) {
+		t.Fatalf("resume did not save the new address: %+v, %v", addresses, err)
+	}
+}

@@ -124,15 +124,16 @@ func (result *pairingResult) UnmarshalJSON(encoded []byte) error {
 }
 
 type pairingOffer struct {
-	scope    InvitationScope
-	token    pairingToken
-	deadline time.Time
-	stop     chan struct{}
-	paired   chan struct{}
-	peer     *protocol.NodeID
-	claims   int // connections being served for this offer; guarded by offerMu
-	close    sync.Once
-	accept   sync.Once
+	scope       InvitationScope
+	token       pairingToken
+	deadline    time.Time
+	stop        chan struct{}
+	paired      chan struct{}
+	peer        *protocol.NodeID
+	peerHasNode *bool
+	claims      int // connections being served for this offer; guarded by offerMu
+	close       sync.Once
+	accept      sync.Once
 }
 
 func (offer *pairingOffer) cancel() {
@@ -452,8 +453,16 @@ func (link *Link) acceptPairingIdentity(ctx context.Context, token pairingToken,
 		return InvitationScope{}, nil, pairingRejected()
 	}
 	resume := offer.peer != nil
-	if !resume {
+	if resume {
+		if !sameClaimKind(offer.peerHasNode, hasNode) {
+			link.offerMu.Unlock()
+			return InvitationScope{}, nil, pairingRejected()
+		}
+	} else {
 		offer.peer = &peer
+		if hasNode != nil {
+			offer.peerHasNode = new(*hasNode)
+		}
 	}
 	link.offerMu.Unlock()
 	scope := offer.scope
@@ -463,12 +472,20 @@ func (link *Link) acceptPairingIdentity(ctx context.Context, token pairingToken,
 	if err := link.savePairingLocked(ctx, address, DirectionController, scope, hasNode, resume); err != nil {
 		if !resume && faultValue(err).Code != protocol.ErrorCodeOutcomeUnknown {
 			link.offerMu.Lock()
-			offer.peer = nil
+			offer.peer, offer.peerHasNode = nil, nil
 			link.offerMu.Unlock()
 		}
 		return InvitationScope{}, nil, err
 	}
 	return scope, offer, nil
+}
+
+// An absent kind is a legacy claim, distinct from either authenticated kind.
+func sameClaimKind(original, current *bool) bool {
+	if original == nil || current == nil {
+		return original == current
+	}
+	return *original == *current
 }
 
 func (link *Link) confirmPairing(offer *pairingOffer) {
@@ -488,7 +505,7 @@ func (link *Link) savePairingLocked(ctx context.Context, address EndpointAddress
 	}); err != nil {
 		return err
 	}
-	if !resume && hasNode != nil {
+	if hasNode != nil {
 		link.peerKinds.Store(address.ID, *hasNode)
 	}
 	return nil

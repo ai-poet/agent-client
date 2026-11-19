@@ -48,6 +48,26 @@ func PairPeerIdentity(ctx context.Context, db *sql.Conn, node, peer protocol.Nod
 	return ClassifyPeer(ctx, db, node, peer, hasNode)
 }
 
+// ResumeIdentityPairing checks current membership in the same write that
+// updates the address. It never recreates membership or classifies a peer.
+func ResumeIdentityPairing(ctx context.Context, db *sql.Conn, node protocol.NodeID, address link.EndpointAddress, hasNode *bool) (protocol.User, error) {
+	user, err := CallerUser(ctx, db, node, address.ID)
+	if err != nil {
+		return protocol.User{}, err
+	}
+	if hasNode != nil {
+		var saved sql.NullBool
+		err := db.QueryRowContext(ctx, "SELECT has_node FROM link_peers WHERE identity=?1", address.ID[:]).Scan(&saved)
+		if errors.Is(err, sql.ErrNoRows) || err == nil && (!saved.Valid || saved.Bool != *hasNode) {
+			return protocol.User{}, fault(protocol.ErrorCodePermissionDenied, "paired device type changed")
+		}
+		if err != nil {
+			return protocol.User{}, err
+		}
+	}
+	return user, RememberLinkPeer(ctx, db, address)
+}
+
 // ClassifyPeer applies the authenticated device type to an existing pairing.
 // It never adds trust, changes direction, or rewrites captured history owners.
 func ClassifyPeer(ctx context.Context, db *sql.Conn, node, peer protocol.NodeID, hasNode bool) error {

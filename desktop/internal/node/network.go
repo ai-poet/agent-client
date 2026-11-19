@@ -71,12 +71,8 @@ func (peers nodePeerStore) SavePairing(ctx context.Context, address link.Endpoin
 	err := peers.handle.Write(ctx, func(db *sql.Conn) error {
 		var err error
 		if resume {
-			// Authorize against persisted membership in the same write as the address.
-			user, err = store.CallerUser(ctx, db, peers.node, address.ID)
-			if err != nil {
-				return err
-			}
-			return store.RememberLinkPeer(ctx, db, address)
+			user, err = store.ResumeIdentityPairing(ctx, db, peers.node, address, hasNode)
+			return err
 		}
 		if hasNode == nil {
 			err = store.PairIdentityPeer(ctx, db, peers.node, address.ID, direction, scope)
