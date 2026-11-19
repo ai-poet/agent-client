@@ -87,6 +87,8 @@ type Envelope struct {
 	Call            Call
 	HasNode         *bool
 	Target          *protocol.NodeID
+	// CatalogPages opts this requester into paged resource catalog completions.
+	CatalogPages bool
 	// RawData preserves a relayed business payload, including peer fields this
 	// build does not know. Only transport metadata is rewritten at the next hop.
 	RawData json.RawMessage
@@ -105,7 +107,8 @@ func (envelope Envelope) MarshalJSON() ([]byte, error) {
 		Zstd            bool             `json:"zstd"`
 		HasNode         *bool            `json:"has_node,omitempty"`
 		Target          *protocol.NodeID `json:"target,omitempty"`
-	}{envelope.SoftwareVersion, envelope.Protocol, envelope.Zstd, envelope.HasNode, envelope.Target})
+		CatalogPages    bool             `json:"catalog_pages,omitempty"`
+	}{envelope.SoftwareVersion, envelope.Protocol, envelope.Zstd, envelope.HasNode, envelope.Target, envelope.CatalogPages})
 	if err != nil {
 		return nil, err
 	}
@@ -135,6 +138,7 @@ func (envelope *Envelope) UnmarshalJSON(data []byte) error {
 		Zstd            bool             `json:"zstd"`
 		HasNode         *bool            `json:"has_node,omitempty"`
 		Target          *protocol.NodeID `json:"target,omitempty"`
+		CatalogPages    bool             `json:"catalog_pages,omitempty"`
 		Data            json.RawMessage  `json:"data"`
 	}
 	if err := protocol.DecodeObject(data, &metadata, nil, false); err != nil {
@@ -152,7 +156,7 @@ func (envelope *Envelope) UnmarshalJSON(data []byte) error {
 	*envelope = Envelope{
 		SoftwareVersion: metadata.SoftwareVersion, Protocol: metadata.Protocol,
 		Zstd: metadata.Zstd, Call: call, HasNode: metadata.HasNode,
-		Target: metadata.Target, RawData: append(json.RawMessage(nil), metadata.Data...),
+		Target: metadata.Target, CatalogPages: metadata.CatalogPages, RawData: append(json.RawMessage(nil), metadata.Data...),
 		Undecoded: undecoded,
 	}
 	return nil

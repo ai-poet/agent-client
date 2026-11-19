@@ -266,7 +266,7 @@ func fixtureFrames(t *testing.T, replies ...wire.Reply) []byte {
 	t.Helper()
 	var encoded bytes.Buffer
 	for _, reply := range replies {
-		if err := wire.WriteReply(reply, func(frame wire.Reply) error { return wire.Write(&encoded, frame, false) }); err != nil {
+		if err := wire.WriteReply(reply, false, func(frame wire.Reply) error { return wire.Write(&encoded, frame, false) }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -550,7 +550,7 @@ func TestServerUsesCertifiedCallerAndOrdersReceipt(t *testing.T) {
 		batch := strings.Repeat("x", 2*wire.PageBytes+1)
 		snapshot.ModelCatalog.Scores.Batch = &batch
 		update := protocol.Update{Kind: "snapshot", Data: &snapshot}
-		if err := link.writeReply(t.Context(), stream, wire.Reply{Kind: wire.ReplyUpdate, Update: &update}, false); err != nil {
+		if err := link.writeReply(t.Context(), stream, wire.Reply{Kind: wire.ReplyUpdate, Update: &update}, false, false); err != nil {
 			t.Fatalf("paged snapshot shared one frame deadline: %v", err)
 		}
 		reply, err := wire.NewReader(false).Reply(bytes.NewReader(stream.written()))

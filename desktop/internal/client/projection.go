@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"cmp"
+	"reflect"
 	"slices"
 
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
@@ -24,6 +25,8 @@ type Projection struct {
 	recovery   bool
 	changes    pluginChangeCursors
 	credential uint64
+	resources  uint64
+	directory  uint64
 }
 
 func NewProjection(node protocol.NodeID, generation uint64) *Projection {
@@ -52,6 +55,7 @@ func (projection *Projection) Apply(generation uint64, update protocol.Update) (
 	}
 	switch update.Kind {
 	case "reset_required":
+		projection.invalidateResourceObservations()
 		projection.recovery = true
 		return Recover, nil
 	case "snapshot":
@@ -70,6 +74,16 @@ func (projection *Projection) Apply(generation uint64, update protocol.Update) (
 		retainQuotas(&snapshot)
 		if err := projection.changes.reset(snapshot); err != nil {
 			return Ignored, err
+		}
+		if previous := projection.snapshot; previous == nil ||
+			!reflect.DeepEqual(previous.Projects, snapshot.Projects) ||
+			!reflect.DeepEqual(previous.Worktrees, snapshot.Worktrees) {
+			projection.resources++
+		}
+		// A replacement can subsume events after the one that caused recovery.
+		// A snapshot does not include knowledge or the direct-host directory.
+		if previous := projection.snapshot; previous != nil && snapshot.Cursor > previous.Cursor && snapshot.Cursor-previous.Cursor > 1 {
+			projection.invalidateResourceObservations()
 		}
 		projection.snapshot, projection.recovery = &snapshot, false
 		projection.credential++
@@ -90,6 +104,7 @@ func (projection *Projection) Apply(generation uint64, update protocol.Update) (
 			return Ignored, nil
 		}
 		if projection.recovery || projection.snapshot.Cursor == ^uint64(0) || projection.snapshot.Cursor+1 != envelope.Cursor {
+			projection.invalidateResourceObservations()
 			projection.recovery = true
 			return Recover, nil
 		}
@@ -102,6 +117,9 @@ func (projection *Projection) Apply(generation uint64, update protocol.Update) (
 			return Ignored, err
 		}
 		if recover {
+			if envelope.Event.Kind == "projection_invalidated" {
+				projection.invalidateResourceObservations()
+			}
 			projection.recovery = true
 			return Recover, nil
 		}
@@ -110,8 +128,13 @@ func (projection *Projection) Apply(generation uint64, update protocol.Update) (
 			return Ignored, err
 		}
 		projection.snapshot.Cursor = envelope.Cursor
-		if envelope.Event.Kind == "credential_changed" {
+		switch envelope.Event.Kind {
+		case "credential_changed":
 			projection.credential++
+		case "worktree_registered", "worktree_removed", "knowledge_collections_changed":
+			projection.resources++
+		case "resource_catalog_changed":
+			projection.directory++
 		}
 		return Applied, nil
 	default:
@@ -122,6 +145,11 @@ func (projection *Projection) Apply(generation uint64, update protocol.Update) (
 		}
 		return Ignored, fault(protocol.ErrorCodeInvalidRequest, "resource update on Node subscription")
 	}
+}
+
+func (projection *Projection) invalidateResourceObservations() {
+	projection.resources++
+	projection.directory++
 }
 
 func terminalFinished(terminal protocol.TerminalInfo) bool {

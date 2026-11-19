@@ -195,10 +195,14 @@ func (client *Client) Err() error {
 // OnChange callbacks schedule presentation updates; they run outside Client locks.
 func (client *Client) OnChange(callback func()) func() {
 	client.mu.Lock()
+	defer client.mu.Unlock()
+	return client.onChangeLocked(callback)
+}
+
+func (client *Client) onChangeLocked(callback func()) func() {
 	client.callback++
 	id := client.callback
 	client.callbacks[id] = callback
-	client.mu.Unlock()
 	return func() {
 		client.mu.Lock()
 		delete(client.callbacks, id)

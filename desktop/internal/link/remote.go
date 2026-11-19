@@ -31,6 +31,7 @@ func (remote *Remote) Route() protocol.RouteKey {
 func (remote *Remote) writeCall(ctx context.Context, stream contextStream, call wire.Call, compressed bool) error {
 	envelope := remote.link.envelope(call)
 	envelope.Target = remote.target
+	envelope.CatalogPages = catalogCommand(call)
 	scoped, cancel := remote.link.operation(ctx, true)
 	defer cancel()
 	return wire.Write(scopedWriter{scoped, stream}, envelope, compressed)

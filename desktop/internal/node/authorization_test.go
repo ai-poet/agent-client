@@ -70,6 +70,24 @@ func TestProjectUsersAndSubscriptionRevocation(t *testing.T) {
 	if got := snapshot(other); len(got.Projects) != 0 || len(got.Worktrees) != 0 {
 		t.Fatalf("private resources leaked: %+v", got.Projects)
 	}
+	catalog := func(caller protocol.NodeID) protocol.ResourceSource {
+		t.Helper()
+		value := send(caller, protocol.Command{Kind: "read_resource_catalog"})
+		if value.Fault != nil || value.Output.Kind != "resource_catalog" {
+			t.Fatalf("resource catalog: %+v", value)
+		}
+		result := value.Output.Data.(protocol.ResourceCatalog)
+		if result.Entry != node.ID() || len(result.Sources) != 1 {
+			t.Fatalf("unexpected resource catalog scope: %+v", result)
+		}
+		return result.Sources[0]
+	}
+	if got := catalog(other); len(got.Projects) != 0 || len(got.Worktrees) != 0 {
+		t.Fatal("another user's private resources entered the catalog")
+	}
+	if got := catalog(owner); len(got.Projects) != 1 || len(got.Worktrees) != 1 {
+		t.Fatal("owner's catalog omitted private resources")
+	}
 	own := snapshot(owner)
 	if own.User == nil || len(own.Projects) != 1 || len(own.Worktrees) != 1 {
 		t.Fatal("owner snapshot missing resources or identity")
@@ -107,6 +125,9 @@ func TestProjectUsersAndSubscriptionRevocation(t *testing.T) {
 	if len(snapshot(other).Projects) != 1 {
 		t.Fatal("shared project absent")
 	}
+	if got := catalog(other); len(got.Projects) != 1 || len(got.Worktrees) != 1 {
+		t.Fatal("shared project or worktree absent from resource catalog")
+	}
 	config := protocol.DefaultSessionConfig()
 	config.Provider, config.Model = protocol.NewProviderID(), "fixture"
 	config.Mode, config.Permission = protocol.WorkModeCode, protocol.PermissionProject
@@ -139,6 +160,9 @@ func TestProjectUsersAndSubscriptionRevocation(t *testing.T) {
 	}
 	if len(snapshot(other).Projects) != 0 {
 		t.Fatal("revoked project remains projected")
+	}
+	if got := catalog(other); len(got.Projects) != 0 || len(got.Worktrees) != 0 {
+		t.Fatal("resource catalog retained the formerly shared project or worktree")
 	}
 	body, err := json.Marshal(rename)
 	if err != nil {

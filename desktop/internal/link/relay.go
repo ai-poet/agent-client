@@ -55,6 +55,8 @@ func (link *Link) relay(ctx context.Context, peer protocol.NodeID, incoming cont
 	defer outgoing.Close()
 	forward := link.envelope(envelope.Call)
 	forward.RawData = envelope.RawData
+	// Forward the final reader's opt-in, not this relay's own support.
+	forward.CatalogPages = envelope.CatalogPages && catalogCommand(envelope.Call)
 	// The target is now reached directly. A second relay hop is never encoded.
 	writing, finishWrite := link.operation(scoped, true)
 	err = wire.Write(scopedWriter{writing, outgoing}, forward, targetCompressed)
@@ -87,7 +89,7 @@ func (link *Link) relay(ctx context.Context, peer protocol.NodeID, incoming cont
 		}
 		return copyDuplex(scoped, incoming, outgoing)
 	}
-	return link.relayReplies(scoped, incoming, outgoing, compressed, targetCompressed)
+	return link.relayReplies(scoped, incoming, outgoing, compressed, targetCompressed, forward.CatalogPages)
 }
 
 func routedRequestTarget(envelope wire.Envelope, target protocol.NodeID) bool {
@@ -105,7 +107,7 @@ func routedRequestTarget(envelope wire.Envelope, target protocol.NodeID) bool {
 
 // relayReplies handles individual transport frames, never assembling a remote
 // snapshot. A missing completion remains uncertain at the original requester.
-func (link *Link) relayReplies(ctx context.Context, incoming, outgoing contextStream, compressed, targetCompressed bool) error {
+func (link *Link) relayReplies(ctx context.Context, incoming, outgoing contextStream, compressed, targetCompressed, catalogPages bool) error {
 	reader := wire.NewReader(targetCompressed)
 	var snapshot *wire.SnapshotHeader
 	var remaining uint64
@@ -130,7 +132,7 @@ func (link *Link) relayReplies(ctx context.Context, incoming, outgoing contextSt
 		switch header.Kind {
 		case wire.ReplySnapshotStart:
 			var start wire.SnapshotHeader
-			if err := json.Unmarshal(header.Data, &start); err != nil || snapshot != nil || start.Bytes == 0 || start.Bytes > wire.MaxSnapshotBytes {
+			if err := json.Unmarshal(header.Data, &start); err != nil || snapshot != nil || !start.Valid() || start.Output != "" && !catalogPages {
 				clear(frame)
 				return invalidLink("invalid snapshot header")
 			}

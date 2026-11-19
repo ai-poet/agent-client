@@ -8,6 +8,54 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
+func TestResourceObserversIgnoreUnrelatedUpdates(t *testing.T) {
+	controller := New(&clientTransport{})
+	t.Cleanup(func() { _ = controller.Close() })
+	snapshot := protocol.DefaultSnapshot()
+	snapshot.Node = controller.Target()
+	apply := func(kind string, data any, want Apply) {
+		t.Helper()
+		got, err := controller.project.Apply(0, protocol.Update{Kind: kind, Data: data})
+		if err != nil || got != want {
+			t.Fatalf("%s: apply = %v, %v", kind, got, err)
+		}
+		controller.changed()
+	}
+	apply("snapshot", snapshot, Applied)
+	var sources, directory int
+	defer controller.OnResourceChange(false, func() { sources++ })()
+	defer controller.OnResourceChange(true, func() { directory++ })()
+	emit := func(cursor uint64, kind string, data any, want Apply) {
+		t.Helper()
+		apply("event", protocol.EventEnvelope{Node: snapshot.Node, Cursor: cursor, Event: protocol.Event{Kind: kind, Data: data}}, want)
+	}
+	assertChanges := func(wantSources, wantDirectory int) {
+		t.Helper()
+		if sources != wantSources || directory != wantDirectory {
+			t.Fatalf("source/directory changes = %d/%d, want %d/%d", sources, directory, wantSources, wantDirectory)
+		}
+	}
+	emit(1, "cursor", nil, Applied)
+	assertChanges(0, 0)
+	snapshot.Cursor = 1
+	apply("snapshot", snapshot, Applied)
+	assertChanges(0, 0)
+	emit(2, "resource_catalog_changed", nil, Applied)
+	assertChanges(0, 1)
+	emit(3, "knowledge_collections_changed", nil, Applied)
+	assertChanges(1, 2)
+	project := protocol.DefaultProject()
+	project.ID = protocol.NewProjectID()
+	emit(4, "project_registered", project, Recover)
+	assertChanges(1, 2)
+	snapshot.Cursor, snapshot.Projects = 4, []protocol.Project{project}
+	apply("snapshot", snapshot, Applied)
+	assertChanges(2, 3)
+	// A cursor gap can hide knowledge or directory changes not in a snapshot.
+	emit(6, "cursor", nil, Recover)
+	assertChanges(3, 4)
+}
+
 func TestResourceCatalogRejectsMixedEntries(t *testing.T) {
 	entry := protocol.NodeID{1}
 	catalog := protocol.ResourceCatalog{Entry: entry, Sources: []protocol.ResourceSource{{Node: entry, Route: protocol.RouteKey{Entry: entry, Target: entry}}}}

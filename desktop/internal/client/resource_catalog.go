@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"sync"
 
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
@@ -40,6 +41,57 @@ func (client *Client) ReadResourceCatalog(ctx context.Context) (protocol.Resourc
 	return copyValue(catalog), nil
 }
 
+// ResourceSnapshot copies only the project and worktree projection from one
+// accepted snapshot generation.
+func (client *Client) ResourceSnapshot() (projects []protocol.Project, worktrees []protocol.Worktree, cursor uint64) {
+	client.mu.RLock()
+	defer client.mu.RUnlock()
+	if snapshot := client.project.snapshot; snapshot != nil {
+		return copyValue(snapshot.Projects), copyValue(snapshot.Worktrees), snapshot.Cursor
+	}
+	return nil, nil, 0
+}
+
+// OnResourceChange observes source resources and connectivity. Directory
+// consumers also need changes to the source's direct-host view.
+func (client *Client) OnResourceChange(directory bool, callback func()) func() {
+	type revision struct {
+		generation, sources, catalog uint64
+		connected                    bool
+		fault                        protocol.ErrorCode
+	}
+	current := func() revision {
+		value := revision{
+			generation: client.project.generation, sources: client.project.resources,
+			connected: client.connected,
+		}
+		if client.err != nil {
+			value.fault = faultCode(client.err)
+		}
+		if directory {
+			value.catalog = client.project.directory
+		}
+		return value
+	}
+	var mu sync.Mutex
+	// Install the callback and capture its starting revision atomically.
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	last := current()
+	return client.onChangeLocked(func() {
+		mu.Lock()
+		client.mu.RLock()
+		next := current()
+		client.mu.RUnlock()
+		changed := next != last
+		last = next
+		mu.Unlock()
+		if changed {
+			callback()
+		}
+	})
+}
+
 type resourceCatalogView struct {
 	Catalog    *protocol.ResourceCatalog `json:"catalog"`
 	Refreshing bool                      `json:"refreshing"`
@@ -56,7 +108,7 @@ func (client *Client) watchResourceCatalog(ctx context.Context) *Observer {
 		default:
 		}
 	}
-	observer.release = client.OnChange(refresh)
+	observer.release = client.OnResourceChange(true, refresh)
 	observer.read = func() (any, error) {
 		observer.mu.Lock()
 		defer observer.mu.Unlock()

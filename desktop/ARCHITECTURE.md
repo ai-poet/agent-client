@@ -830,6 +830,11 @@ recovery. A directory member never creates another trusted peer or a recursive
 directory import. Commands, subscriptions and byte streams traverse the entry
 with the original request identity and actual resource target; each hop negotiates
 its own compression and retains frame boundaries and stream half-closes.
+A resource catalog normally returns one completion. A requester that can assemble
+an oversized catalog opts in on that call's envelope; a relay forwards that
+opt-in without adding it for older peers. The same snapshot frames carry the
+bounded pages, and the requester publishes the catalog only after assembly and
+route validation. The opt-in does not confer directory access.
 
 The controller Node durably stores directory summaries per authenticated access
 user and direct source Node. Each summary retains its entry and actual resource
@@ -838,10 +843,11 @@ visibility, confirmed source cursor and last successful synchronization time.
 It contains no provider keys, file bodies, session history or knowledge indexes.
 Startup reads these summaries before remote Clients connect. Existing shared
 Client observations update them even when no resource page is open; only a
-complete successful snapshot can remove absent entries. A temporary disconnect
-retains the last summary as offline. Explicit connection removal or access
-revocation invalidates disk summaries, in-memory state and open projections,
-without deleting resources on their owning Node.
+complete successful snapshot can remove absent entries. Resource observations
+react to resource and access changes rather than unrelated Node events.
+A temporary disconnect retains the last summary as offline. Explicit
+connection removal or access revocation invalidates disk summaries, in-memory
+state and open projections, without deleting resources on their owning Node.
 
 Desktop observes the unified directory and merges by source Node and resource
 ID, including sources with no connected Client yet. Offline project rows retain

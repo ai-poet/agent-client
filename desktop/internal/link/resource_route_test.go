@@ -113,7 +113,7 @@ func TestRelayedRepliesPreserveFramesAndPerHopCompression(t *testing.T) {
 					}
 				}
 				incoming, outgoing := newFixtureStream(nil), newFixtureStream(upstream.Bytes())
-				if err := service.relayReplies(t.Context(), incoming, outgoing, destinationCompressed, sourceCompressed); err != nil {
+				if err := service.relayReplies(t.Context(), incoming, outgoing, destinationCompressed, sourceCompressed, false); err != nil {
 					t.Fatal(err)
 				}
 				if !incoming.finished {
@@ -131,6 +131,31 @@ func TestRelayedRepliesPreserveFramesAndPerHopCompression(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestRelayCatalogPagesRequireRequesterOptIn(t *testing.T) {
+	service := newFixtureLink(t)
+	id := protocol.NodeID{3}
+	body, err := json.Marshal(protocol.ResourceCatalog{Entry: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := wire.Reply{Kind: wire.ReplySnapshotStart, SnapshotStart: &wire.SnapshotHeader{
+		Delivery: wire.DeliveryCompleted, Node: id, Bytes: uint64(len(body)), Output: "resource_catalog",
+	}}
+	receipt := wire.Reply{Kind: wire.ReplyReceipt, Receipt: &protocol.Receipt{ID: protocol.NewRequestID()}}
+	frames := fixtureFrames(t, receipt, start,
+		wire.Reply{Kind: wire.ReplySnapshotPage, SnapshotPage: &wire.SnapshotPage{Index: 0, Data: string(body)}})
+	legacy := newFixtureStream(nil)
+	if err := service.relayReplies(t.Context(), legacy, newFixtureStream(frames), false, false, false); err == nil ||
+		!bytes.Equal(legacy.written(), fixtureFrames(t, receipt)) {
+		t.Fatal("relay passed a catalog page to a legacy requester")
+	}
+	current := newFixtureStream(nil)
+	if err := service.relayReplies(t.Context(), current, newFixtureStream(frames), false, false, true); err != nil ||
+		!current.finished || !bytes.Equal(current.written(), frames) {
+		t.Fatalf("relay did not preserve the negotiated catalog frames: %v", err)
 	}
 }
 
@@ -157,7 +182,7 @@ func TestRelayRejectsMalformedPagesAndLeavesLostCompletionUnknown(t *testing.T) 
 				frames = []wire.Reply{{Kind: wire.ReplyReceipt, Receipt: &receipt}}
 			}
 			incoming := newFixtureStream(nil)
-			if err := service.relayReplies(t.Context(), incoming, newFixtureStream(fixtureFrames(t, frames...)), false, false); err == nil {
+			if err := service.relayReplies(t.Context(), incoming, newFixtureStream(fixtureFrames(t, frames...)), false, false, false); err == nil {
 				t.Fatal("malformed or truncated completion was reported as complete")
 			}
 			if incoming.finished {

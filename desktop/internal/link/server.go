@@ -223,7 +223,7 @@ func (link *Link) serveRequest(ctx context.Context, peer protocol.NodeID, stream
 		if envelope.Call.Request == nil {
 			return invalidLink("command request expected")
 		}
-		return link.serveCommand(ctx, peer, stream, *envelope.Call.Request, compressed, link.handler.Dispatch)
+		return link.serveCommand(ctx, peer, stream, *envelope.Call.Request, compressed, envelope.CatalogPages && catalogCommand(envelope.Call), link.handler.Dispatch)
 	case wire.CallResource:
 		if envelope.Call.Resource == nil {
 			return link.reject(ctx, stream, protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "resource operation is not supported"})
@@ -236,7 +236,7 @@ func (link *Link) serveRequest(ctx context.Context, peer protocol.NodeID, stream
 			return link.reject(ctx, stream, protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "resource routing is unavailable"})
 		}
 		call := *envelope.Call.Resource
-		return link.serveCommand(ctx, peer, stream, call.Request, compressed, func(ctx context.Context, caller protocol.NodeID, _ protocol.Request) (Admission, error) {
+		return link.serveCommand(ctx, peer, stream, call.Request, compressed, false, func(ctx context.Context, caller protocol.NodeID, _ protocol.Request) (Admission, error) {
 			return handler.Resource(ctx, caller, call)
 		})
 	case wire.CallScopedKnowledge:
@@ -251,7 +251,7 @@ func (link *Link) serveRequest(ctx context.Context, peer protocol.NodeID, stream
 		if !ok {
 			return link.reject(ctx, stream, protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "scoped knowledge routing is unavailable"})
 		}
-		return link.serveCommand(ctx, peer, stream, call.Request, compressed, func(ctx context.Context, caller protocol.NodeID, _ protocol.Request) (Admission, error) {
+		return link.serveCommand(ctx, peer, stream, call.Request, compressed, false, func(ctx context.Context, caller protocol.NodeID, _ protocol.Request) (Admission, error) {
 			return handler.ScopedKnowledge(ctx, caller, *call)
 		})
 	case wire.CallSubscribe:
@@ -284,7 +284,7 @@ func (link *Link) serveRequest(ctx context.Context, peer protocol.NodeID, stream
 			}
 			if err != nil {
 				fault := faultValue(err)
-				if err := link.writeReply(ctx, stream, wire.Reply{Kind: wire.ReplyRejected, Rejected: &fault}, compressed); err != nil {
+				if err := link.writeReply(ctx, stream, wire.Reply{Kind: wire.ReplyRejected, Rejected: &fault}, compressed, false); err != nil {
 					return err
 				}
 				break
@@ -292,7 +292,7 @@ func (link *Link) serveRequest(ctx context.Context, peer protocol.NodeID, stream
 			if !link.Direction(peer).AllowsInbound() {
 				return nil
 			}
-			if err := link.writeReply(ctx, stream, wire.Reply{Kind: wire.ReplyUpdate, Update: &update}, compressed); err != nil {
+			if err := link.writeReply(ctx, stream, wire.Reply{Kind: wire.ReplyUpdate, Update: &update}, compressed, false); err != nil {
 				return err
 			}
 		}
@@ -302,7 +302,7 @@ func (link *Link) serveRequest(ctx context.Context, peer protocol.NodeID, stream
 	return linkNetwork(stream.CloseWrite())
 }
 
-func (link *Link) serveCommand(ctx context.Context, peer protocol.NodeID, stream contextStream, request protocol.Request, compressed bool, dispatch func(context.Context, protocol.NodeID, protocol.Request) (Admission, error)) error {
+func (link *Link) serveCommand(ctx context.Context, peer protocol.NodeID, stream contextStream, request protocol.Request, compressed, catalogPages bool, dispatch func(context.Context, protocol.NodeID, protocol.Request) (Admission, error)) error {
 	dispatchContext := link.ctx
 	release := func() {}
 	if !request.Command.Durable() {
@@ -334,7 +334,7 @@ func (link *Link) serveCommand(ctx context.Context, peer protocol.NodeID, stream
 	if result.Fault != nil {
 		result.Output = nil
 	}
-	if err := link.writeReply(ctx, stream, wire.Reply{Kind: wire.ReplyCompleted, Completed: &result}, compressed); err != nil {
+	if err := link.writeReply(ctx, stream, wire.Reply{Kind: wire.ReplyCompleted, Completed: &result}, compressed, catalogPages); err != nil {
 		return err
 	}
 	return linkNetwork(stream.CloseWrite())

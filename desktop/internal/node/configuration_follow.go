@@ -196,8 +196,11 @@ func (node *Node) refreshConfigurationFollowPeers(ctx context.Context, runtime *
 		if err := node.tasks.Submit(func(owner context.Context) {
 			remote, observer := peer.remote, peer.client
 			defer observer.Close()
-			cancelWatch := observer.OnChange(func() {
+			releaseResources := observer.OnResourceChange(false, func() {
 				node.notifyResourceCatalog(address.ID, observer)
+			})
+			defer releaseResources()
+			cancelWatch := observer.OnChange(func() {
 				select {
 				case peer.wake <- struct{}{}:
 				default:

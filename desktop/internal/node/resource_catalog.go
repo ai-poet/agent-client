@@ -30,22 +30,27 @@ func (node *Node) resourceClients(ctx context.Context) map[protocol.NodeID]*clie
 
 func (node *Node) resourceCatalog(ctx context.Context) (protocol.ResourceCatalog, error) {
 	catalog := protocol.ResourceCatalog{Entry: node.ID(), Sources: []protocol.ResourceSource{}}
+	local := protocol.ResourceSource{Node: node.ID(), Route: protocol.RouteKey{Entry: node.ID(), Target: node.ID()}, Platform: runtime.GOOS}
+	local.Name, _ = os.Hostname()
 	var user protocol.User
 	if err := node.profile.Store.Node.Read(ctx, func(db *sql.Conn) error {
 		var err error
-		user, err = store.CurrentUser(ctx, db)
+		if user, err = store.CurrentUser(ctx, db); err != nil {
+			return err
+		}
+		owner := store.WithUser(ctx, user)
+		if local.Projects, err = store.ReadProjects(owner, db); err != nil {
+			return err
+		}
+		if local.Worktrees, err = store.ReadWorktrees(owner, db); err != nil {
+			return err
+		}
+		local.Revision, err = store.EventCursor(owner, db)
 		return err
 	}); err != nil {
-		return catalog, err
+		return catalog, nodeFault(err)
 	}
 	ctx = store.WithUser(ctx, user)
-	local := protocol.ResourceSource{Node: node.ID(), Route: protocol.RouteKey{Entry: node.ID(), Target: node.ID()}, Platform: runtime.GOOS}
-	local.Name, _ = os.Hostname()
-	snapshot, err := node.Snapshot(ctx)
-	if err != nil {
-		return catalog, err
-	}
-	local.Projects, local.Worktrees, local.Revision = snapshot.Projects, snapshot.Worktrees, snapshot.Cursor
 	local.Worktrees = resourceDirectoryWorktrees(local.Projects, local.Worktrees)
 	output, err := node.readKnowledge(ctx, protocol.NewRequest(node.ID(), protocol.Command{Kind: "list_knowledge_collections"}))
 	if err != nil {
@@ -125,7 +130,6 @@ func (node *Node) resourceCatalog(ctx context.Context) (protocol.ResourceCatalog
 					}
 				}
 			}
-			node.notifyResourceCatalog(id, remote)
 		} else {
 			source.Fault = resourceUnavailable()
 		}
@@ -170,8 +174,7 @@ func (node *Node) captureResourceSource(ctx context.Context, source protocol.Nod
 	} else {
 		// Client publishes a replacement only after every snapshot page has
 		// validated. Never persist an in-progress snapshot as an empty source.
-		snapshot := remote.Snapshot()
-		previous.Projects, previous.Worktrees, previous.Revision = snapshot.Projects, snapshot.Worktrees, snapshot.Cursor
+		previous.Projects, previous.Worktrees, previous.Revision = remote.ResourceSnapshot()
 		previous.Worktrees = resourceDirectoryWorktrees(previous.Projects, previous.Worktrees)
 		now := uint64(time.Now().UnixMilli())
 		previous.LastSyncedAtMs, complete = &now, true
@@ -195,8 +198,12 @@ func (node *Node) captureResourceSource(ctx context.Context, source protocol.Nod
 func resourceDirectoryWorktrees(projects []protocol.Project, worktrees []protocol.Worktree) []protocol.Worktree {
 	// Canonical history can retain a removed project's worktrees for admitted
 	// tasks. A directory must remove those descendants with the project.
+	present := make(map[protocol.ProjectID]bool, len(projects))
+	for _, project := range projects {
+		present[project.ID] = true
+	}
 	return slices.DeleteFunc(worktrees, func(worktree protocol.Worktree) bool {
-		return worktree.Project != nil && !slices.ContainsFunc(projects, func(project protocol.Project) bool { return project.ID == *worktree.Project })
+		return worktree.Project != nil && !present[*worktree.Project]
 	})
 }
 
@@ -604,6 +611,7 @@ func (node *Node) notifyResourceCatalog(source protocol.NodeID, remote *client.C
 		ctx, cancel := context.WithCancel(store.WithUser(ctx, user))
 		defer cancel()
 		defer context.AfterFunc(node.ctx, cancel)()
+		retry := time.Second
 		for {
 			state.mu.Lock()
 			if ctx.Err() != nil || state.removed || !state.dirty {
@@ -642,6 +650,24 @@ func (node *Node) notifyResourceCatalog(source protocol.NodeID, remote *client.C
 				state.running = false
 				state.mu.Unlock()
 				return
+			}
+			if complete && projected.Fault != nil && (projected.Fault.Code == protocol.ErrorCodeUnavailable || projected.Fault.Code == protocol.ErrorCodeBusy) {
+				// Knowledge can fail while the project subscription stays healthy.
+				// Retry that read without relying on a catalog read or another event.
+				timer := time.NewTimer(retry)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+				case <-timer.C:
+					state.mu.Lock()
+					if !state.removed && state.generation == generation {
+						state.dirty = true
+					}
+					state.mu.Unlock()
+				}
+				retry = min(retry*2, 30*time.Second)
+			} else {
+				retry = time.Second
 			}
 		}
 	})

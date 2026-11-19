@@ -37,6 +37,9 @@ func TestFramePlain(t *testing.T) {
 			{"completed success", `{"kind":"completed","data":{"Ok":{"kind":"notifications_updated"}}}`, "", func() any { return new(Reply) }},
 			{"unrecorded outcome", `{"kind":"completed","data":{"Ok":{"kind":"request_outcome","data":{"id":"01890f00-1234-7000-8000-000000000001","outcome":{"kind":"unrecorded"}}}}}`, "", func() any { return new(Reply) }},
 			{"replayable outcome", `{"kind":"completed","data":{"Ok":{"kind":"request_outcome","data":{"id":"01890f00-1234-7000-8000-000000000001","outcome":{"kind":"replayable","data":{"code":"outcome_unknown","message":"send the original request"}}}}}}`, "", func() any { return new(Reply) }},
+			{"v2 catalog request", `{"software_version":"1.0.0","protocol":2,"zstd":true,"has_node":false,"kind":"command","data":{"version":2,"id":"01890f00-1234-7000-8000-000000000001","target":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"command":{"kind":"read_resource_catalog"}}}`, "", func() any { return new(Envelope) }},
+			{"legacy catalog completion", `{"kind":"completed","data":{"Ok":{"kind":"resource_catalog","data":{"entry":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"sources":[]}}}}`, "", func() any { return new(Reply) }},
+			{"legacy snapshot start", `{"kind":"snapshot_start","data":{"delivery":"completed","node":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"cursor":7,"bytes":50}}`, "", func() any { return new(Reply) }},
 			{"update", `{"kind":"update","data":{"kind":"reset_required"}}`, "", func() any { return new(Reply) }},
 		}
 		for _, fixture := range fixtures {
@@ -151,7 +154,7 @@ func TestFramePlain(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, delivery := range []Delivery{DeliveryCompleted, DeliveryUpdate} {
-			header := SnapshotHeader{delivery, snapshot.Node, snapshot.Cursor, uint64(len(data))}
+			header := SnapshotHeader{Delivery: delivery, Node: snapshot.Node, Cursor: snapshot.Cursor, Bytes: uint64(len(data))}
 			assembly := Assembly{}
 			if reply, err := assembly.Accept(Reply{Kind: ReplySnapshotStart, SnapshotStart: &header}); err != nil || reply != nil {
 				t.Fatalf("start = %#v, %v", reply, err)
@@ -197,7 +200,7 @@ func TestFramePlain(t *testing.T) {
 		for _, compressed := range []bool{false, true} {
 			output := protocol.Output{Kind: "snapshot", Data: &snapshot}
 			var stream bytes.Buffer
-			if err := WriteReply(Reply{Kind: ReplyCompleted, Completed: &Response{Output: &output}}, func(frame Reply) error {
+			if err := WriteReply(Reply{Kind: ReplyCompleted, Completed: &Response{Output: &output}}, false, func(frame Reply) error {
 				return Write(&stream, frame, compressed)
 			}); err != nil {
 				t.Fatal(err)
@@ -244,7 +247,7 @@ func TestFramePlain(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		header := SnapshotHeader{DeliveryUpdate, snapshot.Node, snapshot.Cursor, uint64(len(data))}
+		header := SnapshotHeader{Delivery: DeliveryUpdate, Node: snapshot.Node, Cursor: snapshot.Cursor, Bytes: uint64(len(data))}
 		assembly := Assembly{}
 		_, err = assembly.Accept(snapshotPage(0, string(data)))
 		assertFault(t, err, "invalid_request")
@@ -403,7 +406,7 @@ func TestFrameOversizeBeforeAlloc(t *testing.T) {
 	if output.Len() != 0 {
 		t.Fatal("wrote an oversized frame")
 	}
-	header := SnapshotHeader{DeliveryUpdate, protocol.NodeID{1}, 7, MaxSnapshotBytes}
+	header := SnapshotHeader{Delivery: DeliveryUpdate, Node: protocol.NodeID{1}, Cursor: 7, Bytes: MaxSnapshotBytes}
 	assembly := Assembly{}
 	if _, err := assembly.Accept(Reply{Kind: ReplySnapshotStart, SnapshotStart: &header}); err != nil {
 		t.Fatal(err)
@@ -426,6 +429,75 @@ func TestFrameOversizeBeforeAlloc(t *testing.T) {
 	page, err := json.Marshal(snapshotPage(0, strings.Repeat("\x00", PageBytes)))
 	if err != nil || len(page) >= protocol.MAX_FRAME_BYTES {
 		t.Fatalf("escaped page exceeds frame limit: %d bytes, %v", len(page), err)
+	}
+}
+
+func TestSmallResourceCatalogKeepsLegacyFrame(t *testing.T) {
+	const legacy = `{"data":{"Ok":{"data":{"entry":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"sources":[]},"kind":"resource_catalog"}},"kind":"completed"}`
+	catalog := protocol.ResourceCatalog{Entry: protocol.NodeID{1}}
+	reply := Reply{Kind: ReplyCompleted, Completed: &Response{Output: &protocol.Output{Kind: "resource_catalog", Data: catalog}}}
+	for _, optIn := range []bool{false, true} {
+		var stream bytes.Buffer
+		if err := WriteReply(reply, optIn, func(frame Reply) error { return Write(&stream, frame, false) }); err != nil {
+			t.Fatal(err)
+		}
+		data := stream.Bytes()
+		if len(data) != 4+len(legacy) || binary.BigEndian.Uint32(data[:4]) != uint32(len(legacy)) || string(data[4:]) != legacy {
+			t.Fatalf("opt-in %t changed the legacy catalog frame: %q", optIn, data)
+		}
+	}
+}
+
+func TestResourceCatalogPaging(t *testing.T) {
+	id := protocol.NodeID{1}
+	source := protocol.ResourceSource{Node: id, Route: protocol.RouteKey{Entry: id, Target: id}}
+	project := protocol.DefaultProject()
+	project.Name = "Fixture"
+	project.Path = "/" + strings.Repeat("路径", 680)
+	for range protocol.MAX_FRAME_BYTES / len(project.Path) {
+		project.ID = protocol.NewProjectID()
+		source.Projects = append(source.Projects, project)
+	}
+	catalog := protocol.ResourceCatalog{Entry: id, Sources: []protocol.ResourceSource{source}}
+	var assembly Assembly
+	var result *Reply
+	frames := 0
+	reply := Reply{Kind: ReplyCompleted, Completed: &Response{Output: &protocol.Output{Kind: "resource_catalog", Data: catalog}}}
+	var legacy bytes.Buffer
+	assertFault(t, WriteReply(reply, false, func(frame Reply) error {
+		if frame.Kind != ReplyCompleted {
+			t.Fatal("legacy requester was sent catalog pages")
+		}
+		return Write(&legacy, frame, false)
+	}), "invalid_request")
+	if legacy.Len() != 0 {
+		t.Fatal("oversized legacy completion wrote a partial frame")
+	}
+	if err := WriteReply(reply, true, func(frame Reply) error {
+		frames++
+		if frames == 1 && (frame.Kind != ReplySnapshotStart || frame.SnapshotStart.Output != "resource_catalog") {
+			t.Fatalf("first paged catalog frame: %#v", frame)
+		}
+		var buffer bytes.Buffer
+		if err := Write(&buffer, frame, false); err != nil {
+			return err
+		}
+		var decoded Reply
+		if err := Read(&buffer, &decoded, false); err != nil {
+			return err
+		}
+		var err error
+		result, err = assembly.Accept(decoded)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if frames < 2 || result == nil || result.Kind != ReplyCompleted || result.Completed.Output.Kind != "resource_catalog" {
+		t.Fatal("oversized catalog was not assembled as a completion")
+	}
+	got := result.Completed.Output.Data.(*protocol.ResourceCatalog)
+	if got.Entry != id || len(got.Sources) != 1 || len(got.Sources[0].Projects) != len(source.Projects) || got.Sources[0].Projects[0].Path != project.Path {
+		t.Fatal("catalog paging changed the directory")
 	}
 }
 
