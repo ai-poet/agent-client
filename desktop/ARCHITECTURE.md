@@ -486,7 +486,9 @@ input. Explicit model tags and native discovery take precedence. Automatic
 vision uses the channel's catalog, or the canonical origin when catalog entries
 for an unlisted gateway agree on its identity. When inline image content is
 omitted, the model is directed to the captured `inspect_image` tool only if that
-turn can use it.
+turn can use it. Provider listings and snapshots project resolved vision for
+older models without rewriting saved revisions. New vision assignments use the
+same resolution when their models are captured.
 
 Admission freezes the worktree, permission, configuration, model or team,
 reasoning effort, credential identity and package revisions. Renewed runtime

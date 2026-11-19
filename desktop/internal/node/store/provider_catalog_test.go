@@ -35,6 +35,22 @@ func TestBundledProviderCatalogSurvivesFailedRefresh(t *testing.T) {
 			if !slices.ContainsFunc(efforts, func(effort protocol.Effort) bool { return effort.Kind == "max" }) {
 				return fmt.Errorf("bundled reasoning choices are unavailable: %+v", efforts)
 			}
+			for _, channel := range []struct {
+				endpoint string
+				vision   bool
+			}{
+				{endpoint: "https://custom.invalid/v1", vision: true},
+				{endpoint: "https://gateway.dothoosh.com/v1/"},
+			} {
+				provider := providerFixture()
+				provider.Endpoint, provider.DefaultModel, provider.Models[0].ID = channel.endpoint, "gpt-6.1-sol", "gpt-6.1-sol"
+				if err = fillProviderMetadata(ctx, db, &provider); err != nil {
+					return err
+				}
+				if provider.Models[0].Vision != channel.vision {
+					return fmt.Errorf("bundled channel %s vision = %v, want %v", channel.endpoint, provider.Models[0].Vision, channel.vision)
+				}
+			}
 			return nil
 		}); err != nil {
 			t.Fatal(err)
@@ -213,7 +229,7 @@ func TestSaveProviderUsesBundledReasoningAndPreservesCustomChoices(t *testing.T)
 
 func TestProviderVisionUsesChannelOrCanonicalModel(t *testing.T) {
 	t.Parallel()
-	_, _, storage := schemaFixture(t)
+	_, node, storage := schemaFixture(t)
 	ctx := t.Context()
 	const modelID = "fixture-vision"
 	download, err := providers.ParseCatalog([]byte(`{
@@ -251,13 +267,20 @@ func TestProviderVisionUsesChannelOrCanonicalModel(t *testing.T) {
 		t.Run(row.name, func(t *testing.T) {
 			provider := providerFixture()
 			provider.Endpoint, provider.DefaultModel = row.endpoint, row.model
+			provider.Revision = 7
 			if row.auth != "" {
 				provider.Authentication = row.auth
+				provider.Api = protocol.ConversationModelApiResponses
 			}
 			entry := &provider.Models[0]
 			entry.ID, entry.Vision, entry.CustomCapabilities = row.model, row.savedVision, row.manual
 			if row.nativeVision != nil {
 				entry.Capabilities = &protocol.ConversationDiscoveryCapabilities{Vision: row.nativeVision}
+			}
+			if err := storage.Node.Write(ctx, func(db *sql.Conn) error {
+				return saveProviderConfiguration(ctx, db, providerConfiguration{ID: provider.ID, Listed: true, Provider: &provider})
+			}); err != nil {
+				t.Fatal(err)
 			}
 			err := storage.Node.Read(ctx, func(db *sql.Conn) error {
 				captured, err := captureTurnProvider(ctx, db, provider, row.model)
@@ -266,6 +289,36 @@ func TestProviderVisionUsesChannelOrCanonicalModel(t *testing.T) {
 				}
 				if captured.Models[0].Vision != row.want {
 					return fmt.Errorf("captured vision = %v, want %v", captured.Models[0].Vision, row.want)
+				}
+				snapshot, _, err := ReadProviderSnapshot(ctx, db, node)
+				if err != nil {
+					return err
+				}
+				listed, err := providerList(ctx, db)
+				if err != nil {
+					return err
+				}
+				for _, values := range [][]protocol.ConversationProvider{snapshot, listed} {
+					index := slices.IndexFunc(values, func(value protocol.ConversationProvider) bool { return value.ID == provider.ID })
+					if index < 0 || values[index].Models[0].Vision != row.want || values[index].Revision != provider.Revision {
+						return fmt.Errorf("provider projection did not return vision %v at revision %d", row.want, provider.Revision)
+					}
+				}
+				binding := protocol.MediaBinding{Provider: provider.ID, Model: row.model}
+				assignment, err := captureMedia(ctx, db, protocol.MediaSettings{Bindings: map[protocol.MediaKind]*protocol.MediaBinding{protocol.MediaKindVision: &binding}})
+				if err != nil {
+					return err
+				}
+				resolved := assignment[protocol.MediaKindVision]
+				if (resolved.Provider != nil) != row.want || resolved.Model != row.model {
+					return fmt.Errorf("captured media assignment = %+v, want vision %v", resolved, row.want)
+				}
+				saved, err := readProviderConfiguration(ctx, db, provider.ID)
+				if err != nil {
+					return err
+				}
+				if saved == nil || saved.Provider == nil || saved.Provider.Models[0].Vision != row.savedVision || saved.Provider.Revision != provider.Revision {
+					return fmt.Errorf("reading provider vision changed the stored configuration")
 				}
 				if err = fillProviderMetadata(ctx, db, &provider); err != nil {
 					return err

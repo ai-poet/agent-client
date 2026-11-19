@@ -42,7 +42,7 @@ func fillProviderMetadata(ctx context.Context, db *sql.Conn, provider *protocol.
 	}
 	for i := range provider.Models {
 		var reference *protocol.ConversationCatalogModel
-		query := protocol.ConversationCatalogQuery{Provider: catalogProvider, IDs: []string{provider.Models[i].ID}, Limit: 100}
+		query := protocol.ConversationCatalogQuery{Provider: catalogProvider, IDs: []string{provider.Models[i].ID}, Limit: 1}
 		page, err := readProviderCatalog(ctx, db, query)
 		if err != nil {
 			return err
@@ -51,41 +51,34 @@ func fillProviderMetadata(ctx context.Context, db *sql.Conn, provider *protocol.
 			reference = &page.Models[0]
 		}
 		provider.Models[i] = providers.CompleteModel(provider.Models[i], reference, provider.Api)
-		if namespace == "" {
-			if err := fillAutomaticVision(ctx, db, "", &provider.Models[i]); err != nil {
-				return err
-			}
+	}
+	if namespace == "" {
+		if err := fillProviderVision(ctx, db, provider, ""); err != nil {
+			return err
 		}
-		// OpenAI's own Responses channel hosts image generation as a tool of
-		// its multimodal chat models. The default applies only there and only
-		// until the user chooses the model's tags.
+	}
+	// OpenAI's own Responses channel also hosts image generation as a tool.
+	official := provider.Authentication == protocol.AuthenticationChatGptOAuth ||
+		provider.Authentication == protocol.AuthenticationApiKey && strings.TrimRight(provider.Endpoint, "/") == "https://api.openai.com/v1"
+	if !official || provider.Api != protocol.ConversationModelApiResponses {
+		return nil
+	}
+	for i := range provider.Models {
 		model := &provider.Models[i]
-		official := provider.Authentication == protocol.AuthenticationChatGptOAuth ||
-			provider.Authentication == protocol.AuthenticationApiKey && strings.TrimRight(provider.Endpoint, "/") == "https://api.openai.com/v1"
-		if !model.CustomCapabilities && official && provider.Api == protocol.ConversationModelApiResponses && model.Tools && model.Vision && len(model.Generates) == 0 {
+		if !model.CustomCapabilities && model.Tools && model.Vision && len(model.Generates) == 0 {
 			model.Generates = []protocol.MediaGeneration{protocol.MediaGenerationImageTool}
 		}
 	}
 	return nil
 }
 
-// fillAutomaticVision resolves a false automatic flag using facts specific to
-// the channel or model. Generic catalog rows can share an ID while referring to
-// gateways with different inputs. A declared origin supplies the default for
-// an unlisted gateway only when those identities agree.
-func fillAutomaticVision(ctx context.Context, db *sql.Conn, namespace string, model *protocol.ConversationModel) error {
-	if model.Vision || model.CustomCapabilities || model.Capabilities != nil && model.Capabilities.Vision != nil {
-		return nil
-	}
-	status, err := ReadProviderCatalogStatus(ctx, db)
-	if err != nil {
-		return err
-	}
-	id := model.ID
+// catalogVision uses an exact channel entry or the agreed origin on an
+// unlisted channel. A shared ID alone does not establish model identity.
+func catalogVision(ctx context.Context, db *sql.Conn, bundled bool, namespace, id string) (bool, error) {
 	if namespace == "" {
-		entries, err := providerCatalogEntries(ctx, db, protocol.ConversationCatalogQuery{IDs: []string{id}}, status.Bundled)
+		entries, err := providerCatalogEntries(ctx, db, protocol.ConversationCatalogQuery{IDs: []string{id}}, bundled)
 		if err != nil {
-			return err
+			return false, err
 		}
 		origin := ""
 		for _, entry := range entries {
@@ -96,50 +89,65 @@ func fillAutomaticVision(ctx context.Context, db *sql.Conn, namespace string, mo
 				continue
 			}
 			if origin != "" && origin != identity.Canonical {
-				return nil
+				return false, nil
 			}
 			origin = identity.Canonical
 		}
 		var valid bool
 		namespace, id, valid = strings.Cut(origin, "/")
 		if !valid || !boundedCatalogID(namespace, 128) || !boundedCatalogID(id, 256) {
-			return nil
+			return false, nil
 		}
 	}
-	entries, err := providerCatalogEntries(ctx, db, protocol.ConversationCatalogQuery{Provider: &namespace, IDs: []string{id}}, status.Bundled)
+	entries, err := providerCatalogEntries(ctx, db, protocol.ConversationCatalogQuery{Provider: &namespace, IDs: []string{id}}, bundled)
 	if err != nil || len(entries) == 0 {
-		return err
+		return false, err
 	}
 	reference, err := providers.CatalogModel(entries[0].Body)
-	if err == nil {
-		model.Vision = slices.Contains(reference.Inputs, "image")
-	}
-	return err
+	return slices.Contains(reference.Inputs, "image"), err
 }
 
-// captureTurnProvider also resolves automatic vision on older saved channels
-// when the selected model is captured for a new turn.
-func captureTurnProvider(ctx context.Context, db *sql.Conn, provider protocol.ConversationProvider, model string) (protocol.ConversationProvider, error) {
-	captured, err := CaptureProvider(ctx, db, provider)
-	if err != nil {
-		return captured, err
-	}
-	for i := range captured.Models {
-		entry := &captured.Models[i]
-		if entry.ID != model || entry.CustomCapabilities {
+// fillProviderVision resolves legacy automatic flags on the caller's copy,
+// without changing saved revisions. A model ID limits work to one binding.
+func fillProviderVision(ctx context.Context, db *sql.Conn, provider *protocol.ConversationProvider, modelID string) error {
+	var namespace string
+	var bundled, loaded bool
+	for i := range provider.Models {
+		entry := &provider.Models[i]
+		if (modelID != "" && entry.ID != modelID) || entry.CustomCapabilities {
 			continue
 		}
 		if entry.Capabilities != nil && entry.Capabilities.Vision != nil {
 			entry.Vision = *entry.Capabilities.Vision
-			break
+			continue
 		}
-		if !entry.Vision {
-			err = fillAutomaticVision(ctx, db, metadataCatalogProvider(captured), entry)
+		if entry.Vision {
+			continue
 		}
-		return captured, err
+		if !loaded {
+			status, err := ReadProviderCatalogStatus(ctx, db)
+			if err != nil {
+				return err
+			}
+			namespace, bundled, loaded = metadataCatalogProvider(*provider), status.Bundled, true
+		}
+		vision, err := catalogVision(ctx, db, bundled, namespace, entry.ID)
+		if err != nil {
+			return err
+		}
+		entry.Vision = vision
 	}
-	return captured, nil
+	return nil
 }
+
+func captureTurnProvider(ctx context.Context, db *sql.Conn, provider protocol.ConversationProvider, modelID string) (protocol.ConversationProvider, error) {
+	captured, err := CaptureProvider(ctx, db, provider)
+	if err == nil {
+		err = fillProviderVision(ctx, db, &captured, modelID)
+	}
+	return captured, err
+}
+
 func refreshProviderMetadata(ctx context.Context, db *sql.Conn) ([]protocol.Event, error) {
 	saved, err := providerConfigurations(ctx, db)
 	if err != nil {
