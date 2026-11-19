@@ -690,6 +690,13 @@ func (x *conversationActions) submit(m composer.Message, guide, queue bool, draf
 		x.unavailable()
 		return
 	}
+	if pending, ok := x.r.conversationCreations[x.cv.ID]; ok {
+		x.r.resumeCreation(x.cv.ID, pending, false)
+		return
+	}
+	if x.r.conversationCreating[x.cv.ID] {
+		return
+	}
 	for _, attachment := range m.Attachments {
 		if attachment.Status != composer.Ready || attachment.ID == "" {
 			x.unavailable()
@@ -720,9 +727,6 @@ func (x *conversationActions) submit(m composer.Message, guide, queue bool, draf
 		}
 	}
 	if strings.HasPrefix(x.cv.ID, "draft/") {
-		if x.r.conversationCreating[x.cv.ID] {
-			return
-		}
 		if start := x.r.pendingSessionBase(x.comp); start != nil {
 			x.startSessionBase(start, func(c *ui.Context, err error) {
 				if err != nil {
@@ -738,10 +742,6 @@ func (x *conversationActions) submit(m composer.Message, guide, queue bool, draf
 				next.c = c
 				next.submit(m, guide, queue, draft)
 			})
-			return
-		}
-		if captured, ok := x.r.conversationCreations[x.cv.ID]; ok && captured.key == creationKey(x.comp, m) {
-			x.create(captured.command, m, finish)
 			return
 		}
 	}
@@ -807,8 +807,15 @@ func (x *conversationActions) submit(m composer.Message, guide, queue bool, draf
 		}
 	}
 	command := x.r.creationCommand(project, x.r.draftWorktree(x.comp, project), config, revision)
-	x.r.conversationCreations[x.cv.ID] = conversationCreation{key: creationKey(x.comp, m), command: command}
-	x.create(command, m, finish)
+	ownerRuntime := x.r.creationOwner(command)
+	if !x.r.controller.Connected() || !ownerRuntime.controller.Connected() {
+		x.r.discardUnsubmitted(x.cv.ID)
+		x.unavailable()
+		return
+	}
+	pending := conversationCreation{request: ownerRuntime.controller.Prepare(command), actions: x, finish: finish}
+	x.r.conversationCreations[x.cv.ID] = pending
+	x.r.resumeCreation(x.cv.ID, pending, true)
 }
 
 func (x *conversationActions) activeRun() (protocol.ConversationRun, bool) {

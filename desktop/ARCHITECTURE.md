@@ -42,6 +42,10 @@ Node ── agent loop + resource services ── online models / files / Git / 
 ```
 
 Node owns execution, configuration, credentials and durable conversation history.
+Desktop first sends use separate session creation and turn admission. While
+creation is uncertain, Desktop checks the original creation receipt at its
+receiving Node before it can send the captured turn. Only the entry Node's
+explicitly replayable forward can repeat the create with the same request ID.
 Link authenticates peers and transports requests and observations. Client reduces
 those observations into ordered controller state. MyGo and Flutter own view state.
 The initiating controller's Node is the resource entry. Its directory combines

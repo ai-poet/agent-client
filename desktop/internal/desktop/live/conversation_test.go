@@ -1839,10 +1839,9 @@ func testSessionForwarding(t *testing.T) {
 	var unconfirmed *protocol.RequestID
 	transports[0].handle = func(request protocol.Request) (link.Response, bool) {
 		if inspected, valid := detail[protocol.CommandInspectRequestPayload](request.Command.Data); valid && request.Command.Kind == "inspect_request" && unconfirmed != nil && inspected.ID == *unconfirmed {
-			// The local Node's ledger holds that outcome as final; only the
-			// same request, sent again, asks the target.
-			recorded := protocol.Result[protocol.Output, protocol.Fault]{Err: &protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown, Message: "remote session creation could not be confirmed"}}
-			return link.Response{Output: protocol.Output{Kind: "request_outcome", Data: protocol.OutputRequestOutcomePayload{ID: inspected.ID, Outcome: protocol.RequestOutcome{Kind: "completed", Data: recorded}}}}, true
+			// The entry's ledger can ask the target again with the same ID.
+			recorded := protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown, Message: "remote session creation could not be confirmed"}
+			return link.Response{Output: protocol.Output{Kind: "request_outcome", Data: protocol.OutputRequestOutcomePayload{ID: inspected.ID, Outcome: protocol.RequestOutcome{Kind: "replayable", Data: recorded}}}}, true
 		}
 		if request.Command.Kind != "create_session_at" {
 			return link.Response{}, false
@@ -2032,6 +2031,53 @@ func testSessionForwarding(t *testing.T) {
 	if cv.ID != (protocol.SessionID{9}).String() || comp.Draft != "" {
 		t.Fatalf("after the own creation: conversation %s, draft %q", cv.ID, comp.Draft)
 	}
+
+	// A direct creation with a lost reply is inspected on its original
+	// execution Node. Its receipt continues the original send, not newer input.
+	var lost protocol.RequestID
+	reveal := false
+	transports[1].mu.Lock()
+	previous := transports[1].handle
+	transports[1].handle = func(request protocol.Request) (link.Response, bool) {
+		if request.Command.Kind == "create_session" {
+			lost = request.ID
+			return link.Response{Fault: &protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown}}, true
+		}
+		if query, ok := detail[protocol.CommandInspectRequestPayload](request.Command.Data); request.Command.Kind == "inspect_request" && ok && query.ID == lost {
+			outcome := protocol.RequestOutcome{Kind: "admitted"}
+			if reveal {
+				session := protocol.DefaultSession()
+				session.ID, session.Project, session.Worktree, session.Revision = protocol.SessionID{22}, &project, worktree, 1
+				session.Config.Provider, session.Config.Model = remoteProvider, "fixture"
+				output := protocol.Output{Kind: "session", Data: session}
+				outcome = protocol.RequestOutcome{Kind: "completed", Data: protocol.Result[protocol.Output, protocol.Fault]{Ok: &output}}
+			}
+			return link.Response{Output: protocol.Output{Kind: "request_outcome", Data: protocol.OutputRequestOutcomePayload{ID: query.ID, Outcome: outcome}}}, true
+		}
+		if previous != nil {
+			return previous(request)
+		}
+		return link.Response{}, false
+	}
+	transports[1].mu.Unlock()
+	cv, comp, actions = draft(modelKey(remoteProvider, "fixture"))
+	send(actions, comp)
+	transports[1].mu.Lock()
+	reveal = true
+	transports[1].mu.Unlock()
+	actions.c = context
+	actions.Send(composer.Message{Text: "Newer input", Model: comp.Model})
+	settle()
+	own = sent(1, "create_session")
+	turns = sent(1, "submit_turn")
+	lastTurn := turns[len(turns)-1].Command.Data.(protocol.CommandSubmitTurnPayload)
+	if len(own) != 2 || cv.ID != (protocol.SessionID{22}).String() || lastTurn.Session != (protocol.SessionID{22}) ||
+		lastTurn.Message.Text != "Captured draft" || comp.Draft != "Newer input" {
+		t.Fatalf("direct recovery: creates=%d session=%s last turn=%+v draft=%q", len(own), cv.ID, lastTurn, comp.Draft)
+	}
+	transports[1].mu.Lock()
+	transports[1].handle = previous
+	transports[1].mu.Unlock()
 
 	// On another Host the model list says whose configuration each provider
 	// is. The composer offers no host choice (AGENTS.md, Removed UI): its
