@@ -158,6 +158,14 @@ func (c *Client) Keys(ctx context.Context, accessToken string) ([]APIKey, error)
 	return page.Items, err
 }
 
+// CreateKey mints a gateway key. Only a key, never the account tokens, is
+// handed to the model provider.
+func (c *Client) CreateKey(ctx context.Context, accessToken, name string) (APIKey, error) {
+	var key APIKey
+	err := c.do(ctx, http.MethodPost, "/keys", accessToken, map[string]string{"name": name}, &key)
+	return key, err
+}
+
 func (c *Client) ModelCatalog(ctx context.Context, accessToken string) (ModelCatalog, error) {
 	var catalog ModelCatalog
 	err := c.do(ctx, http.MethodGet, "/models/catalog", accessToken, nil, &catalog)

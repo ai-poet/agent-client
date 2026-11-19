@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	core "github.com/ai-poet/agent-client/desktop/internal/cheapauth"
@@ -278,10 +279,25 @@ func (r *Runtime) CheapAuthGate(c *ui.Context) bool {
 	return cheapauthui.Gate(c, r.cheapAuth.state)
 }
 
+// cheapAuthError turns the sync failure into what the user can act on. A
+// protocol fault carries the cause as an English message, so the common ones
+// get their own sentence rather than one catch-all line that hides which step
+// broke.
 func cheapAuthError(err error) string {
 	var auth *core.AuthError
 	if errors.As(err, &auth) {
 		return auth.Error()
 	}
-	return "配置 CheapRouter 模型网关失败，请检查网络后重试"
+	var fault *protocol.Fault
+	if errors.As(err, &fault) {
+		switch {
+		case strings.Contains(fault.Message, "gateway key is empty"):
+			return "账号没有可用的模型网关密钥，自动创建也失败了，请稍后重试"
+		case strings.Contains(fault.Message, "no chat models"):
+			return "账号下没有可用的聊天模型，请确认套餐或模型分组已开通"
+		case strings.Contains(fault.Message, "provider endpoint"):
+			return "模型网关地址不可用，请稍后重试或切换服务入口"
+		}
+	}
+	return "配置 CheapRouter 模型网关失败，请检查网络后重试（" + err.Error() + "）"
 }

@@ -149,6 +149,10 @@ func (s *Service) Account(ctx context.Context) (User, error) {
 	return client.Me(ctx, token)
 }
 
+// CheapRouterKeyName is the gateway key this client mints for an account
+// that owns none, matching the name the Rust client uses.
+const CheapRouterKeyName = "CheapRouter desktop"
+
 // Gateway fetches catalog and keys after login. It prefers the bridge-minted
 // key when it is still listed, otherwise the first active listed key.
 func (s *Service) Gateway(ctx context.Context) (Gateway, error) {
@@ -190,7 +194,16 @@ func (s *Service) Gateway(ctx context.Context) (Gateway, error) {
 		key = bridgeKey
 	}
 	if key == "" {
-		return Gateway{}, &AuthError{Kind: ErrorUnauthorized, Op: "/keys"}
+		// A new account owns no key yet: mint one, as the Rust client does,
+		// instead of failing a sign-in the user cannot fix from here.
+		created, err := client.CreateKey(ctx, token, CheapRouterKeyName)
+		if err != nil {
+			return Gateway{}, err
+		}
+		key = strings.TrimSpace(created.Key)
+		if key == "" {
+			return Gateway{}, &AuthError{Kind: ErrorResponse, Op: "/keys"}
+		}
 	}
 	baseURL := strings.TrimRight(strings.TrimSpace(catalog.BaseURL), "/")
 	if baseURL == "" {

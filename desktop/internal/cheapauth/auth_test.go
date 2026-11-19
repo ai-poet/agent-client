@@ -342,3 +342,46 @@ func TestGatewayFetchesCatalogAndSelectsListedKey(t *testing.T) {
 		t.Fatalf("网关配置不完整: %s", gateway)
 	}
 }
+
+// TestGatewayMintsKeyWhenAccountOwnsNone pins the new-account path: a
+// sign-in must not fail because no key exists yet, and the minted key is the
+// one the provider receives.
+func TestGatewayMintsKeyWhenAccountOwnsNone(t *testing.T) {
+	minted := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "Bearer "+testAccess {
+			t.Errorf("Authorization = %q", request.Header.Get("Authorization"))
+		}
+		switch {
+		case request.URL.Path == "/api/v1/models/catalog":
+			writeEnvelope(t, writer, 200, `{"code":0,"data":{"base_url":"https://gateway.example/v1","items":[{"model":"gpt-test"}]}}`)
+		case request.URL.Path == "/api/v1/keys" && request.Method == http.MethodGet:
+			writeEnvelope(t, writer, 200, `{"code":0,"data":{"items":[],"total":0}}`)
+		case request.URL.Path == "/api/v1/keys" && request.Method == http.MethodPost:
+			minted++
+			var body struct {
+				Name string `json:"name"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Errorf("create key body: %v", err)
+			}
+			if body.Name != CheapRouterKeyName {
+				t.Errorf("minted key name = %q", body.Name)
+			}
+			writeEnvelope(t, writer, 200, `{"code":0,"data":{"id":9,"key":"sk-minted","status":"active"}}`)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	service, _ := NewService(t.TempDir())
+	service.credentials = &Credentials{AccessToken: testAccess, RefreshToken: testRefresh, Endpoint: server.URL, ExpiresAt: time.Now().Add(time.Hour).Unix()}
+	service.client, _ = NewClient(server.URL, server.Client())
+	gateway, err := service.Gateway(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if minted != 1 || gateway.APIKey != "sk-minted" {
+		t.Fatalf("minted = %d, key = %q", minted, gateway.APIKey)
+	}
+}
