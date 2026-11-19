@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jonboulle/clockwork"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
+	"github.com/jonboulle/clockwork"
 )
 
 // RuntimeCredentialsChanged wakes model steps only after their replacement
@@ -67,7 +67,7 @@ func (node *Node) serveCredentialRenewals(ctx context.Context, clock clockwork.C
 				}
 				owner := store.WithUser(ctx, candidate.User)
 				if candidate.Provider != nil {
-					_, _ = node.providerAuthorization(owner, *candidate.Provider, candidate.Credential)
+					_ = node.renewProviderCredential(owner, *candidate.Provider, candidate.Credential, true)
 				} else if candidate.Connection != nil {
 					_, _ = node.connectorAccess(owner, *candidate.Connection, candidate.Declaration)
 				}

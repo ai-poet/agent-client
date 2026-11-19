@@ -338,6 +338,16 @@ func ReadProviderAuthorization(ctx context.Context, db *sql.Conn, node protocol.
 }
 
 func BeginProviderRenewal(ctx context.Context, db *sql.Conn, node protocol.NodeID, provider protocol.ConversationProvider, reference protocol.CredentialRef, now time.Time) (*ProviderRenewal, error) {
+	return beginProviderRenewal(ctx, db, node, provider, reference, now, false)
+}
+
+// BeginScheduledProviderRenewal rechecks selection in the write transaction
+// that admits the refresh so stale timers cannot renew retired accounts.
+func BeginScheduledProviderRenewal(ctx context.Context, db *sql.Conn, node protocol.NodeID, provider protocol.ConversationProvider, reference protocol.CredentialRef, now time.Time) (*ProviderRenewal, error) {
+	return beginProviderRenewal(ctx, db, node, provider, reference, now, true)
+}
+
+func beginProviderRenewal(ctx context.Context, db *sql.Conn, node protocol.NodeID, provider protocol.ConversationProvider, reference protocol.CredentialRef, now time.Time, scheduled bool) (*ProviderRenewal, error) {
 	controller, err := CurrentController(ctx, db, node)
 	if err != nil {
 		return nil, err
@@ -348,9 +358,25 @@ func BeginProviderRenewal(ctx context.Context, db *sql.Conn, node protocol.NodeI
 	if reference.Node != node {
 		return nil, fault(protocol.ErrorCodePermissionDenied, "credential belongs to another Node")
 	}
-	saved, err := authorizationProvider(ctx, db, provider)
-	if err != nil || provider.Authentication == protocol.AuthenticationApiKey {
+	var saved *providerConfiguration
+	if scheduled {
+		// Timers may only act on the user's live provider selection, not
+		// shared or forwarded configuration retained by admitted work.
+		saved, err = readProviderConfiguration(ctx, db, provider.ID)
+	} else {
+		saved, err = authorizationProvider(ctx, db, provider)
+	}
+	if err != nil {
 		return nil, err
+	}
+	if scheduled {
+		selected := selectedProviderCredential(saved, node)
+		if selected == nil || *selected != reference {
+			return nil, ErrProviderRenewalNotSelected
+		}
+	}
+	if provider.Authentication == protocol.AuthenticationApiKey {
+		return nil, nil
 	}
 	if saved.Provider.Authentication != provider.Authentication {
 		return nil, protocol.NewConfigurationFault(protocol.ConfigurationAuthenticationChanged, "provider authentication changed")

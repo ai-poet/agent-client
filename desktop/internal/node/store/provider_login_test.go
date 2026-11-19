@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -87,18 +88,60 @@ func TestProviderAccountLifecycleAndQuota(t *testing.T) {
 			return err
 		}
 		secret := protocol.NewSecret(string(body))
-		entry := current.Authorizations[current.Provider.Credential.ID]
+		selected := *current.Provider.Credential
+		entry := current.Authorizations[selected.ID]
 		entry.Key = &secret
-		current.Authorizations[current.Provider.Credential.ID] = entry
+		current.Authorizations[selected.ID] = entry
+		alternate := protocol.CredentialRef{Node: node, ID: protocol.NewCredentialID()}
+		current.Authorizations[alternate.ID] = entry
 		if err := saveProviderConfiguration(ctx, db, *current); err != nil {
 			return err
 		}
 		candidates, err := ReadCredentialRenewals(ctx, db, node)
-		if err != nil || len(candidates) != 1 || candidates[0].DueMs != *storedGrant.RenewalAt() {
-			return fmt.Errorf("legacy account disappeared from controller renewals: %+v, %v", candidates, err)
+		if err != nil || len(candidates) != 1 || candidates[0].Credential != selected || candidates[0].DueMs != *storedGrant.RenewalAt() {
+			return fmt.Errorf("scheduler did not select only the current legacy account: %+v, %v", candidates, err)
 		}
+		stale := candidates[0]
 		renewAt := time.UnixMilli(int64(*storedGrant.RenewalAt()))
-		renewal, err := BeginProviderRenewal(ctx, db, node, *current.Provider, *current.Provider.Credential, renewAt)
+		current.Provider.Credential = &alternate
+		if err := saveProviderConfiguration(ctx, db, *current); err != nil {
+			return err
+		}
+		if renewal, err := BeginScheduledProviderRenewal(ctx, db, node, *stale.Provider, stale.Credential, renewAt); renewal != nil || !errors.Is(err, ErrProviderRenewalNotSelected) {
+			return fmt.Errorf("stale timer admitted the previously selected credential: %v", err)
+		}
+		if candidates, err := ReadCredentialRenewals(ctx, db, node); err != nil || len(candidates) != 1 || candidates[0].Credential != alternate {
+			return fmt.Errorf("scheduler did not follow the changed selection: %+v, %v", candidates, err)
+		}
+		carried, err := BeginProviderRenewal(ctx, db, node, *stale.Provider, stale.Credential, renewAt)
+		if err != nil || carried == nil {
+			return fmt.Errorf("an admitted turn could not renew its captured credential: %v", err)
+		}
+		if _, err := CompleteProviderRenewal(ctx, db, node, *carried, carried.Grant); err != nil {
+			return err
+		}
+		foreign := selected
+		foreign.Node[0] ^= 1
+		for _, state := range []struct {
+			listed, enabled bool
+			reference       *protocol.CredentialRef
+		}{{false, true, &selected}, {true, false, &selected}, {true, true, nil}, {true, true, &foreign}} {
+			current.Listed, current.Provider.Enabled, current.Provider.Credential = state.listed, state.enabled, state.reference
+			if err := saveProviderConfiguration(ctx, db, *current); err != nil {
+				return err
+			}
+			if candidates, err := ReadCredentialRenewals(ctx, db, node); err != nil || len(candidates) != 0 {
+				return fmt.Errorf("ineligible provider remained scheduled: %+v, %v", candidates, err)
+			}
+			if _, err := BeginScheduledProviderRenewal(ctx, db, node, *stale.Provider, stale.Credential, renewAt); !errors.Is(err, ErrProviderRenewalNotSelected) {
+				return fmt.Errorf("a stale timer admitted an ineligible credential: %v", err)
+			}
+		}
+		current.Listed, current.Provider.Enabled, current.Provider.Credential = true, true, &selected
+		if err := saveProviderConfiguration(ctx, db, *current); err != nil {
+			return err
+		}
+		renewal, err := BeginScheduledProviderRenewal(ctx, db, node, *stale.Provider, selected, renewAt)
 		if err != nil || renewal == nil {
 			return fmt.Errorf("renewal did not capture the expiring account: %v", err)
 		}

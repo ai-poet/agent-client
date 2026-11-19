@@ -249,11 +249,14 @@ Renewable grants with a known issue time are due at
 earliest refresh time. Renewal does not shorten the recorded expiry. Legacy
 grants without an issue time retain their existing refresh rule; no lifetime is
 invented. Refreshes are serialized by credential identity, and an uncertain
-rotation is not replayed. Controller timers retry failures that sent no renewal
-request, including legacy grants using their existing expiry rule. An early
-refresh failure does not invalidate an access token before its real expiry;
-uncertain rotations block further refresh attempts while allowing a still-valid
-access token to run. Hosts continue using valid cached inputs while the
+rotation is not replayed. Controller timers renew only the credential currently
+selected on a listed, enabled provider and recheck that selection when admitting
+the refresh. An admitted turn can still renew its captured credential. Timers
+retry failures that sent no renewal request, including legacy grants using their
+existing expiry rule. An early refresh failure does not invalidate an access
+token before its real expiry. Uncertain rotations block further refresh
+attempts while allowing a still-valid access token to run. Hosts continue using
+valid cached inputs while the
 controller is offline. If a captured model credential expires, the current turn
 waits at its next model step with `controller_login` state. A replacement for that
 same credential resumes the same turn. An unresolved or rejected renewal keeps
@@ -294,7 +297,8 @@ namespace. On an execution host, reads use a materialized base plus pending loca
 writes. A transaction commits its personal writes, dispatch or conversation
 changes, events and a durable outbox group in one local SQL transaction. Reads on
 that host immediately see its committed writes even while the controller is
-offline.
+offline. Each segment of conversation writes belongs to the next turn admitted
+by the transaction in that session. Trailing writes belong to the final turn.
 
 The controller later retrieves each outbox group with its original request ID,
 digest, sequence and source revisions. It compares every key against the
