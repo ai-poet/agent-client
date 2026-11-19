@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
@@ -57,84 +58,106 @@ func (stream *topicSubscription) Next(ctx context.Context) (protocol.Update, err
 	defer cancel()
 	stop := context.AfterFunc(stream.ctx, cancel)
 	defer stop()
+	cancelled := func() error {
+		if err := stream.ctx.Err(); err != nil {
+			return err
+		}
+		return operation.Err()
+	}
+	delay := 250 * time.Millisecond
 	for {
+		if err := cancelled(); err != nil {
+			return protocol.Update{}, err
+		}
 		stream.mu.Lock()
 		current := stream.stream
-		routeCancel := stream.routeCancel
 		stream.mu.Unlock()
-		update, err := current.Next(operation)
-		if err != nil {
-			if closed := stream.ctx.Err(); closed != nil {
+		if current != nil {
+			update, err := current.Next(operation)
+			if err == nil {
+				return update, nil
+			}
+			if closed := cancelled(); closed != nil {
 				return protocol.Update{}, closed
 			}
-			if cancelled := operation.Err(); cancelled != nil {
-				return protocol.Update{}, cancelled
+			if stream.topic.Kind == "status" || stream.topic.Kind == "connector_login" || !transient(err) {
+				return update, err
+			}
+			// Retire the broken route even if this read is cancelled during
+			// recovery. The next read can start from a detached subscription.
+			retired, cancelRoute := stream.detachRoute()
+			if cancelRoute != nil {
+				cancelRoute()
+			}
+			if retired != nil {
+				_ = retired.Close()
 			}
 		}
-		if stream.topic.Kind == "status" || stream.topic.Kind == "connector_login" || err == nil || !transient(err) {
-			return update, err
+
+		stream.mu.Lock()
+		changed, fresh := stream.changed, stream.generation != stream.bound
+		stream.mu.Unlock()
+		if !fresh {
+			timer := time.NewTimer(delay)
+			select {
+			case <-operation.Done():
+			case <-changed:
+			case <-timer.C:
+			}
+			timer.Stop()
 		}
-		_ = current.Close()
-		if routeCancel != nil {
-			routeCancel()
+		if err := cancelled(); err != nil {
+			return protocol.Update{}, err
 		}
-		for {
-			stream.mu.Lock()
-			changed := stream.changed
-			generation := stream.generation
-			fresh := generation != stream.bound
+		delay = min(delay*2, 5*time.Second)
+
+		stream.mu.Lock()
+		generation := stream.generation
+		stream.mu.Unlock()
+		routeContext, cancelRoute := context.WithCancel(stream.ctx)
+		stopRoute := context.AfterFunc(operation, cancelRoute)
+		reconnected, err := stream.client.transport.Subscribe(routeContext, copyValue(stream.topic))
+		stopRoute()
+		stream.mu.Lock()
+		stream.bound = generation
+		closed := cancelled()
+		if err == nil && closed == nil {
+			stream.stream, stream.routeCancel = reconnected, cancelRoute
 			stream.mu.Unlock()
-			if !fresh {
-				select {
-				case <-operation.Done():
-					return protocol.Update{}, operation.Err()
-				case <-changed:
-				}
-				continue
-			}
-			routeContext, cancelRoute := context.WithCancel(stream.ctx)
-			stopRoute := context.AfterFunc(operation, cancelRoute)
-			reconnected, err := stream.client.transport.Subscribe(routeContext, copyValue(stream.topic))
-			stopRoute()
-			if err == nil && operation.Err() != nil {
-				_ = reconnected.Close()
-				err = operation.Err()
-			}
-			stream.mu.Lock()
-			stream.bound = generation
-			if err == nil && stream.ctx.Err() != nil {
-				_ = reconnected.Close()
-				err = stream.ctx.Err()
-			}
-			if err == nil {
-				stream.stream = reconnected
-				stream.routeCancel = cancelRoute
-			}
-			stream.mu.Unlock()
-			if err == nil {
-				break
-			}
-			cancelRoute()
-			if closed := stream.ctx.Err(); closed != nil {
-				return protocol.Update{}, closed
-			}
-			if cancelled := operation.Err(); cancelled != nil {
-				return protocol.Update{}, cancelled
-			}
-			if !transient(err) {
-				return protocol.Update{}, err
-			}
+			continue
+		}
+		stream.mu.Unlock()
+		cancelRoute()
+		if err == nil {
+			_ = reconnected.Close()
+		}
+		if closed != nil {
+			return protocol.Update{}, closed
+		}
+		if !transient(err) {
+			return protocol.Update{}, err
 		}
 	}
+}
+
+func (stream *topicSubscription) detachRoute() (link.Subscription, context.CancelFunc) {
+	stream.mu.Lock()
+	defer stream.mu.Unlock()
+	current, cancel := stream.stream, stream.routeCancel
+	stream.stream, stream.routeCancel = nil, nil
+	return current, cancel
 }
 
 func (stream *topicSubscription) Close() error {
 	stream.once.Do(func() {
 		stream.cancel()
-		stream.mu.Lock()
-		current := stream.stream
-		stream.mu.Unlock()
-		stream.err = current.Close()
+		current, cancelRoute := stream.detachRoute()
+		if cancelRoute != nil {
+			cancelRoute()
+		}
+		if current != nil {
+			stream.err = current.Close()
+		}
 		stream.client.topicsMu.Lock()
 		delete(stream.client.topics, stream)
 		stream.client.topicsMu.Unlock()

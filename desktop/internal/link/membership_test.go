@@ -13,9 +13,9 @@ type membershipFixtureStore struct {
 	scope InvitationScope
 }
 
-func (store *membershipFixtureStore) PairMember(ctx context.Context, id protocol.NodeID, direction PeerDirection, scope InvitationScope) error {
+func (store *membershipFixtureStore) SavePairing(ctx context.Context, address EndpointAddress, direction PeerDirection, scope InvitationScope, hasNode *bool, resume bool) error {
 	store.scope = scope
-	return store.PairPeer(ctx, id, direction)
+	return store.fixturePeerStore.SavePairing(ctx, address, direction, scope, hasNode, resume)
 }
 func (*membershipFixtureStore) Relationships(context.Context) ([]PeerRelationship, error) {
 	return nil, nil

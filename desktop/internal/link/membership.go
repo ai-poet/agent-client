@@ -28,10 +28,8 @@ type PeerRelationship struct {
 	DirectoryRevision uint64            `json:"directory_revision"`
 }
 
-// MembershipStore extends persistent peer stores. The base interface remains
-// usable by transports that do not support identity invitations or directories.
+// MembershipStore extends persistent peer stores with the peer directory.
 type MembershipStore interface {
-	PairMember(context.Context, protocol.NodeID, PeerDirection, InvitationScope) error
 	Relationships(context.Context) ([]PeerRelationship, error)
 	ApplyDirectory(context.Context, protocol.NodeID, uint64, []EndpointAddress, ...map[protocol.NodeID]string) error
 }
@@ -87,19 +85,6 @@ func (link *Link) rememberPeerName(ctx context.Context, peer protocol.NodeID, na
 	}
 	link.notifyPeers()
 	return nil
-}
-
-func (link *Link) pairMember(ctx context.Context, peer protocol.NodeID, direction PeerDirection, scope InvitationScope) error {
-	return link.updateTrust(ctx, peer, func() error {
-		link.cancelHostRemoval(peer)
-		if store, ok := link.store.(MembershipStore); ok {
-			return store.PairMember(ctx, peer, direction, scope)
-		}
-		if scope.Kind == protocol.InvitationMyDevice {
-			return invalidLink("peer store does not support my-device invitations")
-		}
-		return link.store.PairPeer(ctx, peer, direction)
-	})
 }
 
 func (link *Link) Relationships(ctx context.Context) ([]PeerRelationship, error) {

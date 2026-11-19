@@ -22,6 +22,8 @@ type PeerStore interface {
 	SetTrust(context.Context, protocol.NodeID, bool) error
 	Directions(context.Context) ([]PeerTrust, error)
 	PairPeer(context.Context, protocol.NodeID, PeerDirection) error
+	// SavePairing records a fresh pairing atomically. A resume may only refresh an existing inbound peer.
+	SavePairing(ctx context.Context, address EndpointAddress, direction PeerDirection, scope InvitationScope, hasNode *bool, resume bool) error
 	SetDirection(context.Context, protocol.NodeID, PeerDirection) error
 }
 
@@ -267,30 +269,64 @@ func (store *controllerStore) ClassifyPeer(ctx context.Context, id protocol.Node
 }
 
 func (store *controllerStore) PairMember(ctx context.Context, id protocol.NodeID, direction PeerDirection, scope InvitationScope) error {
+	return store.pair(ctx, id, direction, scope, nil, nil, false)
+}
+
+func (store *controllerStore) SavePairing(ctx context.Context, address EndpointAddress, direction PeerDirection, scope InvitationScope, hasNode *bool, resume bool) error {
+	saved := cloneAddress(address)
+	return store.pair(ctx, address.ID, direction, scope, &saved, hasNode, resume)
+}
+
+func (store *controllerStore) pair(ctx context.Context, id protocol.NodeID, direction PeerDirection, scope InvitationScope, address *EndpointAddress, hasNode *bool, resume bool) error {
 	if !direction.Valid() {
 		return invalidLink("invalid peer direction")
 	}
 	return store.update(ctx, func(peers *[]controllerPeer) error {
 		for index := range *peers {
-			if (*peers)[index].ID == id {
-				for removal := range (*peers)[index].Removals {
-					(*peers)[index].Removals[removal].Active = false
+			peer := &(*peers)[index]
+			if peer.ID != id {
+				continue
+			}
+			if resume {
+				if peer.Removed || peer.DirectoryOnly || !peer.Direction.AllowsInbound() {
+					return pairingRejected()
 				}
-				if (*peers)[index].Removed {
-					(*peers)[index].DirectoryRevision = 0
-					(*peers)[index].Direction = ""
-					(*peers)[index].DirectDirection = ""
-				}
-				(*peers)[index].Direction = mergeDirection((*peers)[index].Direction, direction)
-				(*peers)[index].DirectDirection = mergeDirection((*peers)[index].DirectDirection, direction)
-				(*peers)[index].Direct = true
-				(*peers)[index].DirectoryOnly = false
-				(*peers)[index].Removed = false
-				(*peers)[index].MyDevice = (*peers)[index].MyDevice || scope.Kind == protocol.InvitationMyDevice
+				peer.Address = address
 				return nil
 			}
+			if hasNode != nil {
+				if peer.HasNode != nil && *peer.HasNode != *hasNode {
+					return invalidLink("paired device type changed")
+				}
+				peer.HasNode = new(*hasNode)
+			}
+			if address != nil {
+				peer.Address = address
+			}
+			for removal := range peer.Removals {
+				peer.Removals[removal].Active = false
+			}
+			if peer.Removed {
+				peer.DirectoryRevision = 0
+				peer.Direction = ""
+				peer.DirectDirection = ""
+			}
+			peer.Direction = mergeDirection(peer.Direction, direction)
+			peer.DirectDirection = mergeDirection(peer.DirectDirection, direction)
+			peer.Direct = true
+			peer.DirectoryOnly = false
+			peer.Removed = false
+			peer.MyDevice = peer.MyDevice || scope.Kind == protocol.InvitationMyDevice
+			return nil
 		}
-		*peers = append(*peers, controllerPeer{ID: id, Direction: direction, Direct: true, DirectDirection: direction, MyDevice: scope.Kind == protocol.InvitationMyDevice})
+		if resume {
+			return pairingRejected()
+		}
+		peer := controllerPeer{ID: id, Address: address, Direction: direction, Direct: true, DirectDirection: direction, MyDevice: scope.Kind == protocol.InvitationMyDevice}
+		if hasNode != nil {
+			peer.HasNode = new(*hasNode)
+		}
+		*peers = append(*peers, peer)
 		return nil
 	})
 }
