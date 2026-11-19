@@ -367,6 +367,7 @@ func TestStartupPreservesLegacyCredentialRequests(t *testing.T) {
 			schemaExecute(t, storage.Node, "INSERT INTO requests(caller,id,body,status) VALUES(?1,?2,?3,'completed')", node[:], request.String(), body)
 			if additive {
 				schemaExecute(t, storage.Node, "ALTER TABLE node DROP COLUMN storage_generation")
+				schemaExecute(t, storage.Node, "ALTER TABLE node DROP COLUMN request_pruned_through")
 			}
 			if err := storage.Close(); err != nil {
 				t.Fatal(err)
@@ -382,6 +383,9 @@ func TestStartupPreservesLegacyCredentialRequests(t *testing.T) {
 				}
 				if got := schemaInteger(t, opened.Node, "SELECT storage_generation FROM node WHERE singleton=1"); got != 1 {
 					t.Fatalf("normal additive schema update: generation %d", got)
+				}
+				if got := schemaInteger(t, opened.Node, "SELECT count(*) FROM node WHERE singleton=1 AND request_pruned_through=''"); got != 1 {
+					t.Fatal("legacy Node did not gain an empty receipt watermark")
 				}
 				if err := opened.Close(); err != nil {
 					t.Fatal(err)

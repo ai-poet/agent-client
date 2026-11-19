@@ -19,7 +19,7 @@ func CheckpointReceipt(file protocol.ConversationCheckpointFile) protocol.Conver
 		return protocol.ConversationCheckpointReceiptAbsent
 	case "admitted":
 		return protocol.ConversationCheckpointReceiptPending
-	case "unknown":
+	case "unknown", "unrecorded":
 		return protocol.ConversationCheckpointReceiptUncertain
 	case "completed":
 		result, ok := changePayload[protocol.Result[protocol.Output, protocol.Fault]](file.Outcome.Data)

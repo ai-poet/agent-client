@@ -10,7 +10,20 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestRequestIDCaptureTime(t *testing.T) {
+	before := time.Now().Truncate(time.Millisecond)
+	request := NewRequest(NodeID{1}, Command{Kind: "snapshot"})
+	created, ok := request.ID.CreatedAt()
+	if !ok || created.Before(before) || created.After(time.Now()) || request.Version != VERSION {
+		t.Fatalf("ordered request ID %s: created %v (known=%v), version %d", request.ID, created, ok, request.Version)
+	}
+	if _, known := NewRequestID().CreatedAt(); known {
+		t.Fatal("legacy request ID gained a timestamp")
+	}
+}
 
 func TestFixtureRoundTrip(t *testing.T) {
 	t.Parallel()

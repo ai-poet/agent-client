@@ -35,6 +35,8 @@ func TestFramePlain(t *testing.T) {
 			{"rejected", `{"kind":"rejected","data":{"code":"permission_denied","message":"fixture denied"}}`, "", func() any { return new(Reply) }},
 			{"completed failure", `{"kind":"completed","data":{"Err":{"code":"permission_denied","message":"fixture denied"}}}`, "", func() any { return new(Reply) }},
 			{"completed success", `{"kind":"completed","data":{"Ok":{"kind":"notifications_updated"}}}`, "", func() any { return new(Reply) }},
+			{"unrecorded outcome", `{"kind":"completed","data":{"Ok":{"kind":"request_outcome","data":{"id":"01890f00-1234-7000-8000-000000000001","outcome":{"kind":"unrecorded"}}}}}`, "", func() any { return new(Reply) }},
+			{"replayable outcome", `{"kind":"completed","data":{"Ok":{"kind":"request_outcome","data":{"id":"01890f00-1234-7000-8000-000000000001","outcome":{"kind":"replayable","data":{"code":"outcome_unknown","message":"send the original request"}}}}}}`, "", func() any { return new(Reply) }},
 			{"update", `{"kind":"update","data":{"kind":"reset_required"}}`, "", func() any { return new(Reply) }},
 		}
 		for _, fixture := range fixtures {

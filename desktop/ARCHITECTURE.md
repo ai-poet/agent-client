@@ -211,6 +211,14 @@ copy. The source retains the forwarded metadata with its request so an unknown
 outcome can be recovered after configuration changes or a restart. Historical
 session-private provider records remain stored for existing sessions.
 
+New requests carry time-ordered IDs. Pruning settled receipts advances a
+durable watermark, so inspection distinguishes proven non-admission from a
+missing record and an ambiguous old ordered ID cannot be admitted again.
+Legacy opaque IDs can still replay retained receipts, but a missing receipt
+does not establish what happened. Inspection reports an unresolved session
+forward as replayable only to its authorized local controller and only when
+the original import is still frozen.
+
 Configuration snapshots travel in bounded pages under one persisted delivery
 identity. Receivers retain staged pages and their digests across restarts; the
 complete snapshot, absent-record cleanup, events and completion receipt commit

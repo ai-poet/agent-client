@@ -9,6 +9,13 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
+func TestCheckpointUnrecordedReceiptIsUncertain(t *testing.T) {
+	file := protocol.ConversationCheckpointFile{Outcome: protocol.RequestOutcome{Kind: "unrecorded"}}
+	if receipt := CheckpointReceipt(file); receipt != protocol.ConversationCheckpointReceiptUncertain {
+		t.Fatalf("unrecorded file receipt = %v", receipt)
+	}
+}
+
 func TestCheckpointRestoreSettledVersions(t *testing.T) {
 	t.Parallel()
 	version := func(text string) *protocol.ConversationCheckpointVersion {

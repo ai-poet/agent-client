@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ai-poet/agent-client/desktop/internal/client"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/node/admission"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
@@ -381,6 +382,9 @@ func TestSessionForwarding(t *testing.T) {
 		for range 2 {
 			fails(t, dispatchFixture(t, a, a.ID(), uncertain), protocol.ErrorCodeOutcomeUnknown, unknown)
 		}
+		if outcome := inspectForward(t, a, uncertain); outcome.Kind != "replayable" {
+			t.Fatalf("source ledger after the lost outcome = %#v", outcome)
+		}
 		if calls != 2 || sessions(b) != before+1 {
 			t.Fatalf("unknown forward: %d sends, %d sessions", calls, sessions(b)-before)
 		}
@@ -444,8 +448,43 @@ func TestSessionForwarding(t *testing.T) {
 			return link.Admission{}, &protocol.Fault{Code: protocol.ErrorCodeNotFound, Message: "target Node is not paired"}
 		}
 		fails(t, dispatchFixture(t, a, a.ID(), lost), protocol.ErrorCodeOutcomeUnknown, unknown)
-		if outcome := inspectForward(t, a, lost); outcome.Kind != "completed" || outcome.Data.(protocol.Result[protocol.Output, protocol.Fault]).Err == nil {
+		if outcome := inspectForward(t, a, lost); outcome.Kind != "replayable" {
 			t.Fatalf("source ledger without an answer = %#v", outcome)
+		}
+		ctx, caller := t.Context(), a.ID()
+		controller := client.New(link.NewLocal(caller, caller, a))
+		t.Cleanup(func() { _ = controller.Close() })
+		if err := a.profile.Store.Node.Write(ctx, func(db *sql.Conn) error {
+			// Model a restart between freezing the import and recording a result.
+			_, err := db.ExecContext(ctx, "UPDATE requests SET status='unknown',result=NULL WHERE caller=?1 AND id=?2", caller[:], lost.ID.String())
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		observed, err := controller.Resolve(ctx, lost)
+		_, failure := observed.Result()
+		if err != nil || observed.State != client.RequestReplayable || !client.Retained(failure) {
+			t.Fatalf("interrupted frozen forward = %#v, %v", observed, err)
+		}
+		if err := a.profile.Store.Node.Write(ctx, func(db *sql.Conn) error {
+			foreign, err := store.CreateUser(ctx, db, "Different receipt owner")
+			if err != nil {
+				return err
+			}
+			restricted, err := a.inspectOutcomeAccess(store.WithUser(ctx, foreign), db, caller, lost.ID, protocol.RequestOutcome{Kind: "unknown"})
+			result, _ := dispatchPayload[protocol.Result[protocol.Output, protocol.Fault]](restricted.Data)
+			if err != nil || restricted.Kind != "completed" || result.Err == nil || result.Err.Code != protocol.ErrorCodePermissionDenied {
+				return fmt.Errorf("receipt disclosed to an unauthorized actor: %#v, %v", restricted, err)
+			}
+			_, err = db.ExecContext(ctx, "DELETE FROM session_forwards WHERE caller=?1 AND request=?2", caller[:], lost.ID.String())
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		observed, err = controller.Resolve(ctx, lost)
+		_, failure = observed.Result()
+		if err != nil || observed.State != client.RequestUnknown || !client.Released(failure) {
+			t.Fatalf("interrupted forward without a frozen import = %#v, %v", observed, err)
 		}
 		a.forward = nil
 		fails(t, dispatchFixture(t, a, a.ID(), forward(provider.Revision, config)), protocol.ErrorCodeBusy, "Node operation queue is unavailable")
