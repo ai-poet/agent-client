@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preview"
+	"github.com/egoist/mygo/ui"
 )
 
 // sent records what a composer built alone sends; its other actions are not
@@ -189,9 +189,9 @@ func sessionRing(t *testing.T) {
 	if mid, row := r.Bounds.Y+r.Bounds.H/2, chip.Bounds.Y+chip.Bounds.H/2; mid != row {
 		t.Errorf("ring centre %v is off the chip's centre %v", mid, row)
 	}
-	mic, ok := tt.Access(i18n.In("en", "dictation_start"))
-	if !ok || mic.Bounds.X < chip.Bounds.X+chip.Bounds.W {
-		t.Errorf("the microphone at %v is not after the chip %v", mic.Bounds, chip.Bounds)
+	// No dictation in this variant: the chip is the toolbar's last control.
+	if chip.Bounds.X+chip.Bounds.W > float32(960) {
+		t.Errorf("the model chip %v runs past the toolbar", chip.Bounds)
 	}
 	tt.ClickAt(r.Bounds.X+r.Bounds.W/2, r.Bounds.Y+r.Bounds.H/2)
 	tt.Frame()
@@ -426,12 +426,10 @@ func ringFolds(t *testing.T) {
 		if !ok {
 			t.Fatalf("%d: no ring", width)
 		}
-		mic, ok := tt.Access(i18n.In("en", "dictation_start"))
-		if !ok {
-			t.Fatalf("%d: no microphone", width)
-		}
-		if gap := mic.Bounds.X - (r.Bounds.X + r.Bounds.W); gap != 8 {
-			t.Errorf("%d: ring ends %v before the microphone, want 8", width, gap)
+		// This desktop variant has no dictation, so the ring stands alone at
+		// the toolbar's edge instead of sitting 8 DIP before a microphone.
+		if r.Bounds.X < 0 || r.Bounds.X+r.Bounds.W > float32(width) {
+			t.Errorf("%d: ring %v leaves the toolbar", width, r.Bounds)
 		}
 		if _, ok := tt.Access(i18n.In("en", "composer_model_settings") + ": " + comp.Chosen(preview.Load().Models).Name); ok {
 			t.Errorf("%d: the model chip shows in the compact toolbar", width)

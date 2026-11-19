@@ -2,68 +2,32 @@ package shell
 
 import (
 	"testing"
-	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/settings"
+	"github.com/egoist/mygo/ui"
 )
 
-// About's updater checks, downloads, shows the ready row inline, installs
-// from Restart now and stops at Restart; the experience channel's check fails with Details.
-func TestUpdater(t *testing.T) {
+// TestUpdaterUnconfigured pins this fork's default: no feed and no public
+// key means no updater, so About says so and the check button takes no press.
+func TestUpdaterUnconfigured(t *testing.T) {
 	a, tt := newTester(t)
 	a.Do("app.about")
 	tt.Frame()
 	tt.Frame()
-	step := func(label string, wait time.Duration) {
-		t.Helper()
-		clickButton(t, tt, i18n.In("en", label))
-		tt.Frame()
-		for range int(wait / (500 * time.Millisecond)) {
-			tt.Advance(500 * time.Millisecond)
-			tt.Frame()
-		}
+	if !tt.HasText(i18n.In("en", "updates_not_configured")) {
+		t.Fatalf("unconfigured updater says nothing: %q", tt.Texts())
 	}
-	u := &a.Settings.Updater
-	step("updates_check", 2*time.Second)
-	if u.State != settings.UpdateAvailable || !tt.HasText("0.2.0-preview") {
-		t.Fatalf("check: %v %q", u.State, tt.Texts())
-	}
-	if u.Attention() {
-		t.Fatal("an update found on About marks it")
-	}
-	step("updates_download", 5*time.Second)
-	if u.State != settings.UpdateReady {
-		t.Fatalf("download: %v", u.State)
-	}
-	snapshot(t, tt, "updates-ready")
-	// Ready states what a restart stops beside its actions; no dialog asks.
-	if !tt.HasText(i18n.In("en", "updates_restart_description")) || !tt.HasText(i18n.In("en", "updates_ready_now", "version", "0.2.0-preview")) {
-		t.Fatalf("ready row: %q", tt.Texts())
-	}
-	step("updates_later", 0)
-	if tt.HasText(i18n.In("en", "updates_restart_description")) || u.State != settings.UpdateReady {
-		t.Fatalf("Later did not fold the ready row: %q", tt.Texts())
-	}
-	step("updates_restart_now", 2*time.Second)
-	if u.State != settings.UpdateStopped || !tt.HasText(i18n.In("en", "updates_restart_needed")) {
-		t.Fatalf("install: %v", u.State)
-	}
-	t.Run("live states", func(t *testing.T) { testLiveUpdater(t) })
-	*u = settings.Updater{}
-	a.Settings.Channel = 1
-	tt.Frame()
-	step("updates_check", 2*time.Second)
-	if u.Failure == nil || !tt.HasText(i18n.In("en", "updates_details")) {
-		t.Fatalf("no failure: %+v", u)
+	info, ok := tt.AccessByRole(ui.RoleButton, i18n.In("en", "updates_check"))
+	if !ok || !info.Disabled {
+		t.Fatalf("check button = %+v, found %v", info, ok)
 	}
 }
 
 // testLiveUpdater shows each state of the real updater on the About page and
 // presses its action: the page only reports the state and calls the action
 // (SABOUT-005, 006, 008, 009).
-func testLiveUpdater(t *testing.T) {
+func TestUpdaterLiveStates(t *testing.T) {
 	a, tt := newTester(t)
 	calls := map[string]int{}
 	count := func(name string) func() { return func() { calls[name]++ } }
