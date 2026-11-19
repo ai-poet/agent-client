@@ -192,6 +192,24 @@ func presetBrand(entry protocol.ConversationPresetsEntry) string {
 	return name
 }
 
+// Snapshots decoded from the wire and local catalogs may represent the same
+// package source with different Go types. Its protocol identity is the name.
+func samePresetSource(a, b protocol.ConversationPresetsSource) bool {
+	if a.Kind != b.Kind {
+		return false
+	}
+	switch a.Kind {
+	case "builtin", "partner":
+		return true
+	case "package":
+		x, okX := detail[protocol.ConversationPresetsSourcePackagePayload](a.Data)
+		y, okY := detail[protocol.ConversationPresetsSourcePackagePayload](b.Data)
+		return okX && okY && x.Name != "" && x.Name == y.Name
+	default:
+		return false
+	}
+}
+
 // applyPresets projects the Node's preset directory as the brands the
 // editor and the family filter offer. An entry is one method of its brand,
 // and its routes (protocol, product, region) are that method's variants,
@@ -426,6 +444,11 @@ func (r *Runtime) projectProviderSnapshot() {
 		}
 		if p.Preset != nil {
 			reference := *p.Preset
+			// Package presets with auth none use the API-key wire value.
+			// Do not report a missing key until the preset says it needs one.
+			if reference.Source.Kind == "package" && p.Authentication == protocol.AuthenticationApiKey {
+				ch.Auth = viewmodel.AuthUnresolved
+			}
 			if reference.Source.Kind == "builtin" && reference.ID == "compatible-chat" && p.Api == protocol.ConversationModelApiChatCompletions && p.Authentication == protocol.AuthenticationApiKey {
 				if entry, ok := r.providerPresets["builtin:compatible-responses/0"]; ok && entry.Preset.Offered {
 					// The retired Chat-only preset uses the offered compatible
@@ -438,9 +461,15 @@ func (r *Runtime) projectProviderSnapshot() {
 			for id, entry := range r.providerPresets {
 				_, index, _ := strings.Cut(id, "/")
 				i, _ := strconv.Atoi(index)
-				if (route < 0 || i < route) && entry.Preset.ID == reference.ID && reflect.DeepEqual(entry.Source, reference.Source) && i < len(entry.Preset.Routes) && apiForProtocol(entry.Preset.Routes[i].Protocol) == p.Api && (reference.Route == nil || reflect.DeepEqual(*reference.Route, presetRouteKey(entry.Preset.Routes[i]))) {
+				if (route < 0 || i < route) && entry.Preset.ID == reference.ID && samePresetSource(entry.Source, reference.Source) && i < len(entry.Preset.Routes) && apiForProtocol(entry.Preset.Routes[i].Protocol) == p.Api && (reference.Route == nil || reflect.DeepEqual(*reference.Route, presetRouteKey(entry.Preset.Routes[i]))) {
 					route, ch.Method = i, id
-					if entry.Preset.Auth.Kind == "none" {
+					// MyGo presents plugin sign-in as OAuth, like built-in accounts.
+					switch entry.Preset.Auth.Kind {
+					case "api_key", "builtin":
+						if p.Authentication == protocol.AuthenticationApiKey {
+							ch.Auth = viewmodel.AuthKey
+						}
+					case "none":
 						ch.Auth = viewmodel.AuthNone
 					}
 					ch.Brand, ch.Icon = presetBrand(entry), entry.Preset.ID
