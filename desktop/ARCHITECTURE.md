@@ -481,6 +481,13 @@ committed snapshot as a resource outside the executable. This reference data is
 separate from the reviewed model request policies under
 `cmd/sailry-desktop/resources/model-capabilities`.
 
+Uploaded pictures reach vision-capable conversation models as native image
+input. Explicit model tags and native discovery take precedence. Automatic
+vision uses the channel's catalog, or the canonical origin when catalog entries
+for an unlisted gateway agree on its identity. When inline image content is
+omitted, the model is directed to the captured `inspect_image` tool only if that
+turn can use it.
+
 Admission freezes the worktree, permission, configuration, model or team,
 reasoning effort, credential identity and package revisions. Renewed runtime
 tokens replace an expired token for that captured identity. Explicit same-account

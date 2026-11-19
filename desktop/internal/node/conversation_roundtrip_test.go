@@ -1,18 +1,138 @@
 package node
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
 
 	"github.com/ai-poet/agent-client/desktop/internal/client"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
+	"github.com/ai-poet/agent-client/desktop/internal/node/providers"
+	"github.com/ai-poet/agent-client/desktop/internal/node/store"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"lukechampine.com/blake3"
 )
+
+func TestFirstModelRequestIncludesUploadedImage(t *testing.T) {
+	t.Parallel()
+	stream, err := os.ReadFile("agent/model/testdata/responses-text.sse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pixels bytes.Buffer
+	if err := png.Encode(&pixels, image.NewNRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	type imagePart struct {
+		Type string `json:"type"`
+		URL  string `json:"image_url"`
+	}
+	first := make(chan []imagePart, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		var body struct {
+			Input []struct {
+				Role    string      `json:"role"`
+				Content []imagePart `json:"content"`
+			} `json:"input"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Errorf("decode provider request: %v", err)
+			http.Error(w, "invalid fixture request", http.StatusBadRequest)
+			return
+		}
+		var parts []imagePart
+		for _, message := range body.Input {
+			if message.Role == "user" {
+				parts = append(parts, message.Content...)
+			}
+		}
+		select {
+		case first <- parts:
+		default:
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write(stream)
+	}))
+	t.Cleanup(server.Close)
+	node := nodeFixture(t)
+	ctx, cancel := context.WithTimeout(t.Context(), testBudget())
+	defer cancel()
+	const modelID = "fixture-vision"
+	catalog, err := providers.ParseCatalog([]byte(`{
+		"openai":{"models":{"fixture-vision":{"id":"fixture-vision","canonical_model_id":"openai/fixture-vision","modalities":{"input":["text","image"]}}}},
+		"text-gateway":{"models":{"fixture-vision":{"id":"fixture-vision","canonical_model_id":"openai/fixture-vision","modalities":{"input":["text"]}}}}
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := node.profile.Store.Node.Write(ctx, func(db *sql.Conn) error {
+		request := protocol.Request{Command: protocol.Command{Kind: "refresh_model_catalog"}}
+		_, _, err := store.ExecuteProviderCommand(ctx, db, node.ID(), request, &providers.Prepared{Catalog: catalog})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	provider := protocol.DefaultConversationProvider()
+	provider.ID, provider.Name, provider.Enabled = protocol.NewProviderID(), "Fixture gateway", true
+	provider.Api, provider.Authentication, provider.Endpoint = protocol.ConversationModelApiResponses, protocol.AuthenticationApiKey, server.URL+"/v1"
+	provider.DefaultModel = modelID
+	entry := protocol.DefaultConversationModel()
+	entry.ID, entry.Context, entry.Output = modelID, 65536, 4096
+	provider.Models = []protocol.ConversationModel{entry}
+	controller := client.New(link.NewLocal(node.ID(), node.ID(), node))
+	if err := controller.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = controller.Close() })
+	do := func(command protocol.Command) protocol.Output {
+		t.Helper()
+		out, err := controller.Do(ctx, command)
+		if err != nil {
+			t.Fatalf("%s: %v", command.Kind, err)
+		}
+		return out
+	}
+	secret := protocol.NewSecret("fixture-key")
+	do(protocol.Command{Kind: "save_provider", Data: protocol.CommandSaveProviderPayload{Provider: provider, Secret: &secret}})
+	config := protocol.DefaultSessionConfig()
+	config.Provider, config.Model = provider.ID, modelID
+	config.Mode, config.Permission = protocol.WorkModeCode, protocol.PermissionProject
+	session := do(protocol.Command{Kind: "create_session", Data: protocol.CommandCreateSessionPayload{Config: &config}}).Data.(protocol.Session)
+	spec := protocol.AttachmentSpec{Worktree: session.Worktree, Name: "fixture.png", MediaType: "image/png", Size: uint64(pixels.Len()), Revision: fmt.Sprintf("%x", blake3.Sum256(pixels.Bytes()))}
+	upload := do(protocol.Command{Kind: "upload_attachment", Data: &spec}).Data.(protocol.AttachmentUpload)
+	if err := controller.Upload(ctx, upload.Stream, spec.Size, spec.Revision, io.NopCloser(bytes.NewReader(pixels.Bytes())), nil); err != nil {
+		t.Fatal(err)
+	}
+	attachment := do(protocol.Command{Kind: "finish_attachment_upload", Data: protocol.CommandFinishAttachmentUploadPayload{Worktree: session.Worktree, Stream: upload.Stream}}).Data.(protocol.Attachment)
+	do(protocol.Command{Kind: "submit_turn", Data: protocol.CommandSubmitTurnPayload{
+		Session: session.ID, ExpectedRevision: session.Revision,
+		Message: protocol.ConversationInput{Text: "Describe this picture", Attachments: []protocol.AttachmentID{attachment.ID}},
+	}})
+	select {
+	case parts := <-first:
+		want := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pixels.Bytes())
+		for _, part := range parts {
+			if part.Type == "input_image" && part.URL == want {
+				return
+			}
+		}
+		t.Fatalf("first provider request lacked the uploaded PNG, with %d user parts", len(parts))
+	case <-ctx.Done():
+		t.Fatal("no provider request for the conversation image")
+	}
+}
 
 // This checks the production admission, SDK stream, feed and controller route
 // together. Detailed request shaping and reduction cases live in their owners.
