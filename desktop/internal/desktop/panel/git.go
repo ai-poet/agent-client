@@ -105,9 +105,9 @@ func (pr *Project) changesToolbar(c *ui.Context, open func(path string)) {
 	}
 	ui.Row(c.Key("git-toolbar")).PaddingX(8).PaddingY(4).Gap(4).Shrink(0).Children(func() {
 		label := i18n.T(c, "git_diff")
-		b := kit.Ghost(c.Key("diff"), label, false).Height(28).PaddingX(8).Disabled(len(entries) == 0)
+		b := kit.GhostLook(c, ui.ButtonBase(c).Label(label), false).Height(28).PaddingX(8).Disabled(len(entries) == 0)
 		kit.Tooltip(c, b, i18n.T(c, "git_view_diff"))
-		b.Children(func() { ui.Text(c, label).FontSize(13) }).OnClick(func() { open(allChanges) })
+		b.OnClick(func() { open(allChanges) })
 		stats(c, p, add, del)
 		ui.Spacer(c)
 		g := pr.menus(c)

@@ -1,8 +1,8 @@
 package kit
 
 import (
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
 )
 
 // Ghost is Kit's ghost button with Sailry's subtle_button states:
@@ -59,8 +59,17 @@ func IconLook(c *ui.Context, b ui.Element, icon *ui.SVG, label, hint string, siz
 // Primary is Kit's primary button in the button.primary colors: the
 // neutral foreground fill of the built-in theme.
 func Primary(c *ui.Context, label string, disabled bool) ui.Element {
+	// ButtonBase draws no text: Label only names the control for assistive
+	// technology, so the visible caption is a child element.
+	return PrimaryLook(c, ui.ButtonBase(c), label, disabled).
+		Children(func() { ui.Text(c, label).FontSize(14).SingleLine() })
+}
+
+// PrimaryLook gives b, a button of any kind, Primary's look and no caption, for
+// a caller that draws its own content (PrimaryBusy's busy mark and label).
+func PrimaryLook(c *ui.Context, b ui.Element, label string, disabled bool) ui.Element {
 	p := theme.Of(c)
-	b := ui.ButtonBase(c).Label(label).Disabled(disabled).DimDisabled(false).Radius(p.Radius).Center().Gap(6).
+	b = b.Label(label).Disabled(disabled).DimDisabled(false).Radius(p.Radius).Center().Gap(6).
 		PaddingX(12).Height(32).TextColor(p.OnPrimary).Background(p.ButtonPrimary)
 	switch {
 	case disabled && !p.Dark:
@@ -72,9 +81,7 @@ func Primary(c *ui.Context, label string, disabled bool) ui.Element {
 	case b.Hovered():
 		b.Background(p.ButtonPrimaryHi)
 	}
-	// ButtonBase draws no text: Label only names the control for assistive
-	// technology, so the visible caption is a child element.
-	return b.Children(func() { ui.Text(c, label).FontSize(14).SingleLine() })
+	return b
 }
 
 // Tag is Kit's small Tag: a rounded label in the emphasis color at 12%.
@@ -93,7 +100,7 @@ func Secondary(c *ui.Context, label string) ui.Element {
 // PrimaryBusy is Primary with its label, and while the operation it started
 // runs the busy mark (Busy) before the label and no press.
 func PrimaryBusy(c *ui.Context, label string, disabled, busy bool) ui.Element {
-	return Primary(c, label, disabled || busy).Busy(busy).Children(func() {
+	return PrimaryLook(c, ui.ButtonBase(c), label, disabled || busy).Busy(busy).Children(func() {
 		if busy {
 			Busy(c)
 		}

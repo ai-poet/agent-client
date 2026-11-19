@@ -52,7 +52,7 @@ func appearance(c *ui.Context, look Look) {
 			appearanceNotice(c, look.Live)
 		})
 		label := i18n.T(c, "appearance_import")
-		kit.Primary(c.Key("import"), label, false).Children(func() { ui.Text(c, label).FontSize(14) }).OnClick(func() {
+		kit.Primary(c.Key("import"), label, false).OnClick(func() {
 			if look.Actions != nil && look.Actions.Import != nil {
 				look.Actions.Import()
 				return

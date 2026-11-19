@@ -858,7 +858,7 @@ func (s *State) nameDialog(c *ui.Context) {
 		ui.Row(c.Key("footer")).Gap(8).Justify(ui.End).Children(func() {
 			kit.Secondary(c.Key("cancel"), i18n.T(c, "settings_cancel")).OnClick(func() { n.open = false })
 			save := i18n.T(c, "settings_save")
-			kit.Primary(c.Key("save"), save, false).Children(func() { ui.Text(c, save).FontSize(14) }).OnClick(s.saveName)
+			kit.Primary(c.Key("save"), save, false).OnClick(s.saveName)
 		})
 	}).Width(400).Label(title)
 }

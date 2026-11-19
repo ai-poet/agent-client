@@ -299,7 +299,7 @@ func (s *State) badge(c *ui.Context, b StatusBadge, actions Actions) {
 					text := x.Label.in(c)
 					var bt ui.Element
 					if x.Ghost {
-						bt = kit.Ghost(c.Key(x.ID), text, false).PaddingX(8).Children(func() { ui.Text(c, text).FontSize(14) })
+						bt = kit.Ghost(c.Key(x.ID), text, false).PaddingX(8)
 					} else {
 						bt = kit.Secondary(c.Key(x.ID), text)
 					}

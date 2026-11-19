@@ -205,7 +205,7 @@ func shortcutControl(c *ui.Context, k *Keys, s Shortcut) {
 	}
 	var b ui.Element
 	if recording {
-		b = kit.Primary(c.Key("key"), label, false).Children(func() { ui.Text(c, label).FontSize(12) })
+		b = kit.PrimaryLook(c, ui.ButtonBase(c), label, false).Children(func() { ui.Text(c, label).FontSize(12) })
 	} else {
 		b = kit.Secondary(c.Key("key"), label)
 		if ch.Key == 0 {

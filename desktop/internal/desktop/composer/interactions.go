@@ -423,7 +423,7 @@ func (s *State) approval(c *ui.Context, a Approval, actions Actions) {
 			if a.Unrestricted {
 				kit.Tooltip(c, b, i18n.T(c, "approval_unrestricted"))
 			}
-			b.MinWidth(48).Children(func() { ui.Text(c, allow).FontSize(14) }).OnClick(func() { actions.Decide(a.ID, Allow, "") })
+			b.MinWidth(48).OnClick(func() { actions.Decide(a.ID, Allow, "") })
 			if a.Remember {
 				kit.MenuButton(c.Key("allow-options"), "allow-"+a.ID, func(b ui.Element) {
 					kit.IconLook(c, b, icons.ChevronDown, i18n.T(c, "approval_allow_session"), "", 28, false).

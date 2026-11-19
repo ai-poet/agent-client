@@ -203,7 +203,7 @@ func plugins(c *ui.Context, s *State) {
 		kit.Secondary(c.Key("download"), t("plugins_download")).OnClick(func() {
 			m.download = pluginDownload{open: true, generation: m.download.generation + 1}
 		})
-		kit.Primary(c.Key("install"), t("plugins_install"), false).Children(func() { ui.Text(c, t("plugins_install")).FontSize(14) }).
+		kit.Primary(c.Key("install"), t("plugins_install"), false).
 			OnClick(func() { m.install = pluginInstall{open: true, generation: m.install.generation + 1} })
 	}, func() {
 		if len(shown) == 0 {
@@ -574,7 +574,7 @@ func pluginDownloadDialog(c *ui.Context, m *Model) {
 				}
 				e.open, e.pending = false, false
 			})
-			kit.Primary(c.Key("ok"), label, e.pending).Children(func() { ui.Text(c, label).FontSize(14) }).OnClick(func() {
+			kit.Primary(c.Key("ok"), label, e.pending).OnClick(func() {
 				if !strings.HasPrefix(e.repository, "https://") {
 					kit.Toast(c, kit.Failed, t("skills_invalid"))
 					return
@@ -641,7 +641,7 @@ func pluginUpdatesDialog(c *ui.Context, m *Model) {
 		ui.Row(c.Key("footer")).Gap(8).Justify(ui.End).Children(func() {
 			kit.Secondary(c.Key("later"), t("plugins_updates_later")).OnClick(func() { e.open = false })
 			label := t("plugins_updates_selected", "count", n)
-			kit.Primary(c.Key("ok"), label, n == 0).Children(func() { ui.Text(c, label).FontSize(14) }).OnClick(func() {
+			kit.Primary(c.Key("ok"), label, n == 0).OnClick(func() {
 				e.open = false
 				if m.PackageActions != nil && m.PackageActions.Update != nil {
 					var names []string

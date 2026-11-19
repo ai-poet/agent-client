@@ -144,7 +144,7 @@ func EntryTransferDialog(c *ui.Context, d *EntryTransfer, actions EntryTransferA
 				} else if d.Status == EntryFailed || d.Status == EntryCancelled {
 					label = i18n.T(c, "files_upload_retry")
 				}
-				kit.Primary(c.Key("start"), label, false).Children(func() { ui.Text(c, label).FontSize(14) }).OnClick(func() {
+				kit.Primary(c.Key("start"), label, false).OnClick(func() {
 					if d.Status == EntryUncertain {
 						if actions.Check != nil {
 							actions.Check()

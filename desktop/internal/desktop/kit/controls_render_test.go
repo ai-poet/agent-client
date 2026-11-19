@@ -94,6 +94,44 @@ func isText(expr ast.Expr) bool {
 	return false
 }
 
+// TestCaptionsAppearOnce catches a control drawing its caption twice. Every
+// kit button exposes its label once as the accessible name and draws it once,
+// so a frame holds exactly two: a third means the caption was drawn twice,
+// which is what a call site that still adds its own ui.Text shows.
+func TestCaptionsAppearOnce(t *testing.T) {
+	const label = "重试"
+	for _, tc := range []struct {
+		name  string
+		build func(*ui.Context) ui.Element
+	}{
+		{"Primary", func(c *ui.Context) ui.Element { return Primary(c, label, false) }},
+		{"PrimaryBusy idle", func(c *ui.Context) ui.Element { return PrimaryBusy(c, label, false, false) }},
+		{"PrimaryBusy busy", func(c *ui.Context) ui.Element { return PrimaryBusy(c, label, true, true) }},
+		{"Secondary", func(c *ui.Context) ui.Element { return Secondary(c, label) }},
+		{"SecondaryBusy busy", func(c *ui.Context) ui.Element { return SecondaryBusy(c, label, true) }},
+		{"Ghost", func(c *ui.Context) ui.Element { return Ghost(c, label, false) }},
+		{"Danger", func(c *ui.Context) ui.Element { return Danger(c, label) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			build := tc.build
+			tt := ui.NewTester(func(c *ui.Context) {
+				theme.Apply(c, "", theme.Light)
+				ui.Column(c).Padding(8).Children(func() { build(c) })
+			}, 320, 100)
+			tt.Frame()
+			count := 0
+			for _, text := range tt.Texts() {
+				if text == label {
+					count++
+				}
+			}
+			if count != 2 {
+				t.Fatalf("%s draws its caption %d times: %q", tc.name, count, tt.Texts())
+			}
+		})
+	}
+}
+
 // TestButtonInkDiffersFromFill catches "drawn but invisible": the caption's
 // color must differ from the fill it sits on. This does not judge contrast,
 // only that the palette did not resolve both to the same pixels.

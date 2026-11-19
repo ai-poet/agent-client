@@ -105,7 +105,7 @@ func marketFilters(c *ui.Context, m *Model) {
 	p := theme.Of(c)
 	chip := func(key, label string, on bool, pick func()) {
 		b := kit.Ghost(c.Key(key), label, on).Height(28).PaddingX(10).Radius(999).Border(1, p.Border)
-		b.Children(func() { ui.Text(c, label).FontSize(14) }).OnClick(pick)
+		b.OnClick(pick)
 	}
 	ui.Row(c.Key("filters")).Wrap().Gap(6).Children(func() {
 		switch m.MarketKind {

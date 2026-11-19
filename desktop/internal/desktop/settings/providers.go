@@ -1332,7 +1332,7 @@ func modelForm(c *ui.Context, d *modelDraft, api string) {
 					TextColor(p.PopoverForeground)
 				for _, n := range []int{128000, 200000, 400000, 1000000} {
 					s := strconv.Itoa(n)
-					b := kit.Ghost(c.Key(n), tokens(c, n), d.context == s).Height(24).PaddingX(8).Border(1, p.Border).Shrink(0).Disabled(d.pending)
+					b := kit.GhostLook(c, ui.ButtonBase(c).Label(tokens(c, n)), d.context == s).Height(24).PaddingX(8).Border(1, p.Border).Shrink(0).Disabled(d.pending)
 					b.Children(func() { ui.Text(c, tokens(c, n)).FontSize(12) }).OnClick(func() { d.context = s })
 				}
 			})

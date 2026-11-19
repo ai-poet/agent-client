@@ -66,7 +66,7 @@ func updateDialog(c *ui.Context, s *State, h *Host, act Actions) {
 					label = "live_" + label
 				}
 				text := i18n.T(c, label)
-				kit.Primary(c.Key("action"), text, false).Children(func() { ui.Text(c, text).FontSize(14) }).OnClick(func() {
+				kit.Primary(c.Key("action"), text, false).OnClick(func() {
 					if act.Update != nil {
 						act.Update(expected)
 						if action, _, _ := expected.Primary(); action == Apply {

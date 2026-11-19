@@ -69,9 +69,8 @@ func (s *State) editor(c *ui.Context, session string, t *Turn, actions Actions) 
 					kit.Loader(c, 14)
 				}
 				kit.Ghost(c.Key("cancel"), i18n.T(c, "settings_cancel"), false).Height(28).PaddingX(12).Radius(14).Border(1, p.Border).
-					Disabled(pending).Children(func() { ui.Text(c, i18n.T(c, "settings_cancel")).FontSize(14) }).OnClick(cancel)
-				kit.Primary(c.Key("save"), i18n.T(c, "queue_save"), pending || empty).Height(28).Radius(14).
-					Children(func() { ui.Text(c, i18n.T(c, "queue_save")).FontSize(14) }).OnClick(save)
+					Disabled(pending).OnClick(cancel)
+				kit.Primary(c.Key("save"), i18n.T(c, "queue_save"), pending || empty).Height(28).Radius(14).OnClick(save)
 			})
 			if left {
 				cancel()

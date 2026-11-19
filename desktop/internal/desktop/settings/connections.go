@@ -86,7 +86,7 @@ func connections(c *ui.Context, m *Model) {
 	kit.Group(c, "hosts", i18n.T(c, "connections_hosts"), "", func() {
 		kit.Secondary(c.Key("share"), i18n.T(c, "pairing_share")).OnClick(func() { pr.sharing = true })
 		label := i18n.T(c, "settings_add")
-		kit.Primary(c.Key("add"), label, false).Children(func() { ui.Text(c, label).FontSize(14) }).OnClick(func() {
+		kit.Primary(c.Key("add"), label, false).OnClick(func() {
 			m.openAddHost()
 		})
 	}, func() { devices(c, m, true) })

@@ -65,7 +65,7 @@ func (pr *Project) notebookEditorPreview(c *ui.Context, path string, own bool) {
 		if page.Failed {
 			label = "chat_retry"
 		}
-		kit.Ghost(c.Key("notebook-more"), i18n.T(c, label), false).Height(32).FillWidth().Disabled(page.Loading || pr.Actions.ReadNotebook == nil).Children(func() { ui.Text(c, i18n.T(c, label)).FontSize(12) }).OnClick(func() {
+		kit.GhostLook(c, ui.ButtonBase(c).Label(i18n.T(c, label)), false).Height(32).FillWidth().Disabled(page.Loading || pr.Actions.ReadNotebook == nil).Children(func() { ui.Text(c, i18n.T(c, label)).FontSize(12) }).OnClick(func() {
 			offset := uint64(0)
 			if page.Next != nil {
 				offset = *page.Next
