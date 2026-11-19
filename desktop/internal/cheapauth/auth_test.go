@@ -252,6 +252,51 @@ func TestLoopbackRelayExchangesPostedFragment(t *testing.T) {
 	}
 }
 
+// A delivery the service refuses, as a stale tab's code is, leaves the
+// listener waiting: the next delivery signs in, and only then is it over.
+func TestLoopbackKeepsWaitingAfterRefusedCode(t *testing.T) {
+	server := exchangeServer(t, nil)
+	defer server.Close()
+	service, _ := NewService(t.TempDir())
+	flow, err := service.StartLogin(t.Context(), server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer flow.Close()
+	flow.pkce.verifier = testVerifier
+	waited := make(chan error, 1)
+	go func() {
+		credentials, err := flow.Wait(t.Context())
+		if err == nil && credentials.RefreshToken != testRefresh {
+			err = errors.New("the wait ended without the redeemed session")
+		}
+		waited <- err
+	}()
+	deliver := func(fragment string) int {
+		t.Helper()
+		response, err := http.Post(fmt.Sprintf("http://127.0.0.1:%d/deliver", flow.Port()), "text/plain", strings.NewReader(fragment))
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		return response.StatusCode
+	}
+	for _, refused := range []string{"#code=STALE123", "#state=only", "#code=" + testCode + "&endpoint=https%3A%2F%2Felsewhere.example"} {
+		if status := deliver(refused); status != http.StatusBadRequest {
+			t.Fatalf("delivery %q answered %d", refused, status)
+		}
+	}
+	if status := deliver("#code=" + testCode); status != http.StatusOK {
+		t.Fatalf("the redeemable delivery after the refused ones answered %d", status)
+	}
+	if err := <-waited; err != nil {
+		t.Fatal(err)
+	}
+	if status := deliver("#code=" + testCode); status != http.StatusConflict {
+		t.Fatalf("a delivery after the sign-in answered %d", status)
+	}
+}
+
 func TestTokensNeverAppearInErrorsOrLogs(t *testing.T) {
 	server := exchangeServer(t, func(writer http.ResponseWriter, request *http.Request) bool {
 		writeEnvelope(t, writer, http.StatusBadRequest, `{"code":400,"reason":"DESKTOP_LOGIN_CODE_INVALID","message":"bad `+testAccess+` `+testRefresh+` `+testVerifier+`"}`)

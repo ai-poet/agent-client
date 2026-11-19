@@ -19,16 +19,13 @@ type LoginFlow struct {
 	pkce     PKCE
 	listener net.Listener
 	server   *http.Server
-	result   chan loginResult
+	result   chan Credentials
 	serveErr chan error
 	done     chan struct{}
-	deliver  sync.Once
-	close    sync.Once
-}
-
-type loginResult struct {
-	credentials Credentials
-	err         error
+	// delivery admits one relay request at a time, until one is redeemed.
+	delivery  sync.Mutex
+	delivered bool
+	close     sync.Once
 }
 
 // StartManualLogin creates a paste-only attempt without touching the network.
@@ -37,7 +34,7 @@ func StartManualLogin(client *Client) (*LoginFlow, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &LoginFlow{client: client, pkce: pkce, result: make(chan loginResult, 1), serveErr: make(chan error, 1), done: make(chan struct{})}, nil
+	return &LoginFlow{client: client, pkce: pkce, result: make(chan Credentials, 1), serveErr: make(chan error, 1), done: make(chan struct{})}, nil
 }
 
 // StartLogin falls back to paste-only mode when loopback cannot be bound.
@@ -85,8 +82,8 @@ func (f *LoginFlow) LoginURL() string {
 	return LoginURL(f.client.Endpoint(), f.Port(), f.pkce.Challenge())
 }
 
-// Wait waits for the relay page's local POST. Paste-only flows are completed
-// by ExchangePasted instead.
+// Wait waits for the relay page's local POST to be redeemed. Paste-only flows
+// are completed by ExchangePasted instead.
 func (f *LoginFlow) Wait(ctx context.Context) (Credentials, error) {
 	if f.listener == nil {
 		<-ctx.Done()
@@ -97,15 +94,15 @@ func (f *LoginFlow) Wait(ctx context.Context) (Credentials, error) {
 		return Credentials{}, ctx.Err()
 	case <-f.done:
 		select {
-		case result := <-f.result:
-			return result.credentials, result.err
+		case credentials := <-f.result:
+			return credentials, nil
 		default:
 			return Credentials{}, context.Canceled
 		}
 	case <-f.serveErr:
 		return Credentials{}, &AuthError{Kind: ErrorNetwork, Op: "loopback"}
-	case result := <-f.result:
-		return result.credentials, result.err
+	case credentials := <-f.result:
+		return credentials, nil
 	}
 }
 
@@ -150,32 +147,34 @@ func (f *LoginFlow) serveHTTP(writer http.ResponseWriter, request *http.Request)
 			http.Error(writer, "回跳内容无效", http.StatusBadRequest)
 			return
 		}
-		accepted := false
-		f.deliver.Do(func() {
-			accepted = true
-			code, legacy, err := parseDelivery(string(raw), f.client.Endpoint(), f.client.now())
-			var credentials Credentials
-			if err == nil {
-				if legacy != nil {
-					credentials = *legacy
-				} else {
-					credentials, err = f.client.Exchange(request.Context(), code, f.pkce.Verifier())
-				}
-			}
-			if err != nil {
-				http.Error(writer, "登录码无效、已过期或与本次登录不匹配，请返回应用重试或粘贴登录码", http.StatusBadRequest)
-			} else {
-				writer.Header().Set("Cache-Control", "no-store")
-				writer.WriteHeader(http.StatusOK)
-				_, _ = writer.Write([]byte("ok"))
-			}
-			// The owner may close the listener as soon as it gets the result.
-			_ = http.NewResponseController(writer).Flush()
-			f.result <- loginResult{credentials: credentials, err: err}
-		})
-		if !accepted {
+		f.delivery.Lock()
+		defer f.delivery.Unlock()
+		if f.delivered {
 			http.Error(writer, "登录回跳已处理", http.StatusConflict)
+			return
 		}
+		code, legacy, err := parseDelivery(string(raw), f.client.Endpoint(), f.client.now())
+		var credentials Credentials
+		if err == nil {
+			if legacy != nil {
+				credentials = *legacy
+			} else {
+				credentials, err = f.client.Exchange(request.Context(), code, f.pkce.Verifier())
+			}
+		}
+		if err != nil {
+			// A delivery that is not redeemed is that request's problem: a
+			// stale tab or a probe must not cost the sign-in its listener.
+			http.Error(writer, "登录码无效、已过期或与本次登录不匹配，请返回应用重试或粘贴登录码", http.StatusBadRequest)
+			return
+		}
+		f.delivered = true
+		writer.Header().Set("Cache-Control", "no-store")
+		writer.WriteHeader(http.StatusOK)
+		_, _ = writer.Write([]byte("ok"))
+		// The owner may close the listener as soon as it gets the result.
+		_ = http.NewResponseController(writer).Flush()
+		f.result <- credentials
 	default:
 		http.NotFound(writer, request)
 	}
