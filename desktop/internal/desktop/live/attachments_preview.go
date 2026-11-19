@@ -7,14 +7,14 @@ import (
 	"unicode/utf8"
 
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
-	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/markdown"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/fileview"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/panel"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown"
 	"lukechampine.com/blake3"
 )
 
@@ -22,6 +22,8 @@ const attachmentPreviewMaximum = 2 << 20
 
 type attachmentDocumentImage struct {
 	image           *conversation.Image
+	visible         uint64
+	cancel          context.CancelFunc
 	loading, failed bool
 }
 
@@ -314,6 +316,7 @@ func (r *Runtime) projectDocumentThumbnail(session, id string, descriptor attach
 	if artifact == nil || artifact.Kind != protocol.ArtifactKindPreview || native.RenderDocument == nil {
 		return nil
 	}
+	cache := r.attachmentImages(session)
 	key := fmt.Sprintf("%s/%s/%d", session, artifact.ID, artifact.Revision)
 	image := r.attachments.documents[key]
 	if image == nil {
@@ -323,11 +326,13 @@ func (r *Runtime) projectDocumentThumbnail(session, id string, descriptor attach
 		image = &attachmentDocumentImage{}
 		r.attachments.documents[key] = image
 	}
-	if image.image != nil || image.loading || image.failed {
+	image.visible = r.attachments.imageFrame
+	if image.image != nil || image.loading || image.failed || !r.attachments.imageConnected {
 		return image.image
 	}
 	image.loading = true
-	ctx := r.attachmentImages(session).ctx
+	ctx, cancel := context.WithCancel(cache.ctx)
+	image.cancel = cancel
 	r.async(func() {
 		content, err := r.readPublishedArtifact(ctx, descriptor)
 		r.enqueue(func(*ui.Context) {
@@ -335,6 +340,7 @@ func (r *Runtime) projectDocumentThumbnail(session, id string, descriptor attach
 				return
 			}
 			if err != nil {
+				cancel()
 				image.loading, image.failed = false, true
 				return
 			}
@@ -351,11 +357,11 @@ func (r *Runtime) projectDocumentThumbnail(session, id string, descriptor attach
 						if ctx.Err() != nil || r.attachments.documents[key] != image {
 							return
 						}
+						cancel()
 						image.loading, image.failed = false, err != nil
 						if err == nil {
 							width, height := bitmap.Size()
 							image.image = &conversation.Image{ID: id, Name: descriptor.name, Width: width, Height: height, Source: bitmap}
-							r.projectConversations()
 						}
 					})
 				})

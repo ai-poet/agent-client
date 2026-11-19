@@ -38,9 +38,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
 )
 
 // Zoom limits and steps of the image viewer.
@@ -182,7 +182,7 @@ const switchFromScale = 0.96
 // whose Copy, Save and Open call act with the picture. Escape closes it.
 func ImageViewer[T any](c *ui.Context, v *Viewer[T], item func(T) ViewerItem, act func(ImageAction, T)) {
 	if !v.Open || len(v.Images) == 0 {
-		v.Open = false
+		v.Open, v.Images = false, nil
 		return
 	}
 	p := theme.Of(c)

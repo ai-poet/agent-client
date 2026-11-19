@@ -1,8 +1,8 @@
 package conversation
 
 import (
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
+	"github.com/egoist/mygo/ui"
 )
 
 // Zoom limits of the image viewer.
@@ -14,6 +14,14 @@ const (
 // Viewer is the image viewer's state over a message's pictures: Kit's Viewer,
 // whose methods zoom, pan, turn, flip and step it.
 type Viewer = kit.Viewer[Image]
+
+// CloseImages releases the gallery owned by a closed or inaccessible transcript.
+func (s *State) CloseImages(session string) {
+	if viewer := s.views[session]; viewer != nil {
+		*viewer = Viewer{}
+		delete(s.views, session)
+	}
+}
 
 // viewer draws the image viewer over the window while open (kit's
 // ImageViewer). Copy, Save and Open go to the shell.

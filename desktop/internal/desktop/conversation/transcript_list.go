@@ -27,6 +27,8 @@ type transcriptFrame struct {
 	actions  Actions
 	aside    float32
 	linkIcon func(string, float32) (markdown.InlineObject, bool)
+	image    func(Image) Image
+	embed    func(string, string, string, bool) (Embed, bool)
 }
 
 // List returns the list state of a conversation.
@@ -49,6 +51,13 @@ func (s *State) bindTranscript(c *ui.Context, id string, turns []Turn, sess *Ses
 		s.boundLists = append(s.boundLists, l)
 	}
 	l.frame = transcriptFrame{state: s, c: c, id: id, turns: turns, session: sess, actions: actions, aside: s.Aside, linkIcon: s.md.LinkIcon}
+	l.frame.embed = s.Embed
+	if sess != nil {
+		l.frame.image = sess.ResolveImage
+		if sess.Embed != nil {
+			l.frame.embed = sess.Embed
+		}
+	}
 	l.mounted = true
 	return l
 }
@@ -70,6 +79,7 @@ func (s *State) FinishFrame() {
 			l.mounted = false
 			bound = append(bound, l)
 		} else {
+			s.CloseImages(l.frame.id)
 			l.frame = transcriptFrame{}
 		}
 	}
@@ -90,12 +100,14 @@ func (l *transcriptList) buildRow(i int) {
 		return
 	}
 	s := f.state
-	session, block, link, icon := s.renderSession, s.md.Block, s.md.OnLink, s.md.LinkIcon
-	s.renderSession, s.md.Block, s.md.OnLink, s.md.LinkIcon = f.id, nil, l.link, f.linkIcon
-	if s.Embed != nil {
+	session, block, link, icon, image := s.renderSession, s.md.Block, s.md.OnLink, s.md.LinkIcon, s.resolveImage
+	s.renderSession, s.md.Block, s.md.OnLink, s.md.LinkIcon, s.resolveImage = f.id, nil, l.link, f.linkIcon, f.image
+	if f.embed != nil {
 		s.md.Block = l.block
 	}
-	defer func() { s.renderSession, s.md.Block, s.md.OnLink, s.md.LinkIcon = session, block, link, icon }()
+	defer func() {
+		s.renderSession, s.md.Block, s.md.OnLink, s.md.LinkIcon, s.resolveImage = session, block, link, icon, image
+	}()
 	// Row actions can keep a turn, but must not keep the whole slice alive
 	// through a pointer into its backing array.
 	t := f.turns[i]
@@ -111,5 +123,11 @@ func (l *transcriptList) openLink(link string) {
 
 func (l *transcriptList) embedBlock(c *ui.Context, d *parser.Document, i int) bool {
 	f := &l.frame
-	return f.state != nil && f.state.Embed != nil && f.state.embed(c, f.id, d, i, f.actions)
+	if f.state == nil || f.embed == nil {
+		return false
+	}
+	previous, image := f.state.renderSession, f.state.resolveImage
+	f.state.renderSession, f.state.resolveImage = f.id, f.image
+	defer func() { f.state.renderSession, f.state.resolveImage = previous, image }()
+	return f.state.embed(c, f.id, d, i, f.actions, f.embed)
 }

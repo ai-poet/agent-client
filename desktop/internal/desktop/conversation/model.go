@@ -599,6 +599,9 @@ const (
 // connection, a diagnostic of what failed, and its usage. nil is a loaded,
 // connected session at its start.
 type Session struct {
+	// Image callbacks are bound by the transcript's owner, including for child panes.
+	ResolveImage func(Image) Image                                           `json:"-"`
+	Embed        func(session, dest, label string, image bool) (Embed, bool) `json:"-"`
 	// Older is how many turns come before the first one shown, 0 at the
 	// start; LoadingOlder while the page before loads, OlderFailed when it
 	// did not.

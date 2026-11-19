@@ -33,6 +33,7 @@ const (
 type State struct {
 	toolCards     map[string]map[string]func(*ui.Context)
 	renderSession string
+	resolveImage  func(Image) Image
 	lists         map[string]*transcriptList
 	boundLists    []*transcriptList
 	open          map[string]bool    // the disclosures open
@@ -415,7 +416,7 @@ func (s *State) user(c *ui.Context, session string, t *Turn, q string, current i
 		}
 		if len(t.Files) > 0 {
 			ui.Row(c).Justify(ui.End).Children(func() {
-				ui.Column(c).Width(bubbleMax).Children(func() { files(c, "user-files", t.Files, actions) })
+				ui.Column(c).Width(bubbleMax).Children(func() { s.files(c, "user-files", t.Files, actions) })
 			})
 		}
 		userFooter(c, t, over, actions)
@@ -656,7 +657,7 @@ func (s *State) blocks(c *ui.Context, turn string, blocks []Block, continuing bo
 			case ImagesBlock:
 				s.thumbnails(c, "images", b.Images, false)
 			case FilesBlock:
-				files(c, "files", b.Files, actions)
+				s.files(c, "files", b.Files, actions)
 			case SearchBlock:
 				s.grounding(c, key, b)
 			case RetryBlock:

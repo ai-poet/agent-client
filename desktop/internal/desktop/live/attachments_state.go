@@ -5,13 +5,13 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/transfers"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 type NativeFileActions struct {
@@ -47,7 +47,9 @@ type attachmentImageState struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	images  map[string]*ui.Bitmap
-	loading map[string]bool
+	loading map[string]context.CancelFunc
+	visible map[string]uint64
+	sources map[string]attachmentDescriptor
 	failed  map[string]bool // transient reads wait for a refresh or a reconnected Node
 	missing map[string]bool // pictures that cannot show: gone or past the limits
 }
@@ -69,6 +71,7 @@ type attachmentState struct {
 	downloadGeneration uint64
 	imageSessions      map[string]*attachmentImageState
 	imageConnected     bool
+	imageFrame         uint64
 	imageSlots         chan struct{}
 	mu                 sync.Mutex
 	closed             bool

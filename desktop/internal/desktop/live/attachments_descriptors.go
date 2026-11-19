@@ -6,14 +6,14 @@ import (
 	"image"
 	"io"
 	"math"
+	"strconv"
 	"strings"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/tiff"
 )
@@ -50,14 +50,15 @@ func cloneAttachmentRevision(value *string) *string {
 	cloned := *value
 	return &cloned
 }
-func (r *Runtime) bindAttachmentSources(session string, page protocol.ConversationPage) {
+func (r *Runtime) bindAttachmentSources(session string, page protocol.ConversationPage) map[string]conversation.Image {
 	if r.attachments == nil {
-		return
+		return nil
 	}
 	owner, err := protocol.ParseSessionID(session)
 	if err != nil {
-		return
+		return nil
 	}
+	var references map[string]conversation.Image
 	registerImage := func(value protocol.ConversationImage) {
 		attachment := value.Attachment
 		r.attachments.files[attachmentKey(session, attachment.ID.String())] = attachmentDescriptor{session: owner, worktree: attachment.Spec.Worktree, name: attachment.Spec.Name, mime: attachment.Spec.MediaType, attachment: &attachment, image: &value}
@@ -77,6 +78,15 @@ func (r *Runtime) bindAttachmentSources(session string, page protocol.Conversati
 				if value, ok := detail[protocol.ConversationPartToolResultPayload](part.Data); ok {
 					for _, image := range value.Images {
 						registerImage(image)
+						if value.ID != nil {
+							if references == nil {
+								references = map[string]conversation.Image{}
+							}
+							key := *value.ID + "/" + strconv.FormatUint(image.Index, 10)
+							if _, exists := references[key]; !exists {
+								references[key] = conversation.Image{ID: image.Attachment.ID.String(), Name: image.Attachment.Spec.Name}
+							}
+						}
 					}
 				}
 			}
@@ -94,6 +104,7 @@ func (r *Runtime) bindAttachmentSources(session string, page protocol.Conversati
 			r.registerConversationAttachment(session, attachment)
 		}
 	}
+	return references
 }
 func (r *Runtime) openAttachmentFile(x *conversationActions, file conversation.File) {
 	descriptor, ok := r.attachmentDescriptor(x.cv.ID, file.ID)
@@ -222,43 +233,27 @@ func (r *Runtime) draftImageAction(x *conversationActions, action kit.ImageActio
 	}
 	r.report(x.c, fileActionFault(protocol.ErrorCodeBusy, "image upload is still preparing"), "workspace_changed")
 }
-func (r *Runtime) projectAttachmentImages(cv *viewmodel.Conversation) {
-	if r.attachments == nil || !r.attachmentConversationVisible(cv.ID) {
-		return
+
+// Decoded bitmaps belong to the owning Node, not to the projected history.
+func (r *Runtime) resolveConversationImage(session string, image conversation.Image) conversation.Image {
+	key := attachmentKey(session, image.ID)
+	descriptor, ok := r.attachmentDescriptor(session, image.ID)
+	if !ok {
+		return image
 	}
-	cache := r.attachmentImages(cv.ID)
-	project := func(image *conversation.Image) {
-		key := attachmentKey(cv.ID, image.ID)
-		if source := r.projectAttachmentImage(cache, key); source != nil {
-			image.Source = source
-			image.Width, image.Height = source.Size()
+	if descriptor.artifact != nil {
+		if thumb := r.projectDocumentThumbnail(session, image.ID, descriptor); thumb != nil {
+			return *thumb
 		}
-		image.Missing = cache.missing[key]
+		return image
 	}
-	for ti := range cv.Turns {
-		turn := &cv.Turns[ti]
-		for index := range turn.Images {
-			project(&turn.Images[index])
-		}
-		for index := range turn.Reply.Blocks {
-			block := &turn.Reply.Blocks[index]
-			for image := range block.Images {
-				project(&block.Images[image])
-			}
-			for file := range block.Files {
-				if block.Files[file].Image != nil {
-					project(block.Files[file].Image)
-				}
-			}
-			for call := range block.Calls {
-				if output := block.Calls[call].Output; output != nil {
-					for image := range output.Images {
-						project(&output.Images[image])
-					}
-				}
-			}
-		}
+	cache := r.attachmentImages(session)
+	if source := r.projectAttachmentImage(cache, key); source != nil {
+		image.Source = source
+		image.Width, image.Height = source.Size()
 	}
+	image.Missing = cache.missing[key]
+	return image
 }
 
 func (r *Runtime) attachmentImages(session string) *attachmentImageState {
@@ -268,7 +263,7 @@ func (r *Runtime) attachmentImages(session string) *attachmentImageState {
 		for _, cache := range state.imageSessions {
 			cache.cancel()
 			cache.ctx, cache.cancel = context.WithCancel(state.ctx)
-			cache.loading = map[string]bool{}
+			clear(cache.loading)
 			clear(cache.failed)
 		}
 		for _, publication := range state.publications {
@@ -284,22 +279,39 @@ func (r *Runtime) attachmentImages(session string) *attachmentImageState {
 	cache := state.imageSessions[session]
 	if cache == nil {
 		ctx, cancel := context.WithCancel(state.ctx)
-		cache = &attachmentImageState{ctx: ctx, cancel: cancel, images: map[string]*ui.Bitmap{}, loading: map[string]bool{}, failed: map[string]bool{}, missing: map[string]bool{}}
+		cache = &attachmentImageState{ctx: ctx, cancel: cancel, images: map[string]*ui.Bitmap{}, loading: map[string]context.CancelFunc{}, visible: map[string]uint64{}, sources: map[string]attachmentDescriptor{}, failed: map[string]bool{}, missing: map[string]bool{}}
 		state.imageSessions[session] = cache
 	}
 	return cache
 }
+func sameImageSource(a, b attachmentDescriptor) bool {
+	equalRevision := a.revision == b.revision || a.revision != nil && b.revision != nil && *a.revision == *b.revision
+	equalAttachment := a.attachment == b.attachment || a.attachment != nil && b.attachment != nil && *a.attachment == *b.attachment
+	equalImage := a.image == b.image || a.image != nil && b.image != nil && *a.image == *b.image
+	return a.session == b.session && a.worktree == b.worktree && a.path == b.path && equalRevision && equalAttachment && equalImage
+}
+
 func (r *Runtime) projectAttachmentImage(cache *attachmentImageState, key string) *ui.Bitmap {
+	state := r.attachments
+	descriptor, ok := state.files[key]
+	if !ok {
+		return nil
+	}
+	cache.visible[key] = state.imageFrame
+	if old, exists := cache.sources[key]; exists && !sameImageSource(old, descriptor) {
+		cache.releaseBitmap(key)
+		delete(cache.failed, key)
+		delete(cache.missing, key)
+	}
+	cache.sources[key] = descriptor
 	if source := cache.images[key]; source != nil {
 		return source
 	}
-	state := r.attachments
-	descriptor, ok := state.files[key]
-	if !ok || cache.loading[key] || cache.failed[key] || cache.missing[key] || !state.imageConnected {
+	if cache.loading[key] != nil || cache.failed[key] || cache.missing[key] || !state.imageConnected {
 		return nil
 	}
-	cache.loading[key] = true
-	ctx := cache.ctx
+	ctx, cancel := context.WithCancel(cache.ctx)
+	cache.loading[key] = cancel
 	r.async(func() {
 		select {
 		case state.imageSlots <- struct{}{}:
@@ -307,10 +319,13 @@ func (r *Runtime) projectAttachmentImage(cache *attachmentImageState, key string
 		case <-ctx.Done():
 			return
 		}
+		if ctx.Err() != nil {
+			return
+		}
 		data, err := r.readAttachmentImage(ctx, descriptor)
 		var bitmap *ui.Bitmap
 		undecodable := false
-		if err == nil {
+		if err == nil && ctx.Err() == nil {
 			bitmap, err = decodeAttachmentBitmap(data)
 			undecodable = err != nil
 		}
@@ -319,13 +334,13 @@ func (r *Runtime) projectAttachmentImage(cache *attachmentImageState, key string
 				return
 			}
 			delete(cache.loading, key)
+			cancel()
 			if err == nil {
 				cache.images[key] = bitmap
 				return
 			}
-			// A picture that is gone or past the transfer and decoding limits
-			// never shows. Other failed reads wait for an explicit refresh or
-			// a reconnected Node instead of retrying on every frame.
+			// Permanently unavailable pictures differ from reads that can
+			// be retried on refresh or after reconnect.
 			if code := faultCode(err); undecodable || code == protocol.ErrorCodeNotFound || code == protocol.ErrorCodeInvalidRequest {
 				cache.missing[key] = true
 			} else {
@@ -335,6 +350,15 @@ func (r *Runtime) projectAttachmentImage(cache *attachmentImageState, key string
 	})
 	return nil
 }
+
+func (cache *attachmentImageState) releaseBitmap(key string) {
+	if cancel := cache.loading[key]; cancel != nil {
+		cancel()
+		delete(cache.loading, key)
+	}
+	delete(cache.images, key)
+}
+
 func decodeAttachmentBitmap(data []byte, maximumEdge ...int) (*ui.Bitmap, error) {
 	if len(data) > attachmentMaximum {
 		return nil, fileActionFault(protocol.ErrorCodeInvalidRequest, "image exceeds its transfer limit")
@@ -371,27 +395,59 @@ func (r *Runtime) projectDraftAttachmentImages(x *conversationActions) {
 	}
 }
 
-// pruneAttachmentImages runs after all panes have recorded their conversations.
+// Shell's frame hook precedes MyGo's layout, which can build more rows.
+// Allow a previous-frame mark until the current layout has had its chance.
 func (r *Runtime) pruneAttachmentImages() {
-	if r.attachments == nil {
+	state := r.attachments
+	if state == nil {
 		return
 	}
-	for session, cache := range r.attachments.imageSessions {
+	for session, cache := range state.imageSessions {
 		id, err := protocol.ParseSessionID(session)
-		if err == nil && r.conversationSeen[id] {
+		if (err != nil || !r.conversationSeen[id]) && !r.localRuntime().draftsShown[session] {
+			r.releaseAttachmentImages(session)
 			continue
 		}
-		cache.cancel()
-		delete(r.attachments.imageSessions, session)
-		for key, publication := range r.attachments.publications {
-			if publication.session.String() == session {
-				delete(r.attachments.publications, key)
+		for key, frame := range cache.visible {
+			if state.imageFrame-frame > 1 {
+				cache.releaseBitmap(key)
+				delete(cache.visible, key)
+				if !cache.failed[key] && !cache.missing[key] {
+					delete(cache.sources, key)
+				}
 			}
 		}
-		for key := range r.attachments.documents {
-			if strings.HasPrefix(key, session+"/") {
-				delete(r.attachments.documents, key)
+	}
+	for key, thumbnail := range state.documents {
+		if state.imageFrame-thumbnail.visible > 1 {
+			if thumbnail.cancel != nil {
+				thumbnail.cancel()
 			}
+			delete(state.documents, key)
+		}
+	}
+}
+
+func (r *Runtime) releaseAttachmentImages(session string) {
+	state := r.attachments
+	if state == nil {
+		return
+	}
+	if cache := state.imageSessions[session]; cache != nil {
+		cache.cancel()
+		delete(state.imageSessions, session)
+	}
+	for key, publication := range state.publications {
+		if publication.session.String() == session {
+			delete(state.publications, key)
+		}
+	}
+	for key, thumbnail := range state.documents {
+		if strings.HasPrefix(key, session+"/") {
+			if thumbnail.cancel != nil {
+				thumbnail.cancel()
+			}
+			delete(state.documents, key)
 		}
 	}
 }

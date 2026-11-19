@@ -3,9 +3,9 @@ package conversation
 import (
 	"testing"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
 )
 
 func TestToolRowsKeepExecutionInputWithoutResultText(t *testing.T) {
@@ -79,5 +79,33 @@ func TestToolFailureDetailsRemainAvailable(t *testing.T) {
 	tester.Frame()
 	if !tester.HasText(failure) {
 		t.Fatalf("original failure cannot be opened: %q", tester.Texts())
+	}
+}
+
+func TestFoldedToolImageIsResolvedOnlyWhenShown(t *testing.T) {
+	call := Call{ID: "image-tool", Name: "read_file", Label: "Read file", Output: &Output{Images: []Image{{ID: "attachment", Name: "result.png"}}}}
+	state := New()
+	var reads int
+	state.resolveImage = func(image Image) Image { reads++; return image }
+	tester := ui.NewTester(func(c *ui.Context) { theme.Apply(c, "", theme.Light); state.row(c, call) }, 640, 400)
+	tester.Frame()
+	if reads != 0 {
+		t.Fatal("folded tool requested its bitmap")
+	}
+	if err := tester.Click("Read file"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+	if reads == 0 {
+		t.Fatal("open tool did not request its bitmap")
+	}
+	if err := tester.Click("Read file"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+	before := reads
+	tester.Frame()
+	if reads != before {
+		t.Fatal("closed tool kept requesting its bitmap")
 	}
 }

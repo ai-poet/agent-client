@@ -168,3 +168,35 @@ func TestFinishFramePreservesPixelAnchorAndRailKeys(t *testing.T) {
 		t.Errorf("End on the rail should build and show the last row, got row %d", last)
 	}
 }
+
+func TestSplitTranscriptImagesUseTheirOwnBinding(t *testing.T) {
+	state := New()
+	reads := map[string]int{}
+	makePane := func(owner string) (*Session, []Turn) {
+		turns := []Turn{{ID: "same-turn", User: "image", Images: []Image{{ID: "same-image", Name: owner}}}}
+		return &Session{ResolveImage: func(image Image) Image {
+			if image.ID != "same-image" || image.Name != owner {
+				t.Fatalf("%s resolver received %#v", owner, image)
+			}
+			reads[owner]++
+			return image
+		}}, turns
+	}
+	parent, parentRows := makePane("parent")
+	child, childRows := makePane("child")
+	tester := ui.NewTester(func(c *ui.Context) {
+		defer state.FinishFrame()
+		theme.Apply(c, "", theme.Light)
+		ui.Row(c).Fill().Children(func() {
+			ui.Column(c.Key("parent-pane")).Grow(1).FillHeight().Children(func() { View(c, state, "parent", parentRows, parent, &still{}) })
+			ui.Column(c.Key("child-pane")).Grow(1).FillHeight().Children(func() { View(c, state, "child", childRows, child, &still{}) })
+		})
+	}, 1200, 600)
+	tester.Frame()
+	if reads["parent"] == 0 || reads["child"] == 0 {
+		t.Fatalf("resolved images = %v", reads)
+	}
+	if parentRows[0].Images[0].Source != nil || childRows[0].Images[0].Source != nil {
+		t.Fatal("thumbnail resolver mutated the transcript")
+	}
+}

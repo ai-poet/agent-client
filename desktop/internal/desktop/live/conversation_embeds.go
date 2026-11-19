@@ -8,11 +8,12 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 	"golang.org/x/net/html"
 )
 
@@ -39,49 +40,48 @@ func imageReference(dest string) (string, bool) {
 	return call + "/" + number, true
 }
 
-// chatEmbed resolves image markup: a tool's image reference, a workspace
-// picture or its file fallback. Markdown file links do not publish outputs.
-func (r *Runtime) chatEmbed(session, dest, _ string, image bool) (conversation.Embed, bool) {
-	if !image {
-		return conversation.Embed{}, false
+// Bind this frame's interpretation to the exact view and execution Node. A
+// delegated tab is not part of the sidebar data used for ordinary navigation.
+func (r *Runtime) bindTranscriptImages(cv *viewmodel.Conversation, id protocol.SessionID, references map[string]conversation.Image) {
+	if r.attachments == nil {
+		return
 	}
-	cv := r.App.Data.Find(session)
-	if cv == nil {
-		return conversation.Embed{}, false
+	session, frame := cv.ID, r.attachments.imageFrame
+	owned := func() bool {
+		return r.ctx.Err() == nil && cv.ID == session && r.runtimeFor(cv.Node) == r && r.conversationSeen[id] && r.attachments.imageFrame == frame
 	}
-	owner := r.conversationRuntime(cv, nil)
-	if owner == nil || owner.attachments == nil {
-		return conversation.Embed{}, false
+	cv.Session.ResolveImage = func(image conversation.Image) conversation.Image {
+		if !owned() {
+			return image
+		}
+		return r.resolveConversationImage(session, image)
 	}
-	if reference, ok := imageReference(dest); ok && image {
-		for ti := range cv.Turns {
-			for _, block := range cv.Turns[ti].Reply.Blocks {
-				for _, call := range block.Calls {
-					if call.Output == nil {
-						continue
-					}
-					for _, candidate := range call.Output.Images {
-						if candidate.Reference == reference {
-							if candidate.Missing && candidate.Source == nil {
-								return conversation.Embed{Missing: true}, true
-							}
-							return conversation.Embed{Image: &candidate}, true
-						}
-					}
-				}
-			}
+	cv.Session.Embed = func(_, dest, _ string, image bool) (conversation.Embed, bool) {
+		if !image || !owned() {
+			return conversation.Embed{}, false
+		}
+		return r.chatEmbed(session, dest, references)
+	}
+}
+
+// Resolve image markup, not ordinary links. Tool image references are scoped
+// to the observed session; workspace references keep their path checks.
+func (r *Runtime) chatEmbed(session, dest string, references map[string]conversation.Image) (conversation.Embed, bool) {
+	if reference, ok := imageReference(dest); ok {
+		if image, found := references[reference]; found {
+			return conversation.Embed{Image: &image}, true
 		}
 		return conversation.Embed{Missing: true}, true
 	}
 	if strings.ContainsAny(dest, "#?") {
 		return conversation.Embed{}, false
 	}
-	current, ok := owner.session(session)
+	current, ok := r.session(session)
 	if !ok {
 		return conversation.Embed{}, false
 	}
 	root := ""
-	for _, candidate := range owner.snapshot().Worktrees {
+	for _, candidate := range r.snapshot().Worktrees {
 		if candidate.ID == current.Worktree {
 			root = candidate.Path
 		}
@@ -92,17 +92,11 @@ func (r *Runtime) chatEmbed(session, dest, _ string, image bool) (conversation.E
 	}
 	kind := attachmentFileKind(target.path, "")
 	id := "link/" + target.path
-	owner.registerWorkspaceFile(session, id, current.Worktree, target.path, nil)
-	if image && kind == conversation.ImageFile && owner.attachmentConversationVisible(session) {
-		cache := owner.attachmentImages(session)
-		key := attachmentKey(session, id)
-		picture := conversation.Image{ID: id, Name: path.Base(target.path)}
-		if source := owner.projectAttachmentImage(cache, key); source != nil {
-			picture.Source = source
-			picture.Width, picture.Height = source.Size()
-		}
+	r.registerWorkspaceFile(session, id, current.Worktree, target.path, nil)
+	if kind == conversation.ImageFile {
+		picture := r.resolveConversationImage(session, conversation.Image{ID: id, Name: path.Base(target.path)})
 		// A picture that cannot show falls back to its file's card.
-		if !cache.missing[key] {
+		if !picture.Missing {
 			return conversation.Embed{Image: &picture}, true
 		}
 	}

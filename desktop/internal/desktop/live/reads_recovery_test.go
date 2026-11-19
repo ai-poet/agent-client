@@ -9,13 +9,13 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/client"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/shell"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 	"lukechampine.com/blake3"
 )
 
@@ -223,7 +223,7 @@ func TestReadRecovery(t *testing.T) {
 			cache := r.attachmentImages(session)
 			r.projectAttachmentImage(cache, key)
 			settle()
-			if reads != 1 || !cache.failed[key] || cache.loading[key] || cache.missing[key] {
+			if reads != 1 || !cache.failed[key] || cache.loading[key] != nil || cache.missing[key] {
 				t.Fatal("a transient picture failure was left loading or marked missing")
 			}
 			for range 10 {
@@ -253,6 +253,24 @@ func TestReadRecovery(t *testing.T) {
 			settle()
 			if reads != 3 || !cache.missing[missing] || cache.images[key] == nil {
 				t.Fatal("refresh repeated a permanently missing or already loaded picture")
+			}
+			// The row may first be built after Shell's frame hook, in layout.
+			nextFrame := func() {
+				r.beginConversationFrame()
+				r.conversationSeen[protocol.SessionID{1}] = true
+				r.pruneAttachmentImages()
+			}
+			nextFrame()
+			r.projectAttachmentImage(cache, key)
+			nextFrame()
+			if cache.images[key] == nil {
+				t.Fatal("pruning dropped the image before the next layout could reuse it")
+			}
+			r.projectAttachmentImage(cache, key)
+			nextFrame() // leaves the row out of the list
+			nextFrame()
+			if cache.images[key] != nil || !cache.missing[missing] {
+				t.Fatal("pruning retained an unused bitmap or discarded a permanent miss")
 			}
 		})
 	})

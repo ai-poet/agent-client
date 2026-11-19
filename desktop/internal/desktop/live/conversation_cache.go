@@ -23,6 +23,9 @@ type conversationPresentation struct {
 
 func (r *Runtime) beginConversationFrame() {
 	r.conversationSeen = map[protocol.SessionID]bool{}
+	if r.attachments != nil {
+		r.attachments.imageFrame++
+	}
 	if r.conversationCache == nil {
 		r.conversationCache = map[protocol.SessionID]conversationCopy{}
 	}
@@ -42,6 +45,7 @@ func (r *Runtime) finishConversationFrame() {
 			continue
 		}
 		cv.Turns, cv.Queue = nil, nil
+		cv.Session.ResolveImage, cv.Session.Embed = nil, nil
 		cv.Waiting, cv.Animating = composer.Interactions{}, false
 		delete(r.conversationPresentations, cv)
 		if r.childConversations[cv.ID] == cv {

@@ -798,7 +798,10 @@ CrychicUI, chart variants use the conversation painter over limu, and math uses
 Untie. These render natively and keep source text on failure. File preview draws
 text, code, Markdown, notebooks and images; unsupported formats open in the system
 application. Conversation image assets open directly in the shared window image
-viewer without changing the detail panel. The captured source owner supplies the
+viewer without changing the detail panel. Transcript rows request thumbnails as
+the virtualized list builds them, through the owning conversation and Node.
+Closing the transcript or scrolling its image rows away releases their decoded
+bitmaps after layout's last use. The captured source owner supplies the
 read and image actions; closing or replacing the viewer cancels its pending read.
 Document previews capture their entry, resource Node, worktree, path and source
 revision. Markdown images and HTML image elements resolve relative to that

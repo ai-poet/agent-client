@@ -33,6 +33,8 @@ var unshown = map[string]string{
 	"viewmodel.Conversation.Animating":         "set while a sent reply plays",
 	"conversation.Session.Loading":             "a moment before any content, not content",
 	"conversation.Session.LoadingOlder":        "a moment, which would keep the window redrawing",
+	"conversation.Session.Embed":               "resolves references in the live conversation's workspace",
+	"conversation.Session.ResolveImage":        "loads images from the live conversation's Node; demo uses embedded images",
 	"conversation.Call.Load":                   "a live disclosure's request",
 	"conversation.Call.TrackLoad":              "tracks an active live disclosure's observation",
 	"conversation.Call.BackgroundDetail":       "reads the live process behind a disclosure",

@@ -66,7 +66,6 @@ func (r *Runtime) projectConversations() {
 					owner.enrichQueue(cv, state.Snapshot.Page.Queue)
 					owner.projectConversationAssets(cv, state)
 					owner.bindAttachmentSources(cv.ID, state.Snapshot.Page)
-					owner.projectAttachmentImages(cv)
 					cv.Animating = state.Connected && len(state.Snapshot.Drafts) > 0
 				}
 			} else {
@@ -186,6 +185,8 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 	}
 	if owner := r.conversationRuntime(cv, comp); owner == nil {
 		cv.Session.Connection = conversation.Offline
+		cv.Session.ResolveImage, cv.Session.Embed = nil, nil
+		r.App.Messages.CloseImages(cv.ID)
 		// An unadmitted draft can choose another execution host while offline.
 		return &composer.Context{Readonly: !unsentDraft(cv), SendBlocked: true, LocationLocked: r.draftSubmitted(cv), Interactions: cv.Waiting, Queue: cv.Queue, Projects: r.composerProjects(), Hosts: r.composerHosts(c)},
 			&conversationActions{r: r, c: c, cv: cv, comp: comp}
@@ -197,6 +198,7 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 		// offline state after the user changes their execution location.
 		cv.Session.Connection = conversation.Connected
 	}
+	cv.Session.ResolveImage, cv.Session.Embed = nil, nil
 	snapshot := r.snapshot()
 	var page protocol.ConversationPage
 	unsynced := false
@@ -235,8 +237,13 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 			r.enrichDetails(cv, state, c.Locale())
 			r.enrichQueue(cv, state.Snapshot.Page.Queue)
 			r.projectConversationAssets(cv, state)
-			r.bindAttachmentSources(cv.ID, state.Snapshot.Page)
-			r.projectAttachmentImages(cv)
+			images := r.bindAttachmentSources(cv.ID, state.Snapshot.Page)
+			if page.Session == id && !state.Removed {
+				r.bindTranscriptImages(cv, id, images)
+			} else if state.Removed || faultCode(state.Err) == protocol.ErrorCodePermissionDenied || faultCode(state.Err) == protocol.ErrorCodeNotFound {
+				r.releaseAttachmentImages(cv.ID)
+				r.App.Messages.CloseImages(cv.ID)
+			}
 			r.settleTurnRetry(cv.ID, comp, snapshot.Turns, state.Snapshot.Page)
 		}
 	}

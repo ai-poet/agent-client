@@ -8,12 +8,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/editor"
 	"github.com/ai-poet/agent-client/desktop/internal/client"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 )
 
 type attachmentPublication struct {
@@ -133,8 +133,8 @@ func (r *Runtime) projectConversationAssets(cv *viewmodel.Conversation, state cl
 				}
 				seen[dedupe] = true
 				r.attachments.files[attachmentKey(cv.ID, item.file.ID)] = item.descriptor
-				if item.descriptor.artifact != nil && prefetch {
-					item.file.Image = r.projectDocumentThumbnail(cv.ID, item.file.ID, item.descriptor)
+				if artifact := item.descriptor.artifact; artifact != nil && artifact.Kind == protocol.ArtifactKindPreview {
+					item.file.Image = &conversation.Image{ID: item.file.ID, Name: item.file.Name()}
 				}
 				block := conversation.Block{Kind: conversation.FilesBlock, Label: key, Files: []conversation.File{item.file}}
 				if item.image {
