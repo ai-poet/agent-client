@@ -490,9 +490,13 @@ func (f *engineFixture) childTurns() []protocol.TurnID {
 }
 
 func TestParentEndSettlesChildren(t *testing.T) {
-	for _, ending := range []string{"user stop", "failed parent"} {
+	for _, ending := range []string{"user stop", "user stop during hook", "user stop while closing", "failed parent"} {
 		t.Run(ending, func(t *testing.T) {
 			childStarted, parentWaiting := make(chan struct{}), make(chan struct{})
+			closing := ending == "user stop while closing" || ending == "user stop during hook"
+			parentUnwind := make(chan struct{})
+			releaseParent := sync.OnceFunc(func() { close(parentUnwind) })
+			defer releaseParent()
 			var childOnce, parentOnce sync.Once
 			step := func(ctx context.Context, request fantasy.Call, yield func(fantasy.StreamPart) bool) {
 				prompt, results := "", 0
@@ -516,7 +520,14 @@ func TestParentEndSettlesChildren(t *testing.T) {
 					_ = yield(call("first", "spawn_agent", `{"task":"First background child","background":true}`)) &&
 						yield(call("second", "spawn_agent", `{"task":"Second background child","background":true}`)) && yield(finish())
 				default:
-					parentOnce.Do(func() { close(parentWaiting) })
+					if !closing {
+						parentOnce.Do(func() { close(parentWaiting) })
+					}
+					if ending == "user stop" {
+						<-ctx.Done()
+						<-parentUnwind
+						return
+					}
 					select {
 					case <-childStarted:
 					case <-ctx.Done():
@@ -526,11 +537,42 @@ func TestParentEndSettlesChildren(t *testing.T) {
 						yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: &model.Failure{Kind: model.InvalidResponse, Message: "fixture failure"}})
 						return
 					}
-					<-ctx.Done()
+					if closing {
+						_ = yield(text("Parent response")) && yield(finish())
+						return
+					}
 				}
 			}
 			language := &scriptedModel{scripts: []script{step, step, step, step, step}}
 			f := newFixture(t, language)
+			releaseClosing := make(chan struct{})
+			if closing {
+				f.r.hooksForTurn = func(_ context.Context, inv *store.AgentInvocation) *hooks.Binding {
+					if inv.Session.ID != f.session.ID {
+						return nil
+					}
+					return hooks.New(hooks.Capture{
+						Admitted: true,
+						Turn:     inv.Run.Turn,
+						Settings: protocol.HooksSettings{Enabled: true, TurnEnd: &protocol.HooksScript{Enabled: true, Command: "fixture", TimeoutMs: 1000}},
+						Claim:    func(context.Context, protocol.TurnID, protocol.HooksPhase, uint64) error { return nil },
+						Finish: func(context.Context, protocol.TurnID, protocol.HooksPhase, uint64, protocol.ProcessOutcome, error) error {
+							return nil
+						},
+						Launch: func(ctx context.Context, _ string, _ uint64, _ map[string]string) (protocol.ProcessCompletion, error) {
+							parentOnce.Do(func() { close(parentWaiting) })
+							select {
+							case <-ctx.Done():
+								return protocol.ProcessCompletion{Outcome: protocol.ProcessOutcome{Kind: "cancelled"}}, ctx.Err()
+							case <-releaseClosing:
+								return protocol.ProcessCompletion{Outcome: protocol.ProcessOutcome{Kind: "exited", Data: int32(0)}}, nil
+							case <-f.ctx.Done():
+								return protocol.ProcessCompletion{}, f.ctx.Err()
+							}
+						},
+					})
+				}
+			}
 			// One slot keeps the second child queued while the first runs.
 			if err := f.db.Node.Write(f.ctx, func(db *sql.Conn) error {
 				settings, err := store.ReadTeamSettings(f.ctx, db)
@@ -556,15 +598,63 @@ func TestParentEndSettlesChildren(t *testing.T) {
 			if len(children) != 2 {
 				t.Fatalf("admitted children=%d", len(children))
 			}
-			if ending == "user stop" {
+			if ending == "user stop during hook" {
 				f.command("stop_turn", &protocol.CommandStopTurnPayload{Turn: parent})
 			}
+			if ending == "user stop" {
+				// Match the Node's commit-to-publication handoff. The parent
+				// cannot unwind and cancel its children through turn cleanup.
+				func() {
+					unlock := f.r.LockPublication()
+					defer unlock()
+					var output protocol.Output
+					if err := f.db.Node.Write(f.ctx, func(db *sql.Conn) error {
+						request := protocol.NewRequest(f.node, protocol.Command{Kind: "stop_turn", Data: &protocol.CommandStopTurnPayload{Turn: parent}})
+						var err error
+						output, _, err = store.ExecuteAgentCommand(f.ctx, db, f.node, f.r.profile, f.node, request, f.r.clock.Now())
+						return err
+					}); err != nil {
+						t.Fatal(err)
+					}
+					f.r.StopCommitted(output.Data.(protocol.ConversationRun))
+					f.r.mu.Lock()
+					defer f.r.mu.Unlock()
+					if owner := f.r.active[parent]; owner == nil || owner.ctx.Err() == nil {
+						t.Fatal("parent did not receive Stop before publication")
+					}
+					for _, turn := range children {
+						if child := f.r.children[turn]; child == nil || child.ctx.Err() == nil {
+							t.Fatalf("child %s did not receive Stop before publication", turn)
+						}
+					}
+				}()
+				releaseParent()
+			}
+			if ending == "user stop while closing" {
+				// Let the finishing owner see the committed Stop before the
+				// controller's wake reaches it, as can happen on a busy Node.
+				unlock := f.r.LockPublication()
+				err := f.db.Node.Write(f.ctx, func(db *sql.Conn) error {
+					request := protocol.NewRequest(f.node, protocol.Command{Kind: "stop_turn", Data: &protocol.CommandStopTurnPayload{Turn: parent}})
+					_, _, err := store.ExecuteAgentCommand(f.ctx, db, f.node, f.r.profile, f.node, request, f.r.clock.Now())
+					return err
+				})
+				unlock()
+				close(releaseClosing)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			ended := f.settled(parent)
+			if ending == "user stop during hook" {
+				// The first hook had to exit by cancellation. Let the follow-up finish normally.
+				close(releaseClosing)
+			}
 			if ending == "failed parent" && ended.Status != protocol.ConversationStatusFailed {
 				t.Fatalf("parent status=%s", ended.Status)
 			}
-			if ending == "user stop" && ended.Status == protocol.ConversationStatusCompleted {
-				t.Fatal("stopped parent completed")
+			if ending != "failed parent" && ended.Status != protocol.ConversationStatusCancelled {
+				t.Fatalf("stopped parent status=%s", ended.Status)
 			}
 			// The parent finished, so every child must already be terminal.
 			for index, turn := range children {
@@ -583,7 +673,10 @@ func TestParentEndSettlesChildren(t *testing.T) {
 					t.Fatalf("queued child was not cancelled unstarted: %+v", run)
 				}
 			}
-			if len(f.r.children) != 0 {
+			f.r.mu.Lock()
+			remaining := len(f.r.children)
+			f.r.mu.Unlock()
+			if remaining != 0 {
 				t.Fatal("cancelled children kept their owners")
 			}
 			if f.readQuery("SELECT count(*) FROM agent_background WHERE kind='agent' AND state!='consumed'") != 0 || f.readQuery("SELECT count(*) FROM agent_background WHERE kind='agent'") != 2 {
@@ -603,6 +696,93 @@ func TestParentEndSettlesChildren(t *testing.T) {
 				t.Fatalf("model requests=%d", language.count())
 			}
 		})
+	}
+}
+
+func TestChildSettlementRefreshesAgedDelegation(t *testing.T) {
+	f, parent := delegationFixture(t)
+	spawn := saveDelegationCall(t, f, parent, "child", false)
+	if result := f.r.spawnChild(parent, spawn, spawn.Arguments); result.Failure != nil {
+		t.Fatal(result.Failure)
+	}
+	f.r.workers.Wait()
+	child := parent.foreground[0]
+	history := func() protocol.ConversationHistory {
+		t.Helper()
+		var h protocol.ConversationHistory
+		if err := f.db.Node.Read(f.ctx, func(db *sql.Conn) error {
+			var err error
+			h, err = store.ReadConversation(f.ctx, db, f.session.ID, nil, 20)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	initial := history()
+	if len(initial.Page.Children) != 1 || initial.Page.Children[0].Run.Turn != child.turn {
+		t.Fatal("initial history did not include the delegated child")
+	}
+	f.r.feed.Publish(f.session.ID, protocol.ConversationChange{Kind: "run", Data: parent.inv.Run})
+	draft := protocol.ConversationDraft{ID: "parent-draft", Turn: parent.inv.Run.Turn, Author: "assistant", Parts: []protocol.ConversationPart{{Kind: "text", Data: "Partial reply"}}}
+	if err := f.r.feed.Delta(f.session.ID, draft); err != nil {
+		t.Fatal(err)
+	}
+	reservation := f.r.feed.Reserve(f.session.ID, make(chan struct{}))
+	t.Cleanup(func() { _ = reservation.Close() })
+	snapshot := protocol.DefaultConversationSnapshot()
+	snapshot.Page = initial.Page
+	stream := reservation.Subscribe(snapshot)
+	if _, err := stream.Next(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Advance stored history beyond the origin of the still-loaded child.
+	if err := f.db.Node.Write(f.ctx, func(db *sql.Conn) error {
+		for range 101 {
+			record := canonical.NewRecord(parent.inv.Run.Turn, "message", canonical.NewMessage(canonical.Assistant, canonical.Text(0, "Later entry")), f.r.clock.Now())
+			record.Provenance.Author = "assistant"
+			if _, _, err := store.AppendCanonical(f.ctx, db, f.session.ID, record); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(history().Page.Children) != 0 {
+		t.Fatal("the delegation did not age out of the newest history page")
+	}
+	child.cancel()
+	if err := f.r.finishQueued(f.ctx, []*delegatedChild{child}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		update, err := stream.Next(f.ctx)
+		if err != nil {
+			t.Fatalf("aged delegation did not invalidate the parent feed: %v", err)
+		}
+		if update.Kind == "reset_required" {
+			break
+		}
+		// The statistics requested at admission can arrive after subscribing.
+		frame, ok := update.Data.(*protocol.ConversationFrame)
+		if !ok || frame.Change.Kind != "statistics" {
+			t.Fatalf("unexpected update before invalidation: %+v", update)
+		}
+	}
+	resumed := f.r.feed.Reserve(f.session.ID, make(chan struct{}))
+	t.Cleanup(func() { _ = resumed.Close() })
+	if len(resumed.Drafts) != 1 || resumed.Drafts[0].ID != draft.ID {
+		t.Fatal("refresh dropped the parent's draft")
+	}
+	if err := f.db.Node.Read(f.ctx, func(db *sql.Conn) error {
+		h, err := store.ReadConversationTurn(f.ctx, db, f.session.ID, parent.inv.Run.Turn, initial.Page.Revision, nil, 500)
+		if err == nil && (len(h.Children) != 1 || h.Children[0].Run.Turn != child.turn || h.Children[0].Run.Status != protocol.ConversationStatusCancelled) {
+			t.Fatalf("restored parent history lacks child cancellation: %+v", h.Children)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

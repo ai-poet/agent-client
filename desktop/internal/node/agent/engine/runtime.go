@@ -4,6 +4,7 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"slices"
 	"sync"
 
 	"charm.land/fantasy"
@@ -196,38 +197,53 @@ func (r *Runtime) run() {
 			unlock := r.LockPublication()
 			var inv *store.AgentInvocation
 			var ended []*delegatedChild
-			changed := false
+			var changes []protocol.Event
 			err := r.db.Write(r.ctx, func(db *sql.Conn) error {
-				var changes []protocol.Event
 				var err error
 				inv, changes, ended, err = r.claimInvocation(r.ctx, db)
-				changed = len(changes) > 0
 				if err != nil {
 					return err
 				}
 				_, err = store.RecordEvents(r.ctx, db, r.node, changes)
 				return err
 			})
-			if err == nil {
-				for _, child := range ended {
-					child.cancel()
-					r.mu.Lock()
-					delete(r.children, child.turn)
-					r.mu.Unlock()
-					if child.commandsInherited && r.stopCommands != nil && r.ctx.Err() == nil {
-						r.stopCommands(child.session)
-					}
+			if err != nil {
+				unlock()
+				break
+			}
+			changedChildren := make(map[protocol.SessionID][]protocol.TurnID)
+			for _, child := range ended {
+				changedChildren[child.root] = append(changedChildren[child.root], child.turn)
+				child.cancel()
+				r.mu.Lock()
+				delete(r.children, child.turn)
+				r.mu.Unlock()
+				if child.commandsInherited && r.stopCommands != nil && r.ctx.Err() == nil {
+					r.stopCommands(child.session)
 				}
 			}
-			if err != nil || inv == nil {
-				if err == nil && changed {
-					r.publish()
+			if inv != nil || len(changes) > 0 {
+				r.publish()
+			}
+			refreshed := make(map[protocol.SessionID]bool)
+			for _, event := range changes {
+				value, ok := event.Data.(protocol.EventConversationChangedPayload)
+				if ok && !refreshed[value.Session] && (inv == nil || value.Session != inv.Session.ID) {
+					refreshed[value.Session] = true
+					r.RefreshCommitted(value.Session, changedChildren[value.Session]...)
+					delete(changedChildren, value.Session)
+				}
+			}
+			for parent, turns := range changedChildren {
+				r.RefreshCommitted(parent, turns...)
+			}
+			if inv == nil {
+				if len(changes) > 0 {
 					r.Wake()
 				}
 				unlock()
 				break
 			}
-			r.publish()
 			parent := r.ctx
 			r.mu.Lock()
 			if child := r.children[inv.Run.Turn]; child != nil {
@@ -262,7 +278,7 @@ func (r *Runtime) run() {
 				r.feed.Publish(inv.Session.ID, protocol.ConversationChange{Kind: "run", Data: current})
 				r.RefreshStatisticsCommitted(inv.Session.ID)
 				if inv.Session.Delegation != nil && *inv.Session.Delegation != nil {
-					r.RefreshCommitted((*inv.Session.Delegation).Session)
+					r.RefreshCommitted((*inv.Session.Delegation).Session, inv.Run.Turn)
 				}
 			}
 			unlock()
@@ -316,6 +332,23 @@ func (r *Runtime) succeed(x, previous *execution) bool {
 	return current.Status == protocol.ConversationStatusRunning
 }
 
+// StopCommitted delivers a durable Stop before projecting the changed history.
+// The caller holds the publication lock, so the turn cannot finish or be
+// replaced between this decision and cancellation of its owned work.
+func (r *Runtime) StopCommitted(run protocol.ConversationRun) {
+	if run.Status != protocol.ConversationStatusStopping {
+		return
+	}
+	r.mu.Lock()
+	x := r.active[run.Turn]
+	r.mu.Unlock()
+	if x != nil && x.ctx.Err() == nil {
+		x.cancel()
+		r.stopChildren(x)
+		r.feed.Publish(run.Session, protocol.ConversationChange{Kind: "run", Data: run})
+	}
+}
+
 // Committed wakes owners only after a controller transaction has committed.
 // The durable queue remains the sole source of admitted work.
 func (r *Runtime) Committed() {
@@ -333,10 +366,8 @@ func (r *Runtime) Committed() {
 			run, err = store.ReadAgentRun(r.ctx, db, x.inv.Run.Turn)
 			return err
 		})
-		if err == nil && run.Status == protocol.ConversationStatusStopping {
-			r.feed.Seal(run.Session, run.Turn)
-			r.feed.Publish(run.Session, protocol.ConversationChange{Kind: "run", Data: run})
-			x.cancel()
+		if err == nil {
+			r.StopCommitted(run)
 		}
 		unlock()
 		select {
@@ -365,7 +396,7 @@ func (r *Runtime) Refresh(session protocol.SessionID) {
 
 // RefreshCommitted publishes a pinned metadata read while its caller owns
 // publication, so no newer interaction or queue can overtake the read.
-func (r *Runtime) RefreshCommitted(session protocol.SessionID) {
+func (r *Runtime) RefreshCommitted(session protocol.SessionID, changedChildren ...protocol.TurnID) {
 	var history protocol.ConversationHistory
 	if err := r.db.Read(r.ctx, func(db *sql.Conn) error {
 		var err error
@@ -373,6 +404,14 @@ func (r *Runtime) RefreshCommitted(session protocol.SessionID) {
 		return err
 	}); err != nil {
 		return
+	}
+	for _, turn := range changedChildren {
+		if !slices.ContainsFunc(history.Page.Children, func(child protocol.ConversationChild) bool { return child.Run.Turn == turn }) {
+			// A child frame requires its canonical call in the receiver's
+			// page. An older call may still be loaded by existing subscribers.
+			r.feed.Invalidate(session)
+			return
+		}
 	}
 	for _, run := range history.Page.Runs {
 		r.feed.Publish(session, protocol.ConversationChange{Kind: "run", Data: run})
