@@ -174,6 +174,9 @@ func (r *Runtime) nodeSettingsFrame() {
 	if owner.snapshot().PowerSettingsRevision != owner.powerObservedRevision && !root.App.Settings.Power.Pending {
 		owner.readPower()
 	}
+	if owner.media.wanted.observation != owner.controller.ObservationGeneration() {
+		owner.followMedia(owner.snapshot())
+	}
 	owner.followCompaction()
 	owner.followModelCatalog()
 }
@@ -212,7 +215,6 @@ func (r *Runtime) enterNodeSettings() {
 	if r.teams == nil {
 		r.teams = newTeamState()
 	}
-	r.media.seen = ""
 	r.readPower()
 	r.readCodeIndex()
 	r.readProviders()
@@ -226,6 +228,7 @@ func (r *Runtime) enterNodeSettings() {
 // provider or connector sign-in under way, and a concurrency save in doubt.
 // A command already sent still ends in its toast.
 func (r *Runtime) leaveNodeSettings() {
+	r.media = mediaState{binding: r.media.binding + 1}
 	r.modelCatalogEntered = false
 	if state := r.authorizations; state != nil {
 		if attempt := state.provider; attempt != nil {

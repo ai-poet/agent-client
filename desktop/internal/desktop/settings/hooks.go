@@ -5,12 +5,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preview"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 var hookMessages = Messages{"hooks_saved", "hooks_failed", "hooks_conflict", "hooks_unknown"}
@@ -18,19 +18,19 @@ var hookMessages = Messages{"hooks_saved", "hooks_failed", "hooks_conflict", "ho
 // phases name the hook phases.
 var phases = []string{"hooks_before_tool", "hooks_after_tool", "hooks_turn_end"}
 
-// hookEditor is the hook dialog's draft: the script at index, or a new one at
-// -1, and its timeout as typed.
+// hookEditor is the hook dialog's draft. A blank script ID means a new hook.
 type hookEditor struct {
-	open    bool
-	index   int
-	script  preview.Hook
-	timeout string
+	open     bool
+	script   preview.Hook
+	original preview.Hook
+	timeout  string
 }
 
 // consent is the enabling dialog: the settings that run once the user agrees.
 type consent struct {
 	open     bool
 	settings HookSettings
+	revision uint64
 }
 
 func (m *Model) HooksEditing() bool { return m.hook.open || m.consent.open }
@@ -55,9 +55,13 @@ func hooks(c *ui.Context, m *Model) {
 		}
 	}
 	h := &m.Hooks
+	writable := func() bool { return !m.Live || m.SaveHooks != nil && !h.Pending }
 	save := func(s HookSettings) {
+		if !writable() {
+			return
+		}
 		h.Draft = s
-		if m.Live && m.SaveHooks != nil {
+		if m.Live {
 			m.SaveHooks()
 		} else {
 			report(c, h.Commit(), hookMessages)
@@ -65,7 +69,7 @@ func hooks(c *ui.Context, m *Model) {
 	}
 	enable := func(s HookSettings) {
 		if s.Enabled && slices.ContainsFunc(s.Scripts, func(x preview.Hook) bool { return x.Enabled }) {
-			m.consent = consent{open: true, settings: s}
+			m.consent = consent{open: true, settings: s, revision: h.Revision}
 			return
 		}
 		save(s)
@@ -74,7 +78,7 @@ func hooks(c *ui.Context, m *Model) {
 		kit.Card(c, func() {
 			on := h.Draft.Enabled
 			kit.Row(c, "enabled", i18n.T(c, "hooks_enabled"), "", func() {
-				if ui.Switch(c.Key("switch"), &on).Label(i18n.T(c, "hooks_enabled")).Disabled(h.Pending || len(h.Draft.Scripts) == 0).Changed() {
+				if ui.Switch(c.Key("switch"), &on).Label(i18n.T(c, "hooks_enabled")).Disabled(!writable() || len(h.Draft.Scripts) == 0).Changed() {
 					s := clone(h.Draft)
 					s.Enabled = on
 					enable(s)
@@ -87,8 +91,8 @@ func hooks(c *ui.Context, m *Model) {
 			kit.BusyAction(c.Key("add"), i18n.T(c, "hooks_add")) // the hooks are being read or saved
 			return
 		}
-		kit.Action(c.Key("add"), icons.Plus, i18n.T(c, "hooks_add"), h.Pending).OnClick(func() {
-			m.hook = hookEditor{open: true, index: -1, script: preview.Hook{Phase: preview.BeforeTool}, timeout: "30000"}
+		kit.Action(c.Key("add"), icons.Plus, i18n.T(c, "hooks_add"), !writable()).OnClick(func() {
+			m.hook = hookEditor{open: true, script: preview.Hook{Phase: preview.BeforeTool}, timeout: "30000"}
 		})
 	}, func() {
 		if len(h.Draft.Scripts) == 0 {
@@ -103,7 +107,7 @@ func hooks(c *ui.Context, m *Model) {
 				}
 				kit.Entry(c, x.ID, func() { kit.Record(c, title, detail) }, func() {
 					on := x.Enabled
-					if ui.Switch(c.Key("switch"), &on).Label(i18n.T(c, "hooks_enabled") + " " + title).Disabled(h.Pending).Changed() {
+					if ui.Switch(c.Key("switch"), &on).Label(i18n.T(c, "hooks_enabled") + " " + title).Disabled(!writable()).Changed() {
 						s := clone(h.Draft)
 						s.Scripts[i].Enabled = on
 						if on {
@@ -113,10 +117,10 @@ func hooks(c *ui.Context, m *Model) {
 						}
 					}
 				}, func() {
-					kit.Action(c.Key("edit"), icons.Settings2, i18n.T(c, "hooks_configure"), h.Pending).OnClick(func() {
-						m.hook = hookEditor{open: true, index: i, script: x, timeout: strconv.Itoa(x.TimeoutMS)}
+					kit.Action(c.Key("edit"), icons.Settings2, i18n.T(c, "hooks_configure"), !writable()).OnClick(func() {
+						m.hook = hookEditor{open: true, script: x, original: x, timeout: strconv.Itoa(x.TimeoutMS)}
 					})
-					kit.Action(c.Key("remove"), icons.CircleX, i18n.T(c, "hooks_remove"), h.Pending).OnClick(func() {
+					kit.Action(c.Key("remove"), icons.CircleX, i18n.T(c, "hooks_remove"), !writable()).OnClick(func() {
 						s := clone(h.Draft)
 						s.Scripts = slices.Delete(s.Scripts, i, i+1)
 						if len(s.Scripts) == 0 {
@@ -128,8 +132,10 @@ func hooks(c *ui.Context, m *Model) {
 			}
 		})
 	})
-	hookDialog(c, m, save)
-	consentDialog(c, m, save)
+	hookDialog(c, m, save, writable())
+	if writable() {
+		consentDialog(c, m, save)
+	}
 }
 
 func clone(s HookSettings) HookSettings {
@@ -147,7 +153,7 @@ func hookScope(m *Model) string {
 // hookDialog is the hook's name, phase, command and timeout. The reference
 // saves as it is edited and Close ends the edit; here Close saves the draft
 // once it is valid, a problem toasting and keeping the dialog open.
-func hookDialog(c *ui.Context, m *Model, save func(HookSettings)) {
+func hookDialog(c *ui.Context, m *Model, save func(HookSettings), writable bool) {
 	e := &m.hook
 	if !e.open {
 		return
@@ -177,17 +183,22 @@ func hookDialog(c *ui.Context, m *Model, save func(HookSettings)) {
 			})
 		})
 		ui.Row(c.Key("footer")).Justify(ui.End).Children(func() {
-			kit.Secondary(c.Key("close"), i18n.T(c, "close")).OnClick(func() {
+			kit.Secondary(c.Key("close"), i18n.T(c, "close")).Disabled(!writable).OnClick(func() {
 				if problem := e.Check(); problem != "" {
 					kit.Toast(c, kit.Failed, i18n.T(c, problem))
 					return
 				}
 				s := clone(m.Hooks.Draft)
-				if e.index < 0 {
+				if e.script.ID == "" {
 					e.script.ID = protocol.NewRequestID().String()
 					s.Scripts = append(s.Scripts, e.script)
 				} else {
-					s.Scripts[e.index] = e.script
+					index := slices.IndexFunc(s.Scripts, func(h preview.Hook) bool { return h.ID == e.script.ID })
+					if index < 0 || s.Scripts[index] != e.original {
+						kit.Toast(c, kit.Conflict, i18n.T(c, "hooks_conflict"))
+						return
+					}
+					s.Scripts[index] = e.script
 				}
 				e.open = false
 				save(s)
@@ -201,6 +212,11 @@ func hookDialog(c *ui.Context, m *Model, save func(HookSettings)) {
 func consentDialog(c *ui.Context, m *Model, save func(HookSettings)) {
 	k := &m.consent
 	if !k.open {
+		return
+	}
+	if m.Live && k.revision != m.Hooks.Revision {
+		k.open = false
+		kit.Toast(c, kit.Conflict, i18n.T(c, "hooks_conflict"))
 		return
 	}
 	title := i18n.T(c, "hooks_enable")

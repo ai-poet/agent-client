@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/settings"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 // Settings › Media models: the model the Node Settings shows uses for
@@ -18,61 +18,89 @@ import (
 // mediaState is what the media rows were read for and the bindings their
 // option keys stand for.
 type mediaState struct {
-	seen     string // the providers and assignments last read for
-	wanted   string // the latest ones the snapshot showed
-	reading  bool
-	bindings map[string]protocol.MediaBinding
+	binding   uint64 // increments when these Settings pages leave the Node
+	attempted mediaReadKey
+	accepted  mediaReadKey
+	wanted    mediaReadKey
+	reading   bool
+	bindings  map[string]protocol.MediaBinding
 }
 
-// followMedia reads the media assignments and the models offered when the
-// snapshot's providers or assignments are not the ones last read for. A
-// change that arrives during a read is read for once that read ends.
+type mediaReadKey struct {
+	observation uint64
+	fingerprint string
+	revision    uint64
+}
+
+// followMedia reads on a changed snapshot, reconnect, or explicit Refresh.
+// A failed pair is attempted but not accepted; frames do not retry it.
 func (r *Runtime) followMedia(snapshot protocol.Snapshot) {
 	if !r.showsSettings() {
 		return
 	}
-	var seen strings.Builder
-	fmt.Fprintf(&seen, "%d", snapshot.MediaSettings.Revision)
-	for _, provider := range snapshot.Providers {
-		fmt.Fprintf(&seen, " %s/%d", provider.ID, provider.Revision)
-	}
 	state := &r.media
-	state.wanted = seen.String()
-	if !state.reading && state.seen != state.wanted {
+	state.wanted = mediaReadKey{observation: r.controller.ObservationGeneration(), revision: snapshot.MediaSettings.Revision}
+	if state.wanted.observation == 0 {
+		return
+	}
+	var providers strings.Builder
+	for _, provider := range snapshot.Providers {
+		fmt.Fprintf(&providers, " %s/%d", provider.ID, provider.Revision)
+	}
+	state.wanted.fingerprint = providers.String()
+	r.readWantedMedia()
+}
+
+func (r *Runtime) readWantedMedia() {
+	state := &r.media
+	if !state.reading && state.wanted.observation != 0 && state.wanted != state.attempted && state.wanted != state.accepted {
 		r.readMedia()
 	}
 }
 
-// readMedia reads for the latest providers and assignments. An answer older
-// than the assignments shown, as one overtaken by a save, is dropped: the
-// snapshot that carries the newer revision is read for in its turn.
+// readMedia projects only a validated pair for the current target. A newer
+// snapshot arriving during either read gets its own pair when this one ends.
 func (r *Runtime) readMedia() {
 	state := &r.media
-	state.seen = state.wanted
+	binding, wanted := state.binding, state.wanted
 	state.reading = r.async(func() {
 		saved, err := r.controller.Do(r.ctx, protocol.Command{Kind: "read_media_settings"})
+		value, valid := detail[protocol.MediaSettings](saved.Data)
+		if err == nil && (saved.Kind != "media_settings" || !valid) {
+			err = fmt.Errorf("unexpected media settings response")
+		}
 		var listed protocol.Output
 		if err == nil {
 			listed, err = r.controller.Do(r.ctx, protocol.Command{Kind: "list_media_models"})
 		}
+		candidates, valid := detail[[]protocol.MediaCandidate](listed.Data)
+		if err == nil && (listed.Kind != "media_models" || !valid) {
+			err = fmt.Errorf("unexpected media models response")
+		}
 		r.enqueue(func(c *ui.Context) {
+			if !r.showsSettings() || binding != state.binding {
+				return
+			}
 			state.reading = false
-			if !r.showsSettings() {
-				// The page turned to another Node: this one is read again
-				// when the page returns.
+			if wanted.observation != r.controller.ObservationGeneration() {
+				r.followMedia(r.snapshot())
+				return
+			}
+			defer r.readWantedMedia()
+			if wanted != state.wanted {
 				return
 			}
 			if err != nil {
 				r.reportKeys(c, err, "media_load_failed", "media_load_failed", "media_load_failed")
-			} else if value, valid := detail[protocol.MediaSettings](saved.Data); valid && saved.Kind == "media_settings" && value.Revision >= r.App.Settings.Media.Revision {
-				candidates, _ := detail[[]protocol.MediaCandidate](listed.Data)
+			} else if value.Revision >= max(wanted.revision, r.App.Settings.Media.Revision) {
 				r.projectMedia(value, candidates, true)
-			}
-			if state.seen != state.wanted {
-				r.readMedia()
+				state.accepted = wanted
 			}
 		})
 	})
+	if state.reading {
+		state.attempted = wanted
+	}
 }
 
 // projectMedia shows the assignments the Node holds. A draft that differs
@@ -154,7 +182,8 @@ func mediaKey(binding protocol.MediaBinding) string {
 // Node's revision.
 func (r *Runtime) saveMedia() {
 	field := &r.App.Settings.Media
-	if field.Pending {
+	observation, binding := r.controller.ObservationGeneration(), r.media.binding
+	if !r.showsSettings() || observation == 0 || field.Pending {
 		return
 	}
 	request := protocol.MediaSettings{Revision: field.Revision, Bindings: map[protocol.MediaKind]*protocol.MediaBinding{}}
@@ -165,17 +194,22 @@ func (r *Runtime) saveMedia() {
 	}
 	field.Pending = true
 	r.saveSetting(protocol.Command{Kind: "save_media_settings", Data: request}, settings.MediaMessages, func(output protocol.Output, ok bool) {
-		if !r.showsSettings() {
+		if !r.showsSettings() || binding != r.media.binding {
 			return
 		}
 		field.Pending = false
+		if observation != r.controller.ObservationGeneration() {
+			return
+		}
 		value, valid := detail[protocol.MediaSettings](output.Data)
 		if !ok || !valid || output.Kind != "media_settings" {
-			r.media.seen = ""
+			r.media.accepted, r.media.attempted = mediaReadKey{}, mediaReadKey{}
 			r.followMedia(r.snapshot())
 			return
 		}
-		field.Draft = field.Saved
-		r.projectMedia(value, nil, false)
+		if value.Revision >= field.Revision {
+			field.Draft = field.Saved
+			r.projectMedia(value, nil, false)
+		}
 	})
 }

@@ -258,6 +258,7 @@ func (client *Client) apply(ctx context.Context, generation uint64, update proto
 		if client.project.snapshot != nil {
 			client.feed.observe(*client.project.snapshot)
 		}
+		client.activeObservation = generation
 		client.connected, client.err = true, nil
 		client.mu.Unlock()
 		client.reconcileConversations()

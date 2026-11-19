@@ -3,21 +3,30 @@ package live
 import (
 	"reflect"
 
-	"github.com/egoist/mygo/ui"
+	"github.com/ai-poet/agent-client/desktop/internal/client"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/settings"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 type workspaceSettingsState struct {
 	worktree        protocol.WorktreeID
-	hooks           protocol.HooksSettings
 	sandboxed       bool
 	sandboxRevision uint64
-	loading         bool
-	hookModels      map[protocol.WorktreeID]*settings.Stored[settings.HookSettings]
+	hookModels      map[protocol.WorktreeID]*workspaceHookModel
+	hookBinding     uint64 // changes when this owner's selected worktree changes or is rebound
+	hookObservation uint64
+	hookAttempted   bool
+	hookReady       bool
 	sandboxModel    settings.Stored[bool]
 	sandboxKnown    bool
+}
+
+type workspaceHookModel struct {
+	settings.Stored[settings.HookSettings]
+	uncertain *protocol.Request
 }
 
 func (r *Runtime) initWorkspaceSettings() {
@@ -25,23 +34,17 @@ func (r *Runtime) initWorkspaceSettings() {
 	if state.hookModels != nil {
 		return
 	}
-	state.hookModels = map[protocol.WorktreeID]*settings.Stored[settings.HookSettings]{}
+	state.hookModels = map[protocol.WorktreeID]*workspaceHookModel{}
 	if r.parent == nil {
 		state.sandboxModel = r.App.Settings.Sandbox
 	}
-	if owner := r.localRuntime().workspaceSettingsOwner; owner == nil || owner == r {
-		if state.worktree != (protocol.WorktreeID{}) {
-			value := r.App.Settings.Hooks
-			state.hookModels[state.worktree] = &value
-		}
-	}
 }
-func (r *Runtime) workspaceHooksModel(id protocol.WorktreeID) *settings.Stored[settings.HookSettings] {
+func (r *Runtime) workspaceHooksModel(id protocol.WorktreeID) *workspaceHookModel {
 	r.initWorkspaceSettings()
 	if model := r.workspaceSettings.hookModels[id]; model != nil {
 		return model
 	}
-	model := &settings.Stored[settings.HookSettings]{}
+	model := &workspaceHookModel{}
 	r.workspaceSettings.hookModels[id] = model
 	return model
 }
@@ -54,7 +57,7 @@ func (r *Runtime) captureWorkspaceSettings() {
 		return
 	}
 	if id := r.workspaceSettings.worktree; id != (protocol.WorktreeID{}) {
-		*r.workspaceHooksModel(id) = r.App.Settings.Hooks
+		r.workspaceHooksModel(id).Draft = r.App.Settings.Hooks.Draft
 	}
 }
 func (r *Runtime) publishWorkspaceSettings() {
@@ -64,17 +67,44 @@ func (r *Runtime) publishWorkspaceSettings() {
 	if r.localRuntime().workspaceSettingsOwner != r {
 		return
 	}
-	r.App.Settings.Hooks = settings.Stored[settings.HookSettings]{}
-	if id := r.workspaceSettings.worktree; id != (protocol.WorktreeID{}) {
-		r.App.Settings.Hooks = *r.workspaceHooksModel(id)
+	m, state := r.App.Settings, &r.workspaceSettings
+	m.Hooks = settings.Stored[settings.HookSettings]{}
+	m.SaveHooks = nil
+	if id := state.worktree; id != (protocol.WorktreeID{}) {
+		model := r.workspaceHooksModel(id)
+		m.Hooks = model.Stored
+		if state.hookReady && !model.Pending && model.uncertain == nil {
+			binding, observation := state.hookBinding, state.hookObservation
+			if r.workspaceHookCurrent(id, binding, observation) {
+				m.SaveHooks = func() {
+					if r.workspaceHookCurrent(id, binding, observation) && state.hookReady && !model.Pending && model.uncertain == nil {
+						r.saveWorkspaceHooks(id, model)
+					}
+				}
+			}
+		}
 	}
 }
+
+func (r *Runtime) invalidateWorkspaceHooks() {
+	state := &r.workspaceSettings
+	state.hookBinding++
+	state.hookAttempted, state.hookReady, state.sandboxed = false, false, false
+}
+
+func (r *Runtime) workspaceHookCurrent(id protocol.WorktreeID, binding, observation uint64) bool {
+	state := &r.workspaceSettings
+	return r.localRuntime().workspaceSettingsOwner == r && id == state.worktree &&
+		binding == state.hookBinding && observation != 0 && observation == r.controller.ObservationGeneration() &&
+		(r.ctx == nil || r.ctx.Err() == nil)
+}
+
 func (r *Runtime) bindWorkspaceSettings() {
 	root := r.localRuntime()
 	r.initWorkspaceSettings()
 	root.workspaceSettingsOwner = r
+	r.invalidateWorkspaceHooks()
 	root.App.Settings.SaveSandbox = root.saveSandbox
-	root.App.Settings.SaveHooks = r.saveWorkspaceHooks
 	root.App.Settings.HooksContext = r.hookContext
 	root.App.Settings.HooksSandboxed = r.hooksSandboxed
 	r.publishWorkspaceSettings()
@@ -136,12 +166,15 @@ func (r *Runtime) refreshWorkspaceSettings() {
 	}
 	if id != state.worktree && !r.App.Settings.HooksEditing() {
 		state.worktree = id
-		state.hooks = protocol.DefaultHooksSettings()
-		state.sandboxed = false
-		state.loading = false
-		if id != (protocol.WorktreeID{}) {
-			r.readWorkspaceHooks(id)
-		}
+		r.invalidateWorkspaceHooks()
+	}
+	observation := r.controller.ObservationGeneration()
+	if observation != state.hookObservation {
+		state.hookObservation = observation
+		r.invalidateWorkspaceHooks()
+	}
+	if observation != 0 && state.worktree != (protocol.WorktreeID{}) && !state.hookAttempted {
+		r.readWorkspaceHooks(state.worktree)
 	}
 	r.publishWorkspaceSettings()
 }
@@ -202,50 +235,48 @@ func (r *Runtime) readWorkspaceHooks(id protocol.WorktreeID) {
 	if model.Pending {
 		return
 	}
-	r.workspaceSettings.loading = true
+	state := &r.workspaceSettings
+	binding, observation := state.hookBinding, state.hookObservation
+	state.hookAttempted = true
 	model.Pending = true
-	r.publishWorkspaceSettings()
-	r.execute(protocol.Command{Kind: "read_hooks", Data: protocol.CommandReadHooksPayload{Worktree: id}}, func(c *ui.Context, out protocol.Output, err error) {
+	if !r.async(func() {
+		out, err := r.controller.Do(r.ctx, protocol.Command{Kind: "read_hooks", Data: protocol.CommandReadHooksPayload{Worktree: id}})
+		r.enqueue(func(c *ui.Context) {
+			model.Pending = false
+			if !r.workspaceHookCurrent(id, binding, observation) {
+				return
+			}
+			defer r.publishWorkspaceSettings()
+			if err != nil {
+				r.reportKeys(c, err, "hooks_failed", "hooks_conflict", "hooks_unknown")
+				return
+			}
+			value, ok := detail[protocol.HooksState](out.Data)
+			if !ok || out.Kind != "hook_settings" || value.Worktree != id || value.Settings.Revision < model.Revision {
+				settings.Report(c, kit.Failed, workspaceHookMessages)
+				return
+			}
+			draft := hookDraft(value.Settings)
+			if reflect.DeepEqual(model.Draft, model.Saved) {
+				model.Draft = draft
+			}
+			model.Saved, model.Revision = draft, value.Settings.Revision
+			state.sandboxed, state.hookReady = value.Sandboxed, true
+			if request := model.uncertain; request != nil {
+				// Refresh or returning to this worktree makes recovery available
+				// even if the original action toast has expired.
+				settings.ReportRetry(c, kit.Uncertain, workspaceHookMessages, r.retryWorkspaceHooks(id, model, request))
+			}
+		})
+	}) {
 		model.Pending = false
-		if id == r.workspaceSettings.worktree {
-			r.workspaceSettings.loading = false
-		}
-		defer r.publishWorkspaceSettings()
-		if err != nil {
-			r.reportKeys(c, err, "hooks_failed", "hooks_conflict", "hooks_unknown")
-			return
-		}
-		value, ok := detail[protocol.HooksState](out.Data)
-		if !ok {
-			return
-		}
-		draft := hookDraft(value.Settings)
-		if reflect.DeepEqual(model.Draft, model.Saved) {
-			model.Draft = draft
-		}
-		model.Saved, model.Revision = draft, value.Settings.Revision
-		if id == r.workspaceSettings.worktree {
-			r.workspaceSettings.hooks = value.Settings
-			r.workspaceSettings.sandboxed = value.Sandboxed
-		}
-	})
+	}
 }
-func (r *Runtime) saveWorkspaceHooks() {
-	if r.ctx != nil && r.ctx.Err() != nil {
-		r.Report(fileActionFault(protocol.ErrorCodeUnavailable, "the hooks execution host is unavailable"))
-		return
-	}
+
+var workspaceHookMessages = settings.Messages{Done: "hooks_saved", Failed: "hooks_failed", Conflict: "hooks_conflict", Uncertain: "hooks_unknown"}
+
+func (r *Runtime) saveWorkspaceHooks(id protocol.WorktreeID, m *workspaceHookModel) {
 	r.captureWorkspaceSettings()
-	id := r.workspaceSettings.worktree
-	if id == (protocol.WorktreeID{}) {
-		return
-	}
-	m := r.workspaceHooksModel(id)
-	if m.Pending {
-		return
-	}
-	m.Pending = true
-	r.publishWorkspaceSettings()
 	value := protocol.DefaultHooksSettings()
 	value.Revision = m.Revision
 	value.Enabled = m.Draft.Enabled
@@ -269,28 +300,75 @@ func (r *Runtime) saveWorkspaceHooks() {
 			value.Additional = append(value.Additional, protocol.HooksEntry{ID: entry.ID, Phase: phase, Script: script})
 		}
 	}
-	// Retry saves the draft again while the page still shows this project.
-	again := func() {
-		if r.workspaceSettings.worktree == id {
-			r.saveWorkspaceHooks()
+	request := r.controller.Prepare(protocol.Command{Kind: "save_hooks", Data: protocol.CommandSaveHooksPayload{Worktree: id, Settings: value, ExpectedRevision: m.Revision}})
+	r.settleWorkspaceHooks(id, m, &request, false)
+}
+
+func (r *Runtime) retryWorkspaceHooks(id protocol.WorktreeID, model *workspaceHookModel, request *protocol.Request) func() {
+	return func() {
+		state := &r.workspaceSettings
+		// The original write can be inspected after reconnect, but not while
+		// a different binding is displayed or after that write was settled.
+		if r.workspaceHookCurrent(id, state.hookBinding, state.hookObservation) && !model.Pending && model.uncertain == request {
+			r.settleWorkspaceHooks(id, model, request, true)
 		}
 	}
-	r.saveSettingRetry(protocol.Command{Kind: "save_hooks", Data: protocol.CommandSaveHooksPayload{Worktree: id, Settings: value, ExpectedRevision: m.Revision}}, settings.Messages{Done: "hooks_saved", Failed: "hooks_failed", Conflict: "hooks_conflict", Uncertain: "hooks_unknown"}, nil, again, func(out protocol.Output, ok bool) {
+}
+
+func (r *Runtime) settleWorkspaceHooks(id protocol.WorktreeID, m *workspaceHookModel, request *protocol.Request, inspect bool) {
+	state := &r.workspaceSettings
+	binding, observation := state.hookBinding, r.controller.ObservationGeneration()
+	m.Pending = true
+	r.publishWorkspaceSettings()
+	if !r.async(func() {
+		var out protocol.Output
+		var err error
+		if inspect {
+			var result client.Resolution
+			result, err = r.controller.Resolve(r.ctx, *request)
+			if err != nil {
+				// A failed query does not settle the original write.
+				result = client.Resolution{State: client.RequestPending}
+			}
+			out, err = result.Result()
+		} else {
+			out, err = r.controller.Settle(r.ctx, *request)
+		}
+		r.enqueue(func(c *ui.Context) {
+			m.Pending = false
+			m.uncertain = nil
+			outcome := kit.Done
+			var again func()
+			value, valid := detail[protocol.HooksState](out.Data)
+			switch {
+			case client.Retained(err):
+				outcome = kit.Uncertain
+				m.uncertain = request
+				again = r.retryWorkspaceHooks(id, m, request)
+			case faultCode(err) == protocol.ErrorCodeOutcomeUnknown:
+				outcome = kit.Uncertain
+			case faultCode(err) == protocol.ErrorCodeConflict || faultCode(err) == protocol.ErrorCodeRevisionConflict:
+				outcome = kit.Conflict
+			case err != nil || !valid || out.Kind != "hook_settings" || value.Worktree != id:
+				outcome = kit.Failed
+			}
+			settings.ReportRetry(c, outcome, workspaceHookMessages, again)
+			if !r.workspaceHookCurrent(id, binding, observation) {
+				return
+			}
+			if outcome == kit.Done && value.Settings.Revision >= m.Revision {
+				m.Saved, m.Draft, m.Revision = hookDraft(value.Settings), hookDraft(value.Settings), value.Settings.Revision
+				state.sandboxed = value.Sandboxed
+			} else if err == nil || outcome == kit.Conflict || outcome == kit.Uncertain && m.uncertain == nil {
+				// Rebase the retained draft once the current revision can be read.
+				r.invalidateWorkspaceHooks()
+			}
+			r.publishWorkspaceSettings()
+		})
+	}) {
 		m.Pending = false
-		defer r.publishWorkspaceSettings()
-		if !ok {
-			return
-		}
-		state, valid := detail[protocol.HooksState](out.Data)
-		if !valid {
-			return
-		}
-		m.Saved, m.Draft, m.Revision = hookDraft(state.Settings), hookDraft(state.Settings), state.Settings.Revision
-		if id == r.workspaceSettings.worktree {
-			r.workspaceSettings.hooks = state.Settings
-			r.workspaceSettings.sandboxed = state.Sandboxed
-		}
-	})
+		r.publishWorkspaceSettings()
+	}
 }
 func (r *Runtime) readSandbox() {
 	r.initWorkspaceSettings()

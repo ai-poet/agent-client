@@ -45,10 +45,13 @@ func TestWorkspaceHookSettings(t *testing.T) {
 			transports[index] = &conversationTestTransport{snapshot: snapshot}
 			transports[index].handle = func(request protocol.Request) (link.Response, bool) {
 				switch request.Command.Kind {
+				case "read_hooks":
+					input, _ := detail[protocol.CommandReadHooksPayload](request.Command.Data)
+					return link.Response{Output: protocol.Output{Kind: "hook_settings", Data: protocol.HooksState{Worktree: input.Worktree, Settings: protocol.HooksSettings{Revision: uint64(index + 7)}, Sandboxed: true}}}, true
 				case "save_hooks":
 					input, _ := detail[protocol.CommandSaveHooksPayload](request.Command.Data)
 					input.Settings.Revision++
-					return link.Response{Output: protocol.Output{Kind: "hooks", Data: protocol.HooksState{Settings: input.Settings, Sandboxed: true}}}, true
+					return link.Response{Output: protocol.Output{Kind: "hook_settings", Data: protocol.HooksState{Worktree: input.Worktree, Settings: input.Settings, Sandboxed: true}}}, true
 				case "save_sandbox_settings":
 					input, _ := detail[protocol.SandboxSettings](request.Command.Data)
 					input.Revision++
@@ -61,13 +64,11 @@ func TestWorkspaceHookSettings(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer controller.Close()
-			hooks := &settings.Stored[settings.HookSettings]{Revision: uint64(index + 7)}
 			owners[index] = &Runtime{
 				ctx: t.Context(), controller: controller, App: app,
 				busy: map[string]bool{}, uncertain: map[string]protocol.Request{},
 				workspaceSettings: workspaceSettingsState{
 					worktree: worktree, sandboxKnown: true, sandboxRevision: snapshot.SandboxSettingsRevision,
-					hookModels:   map[protocol.WorktreeID]*settings.Stored[settings.HookSettings]{worktree: hooks},
 					sandboxModel: settings.Stored[bool]{Revision: uint64(index + 3)},
 				},
 			}
@@ -76,13 +77,17 @@ func TestWorkspaceHookSettings(t *testing.T) {
 		local, remote := owners[0], owners[1]
 		remote.parent = local
 		local.bindings = map[string]*Runtime{remote.controller.Target().String(): remote}
+		// Initial binding captures the sandbox state already loaded in the window.
+		app.Settings.Sandbox = local.workspaceSettings.sandboxModel
 		local.bindWorkspaceSettings()
+		settle := settingsQueueTester(local)
 		localSession, remoteSession := transports[0].snapshot.Sessions[0].ID.String(), transports[1].snapshot.Sessions[0].ID.String()
 		// Project selection owns hooks independently of the monitored device.
 		localHost, remoteHost := local.controller.Target().String(), remote.controller.Target().String()
 		app.Host = localHost
 		local.OpenSession(remoteSession)
 		local.workspaceSettingsFrame()
+		settle(remote)
 		if label, ok := app.Settings.HooksContext(); !ok || !strings.Contains(label, remoteHost) || app.Settings.Hooks.Revision != 8 || app.Settings.Sandbox.Revision != 3 {
 			t.Fatal("remote project hooks or local sandbox lost their owner")
 		}
@@ -99,27 +104,15 @@ func TestWorkspaceHookSettings(t *testing.T) {
 		app.Host = localHost
 		local.OpenSession(localSession)
 		local.workspaceSettingsFrame()
-		remote.workers.Wait()
-		local.workers.Wait()
-		tester := ui.NewTester(func(c *ui.Context) {
-			theme.Apply(c, "", theme.Light)
-			local.mu.Lock()
-			queue := local.queue
-			local.queue = nil
-			local.mu.Unlock()
-			for _, complete := range queue {
-				complete(c)
-			}
-		}, 640, 480)
-		tester.Frame()
+		settle(local, remote)
 		if app.Settings.Hooks.Revision != 7 || app.Settings.Hooks.Draft.Enabled || app.Settings.Sandbox.Revision != 4 || !app.Settings.Sandbox.Draft {
 			t.Fatal("remote hook completion overwrote local hooks or sandbox completion")
 		}
 		transports[1].mu.Lock()
 		requests := append([]protocol.Request(nil), transports[1].requests...)
 		transports[1].mu.Unlock()
-		if len(requests) != 1 {
-			t.Fatalf("remote hooks dispatched %d requests", len(requests))
+		if len(requests) != 2 || requests[0].Command.Kind != "read_hooks" || requests[1].Command.Kind != "save_hooks" {
+			t.Fatalf("remote hooks dispatched %+v", requests)
 		}
 		for _, request := range requests {
 			if request.Target != remote.controller.Target() {
@@ -135,7 +128,8 @@ func TestWorkspaceHookSettings(t *testing.T) {
 		transports[0].mu.Lock()
 		localRequests := append([]protocol.Request(nil), transports[0].requests...)
 		transports[0].mu.Unlock()
-		if len(localRequests) != 1 || localRequests[0].Command.Kind != "save_sandbox_settings" || localRequests[0].Target != local.controller.Target() {
+		if len(localRequests) != 2 || localRequests[0].Command.Kind != "save_sandbox_settings" && localRequests[1].Command.Kind != "save_sandbox_settings" ||
+			localRequests[0].Target != local.controller.Target() || localRequests[1].Target != local.controller.Target() {
 			t.Fatalf("sandbox save escaped local Node: %+v", localRequests)
 		}
 		if controller, ok := local.SessionClient(remoteSession); !ok || controller != remote.controller {
@@ -144,6 +138,7 @@ func TestWorkspaceHookSettings(t *testing.T) {
 		app.Host = remoteHost
 		local.OpenSession(remoteSession)
 		local.workspaceSettingsFrame()
+		settle(remote)
 		if !app.Settings.Hooks.Draft.Enabled || !app.Settings.Sandbox.Draft || app.Settings.Hooks.Pending || app.Settings.Sandbox.Pending {
 			t.Fatal("navigation lost the retained remote hook or local sandbox draft")
 		}
@@ -161,7 +156,14 @@ func TestWorkspaceHookSettings(t *testing.T) {
 			if !admitted {
 				snapshot.Worktrees = []protocol.Worktree{tree}
 			}
-			controller := client.New(&conversationTestTransport{snapshot: snapshot})
+			source := &conversationTestTransport{snapshot: snapshot}
+			source.handle = func(request protocol.Request) (link.Response, bool) {
+				if request.Command.Kind != "read_hooks" {
+					return link.Response{}, false
+				}
+				return link.Response{Output: protocol.Output{Kind: "hook_settings", Data: protocol.HooksState{Worktree: worktree, Settings: protocol.HooksSettings{Revision: 7}, Sandboxed: true}}}, true
+			}
+			controller := client.New(source)
 			if err := controller.Start(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -171,15 +173,15 @@ func TestWorkspaceHookSettings(t *testing.T) {
 				Workspace: &viewmodel.Workspace{Hosts: []viewmodel.Host{{ID: node.String(), Local: true}}},
 				Projects:  []*viewmodel.Project{{ID: project.String(), Host: node.String(), Conversations: []*viewmodel.Conversation{{ID: draftID, Node: node.String()}}}},
 			}
-			r := &Runtime{controller: controller, App: shell.NewLive(data), workspace: &workspaceState{admitted: map[protocol.WorktreeID]protocol.Worktree{}}}
+			r := &Runtime{ctx: t.Context(), controller: controller, App: shell.NewLive(data), workspace: &workspaceState{admitted: map[protocol.WorktreeID]protocol.Worktree{}}}
 			if admitted {
 				r.workspace.admitted[worktree] = tree
 			}
 			r.App.Sidebar.Selected = draftID
 			r.App.Composer(draftID).Worktree = tree.Path
-			r.workspaceSettings = workspaceSettingsState{worktree: worktree, sandboxed: true, sandboxKnown: true}
-			r.App.Settings.Hooks = settings.Stored[settings.HookSettings]{Revision: 7}
+			r.workspaceSettings.sandboxKnown = true
 			r.workspaceSettingsFrame()
+			settingsQueueTester(r)(r)
 			if r.workspaceSettings.worktree != worktree || r.App.Settings.Hooks.Revision != 7 || !r.hooksSandboxed() {
 				t.Fatal("project draft lost its captured hook owner or settings")
 			}
@@ -199,5 +201,24 @@ func TestWorkspaceHookSettings(t *testing.T) {
 				t.Fatal("unassigned draft exposed project hook consent")
 			}
 		})
+	}
+}
+
+func settingsQueueTester(root *Runtime) func(...*Runtime) {
+	tester := ui.NewTester(func(c *ui.Context) {
+		theme.Apply(c, "", theme.Light)
+		root.mu.Lock()
+		queue := root.queue
+		root.queue = nil
+		root.mu.Unlock()
+		for _, complete := range queue {
+			complete(c)
+		}
+	}, 640, 480)
+	return func(workers ...*Runtime) {
+		for _, owner := range workers {
+			owner.workers.Wait()
+		}
+		tester.Frame()
 	}
 }

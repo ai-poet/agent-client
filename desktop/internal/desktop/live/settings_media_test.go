@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/client"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preferences"
@@ -13,6 +12,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 // TestMediaSettings drives Settings › Media models against a Node that answers
@@ -302,7 +302,7 @@ func TestMediaSettings(t *testing.T) {
 		current := r.snapshot()
 		newer := current
 		newer.MediaSettings.Revision++
-		r.media.seen = ""
+		r.media.attempted, r.media.accepted = mediaReadKey{}, mediaReadKey{}
 		r.followMedia(current)
 		r.followMedia(newer)
 		await("the read for the newer snapshot", func() bool {
@@ -316,7 +316,7 @@ func TestMediaSettings(t *testing.T) {
 			before = reads
 			overtaken = &protocol.MediaSettings{Revision: revision - 1, Bindings: map[protocol.MediaKind]*protocol.MediaBinding{protocol.MediaKindVision: binding("see")}}
 		})
-		r.media.seen = ""
+		r.media.attempted, r.media.accepted = mediaReadKey{}, mediaReadKey{}
 		r.followMedia(current)
 		await("the overtaken read", func() bool {
 			done := false

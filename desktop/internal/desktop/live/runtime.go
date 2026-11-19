@@ -19,6 +19,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preferences"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/settings"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/shell"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/sidebar"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
@@ -723,6 +724,8 @@ func (r *Runtime) Refresh() {
 		owner := r.selectedRuntime()
 		if r.App.Page == shell.HostPage {
 			owner = r.runtimeFor(r.App.Host)
+		} else if r.App.Page == shell.SettingsPage && r.App.Settings.Section == settings.Media {
+			owner = r.shownSettings()
 		}
 		if owner == nil {
 			r.Report(fileActionFault(protocol.ErrorCodeUnavailable, "the execution host is unavailable"))

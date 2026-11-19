@@ -38,6 +38,7 @@ type Client struct {
 	revision                uint64
 	feed                    activityFeed
 	connected               bool
+	activeObservation       uint64
 	connection              link.ConnectionInfo
 	connectionDone          chan struct{}
 	err                     error
@@ -178,6 +179,18 @@ func (client *Client) Connected() bool {
 	client.mu.RLock()
 	defer client.mu.RUnlock()
 	return client.connected
+}
+
+// ObservationGeneration identifies the active Node observation, or zero when
+// offline. It changes on reconnect or Refresh even if no frame saw the outage
+// and the replacement snapshot has the same settings revisions.
+func (client *Client) ObservationGeneration() uint64 {
+	client.mu.RLock()
+	defer client.mu.RUnlock()
+	if !client.connected {
+		return 0
+	}
+	return client.activeObservation
 }
 
 func (client *Client) Connection() link.ConnectionInfo {
