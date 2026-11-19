@@ -348,6 +348,7 @@ func (r *Runtime) Close() error {
 	}
 	r.closed = true
 	r.mu.Unlock()
+	r.cancel()
 	if r.updates != nil {
 		// A closing window no longer needs to acknowledge an installation's
 		// read-only frame. The remaining UI frames remove it from the wait.
@@ -377,10 +378,6 @@ func (r *Runtime) Close() error {
 	r.closeAttachments()
 	r.invalidateFilePreview(nil)
 	r.closeWorkspace()
-	if r.cheapAuth != nil && r.cheapAuth.attempt != nil {
-		r.cheapAuth.attempt.flow.Close()
-	}
-	r.cancel()
 	r.workers.Wait()
 	r.observers.Wait()
 	return nil

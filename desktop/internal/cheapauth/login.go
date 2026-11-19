@@ -16,7 +16,6 @@ import (
 // listener. The same verifier redeems browser-delivered and pasted codes.
 type LoginFlow struct {
 	client   *Client
-	store    *Store
 	pkce     PKCE
 	listener net.Listener
 	server   *http.Server
@@ -25,7 +24,6 @@ type LoginFlow struct {
 	done     chan struct{}
 	deliver  sync.Once
 	close    sync.Once
-	onLogin  func(Credentials)
 }
 
 type loginResult struct {
@@ -34,17 +32,17 @@ type loginResult struct {
 }
 
 // StartManualLogin creates a paste-only attempt without touching the network.
-func StartManualLogin(client *Client, store *Store) (*LoginFlow, error) {
+func StartManualLogin(client *Client) (*LoginFlow, error) {
 	pkce, err := GeneratePKCE()
 	if err != nil {
 		return nil, err
 	}
-	return &LoginFlow{client: client, store: store, pkce: pkce, result: make(chan loginResult, 1), serveErr: make(chan error, 1), done: make(chan struct{})}, nil
+	return &LoginFlow{client: client, pkce: pkce, result: make(chan loginResult, 1), serveErr: make(chan error, 1), done: make(chan struct{})}, nil
 }
 
 // StartLogin falls back to paste-only mode when loopback cannot be bound.
-func StartLogin(client *Client, store *Store) (*LoginFlow, error) {
-	flow, err := StartManualLogin(client, store)
+func StartLogin(ctx context.Context, client *Client) (*LoginFlow, error) {
+	flow, err := StartManualLogin(client)
 	if err != nil {
 		return nil, err
 	}
@@ -54,6 +52,7 @@ func StartLogin(client *Client, store *Store) (*LoginFlow, error) {
 	}
 	flow.listener = listener
 	flow.server = &http.Server{
+		BaseContext: func(net.Listener) context.Context { return ctx },
 		Handler: http.HandlerFunc(flow.serveHTTP), MaxHeaderBytes: 16 * 1024,
 		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second,
 	}
@@ -111,39 +110,17 @@ func (f *LoginFlow) Wait(ctx context.Context) (Credentials, error) {
 }
 
 // ExchangePasted redeems a code copied from the bridge, including the
-// no-loopback flow. It uses the exact same verifier and credential store.
+// no-loopback flow. Both exchange paths return candidates; only the owner of
+// the current attempt can establish an account.
 func (f *LoginFlow) ExchangePasted(ctx context.Context, pasted string) (Credentials, error) {
 	code, legacy, err := ParsePastedLogin(pasted, f.client.Endpoint())
 	if err != nil {
 		return Credentials{}, err
 	}
-	var credentials Credentials
 	if legacy != nil {
-		credentials = *legacy
-	} else {
-		credentials, err = f.client.Exchange(ctx, code, f.pkce.Verifier())
-		if err != nil {
-			return Credentials{}, err
-		}
+		return *legacy, nil
 	}
-	if err := f.establish(credentials); err != nil {
-		return Credentials{}, err
-	}
-	f.result <- loginResult{credentials: credentials}
-	f.Close()
-	return credentials, nil
-}
-
-func (f *LoginFlow) establish(credentials Credentials) error {
-	if f.store != nil {
-		if err := f.store.Save(credentials); err != nil {
-			return err
-		}
-	}
-	if f.onLogin != nil {
-		f.onLogin(credentials)
-	}
-	return nil
+	return f.client.Exchange(ctx, code, f.pkce.Verifier())
 }
 
 func (f *LoginFlow) serveHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -159,16 +136,16 @@ func (f *LoginFlow) serveHTTP(writer http.ResponseWriter, request *http.Request)
 			http.Error(writer, "禁止跨站提交", http.StatusForbidden)
 			return
 		}
+		if request.ContentLength < 0 {
+			http.Error(writer, "回跳内容无效", http.StatusBadRequest)
+			return
+		}
 		if request.ContentLength > 64*1024 {
 			http.Error(writer, "回跳内容过大", http.StatusRequestEntityTooLarge)
 			return
 		}
 		request.Body = http.MaxBytesReader(writer, request.Body, 64*1024)
 		raw := make([]byte, request.ContentLength)
-		if request.ContentLength < 0 {
-			http.Error(writer, "回跳内容无效", http.StatusBadRequest)
-			return
-		}
 		if _, err := io.ReadFull(request.Body, raw); err != nil {
 			http.Error(writer, "回跳内容无效", http.StatusBadRequest)
 			return
@@ -185,18 +162,16 @@ func (f *LoginFlow) serveHTTP(writer http.ResponseWriter, request *http.Request)
 					credentials, err = f.client.Exchange(request.Context(), code, f.pkce.Verifier())
 				}
 			}
-			if err == nil {
-				err = f.establish(credentials)
-			}
 			if err != nil {
 				http.Error(writer, "登录码无效、已过期或与本次登录不匹配，请返回应用重试或粘贴登录码", http.StatusBadRequest)
-				f.result <- loginResult{err: err}
-				return
+			} else {
+				writer.Header().Set("Cache-Control", "no-store")
+				writer.WriteHeader(http.StatusOK)
+				_, _ = writer.Write([]byte("ok"))
 			}
-			writer.Header().Set("Cache-Control", "no-store")
-			writer.WriteHeader(http.StatusOK)
-			_, _ = writer.Write([]byte("ok"))
-			f.result <- loginResult{credentials: credentials}
+			// The owner may close the listener as soon as it gets the result.
+			_ = http.NewResponseController(writer).Flush()
+			f.result <- loginResult{credentials: credentials, err: err}
 		})
 		if !accepted {
 			http.Error(writer, "登录回跳已处理", http.StatusConflict)

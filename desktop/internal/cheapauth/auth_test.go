@@ -63,7 +63,7 @@ func TestPKCEExchangePersistsOwnerOnlyCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	flow, err := service.StartLogin(server.URL)
+	flow, err := service.StartLogin(t.Context(), server.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,6 +86,10 @@ func TestPKCEExchangePersistsOwnerOnlyCredentials(t *testing.T) {
 	}
 	if credentials.AccessToken != testAccess || credentials.Endpoint != server.URL || credentials.APIKey != testGateway {
 		t.Fatalf("兑换结果不完整: %s", credentials)
+	}
+	// 兑换只产出候选凭据；当前 attempt 的持有者负责落盘。
+	if err := service.Establish(t.Context(), credentials); err != nil {
+		t.Fatal(err)
 	}
 	info, err := os.Stat(service.store.Path())
 	if err != nil {
@@ -195,7 +199,11 @@ func TestPastedCodeUsesCurrentPKCEAndStore(t *testing.T) {
 	if strings.Contains(flow.LoginURL(), "redirect_to=") {
 		t.Fatal("粘贴模式不应携带 loopback 回跳")
 	}
-	if _, err := flow.ExchangePasted(t.Context(), "http://127.0.0.1:65535/callback#code=K7QM-3XPD&endpoint="+url.QueryEscape(server.URL)); err != nil {
+	credentials, err := flow.ExchangePasted(t.Context(), "http://127.0.0.1:65535/callback#code=K7QM-3XPD&endpoint="+url.QueryEscape(server.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Establish(t.Context(), credentials); err != nil {
 		t.Fatal(err)
 	}
 	if !service.SignedIn() {
@@ -207,7 +215,7 @@ func TestLoopbackRelayExchangesPostedFragment(t *testing.T) {
 	server := exchangeServer(t, nil)
 	defer server.Close()
 	service, _ := NewService(t.TempDir())
-	flow, err := service.StartLogin(server.URL)
+	flow, err := service.StartLogin(t.Context(), server.URL)
 	if err != nil {
 		t.Fatal(err)
 	}

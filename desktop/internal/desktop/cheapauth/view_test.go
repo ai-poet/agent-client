@@ -17,6 +17,12 @@ func loginTester(state *State) *ui.Tester {
 	return tt
 }
 
+func accountTester(state *State) *ui.Tester {
+	tt := ui.NewTester(func(c *ui.Context) { Page(c, state) }, 960, 720)
+	tt.SetLocale("zh-CN")
+	return tt
+}
+
 func loginControl(t *testing.T, tt *ui.Tester, role ui.Role, name string) ui.AccessInfo {
 	t.Helper()
 	info, ok := tt.AccessByRole(role, name)
@@ -140,25 +146,123 @@ func TestPasteLoginSubmissionAndBrowserActions(t *testing.T) {
 	}
 }
 
-func TestLoginFailureRecoveryAndReadyGate(t *testing.T) {
+func TestLoginGateFollowsCredentialState(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		state  *State
+		blocks bool
+	}{
+		{"nil", nil, true},
+		{"signed out", &State{Stage: SignedOut}, true},
+		{"starting", &State{Stage: Starting}, true},
+		{"waiting", &State{Stage: WaitingForCode}, true},
+		{"syncing", &State{Stage: SyncingGateway}, false},
+		{"gateway failed", &State{Stage: GatewayFailed, Failure: "连接模型网关失败"}, false},
+		{"ready", &State{Stage: Ready}, false},
+		{"account read failed", &State{Stage: Ready, AccountFailure: "无法读取账号信息"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.state.RequiresLogin() != tc.blocks {
+				t.Fatalf("RequiresLogin() = %t, want %t", !tc.blocks, tc.blocks)
+			}
+			tt := ui.NewTester(func(c *ui.Context) {
+				if !Gate(c, tc.state) {
+					ui.Text(c, "shell")
+				}
+			}, 960, 720)
+			if tt.HasText("shell") == tc.blocks || tt.HasText("登录 CheapRouter") != tc.blocks {
+				t.Fatalf("unexpected gate contents: %q", tt.Texts())
+			}
+		})
+	}
+}
+
+func TestAccountGatewayProgressAndRecovery(t *testing.T) {
 	state := NewState()
-	state.Stage, state.Failure = SyncingGateway, "连接模型网关失败"
-	retries, cancellations := 0, 0
-	state.Retry = func() { retries++ }
+	state.Stage = SyncingGateway
+	stops, retries, cancellations, logouts := 0, 0, 0, 0
+	state.StopSync = func() {
+		stops++
+		state.Stage, state.Failure = GatewayFailed, "已取消模型网关配置"
+	}
+	state.Retry = func() {
+		retries++
+		state.Stage, state.Failure = SyncingGateway, ""
+	}
 	state.Cancel = func() { cancellations++ }
-	tt := loginTester(state)
-	if !tt.HasText(state.Failure) || !tt.HasText("正在连接模型网关") {
-		t.Fatal("gateway failure or synchronization status is missing")
+	state.Logout = func() {
+		logouts++
+		state.LoggingOut = true
 	}
-	loginClick(t, tt, "重试网关配置")
-	loginClick(t, tt, "返回重新登录")
-	if retries != 1 || cancellations != 1 {
-		t.Fatal("gateway recovery callbacks changed")
+	tt := accountTester(state)
+	if !tt.HasText("正在连接模型网关") || tt.HasText("重试网关配置") {
+		t.Fatal("gateway progress is missing or shows recovery actions")
 	}
-	state.Stage = Ready
+	loginClick(t, tt, "取消本次配置")
 	tt.Frame()
-	if tt.HasText("登录 CheapRouter") {
-		t.Fatal("ready account is still gated")
+	if stops != 1 || !tt.HasText(state.Failure) || tt.HasText("正在连接模型网关") || tt.HasText("取消本次配置") {
+		t.Fatalf("unexpected gateway failure contents after cancellation: %q", tt.Texts())
+	}
+
+	loginClick(t, tt, "重试网关配置")
+	tt.Frame()
+	if retries != 1 || !tt.HasText("正在连接模型网关") {
+		t.Fatal("retry did not restart synchronization")
+	}
+	state.Stage, state.Failure = GatewayFailed, "连接模型网关失败"
+	state.AccountFailure = "无法读取账号信息"
+	tt.Frame()
+	if !tt.HasText(state.Failure) || !tt.HasText(state.AccountFailure) {
+		t.Fatal("gateway and account failures are not both displayed")
+	}
+	loginClick(t, tt, "返回重新登录")
+	tt.Frame()
+	if logouts != 1 || cancellations != 0 {
+		t.Fatal("relogin did not use logout to clear credentials")
+	}
+	for _, name := range []string{"重试网关配置", "返回重新登录"} {
+		if !loginControl(t, tt, ui.RoleButton, name).Disabled {
+			t.Errorf("%q is enabled during logout", name)
+		}
+	}
+}
+
+func TestReadyAccountReadFailureDoesNotReportUnknownBalanceOrPlan(t *testing.T) {
+	state := NewState()
+	state.Stage, state.AccountFailure, state.ModelCount = Ready, "无法读取账号信息", 3
+	tt := accountTester(state)
+	for _, label := range []string{"已连接 CheapRouter", state.AccountFailure, "可用聊天模型", "3 个", "退出登录"} {
+		if !tt.HasText(label) {
+			t.Errorf("missing %q from account page: %q", label, tt.Texts())
+		}
+	}
+	for _, label := range []string{"当前套餐", "按量付费", "账户余额", "$0.00"} {
+		if tt.HasText(label) {
+			t.Errorf("unavailable account information shown as fact: %q", label)
+		}
+	}
+	state.AccountFailure = ""
+	state.Account = core.User{Username: "Demo", Plan: "Pro", Balance: 4.5}
+	tt.Frame()
+	for _, label := range []string{"Demo", "当前套餐", "Pro", "账户余额", "$4.50"} {
+		if !tt.HasText(label) {
+			t.Errorf("missing verified account information %q", label)
+		}
+	}
+	if tt.HasText("无法读取账号信息") {
+		t.Fatal("stale account failure is still visible")
+	}
+}
+
+func TestAccountPageCanCancelPendingLogin(t *testing.T) {
+	state := NewState()
+	state.Stage, state.Exchanging = WaitingForCode, true
+	state.Cancel = func() { state.Stage = SignedOut }
+	tt := accountTester(state)
+	loginClick(t, tt, "取消本次登录")
+	tt.Frame()
+	if state.Stage != SignedOut || !tt.HasText("在浏览器中登录") {
+		t.Fatal("embedded login could not be cancelled during exchange")
 	}
 }
 

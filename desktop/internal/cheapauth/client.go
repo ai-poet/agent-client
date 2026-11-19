@@ -76,13 +76,24 @@ func (c *Client) do(ctx context.Context, method, path, accessToken string, input
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return &AuthError{Kind: ErrorNetwork, Op: path}
 	}
 	defer response.Body.Close()
+	authStatus := response.StatusCode == http.StatusUnauthorized ||
+		path == "/auth/refresh" && response.StatusCode == http.StatusForbidden
+	if authStatus && path != "/auth/desktop-session/exchange" {
+		return apiError(path, response.StatusCode, envelope{})
+	}
 	if response.ContentLength > maxResponseSize {
 		return &AuthError{Kind: ErrorResponse, Op: path, Status: response.StatusCode}
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponseSize+1))
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	if err != nil || len(raw) > maxResponseSize {
 		return &AuthError{Kind: ErrorResponse, Op: path, Status: response.StatusCode}
 	}
@@ -110,6 +121,24 @@ func (c *Client) do(ctx context.Context, method, path, accessToken string, input
 func apiError(op string, status int, wrapped envelope) error {
 	reason := strings.ToUpper(strings.TrimSpace(wrapped.Reason))
 	message := strings.ToLower(wrapped.Message)
+	if op == "/auth/refresh" {
+		switch {
+		case status == http.StatusUnauthorized || status == http.StatusForbidden ||
+			wrapped.Code == http.StatusUnauthorized || wrapped.Code == http.StatusForbidden:
+			return &AuthError{Kind: ErrorRefresh, Op: op, Status: status}
+		case reason == "REFRESH_TOKEN_INVALID", reason == "REFRESH_TOKEN_EXPIRED", reason == "REFRESH_TOKEN_REUSED",
+			reason == "TOKEN_REVOKED", reason == "SESSION_BINDING_MISMATCH", reason == "USER_NOT_ACTIVE":
+			return &AuthError{Kind: ErrorRefresh, Op: op, Status: status}
+		default:
+			return &AuthError{Kind: ErrorResponse, Op: op, Status: status}
+		}
+	}
+	if op != "/auth/desktop-session/exchange" {
+		if status == http.StatusUnauthorized || wrapped.Code == http.StatusUnauthorized {
+			return &AuthError{Kind: ErrorUnauthorized, Op: op, Status: status}
+		}
+		return &AuthError{Kind: ErrorResponse, Op: op, Status: status}
+	}
 	switch {
 	case strings.Contains(reason, "VERIFIER") || strings.Contains(reason, "PKCE") || strings.Contains(message, "verifier"):
 		return &AuthError{Kind: ErrorVerifierMismatch, Op: op, Status: status}
@@ -117,8 +146,6 @@ func apiError(op string, status int, wrapped envelope) error {
 		return &AuthError{Kind: ErrorCodeExpired, Op: op, Status: status}
 	case reason == "DESKTOP_LOGIN_CODE_INVALID" || strings.Contains(reason, "LOGIN_CODE"):
 		return &AuthError{Kind: ErrorCodeInvalid, Op: op, Status: status}
-	case op == "/auth/refresh":
-		return &AuthError{Kind: ErrorRefresh, Op: op, Status: status}
 	case status == http.StatusUnauthorized:
 		return &AuthError{Kind: ErrorUnauthorized, Op: op, Status: status}
 	default:
@@ -187,14 +214,10 @@ func (c *Client) Refresh(ctx context.Context, current Credentials) (Credentials,
 	var pair TokenPair
 	err := c.do(ctx, http.MethodPost, "/auth/refresh", "", map[string]string{"refresh_token": current.RefreshToken}, &pair)
 	if err != nil {
-		var auth *AuthError
-		if ok := errorAs(err, &auth); ok && auth.Kind == ErrorNetwork {
-			return Credentials{}, err
-		}
-		return Credentials{}, &AuthError{Kind: ErrorRefresh, Op: "/auth/refresh", Status: authStatus(err)}
+		return Credentials{}, err
 	}
 	if strings.TrimSpace(pair.AccessToken) == "" || pair.ExpiresIn <= 0 {
-		return Credentials{}, &AuthError{Kind: ErrorRefresh, Op: "/auth/refresh"}
+		return Credentials{}, &AuthError{Kind: ErrorResponse, Op: "/auth/refresh"}
 	}
 	current.AccessToken = pair.AccessToken
 	if token := strings.TrimSpace(pair.RefreshToken); token != "" {
@@ -202,31 +225,6 @@ func (c *Client) Refresh(ctx context.Context, current Credentials) (Credentials,
 	}
 	current.ExpiresAt = c.now().Unix() + pair.ExpiresIn
 	return current, nil
-}
-
-// errorAs is kept tiny so Refresh never formats or wraps the original error.
-func errorAs(err error, target **AuthError) bool {
-	for err != nil {
-		if value, ok := err.(*AuthError); ok {
-			*target = value
-			return true
-		}
-		type unwrapper interface{ Unwrap() error }
-		wrapped, ok := err.(unwrapper)
-		if !ok {
-			return false
-		}
-		err = wrapped.Unwrap()
-	}
-	return false
-}
-
-func authStatus(err error) int {
-	var auth *AuthError
-	if errorAs(err, &auth) {
-		return auth.Status
-	}
-	return 0
 }
 
 func (c *Client) Logout(ctx context.Context, refreshToken string) error {

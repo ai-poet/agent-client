@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ai-poet/agent-client/desktop/internal/client"
 	core "github.com/ai-poet/agent-client/desktop/internal/cheapauth"
 	cheapauthui "github.com/ai-poet/agent-client/desktop/internal/desktop/cheapauth"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/settings"
@@ -16,18 +17,45 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+// The UI owns generation changes. Background mutations share effects: after
+// taking it, a worker must check its generation's context before admission.
+// Already admitted writes settle before another mutation can overtake them.
 type cheapAuthRuntime struct {
 	service    *core.Service
 	state      *cheapauthui.State
+	generation *cheapAuthGeneration
 	attempt    *cheapLoginAttempt
-	generation uint64
-	loggingOut bool
+	stopSync  context.CancelFunc
+
+	effects sync.Mutex
+	pending *cheapProviderWrite // guarded by effects; never redispatch this request
+}
+
+type cheapAuthGeneration struct {
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 type cheapLoginAttempt struct {
+	*cheapAuthGeneration
 	flow       *core.LoginFlow
-	generation uint64
 	once       sync.Once
+	committing bool
+}
+
+type cheapProviderWrite struct {
+	generation *cheapAuthGeneration
+	request    protocol.Request
+}
+
+func (a *cheapAuthRuntime) advance(parent context.Context) *cheapAuthGeneration {
+	if a.generation != nil {
+		a.generation.cancel()
+	}
+	a.stopSync, a.attempt = nil, nil
+	ctx, cancel := context.WithCancel(parent)
+	a.generation = &cheapAuthGeneration{ctx: ctx, cancel: cancel}
+	return a.generation
 }
 
 func (r *Runtime) initCheapAuth() {
@@ -37,15 +65,15 @@ func (r *Runtime) initCheapAuth() {
 	account := &cheapAuthRuntime{service: service, state: state}
 	r.cheapAuth = account
 	r.App.Settings.CheapRouter = state
-	state.Start = func(manual bool) { r.startCheapLogin(manual) }
+	state.Start = r.startCheapLogin
 	state.SubmitPaste = r.submitCheapPaste
 	state.Cancel = r.cancelCheapLogin
 	state.Retry = func() {
-		if r.cheapAuth != nil && r.cheapAuth.service.SignedIn() {
-			state.Stage, state.Failure = cheapauthui.SyncingGateway, ""
-			r.startCheapSync(r.cheapAuth.generation)
+		if state.Stage == cheapauthui.GatewayFailed && !state.LoggingOut {
+			r.startCheapSync(account, account.generation)
 		}
 	}
+	state.StopSync = r.stopCheapSync
 	state.Logout = r.logoutCheapAuth
 	if err != nil {
 		state.Failure = cheapAuthError(err)
@@ -57,21 +85,18 @@ func (r *Runtime) initCheapAuth() {
 	}
 	if service.SignedIn() {
 		state.Endpoint = service.Endpoint()
-		state.Stage = cheapauthui.SyncingGateway
-		r.startCheapSync(0)
+		r.startCheapSync(account, account.advance(r.ctx))
 	}
 }
 
 func (r *Runtime) startCheapLogin(manual bool) {
 	account := r.cheapAuth
-	if account == nil || account.state.Stage == cheapauthui.Starting {
+	if account == nil || account.service == nil || account.state.LoggingOut || account.state.Stage != cheapauthui.SignedOut {
 		return
 	}
-	if account.attempt != nil {
-		account.attempt.flow.Close()
-	}
-	account.generation++
-	generation := account.generation
+	generation := account.advance(r.ctx)
+	attempt := &cheapLoginAttempt{cheapAuthGeneration: generation}
+	account.attempt = attempt
 	state := account.state
 	endpoint := state.Endpoint
 	state.Stage, state.Failure, state.Pasted, state.Exchanging = cheapauthui.Starting, "", "", false
@@ -81,36 +106,36 @@ func (r *Runtime) startCheapLogin(manual bool) {
 		if manual {
 			flow, err = account.service.StartManualLogin(endpoint)
 		} else {
-			flow, err = account.service.StartLogin(endpoint)
+			flow, err = account.service.StartLogin(attempt.ctx, endpoint)
 		}
 		if err != nil {
 			r.enqueue(func(*ui.Context) {
-				if account.generation == generation {
+				if account.attempt == attempt && attempt.ctx.Err() == nil {
 					state.Stage, state.Failure = cheapauthui.SignedOut, cheapAuthError(err)
 				}
 			})
 			return
 		}
-		attempt := &cheapLoginAttempt{flow: flow, generation: generation}
+		context.AfterFunc(attempt.ctx, flow.Close)
 		r.enqueue(func(c *ui.Context) {
-			if account.generation != generation {
-				flow.Close()
+			if account.attempt != attempt || attempt.ctx.Err() != nil {
 				return
 			}
-			account.attempt = attempt
+			attempt.flow = flow
 			state.Stage, state.LoginURL, state.Loopback = cheapauthui.WaitingForCode, flow.LoginURL(), flow.Loopback()
 			c.OpenURL(flow.LoginURL())
 		})
-		if !manual {
-			credentials, waitErr := flow.Wait(r.ctx)
-			r.finishCheapLogin(attempt, credentials, waitErr)
+		if flow.Loopback() {
+			credentials, waitErr := flow.Wait(attempt.ctx)
+			r.finishCheapLogin(attempt, credentials, waitErr, false)
 		}
 	})
 }
 
 func (r *Runtime) submitCheapPaste() {
 	account := r.cheapAuth
-	if account == nil || account.attempt == nil || account.state.Exchanging {
+	if account == nil || account.state.Stage != cheapauthui.WaitingForCode ||
+		account.state.Exchanging || account.state.LoggingOut {
 		return
 	}
 	attempt := account.attempt
@@ -118,155 +143,273 @@ func (r *Runtime) submitCheapPaste() {
 	account.state.Exchanging = true
 	account.state.Failure = ""
 	r.async(func() {
-		credentials, err := attempt.flow.ExchangePasted(r.ctx, pasted)
-		r.enqueue(func(*ui.Context) {
-			if account.generation == attempt.generation {
-				account.state.Exchanging = false
-			}
-		})
-		r.finishCheapLogin(attempt, credentials, err)
+		credentials, err := attempt.flow.ExchangePasted(attempt.ctx, pasted)
+		r.finishCheapLogin(attempt, credentials, err, true)
 	})
 }
 
-func (r *Runtime) finishCheapLogin(attempt *cheapLoginAttempt, credentials core.Credentials, err error) {
-	attempt.once.Do(func() {
-		r.enqueue(func(*ui.Context) {
-			account := r.cheapAuth
-			if account == nil || account.generation != attempt.generation || account.attempt != attempt {
-				attempt.flow.Close()
-				return
-			}
-			account.state.Exchanging = false
-			if err != nil {
-				if errors.Is(err, context.Canceled) {
-					return
+func (r *Runtime) finishCheapLogin(attempt *cheapLoginAttempt, credentials core.Credentials, err error, pasted bool) {
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+	r.enqueue(func(*ui.Context) {
+		account := r.cheapAuth
+		if account == nil || account.generation != attempt.cheapAuthGeneration || account.attempt != attempt ||
+			attempt.ctx.Err() != nil || account.state.Stage != cheapauthui.WaitingForCode {
+			return
+		}
+		if err != nil {
+			if !attempt.committing {
+				if pasted {
+					account.state.Exchanging = false
 				}
 				account.state.Failure = cheapAuthError(err)
-				account.state.Stage = cheapauthui.WaitingForCode
-				return
 			}
-			attempt.flow.Close()
-			account.state.Pasted = ""
-			account.state.Stage = cheapauthui.SyncingGateway
-			r.startCheapSync(attempt.generation)
+			return
+		}
+		attempt.once.Do(func() {
+			attempt.committing = true
+			account.state.Exchanging = true
+			account.state.Failure = ""
+			r.async(func() {
+				account.effects.Lock()
+				saveErr := account.service.Establish(attempt.ctx, credentials)
+				account.effects.Unlock()
+				r.enqueue(func(*ui.Context) {
+					if account.attempt != attempt || attempt.ctx.Err() != nil {
+						return
+					}
+					account.state.Exchanging = false
+					if saveErr != nil {
+						attempt.committing = false
+						attempt.once = sync.Once{} // no credential was adopted
+						account.state.Failure = cheapAuthError(saveErr)
+						return
+					}
+					account.state.Pasted = ""
+					account.state.Endpoint = credentials.Endpoint
+					generation := account.advance(r.ctx)
+					r.startCheapSync(account, generation)
+					r.App.Settings.Open(settings.CheapAccount)
+					r.App.Navigate(shell.SettingsPage)
+				})
+			})
 		})
 	})
 }
 
 func (r *Runtime) cancelCheapLogin() {
 	account := r.cheapAuth
-	if account == nil {
+	if account == nil || account.attempt == nil || account.state.LoggingOut {
 		return
 	}
-	account.generation++
-	if account.attempt != nil {
-		account.attempt.flow.Close()
-		account.attempt = nil
+	if account.attempt.committing {
+		// The save may already be admitted. Order a local clear after it.
+		r.logoutCheapAuth()
+		return
 	}
+	account.advance(r.ctx)
 	account.state.Stage = cheapauthui.SignedOut
 	account.state.Failure, account.state.Pasted, account.state.Exchanging = "", "", false
 }
 
-// startCheapSync resolves the complete account/provider collection in one
-// background pass. A superseded login/logout generation cannot overwrite it.
-func (r *Runtime) startCheapSync(generation uint64) {
+func (r *Runtime) stopCheapSync() {
 	account := r.cheapAuth
-	if account == nil {
+	if account == nil || account.stopSync == nil || account.state.LoggingOut {
 		return
 	}
+	account.stopSync()
+	account.stopSync = nil
+	account.state.Stage, account.state.Failure = cheapauthui.GatewayFailed, "已取消本次模型网关配置"
+}
+
+// startCheapSync is one cancellable pass. The account projection is optional;
+// only a definite authentication rejection blocks access to the shell.
+func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAuthGeneration) {
+	ctx, cancel := context.WithCancel(generation.ctx)
+	account.stopSync = cancel
+	account.state.Stage, account.state.Failure = cheapauthui.SyncingGateway, ""
+	account.state.AccountFailure = ""
 	r.async(func() {
-		user, err := account.service.Account(r.ctx)
+		user, accountErr := account.service.Account(ctx)
 		var gateway core.Gateway
-		var provider protocol.ConversationProvider
-		var secret *protocol.Secret
-		if err == nil {
-			gateway, err = account.service.Gateway(r.ctx)
+		var gatewayErr error
+		if !cheapAuthRejected(accountErr) && ctx.Err() == nil {
+			gateway, gatewayErr = account.service.Gateway(ctx)
 		}
-		if err == nil {
-			provider, secret, err = providers.CheapRouterProvider(gateway)
+		authErr := accountErr
+		if !cheapAuthRejected(authErr) {
+			authErr = gatewayErr
 		}
-		if err == nil {
-			expected := uint64(0)
-			for _, existing := range r.controller.Snapshot().Providers {
-				if existing.ID == providers.CheapRouterProviderID {
-					expected = existing.Revision
-					provider.Revision = existing.Revision
-					break
+
+		var modelCount int
+		if ctx.Err() == nil {
+			if cheapAuthRejected(authErr) {
+				account.effects.Lock()
+				if ctx.Err() == nil {
+					// Refresh rejection is already cleared by Service. A
+					// bearer rejection from /me or the gateway clears here.
+					authErr = errors.Join(authErr, account.service.Invalidate())
 				}
+				account.effects.Unlock()
+			} else if gatewayErr == nil {
+				modelCount, gatewayErr = r.saveCheapGateway(ctx, account, generation, gateway)
 			}
-			_, err = r.controller.Do(r.ctx, protocol.Command{Kind: "save_provider", Data: protocol.CommandSaveProviderPayload{
-				Provider: provider, ExpectedRevision: expected, Secret: secret,
-			}})
 		}
 		r.enqueue(func(*ui.Context) {
-			if r.cheapAuth != account || account.generation != generation {
+			if account.generation != generation || ctx.Err() != nil {
 				return
 			}
-			if err != nil {
-				account.state.Stage = cheapauthui.SyncingGateway
-				account.state.Failure = cheapAuthError(err)
-				if !account.service.SignedIn() {
-					account.state.Stage = cheapauthui.SignedOut
-				}
+			cancel()
+			account.stopSync = nil
+			if cheapAuthRejected(authErr) {
+				account.state.Stage, account.state.Failure = cheapauthui.SignedOut, cheapAuthError(authErr)
+				account.state.Account, account.state.ModelCount = core.User{}, 0
 				return
 			}
 			account.state.Account = user
-			account.state.ModelCount = len(provider.Models)
-			account.state.Endpoint = account.service.Endpoint()
+			if accountErr != nil {
+				account.state.AccountFailure = cheapAuthError(accountErr)
+			}
+			if gatewayErr != nil {
+				account.state.Stage, account.state.Failure = cheapauthui.GatewayFailed, cheapAuthError(gatewayErr)
+				return
+			}
+			account.state.ModelCount = modelCount
 			account.state.Stage, account.state.Failure = cheapauthui.Ready, ""
-			if generation > 0 {
-				// A fresh sign-in lands on the account/plan confirmation page;
-				// startup restoration (generation zero) keeps the user's page.
-				r.App.Settings.Open(settings.CheapAccount)
-				r.App.Navigate(shell.SettingsPage)
+		})
+	})
+}
+
+func cheapAuthRejected(err error) bool {
+	return errors.Is(err, core.ErrRefresh) || errors.Is(err, core.ErrUnauthorized)
+}
+
+func (r *Runtime) saveCheapGateway(ctx context.Context, account *cheapAuthRuntime, generation *cheapAuthGeneration, gateway core.Gateway) (int, error) {
+	account.effects.Lock()
+	defer account.effects.Unlock()
+	if pending := account.pending; pending != nil {
+		output, err := r.resolveCheapProvider(ctx, account)
+		if err != nil || pending.generation == generation {
+			if err != nil {
+				return 0, err
+			}
+			provider, ok := detail[protocol.ConversationProvider](output.Data)
+			if !ok {
+				return 0, errors.New("provider detail is missing")
+			}
+			return len(provider.Models), nil
+		}
+	}
+
+	provider, secret, err := providers.CheapRouterProvider(gateway)
+	if err != nil {
+		return 0, err
+	}
+	existing, err := r.readCheapProvider(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if existing != nil {
+		provider.Revision = existing.Revision
+	}
+	err = r.writeCheapProvider(ctx, account, generation, protocol.CommandSaveProviderPayload{
+		Provider: provider, ExpectedRevision: provider.Revision, Secret: secret,
+	})
+	return len(provider.Models), err
+}
+
+func (r *Runtime) readCheapProvider(ctx context.Context) (*protocol.ConversationProvider, error) {
+	// A previous write can have completed before its event reaches Snapshot.
+	output, err := r.controller.Do(ctx, protocol.Command{Kind: "list_providers"})
+	if err != nil {
+		return nil, err
+	}
+	list, ok := detail[[]protocol.ConversationProvider](output.Data)
+	if !ok {
+		return nil, errors.New("provider list is missing")
+	}
+	for _, provider := range list {
+		if provider.ID == providers.CheapRouterProviderID {
+			return &provider, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *Runtime) writeCheapProvider(ctx context.Context, account *cheapAuthRuntime, generation *cheapAuthGeneration, input protocol.CommandSaveProviderPayload) error {
+	// This is the admission boundary. Once admitted, observe using the
+	// runtime's lifetime so logout can run after the write, not race it.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	request := r.controller.Prepare(protocol.Command{Kind: "save_provider", Data: input})
+	_, err := r.controller.Settle(r.ctx, request)
+	if client.Retained(err) {
+		account.pending = &cheapProviderWrite{generation: generation, request: request}
+	}
+	return err
+}
+
+func (r *Runtime) resolveCheapProvider(ctx context.Context, account *cheapAuthRuntime) (protocol.Output, error) {
+	resolution, err := r.controller.Resolve(ctx, account.pending.request)
+	if err != nil {
+		return protocol.Output{}, err
+	}
+	if resolution.State != client.RequestPending {
+		account.pending = nil
+	}
+	return resolution.Result()
+}
+
+func (r *Runtime) logoutCheapAuth() {
+	account := r.cheapAuth
+	if account == nil || account.service == nil || account.state.LoggingOut {
+		return
+	}
+	account.state.LoggingOut = true
+	account.state.Failure = ""
+	generation := account.advance(r.ctx)
+	r.async(func() {
+		account.effects.Lock()
+		// Clear locally even if Node or the revocation endpoint is unreachable.
+		logoutErr := account.service.Logout(generation.ctx)
+		disableErr := r.disableCheapGateway(account, generation)
+		account.effects.Unlock()
+		r.enqueue(func(*ui.Context) {
+			if account.generation != generation {
+				return
+			}
+			account.state.LoggingOut = false
+			account.state.Stage = cheapauthui.SignedOut
+			account.state.Account = core.User{}
+			account.state.AccountFailure = ""
+			account.state.ModelCount = 0
+			account.state.Pasted = ""
+			account.state.Exchanging = false
+			if disableErr != nil || logoutErr != nil {
+				account.state.Failure = "本地登录已退出；远程撤销或禁用模型网关未完全成功，请检查网络后重试"
 			}
 		})
 	})
 }
 
-func (r *Runtime) logoutCheapAuth() {
-	account := r.cheapAuth
-	if account == nil || account.loggingOut {
-		return
-	}
-	account.loggingOut = true
-	account.state.LoggingOut = true
-	account.state.Failure = ""
-	account.generation++
-	generation := account.generation
-	if account.attempt != nil {
-		account.attempt.flow.Close()
-		account.attempt = nil
-	}
-	r.async(func() {
-		// Disable only the provider created for CheapRouter. User-installed
-		// providers and all other session configuration remain intact.
-		var disableErr error
-		for _, existing := range r.controller.Snapshot().Providers {
-			if existing.ID != providers.CheapRouterProviderID || !existing.Enabled {
-				continue
-			}
-			existing.Enabled = false
-			_, disableErr = r.controller.Do(r.ctx, protocol.Command{Kind: "save_provider", Data: protocol.CommandSaveProviderPayload{
-				Provider: existing, ExpectedRevision: existing.Revision,
-			}})
-			break
+func (r *Runtime) disableCheapGateway(account *cheapAuthRuntime, generation *cheapAuthGeneration) error {
+	ctx := generation.ctx
+	if account.pending != nil {
+		_, err := r.resolveCheapProvider(ctx, account)
+		if err != nil && account.pending != nil {
+			return err // An admitted enable may still be running.
 		}
-		logoutErr := account.service.Logout(context.Background())
-		r.enqueue(func(*ui.Context) {
-			if r.cheapAuth != account || account.generation != generation {
-				return
-			}
-			account.loggingOut = false
-			account.state.LoggingOut = false
-			account.state.Stage = cheapauthui.SignedOut
-			account.state.Account = core.User{}
-			account.state.ModelCount = 0
-			account.state.Pasted = ""
-			if disableErr != nil || logoutErr != nil {
-				account.state.Failure = "本地登录已退出；远程撤销或禁用模型网关未完全成功，请检查网络后重试"
-			}
-		})
+	}
+	existing, err := r.readCheapProvider(ctx)
+	if err != nil || existing == nil || !existing.Enabled {
+		return err
+	}
+	// Disable only CheapRouter; do not alter other providers or captured tasks.
+	existing.Enabled = false
+	return r.writeCheapProvider(ctx, account, generation, protocol.CommandSaveProviderPayload{
+		Provider: *existing, ExpectedRevision: existing.Revision,
 	})
 }
 

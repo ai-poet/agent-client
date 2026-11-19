@@ -15,8 +15,8 @@ import (
 	lobetheme "github.com/lobehub/lobe-mygo/pkg/theme"
 )
 
-// Gate renders the full-window sign-in page until the account and provider
-// are both usable. Returning true tells the shell not to render other pages.
+// Gate renders the full-window sign-in page until credentials are established.
+// Returning true tells the shell not to render other pages.
 func Gate(c *ui.Context, state *State) bool {
 	if !state.RequiresLogin() {
 		return false
@@ -30,7 +30,9 @@ func Gate(c *ui.Context, state *State) bool {
 				ui.Text(c, "登录 CheapRouter").FontSize(22).FontWeight(600)
 				ui.Text(c, "使用 CheapRouter 账号连接模型网关。登录码通过 PKCE 保护，应用不会接触你的账号密码。").FontSize(14).TextColor(p.TextSecondary)
 			})
-			content(c, state, true)
+			if state != nil {
+				content(c, state)
+			}
 		})
 	})
 	return true
@@ -45,22 +47,26 @@ func Page(c *ui.Context, state *State) {
 	kit.Page(c, "cheaprouter-account", "CheapRouter 账号", "管理账号登录、套餐信息和模型网关连接。", func() {
 		kit.Card(c, func() {
 			if state.Stage == Ready {
-				ui.Column(c).Padding(20).Gap(18).Children(func() { content(c, state, false) })
+				ui.Column(c).Padding(20).Gap(18).Children(func() { content(c, state) })
 				return
 			}
 			ui.Themed(c, lobetheme.Default().Theme(c.Theme().Dark)).Padding(20).Gap(18).
-				Children(func() { content(c, state, false) })
+				Children(func() { content(c, state) })
 		})
 	})
 }
 
-func content(c *ui.Context, state *State, gate bool) {
+func content(c *ui.Context, state *State) {
 	p := lobetheme.TokensOf(c)
 	if state.Failure != "" {
 		feedback.Alert(c.Key("failure"), state.Failure, feedback.AlertProps{Type: feedback.Error, Selectable: true})
 	}
+	if !state.RequiresLogin() && state.AccountFailure != "" {
+		feedback.Alert(c.Key("account-failure"), state.AccountFailure, feedback.AlertProps{Type: feedback.Error, Selectable: true})
+	}
 	switch state.Stage {
 	case SignedOut, Starting:
+		disabled := state.Stage == Starting || state.LoggingOut
 		ui.Column(c.Key("signed-out")).Gap(16).Children(func() {
 			ui.Column(c).Gap(6).Children(func() {
 				ui.Text(c, "选择服务入口").FontSize(14).FontWeight(600)
@@ -74,7 +80,7 @@ func content(c *ui.Context, state *State, gate bool) {
 				}
 				action.Button(c.Key(endpoint.name), endpoint.name+" · "+endpoint.value, action.ButtonProps{Variant: variant, Size: lobetheme.Large}).
 					Role(ui.RoleToggleButton).Checked(selected).FillWidth().Justify(ui.Start).
-					Disabled(state.Stage == Starting).OnClick(func() { state.Endpoint = endpoint.value }).Children(func() {
+					Disabled(disabled).OnClick(func() { state.Endpoint = endpoint.value }).Children(func() {
 					if selected {
 						ui.Icon(c, lucide.Check()).FontSize(14)
 					}
@@ -87,13 +93,13 @@ func content(c *ui.Context, state *State, gate bool) {
 				})
 			}
 			action.Button(c.Key("start"), "在浏览器中登录", action.ButtonProps{Variant: action.Primary, Size: lobetheme.Large}).
-				FillWidth().Disabled(state.Stage == Starting).Busy(state.Stage == Starting).OnClick(func() {
+				FillWidth().Disabled(disabled).Busy(state.Stage == Starting).OnClick(func() {
 				if state.Start != nil {
 					state.Start(false)
 				}
 			})
 			action.Button(c.Key("manual"), "使用粘贴登录码方式", action.ButtonProps{Size: lobetheme.Large}).
-				FillWidth().Disabled(state.Stage == Starting).OnClick(func() {
+				FillWidth().Disabled(disabled).OnClick(func() {
 				if state.Start != nil {
 					state.Start(true)
 				}
@@ -109,17 +115,18 @@ func content(c *ui.Context, state *State, gate bool) {
 			ui.Text(c, detail).FontSize(13).TextColor(p.TextSecondary)
 			ui.Row(c.Key("browser-actions")).Gap(8).Children(func() {
 				action.Button(c.Key("open"), "重新打开登录页", action.ButtonProps{Variant: action.Primary}).
-					Grow(1).OnClick(func() { c.OpenURL(state.LoginURL) })
-				action.Button(c.Key("copy"), "复制链接", action.ButtonProps{}).OnClick(func() {
+					Grow(1).Disabled(state.LoggingOut).OnClick(func() { c.OpenURL(state.LoginURL) })
+				action.Button(c.Key("copy"), "复制链接", action.ButtonProps{}).Disabled(state.LoggingOut).OnClick(func() {
 					c.WriteClipboard(state.LoginURL)
 					kit.Copied(c)
 				})
 			})
 			ui.Text(c, "一次性登录码").FontSize(14).FontWeight(500)
+			disabled := state.Exchanging || state.LoggingOut
 			input := field.Input(c.Key("code"), &state.Pasted, field.InputProps{Placeholder: "例如 K7QM-3XPD", Size: lobetheme.Large}).
-				Label("一次性登录码").Disabled(state.Exchanging)
+				Label("一次性登录码").Disabled(disabled)
 			hasCode := strings.TrimSpace(state.Pasted) != ""
-			if input.Submitted() && hasCode && !state.Exchanging && state.SubmitPaste != nil {
+			if input.Submitted() && hasCode && !disabled && state.SubmitPaste != nil {
 				state.SubmitPaste()
 			}
 			if state.Exchanging {
@@ -129,18 +136,17 @@ func content(c *ui.Context, state *State, gate bool) {
 				})
 			}
 			action.Button(c.Key("submit"), "完成登录", action.ButtonProps{Variant: action.Primary, Size: lobetheme.Large}).
-				FillWidth().Disabled(!hasCode || state.Exchanging).Busy(state.Exchanging).OnClick(func() {
+				FillWidth().Disabled(!hasCode || state.Exchanging || state.LoggingOut).Busy(state.Exchanging).OnClick(func() {
 				if state.SubmitPaste != nil {
 					state.SubmitPaste()
 				}
 			})
-			if gate {
-				action.Button(c.Key("cancel"), "取消本次登录", action.ButtonProps{Size: lobetheme.Large}).FillWidth().OnClick(func() {
-					if state.Cancel != nil {
-						state.Cancel()
-					}
-				})
-			}
+			action.Button(c.Key("cancel"), "取消本次登录", action.ButtonProps{Size: lobetheme.Large}).
+				FillWidth().Disabled(state.LoggingOut).OnClick(func() {
+				if state.Cancel != nil {
+					state.Cancel()
+				}
+			})
 		})
 	case SyncingGateway:
 		ui.Row(c.Key("syncing")).Gap(10).AlignItems(ui.Center).Children(func() {
@@ -150,32 +156,44 @@ func content(c *ui.Context, state *State, gate bool) {
 				ui.Text(c, "正在读取账号、套餐、模型目录和网关密钥，并配置 sailry。").FontSize(13).TextColor(p.TextSecondary)
 			})
 		})
-		if state.Failure != "" {
-			ui.Row(c.Key("sync-actions")).Gap(8).Children(func() {
-				action.Button(c.Key("retry"), "重试网关配置", action.ButtonProps{Variant: action.Primary}).Grow(1).OnClick(func() {
-					if state.Retry != nil {
-						state.Retry()
-					}
-				})
-				action.Button(c.Key("relogin"), "返回重新登录", action.ButtonProps{}).OnClick(func() {
-					if state.Cancel != nil {
-						state.Cancel()
-					}
-				})
+		action.Button(c.Key("stop-sync"), "取消本次配置", action.ButtonProps{}).
+			FillWidth().Disabled(state.LoggingOut).OnClick(func() {
+			if state.StopSync != nil {
+				state.StopSync()
+			}
+		})
+	case GatewayFailed:
+		ui.Row(c.Key("sync-actions")).Gap(8).Children(func() {
+			action.Button(c.Key("retry"), "重试网关配置", action.ButtonProps{Variant: action.Primary}).
+				Grow(1).Disabled(state.LoggingOut).OnClick(func() {
+				if state.Retry != nil {
+					state.Retry()
+				}
 			})
-		}
+			action.Button(c.Key("relogin"), "返回重新登录", action.ButtonProps{}).
+				Disabled(state.LoggingOut).OnClick(func() {
+				if state.Logout != nil {
+					state.Logout()
+				}
+			})
+		})
 	case Ready:
 		p := theme.Of(c)
 		ui.Column(c.Key("account")).Gap(14).Children(func() {
 			ui.Column(c).Gap(5).Children(func() {
 				ui.Text(c, "已连接 CheapRouter").FontSize(16).FontWeight(600)
-				ui.Text(c, state.Account.DisplayName()).FontSize(14)
-				if state.Account.Email != "" && state.Account.Email != state.Account.DisplayName() {
+				name := state.Account.DisplayName()
+				if name != "" {
+					ui.Text(c, name).FontSize(14)
+				}
+				if state.Account.Email != "" && state.Account.Email != name {
 					ui.Text(c, state.Account.Email).FontSize(13).TextColor(p.MutedForeground)
 				}
 			})
-			kit.Row(c, "plan", "当前套餐", "", func() { ui.Text(c, state.Account.PlanDisplay()).FontSize(14) })
-			kit.Row(c, "balance", "账户余额", "", func() { ui.Textf(c, "$%.2f", state.Account.Balance).FontSize(14) })
+			if state.AccountFailure == "" {
+				kit.Row(c, "plan", "当前套餐", "", func() { ui.Text(c, state.Account.PlanDisplay()).FontSize(14) })
+				kit.Row(c, "balance", "账户余额", "", func() { ui.Textf(c, "$%.2f", state.Account.Balance).FontSize(14) })
+			}
 			kit.Row(c, "models", "可用聊天模型", "", func() { ui.Text(c, fmt.Sprintf("%d 个", state.ModelCount)).FontSize(14) })
 			kit.Row(c, "endpoint", "服务入口", "", func() { ui.Text(c, state.Endpoint).FontSize(13).Selectable() })
 			kit.DangerBusy(c.Key("logout"), "退出登录", state.LoggingOut).FillWidth().OnClick(func() {

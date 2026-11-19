@@ -62,17 +62,13 @@ func (s *Service) Endpoint() string {
 	return s.credentials.Endpoint
 }
 
-func (s *Service) StartLogin(endpoint string) (*LoginFlow, error) {
+func (s *Service) StartLogin(ctx context.Context, endpoint string) (*LoginFlow, error) {
 	client, err := NewClient(endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
 	client.now = s.now
-	flow, err := StartLogin(client, s.store)
-	if err == nil {
-		flow.onLogin = s.adopt
-	}
-	return flow, err
+	return StartLogin(ctx, client)
 }
 
 // StartManualLogin skips loopback for environments where the user already
@@ -83,52 +79,75 @@ func (s *Service) StartManualLogin(endpoint string) (*LoginFlow, error) {
 		return nil, err
 	}
 	client.now = s.now
-	flow, err := StartManualLogin(client, s.store)
-	if err == nil {
-		flow.onLogin = s.adopt
-	}
-	return flow, err
+	return StartManualLogin(client)
 }
 
-func (s *Service) adopt(credentials Credentials) {
+// Establish persists and adopts a candidate. The caller must first admit it
+// through the current attempt's serialized commit path.
+func (s *Service) Establish(ctx context.Context, credentials Credentials) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	client, _ := NewClient(credentials.Endpoint, nil)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	client, err := NewClient(credentials.Endpoint, nil)
+	if err != nil {
+		return err
+	}
+	if err := s.store.Save(credentials); err != nil {
+		return err
+	}
 	client.now = s.now
-	copy := credentials
-	s.credentials, s.client = &copy, client
+	s.credentials, s.client = &credentials, client
+	return nil
 }
 
 // AccessToken returns a renewable bearer token for API calls. It must remain
 // inside background API/provider glue and never be presented in the UI.
 func (s *Service) AccessToken(ctx context.Context) (string, error) {
+	credentials, _, err := s.session(ctx)
+	return credentials.AccessToken, err
+}
+
+func (s *Service) session(ctx context.Context) (Credentials, *Client, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if ctx.Err() != nil {
+		return Credentials{}, nil, ctx.Err()
+	}
 	if s.credentials == nil || s.client == nil {
-		return "", ErrUnauthorized
+		return Credentials{}, nil, ErrUnauthorized
 	}
 	if s.credentials.NeedsRefresh(s.now()) {
-		credentials, err := s.client.Refresh(ctx, *s.credentials)
-		if err != nil {
-			return "", err
+		if err := s.refreshLocked(ctx); err != nil {
+			return Credentials{}, nil, err
 		}
-		if err := s.store.Save(credentials); err != nil {
-			return "", err
-		}
-		*s.credentials = credentials
 	}
-	return s.credentials.AccessToken, nil
+	return *s.credentials, s.client, nil
 }
 
 // Refresh forces renewal and persists the rotated pair before returning.
 func (s *Service) Refresh(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.refreshLocked(ctx)
+}
+
+func (s *Service) refreshLocked(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	if s.credentials == nil || s.client == nil {
 		return ErrUnauthorized
 	}
 	credentials, err := s.client.Refresh(ctx, *s.credentials)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	if err != nil {
+		if errors.Is(err, ErrRefresh) || errors.Is(err, ErrUnauthorized) {
+			return errors.Join(err, s.clearLocked())
+		}
 		return err
 	}
 	if err := s.store.Save(credentials); err != nil {
@@ -139,14 +158,26 @@ func (s *Service) Refresh(ctx context.Context) error {
 }
 
 func (s *Service) Account(ctx context.Context) (User, error) {
-	token, err := s.AccessToken(ctx)
+	credentials, client, err := s.session(ctx)
 	if err != nil {
 		return User{}, err
 	}
-	s.mu.Lock()
-	client := s.client
-	s.mu.Unlock()
-	return client.Me(ctx, token)
+	return client.Me(ctx, credentials.AccessToken)
+}
+
+// ReadSetup shares one credential snapshot across both reads, so an optional
+// account failure cannot trigger a second refresh or prevent gateway setup.
+func (s *Service) ReadSetup(ctx context.Context) (User, error, Gateway, error) {
+	credentials, client, err := s.session(ctx)
+	if err != nil {
+		return User{}, nil, Gateway{}, err
+	}
+	user, accountErr := client.Me(ctx, credentials.AccessToken)
+	if errors.Is(accountErr, ErrUnauthorized) || ctx.Err() != nil {
+		return user, accountErr, Gateway{}, ctx.Err()
+	}
+	gateway, gatewayErr := readGateway(ctx, client, credentials)
+	return user, accountErr, gateway, gatewayErr
 }
 
 // CheapRouterKeyName is the gateway key this client mints for an account
@@ -156,17 +187,15 @@ const CheapRouterKeyName = "CheapRouter desktop"
 // Gateway fetches catalog and keys after login. It prefers the bridge-minted
 // key when it is still listed, otherwise the first active listed key.
 func (s *Service) Gateway(ctx context.Context) (Gateway, error) {
-	token, err := s.AccessToken(ctx)
+	credentials, client, err := s.session(ctx)
 	if err != nil {
 		return Gateway{}, err
 	}
-	s.mu.Lock()
-	client := s.client
-	bridgeKey := ""
-	if s.credentials != nil {
-		bridgeKey = s.credentials.APIKey
-	}
-	s.mu.Unlock()
+	return readGateway(ctx, client, credentials)
+}
+
+func readGateway(ctx context.Context, client *Client, credentials Credentials) (Gateway, error) {
+	token, bridgeKey := credentials.AccessToken, credentials.APIKey
 	catalog, err := client.ModelCatalog(ctx, token)
 	if err != nil {
 		return Gateway{}, err
@@ -217,11 +246,23 @@ func (s *Service) Gateway(ctx context.Context) (Gateway, error) {
 func (s *Service) Logout(ctx context.Context) error {
 	s.mu.Lock()
 	credentials, client := s.credentials, s.client
-	s.credentials, s.client = nil, nil
+	local := s.clearLocked()
 	s.mu.Unlock()
 	var remote error
 	if credentials != nil && client != nil {
 		remote = client.Logout(ctx, credentials.RefreshToken)
 	}
-	return errors.Join(remote, s.store.Clear())
+	return errors.Join(local, remote)
+}
+
+// Invalidate drops a rejected local session without trying to revoke it.
+func (s *Service) Invalidate() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.clearLocked()
+}
+
+func (s *Service) clearLocked() error {
+	s.credentials, s.client = nil, nil
+	return s.store.Clear()
 }
