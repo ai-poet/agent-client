@@ -1,11 +1,13 @@
 package shell
 
 import (
+	"reflect"
 	"testing"
 
 	cheapauthui "github.com/ai-poet/agent-client/desktop/internal/desktop/cheapauth"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/settings"
+	"github.com/egoist/mygo/ui"
 )
 
 // A CheapRouter account is optional: no stage of it hides the workspace, and
@@ -42,5 +44,27 @@ func TestAccountNeverHidesWorkspace(t *testing.T) {
 				t.Fatalf("the account page does not report %q: %q", state.Failure, tt.Texts())
 			}
 		})
+	}
+}
+
+// The shell offers its embedders no seam that takes the workspace's place:
+// whatever a frame's yes-or-no hooks answer, the conversation is drawn. An
+// account gate was once such a hook, installed by the composition root.
+func TestHooksCannotHideWorkspace(t *testing.T) {
+	a, tt := newTester(t)
+	hooks := reflect.ValueOf(&a.Hooks).Elem()
+	claimed := 0
+	for i := range hooks.NumField() {
+		if field := hooks.Field(i); field.Type() == reflect.TypeFor[func(*ui.Context) bool]() {
+			field.Set(reflect.ValueOf(func(*ui.Context) bool { return true }))
+			claimed++
+		}
+	}
+	tt.Frame()
+	if claimed == 0 || !tt.HasText("Virtualized transcript stress test") {
+		t.Fatalf("%d hooks answering yes hid the workspace: %q", claimed, tt.Texts())
+	}
+	if _, ok := tt.Access(i18n.In("en", "composer")); !ok {
+		t.Fatal("the composer is not reachable")
 	}
 }
