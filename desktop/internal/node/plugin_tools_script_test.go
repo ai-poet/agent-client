@@ -5,11 +5,46 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
 	"github.com/ai-poet/agent-client/desktop/internal/node/plugins"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
+
+func TestBeforeModelResultsKeepRecentCompleteResultsOfThisTurn(t *testing.T) {
+	current, earlier := protocol.NewTurnID(), protocol.NewTurnID()
+	result := func(turn protocol.TurnID, id, name, body string) canonical.Record {
+		return canonical.NewRecord(turn, "message", canonical.NewMessage(canonical.User, canonical.Block{Kind: "tool_response", Data: &canonical.ToolResponse{
+			ID: id, Name: name, Result: canonical.Payload{Value: json.RawMessage(body)},
+		}}), time.Time{})
+	}
+	initial := canonical.NewRecord(current, "message", canonical.NewMessage(canonical.User, canonical.Text(0, "Current turn")), time.Time{})
+	initial.Provenance.Author = "user"
+	initial.Metadata.Input = &canonical.Input{Turn: &current}
+	large := `"` + strings.Repeat("x", plugins.ScriptMaxDataBytes/2) + `"`
+	records := []canonical.Record{
+		initial,
+		result(current, "old-large", "memory-read", large),
+		result(current, "first", "memory-read", `"First"`),
+		result(current, "oversized", "memory-read", `"`+strings.Repeat("x", plugins.ScriptMaxDataBytes)+`"`),
+		result(current, "new-large", "memory-read", large),
+		result(earlier, "earlier", "memory-read", `"Earlier turn"`),
+		result(current, "second", "memory-read", `"Second"`),
+		result(current, "other-tool", "private-tool", `"Another package"`),
+	}
+	names := map[string]string{"memory-read": "read"}
+	results, latest := beforeModelResults(records, current, names, "")
+	encoded, err := json.Marshal(map[string]any{"results": results})
+	want := `{"results":[{"name":"read","response":"First"},{"name":"read","response":` + large + `},{"name":"read","response":"Second"}]}`
+	if err != nil || latest != "other-tool" || len(encoded) > plugins.ScriptMaxDataBytes || string(encoded) != want {
+		t.Fatalf("before_model results have %d bytes, %d entries, newest %q, error %v", len(encoded), len(results), latest, err)
+	}
+	if repeated, newest := beforeModelResults(records, current, names, latest); repeated != nil || newest != latest {
+		t.Fatalf("unchanged tool results requested a second evaluation: %d, %q", len(repeated), newest)
+	}
+}
 
 func TestPluginTurnInput(t *testing.T) {
 	delegate, apply, read, write := protocol.ToolOperationDelegateAgent, protocol.ToolOperationApplyRoles, protocol.ToolOperationReadFile, protocol.ToolOperationWriteFile

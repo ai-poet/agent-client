@@ -4,8 +4,11 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"log/slog"
 	"slices"
 	"sync"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/clock"
@@ -14,6 +17,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/operations"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/output"
 	"github.com/ai-poet/agent-client/desktop/internal/node/hooks"
+	"github.com/ai-poet/agent-client/desktop/internal/node/logging"
 	"github.com/ai-poet/agent-client/desktop/internal/node/python"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
 	"github.com/ai-poet/agent-client/desktop/internal/node/telemetry"
@@ -193,6 +197,7 @@ func (r *Runtime) run() {
 			return
 		case <-r.wake:
 		}
+		retries := 0
 		for r.ctx.Err() == nil {
 			unlock := r.LockPublication()
 			var inv *store.AgentInvocation
@@ -209,8 +214,20 @@ func (r *Runtime) run() {
 			})
 			if err != nil {
 				unlock()
-				break
+				if retries == 0 && r.ctx.Err() == nil {
+					logging.Emit(slog.LevelError, slog.String("area", "agent"), slog.String("phase", logging.Failed),
+						slog.String("operation", "claim"), slog.String("exception", err.Error()))
+				}
+				failure, ok := errors.AsType[*protocol.Fault](err)
+				// Do not repeat an uncertain commit. Only retry when the
+				// writer reports that this claim was not admitted.
+				if !ok || failure.Code != protocol.ErrorCodeBusy && failure.Code != protocol.ErrorCodeUnavailable || retries == 3 || r.clock.Sleep(r.ctx, time.Second) != nil {
+					break
+				}
+				retries++
+				continue
 			}
+			retries = 0
 			changedChildren := make(map[protocol.SessionID][]protocol.TurnID)
 			for _, child := range ended {
 				changedChildren[child.root] = append(changedChildren[child.root], child.turn)
