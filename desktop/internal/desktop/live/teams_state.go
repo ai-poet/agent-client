@@ -162,10 +162,10 @@ func (r *Runtime) readTeamSettings() {
 // answered before a save whose result was accepted since.
 func (r *Runtime) acceptTeamRead(value protocol.TeamSettings) {
 	field := &r.App.Settings.Concurrency
-	r.App.Settings.ConcurrencyReadOnly = value.Source != nil
 	if !r.showsSettings() || field.Pending || r.teams.settingsUnknown != nil || value.Revision < field.Revision {
 		return
 	}
+	r.App.Settings.ConcurrencyReadOnly = value.Source != nil
 	if field.Draft == field.Saved {
 		field.Draft = float64(value.ChildConcurrency)
 	}

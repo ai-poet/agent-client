@@ -79,11 +79,18 @@ func TestTeamsProjection(t *testing.T) {
 		r := &Runtime{App: shell.NewLive(&viewmodel.Data{Workspace: &viewmodel.Workspace{}}), teams: &teamState{}}
 		field := &r.App.Settings.Concurrency
 		r.acceptTeamRead(protocol.TeamSettings{Revision: 5, ChildConcurrency: 4})
-		r.acceptTeamRead(protocol.TeamSettings{Revision: 4, ChildConcurrency: 2})
-		if field.Revision != 5 || field.Saved != 4 || field.Draft != 4 || r.teams.observed != 5 {
+		inherited := &protocol.ConfigurationOrigin{}
+		r.acceptTeamRead(protocol.TeamSettings{Revision: 4, ChildConcurrency: 2, Source: inherited})
+		if field.Revision != 5 || field.Saved != 4 || field.Draft != 4 || r.teams.observed != 5 || r.App.Settings.ConcurrencyReadOnly {
 			t.Fatalf("an older read left %+v, observed %d", *field, r.teams.observed)
 		}
-		if r.acceptTeamRead(protocol.TeamSettings{Revision: 6, ChildConcurrency: 3}); field.Revision != 6 || field.Saved != 3 {
+		field.Pending = true
+		r.acceptTeamRead(protocol.TeamSettings{Revision: 6, ChildConcurrency: 3, Source: inherited})
+		if r.App.Settings.ConcurrencyReadOnly {
+			t.Fatal("an ignored read made the pending field read-only")
+		}
+		field.Pending = false
+		if r.acceptTeamRead(protocol.TeamSettings{Revision: 6, ChildConcurrency: 3, Source: inherited}); field.Revision != 6 || field.Saved != 3 || !r.App.Settings.ConcurrencyReadOnly {
 			t.Fatalf("a newer read left %+v", *field)
 		}
 	})
