@@ -12,7 +12,9 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -177,12 +179,146 @@ func TestRefreshSuccessAndFailure(t *testing.T) {
 		t.Fatalf("刷新后凭据错误: %s, %v", stored, err)
 	}
 	service.credentials.ExpiresAt = fixed.Unix() + 60
+	if err := service.store.Save(*service.credentials); err != nil {
+		t.Fatal(err)
+	}
 	_, err = service.AccessToken(t.Context())
 	if !errors.Is(err, ErrRefresh) {
 		t.Fatalf("刷新失败分类 = %v, want refresh_failed", err)
 	}
 	if strings.Contains(err.Error(), testRefresh) {
 		t.Fatal("刷新错误泄露 token")
+	}
+}
+
+// rotatingServer renews as the service does: presenting the live refresh
+// token rotates it and the old one dies at once; a dead one is refused. It
+// records every token presented for renewal and for revocation.
+type rotatingServer struct {
+	*httptest.Server
+	mu        sync.Mutex
+	live      string
+	presented []string
+	revoked   []string
+}
+
+func newRotatingServer(t *testing.T, live string) *rotatingServer {
+	rotating := &rotatingServer{live: live}
+	rotating.Server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]string
+		_ = json.NewDecoder(request.Body).Decode(&body)
+		rotating.mu.Lock()
+		defer rotating.mu.Unlock()
+		switch request.URL.Path {
+		case "/api/v1/auth/refresh":
+			rotating.presented = append(rotating.presented, body["refresh_token"])
+			if body["refresh_token"] != rotating.live {
+				writeEnvelope(t, writer, http.StatusUnauthorized, `{"code":401,"reason":"REFRESH_TOKEN_INVALID","message":"invalid refresh token"}`)
+				return
+			}
+			generation := len(rotating.presented) + 1
+			rotating.live = fmt.Sprintf("rt_%d", generation)
+			writeEnvelope(t, writer, http.StatusOK, fmt.Sprintf(`{"code":0,"data":{"access_token":"at_%d","refresh_token":"%s","expires_in":900}}`, generation, rotating.live))
+		case "/api/v1/auth/logout":
+			rotating.revoked = append(rotating.revoked, body["refresh_token"])
+			writeEnvelope(t, writer, http.StatusOK, `{"code":0,"data":{}}`)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	t.Cleanup(rotating.Close)
+	return rotating
+}
+
+// windows restores count Services from one profile holding an expired
+// session of server, as that many windows of one desktop do.
+func (r *rotatingServer) windows(t *testing.T, count int) []*Service {
+	t.Helper()
+	profile := t.TempDir()
+	store, err := NewStore(profile)
+	if err == nil {
+		err = store.Save(Credentials{AccessToken: "at_1", RefreshToken: r.live, Endpoint: r.URL, ExpiresAt: time.Now().Add(-time.Hour).Unix()})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	services := make([]*Service, count)
+	for index := range services {
+		if services[index], err = NewService(profile); err == nil {
+			err = services[index].Restore()
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	return services
+}
+
+// A window whose copy of the session went stale while another window renewed
+// it takes the renewed pair from the file. Presenting its dead refresh token
+// would be refused, and the refusal would clear the session for every window.
+func TestRenewalAdoptsAnotherWindowsPair(t *testing.T) {
+	server := newRotatingServer(t, "rt_1")
+	windows := server.windows(t, 2)
+	for index, window := range windows {
+		if token, err := window.AccessToken(t.Context()); err != nil || token != "at_2" {
+			t.Fatalf("window %d holds %q, %v", index, token, err)
+		}
+	}
+	if !slices.Equal(server.presented, []string{"rt_1"}) {
+		t.Fatalf("the windows presented %q for renewal", server.presented)
+	}
+	if stored, err := windows[0].store.Load(); err != nil || stored == nil || stored.RefreshToken != "rt_2" {
+		t.Fatalf("the renewed session was not kept: %v, %v", stored, err)
+	}
+}
+
+// Windows that renew at once do so one after the other, the later ones on
+// the first one's pair.
+func TestConcurrentRenewalsRotateOnce(t *testing.T) {
+	server := newRotatingServer(t, "rt_1")
+	windows := server.windows(t, 4)
+	failed := make(chan error, len(windows))
+	for _, window := range windows {
+		go func() {
+			token, err := window.AccessToken(t.Context())
+			if err == nil && token != "at_2" {
+				err = fmt.Errorf("a window holds %q", token)
+			}
+			failed <- err
+		}()
+	}
+	for range windows {
+		if err := <-failed; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !slices.Equal(server.presented, []string{"rt_1"}) {
+		t.Fatalf("the windows presented %q for renewal", server.presented)
+	}
+}
+
+// A sign-out in one window ends the session in the others without a request,
+// and revokes the pair that is stored, not the one the window last saw.
+func TestSignOutReachesOtherWindows(t *testing.T) {
+	server := newRotatingServer(t, "rt_1")
+	windows := server.windows(t, 3)
+	if _, err := windows[0].AccessToken(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := windows[1].Logout(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(server.revoked, []string{"rt_2"}) {
+		t.Fatalf("the sign-out revoked %q", server.revoked)
+	}
+	for index, window := range windows {
+		if _, err := window.AccessToken(t.Context()); !errors.Is(err, ErrUnauthorized) || window.SignedIn() {
+			t.Fatalf("window %d after the sign-out: %v", index, err)
+		}
+	}
+	if !slices.Equal(server.presented, []string{"rt_1"}) {
+		t.Fatalf("the signed-out windows presented %q for renewal", server.presented)
 	}
 }
 
@@ -387,6 +523,9 @@ func TestGatewayFetchesCatalogAndSelectsListedKey(t *testing.T) {
 	service, _ := NewService(t.TempDir())
 	service.credentials = &Credentials{AccessToken: testAccess, RefreshToken: testRefresh, Endpoint: server.URL, ExpiresAt: time.Now().Add(time.Hour).Unix(), APIKey: testGateway}
 	service.client, _ = NewClient(server.URL, server.Client())
+	if err := service.store.Save(*service.credentials); err != nil {
+		t.Fatal(err)
+	}
 	gateway, err := service.Gateway(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -430,6 +569,9 @@ func TestGatewayMintsKeyWhenAccountOwnsNone(t *testing.T) {
 	service, _ := NewService(t.TempDir())
 	service.credentials = &Credentials{AccessToken: testAccess, RefreshToken: testRefresh, Endpoint: server.URL, ExpiresAt: time.Now().Add(time.Hour).Unix()}
 	service.client, _ = NewClient(server.URL, server.Client())
+	if err := service.store.Save(*service.credentials); err != nil {
+		t.Fatal(err)
+	}
 	gateway, err := service.Gateway(t.Context())
 	if err != nil {
 		t.Fatal(err)

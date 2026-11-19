@@ -18,6 +18,13 @@ type Service struct {
 	now         func() time.Time
 }
 
+// credentialLock serializes every renewal and every write of the credential
+// file across the Services of this process. Each window owns a Service over
+// the same file and the service rotates refresh tokens: two renewals racing
+// each other would leave the loser with a dead pair, which it would then
+// clear from disk.
+var credentialLock sync.Mutex
+
 func NewService(profileDir string) (*Service, error) {
 	store, err := NewStore(profileDir)
 	if err != nil {
@@ -87,6 +94,8 @@ func (s *Service) StartManualLogin(endpoint string) (*LoginFlow, error) {
 func (s *Service) Establish(ctx context.Context, credentials Credentials) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	credentialLock.Lock()
+	defer credentialLock.Unlock()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -115,8 +124,10 @@ func (s *Service) session(ctx context.Context) (Credentials, *Client, error) {
 	if ctx.Err() != nil {
 		return Credentials{}, nil, ctx.Err()
 	}
-	if s.credentials == nil || s.client == nil {
-		return Credentials{}, nil, ErrUnauthorized
+	credentialLock.Lock()
+	defer credentialLock.Unlock()
+	if err := s.adoptLocked(); err != nil {
+		return Credentials{}, nil, err
 	}
 	if s.credentials.NeedsRefresh(s.now()) {
 		if err := s.refreshLocked(ctx); err != nil {
@@ -126,10 +137,46 @@ func (s *Service) session(ctx context.Context) (Credentials, *Client, error) {
 	return *s.credentials, s.client, nil
 }
 
+// adoptLocked takes over what another window stored since this Service last
+// looked: a renewed pair, another sign-in, or a sign-out. A Service only
+// changes its session after saving it, so the file is never the older of the
+// two. The caller holds credentialLock.
+func (s *Service) adoptLocked() error {
+	if s.credentials == nil || s.client == nil {
+		return ErrUnauthorized
+	}
+	stored, err := s.store.Load()
+	if err != nil {
+		// An unreadable file is replaced by the next renewal's save.
+		return nil
+	}
+	if stored == nil {
+		s.credentials, s.client = nil, nil
+		return ErrUnauthorized
+	}
+	if *stored == *s.credentials {
+		return nil
+	}
+	client := s.client
+	if stored.Endpoint != s.credentials.Endpoint {
+		if client, err = NewClient(stored.Endpoint, nil); err != nil {
+			return err
+		}
+		client.now = s.now
+	}
+	s.credentials, s.client = stored, client
+	return nil
+}
+
 // Refresh forces renewal and persists the rotated pair before returning.
 func (s *Service) Refresh(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	credentialLock.Lock()
+	defer credentialLock.Unlock()
+	if err := s.adoptLocked(); err != nil {
+		return err
+	}
 	return s.refreshLocked(ctx)
 }
 
@@ -245,8 +292,12 @@ func readGateway(ctx context.Context, client *Client, credentials Credentials) (
 // be reached. The returned error is sanitized by Client/Store.
 func (s *Service) Logout(ctx context.Context) error {
 	s.mu.Lock()
+	credentialLock.Lock()
+	// Revoke the pair that is stored now, not one another window renewed away.
+	_ = s.adoptLocked()
 	credentials, client := s.credentials, s.client
 	local := s.clearLocked()
+	credentialLock.Unlock()
 	s.mu.Unlock()
 	var remote error
 	if credentials != nil && client != nil {
@@ -259,6 +310,8 @@ func (s *Service) Logout(ctx context.Context) error {
 func (s *Service) Invalidate() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	credentialLock.Lock()
+	defer credentialLock.Unlock()
 	return s.clearLocked()
 }
 
