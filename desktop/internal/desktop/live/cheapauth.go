@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ai-poet/agent-client/desktop/internal/client"
 	core "github.com/ai-poet/agent-client/desktop/internal/cheapauth"
+	"github.com/ai-poet/agent-client/desktop/internal/client"
 	cheapauthui "github.com/ai-poet/agent-client/desktop/internal/desktop/cheapauth"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
@@ -25,7 +25,7 @@ type cheapAuthRuntime struct {
 	state      *cheapauthui.State
 	generation *cheapAuthGeneration
 	attempt    *cheapLoginAttempt
-	stopSync  context.CancelFunc
+	stopSync   context.CancelFunc
 
 	effects sync.Mutex
 	pending *cheapProviderWrite // guarded by effects; never redispatch this request

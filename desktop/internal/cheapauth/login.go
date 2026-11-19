@@ -50,7 +50,7 @@ func StartLogin(ctx context.Context, client *Client) (*LoginFlow, error) {
 	flow.listener = listener
 	flow.server = &http.Server{
 		BaseContext: func(net.Listener) context.Context { return ctx },
-		Handler: http.HandlerFunc(flow.serveHTTP), MaxHeaderBytes: 16 * 1024,
+		Handler:     http.HandlerFunc(flow.serveHTTP), MaxHeaderBytes: 16 * 1024,
 		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second,
 	}
 	go func() {
