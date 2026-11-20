@@ -3,6 +3,7 @@ package cheapauth
 import (
 	"context"
 	"errors"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -231,14 +232,21 @@ func (s *Service) ReadSetup(ctx context.Context) (User, error, Gateway, error) {
 // that owns none, matching the name the Rust client uses.
 const CheapRouterKeyName = "CheapRouter desktop"
 
-// Gateway fetches catalog and keys after login. The key is the one accountKey
-// picks among the listed ones (honoring any bound group), or a newly minted one.
+// Gateway fetches catalog and keys after login, honoring all bound lanes (or
+// legacy single GroupID / account default when no lane is bound).
 func (s *Service) Gateway(ctx context.Context) (Gateway, error) {
+	return s.GatewayWithGroups(ctx, nil)
+}
+
+// GatewayWithGroups fetches a fresh model catalog and ensures active gateway
+// keys for all bound lanes, using groups to classify legacy bindings and silent
+// groups.
+func (s *Service) GatewayWithGroups(ctx context.Context, groups []Group) (Gateway, error) {
 	credentials, client, err := s.session(ctx)
 	if err != nil {
 		return Gateway{}, err
 	}
-	return readGatewayForGroup(ctx, client, credentials, credentials.GroupID)
+	return readGatewayWithGroups(ctx, client, credentials, groups)
 }
 
 // GatewayForGroup fetches a fresh model catalog and ensures an active gateway
@@ -253,6 +261,46 @@ func (s *Service) GatewayForGroup(ctx context.Context, groupID *int64) (Gateway,
 	return readGatewayForGroup(ctx, client, credentials, groupID)
 }
 
+// GatewayForLaneChange previews and prepares a single lane's group switch or
+// unbind without modifying persisted credentials. When groupID is non-nil it
+// reuses an active key for that group before minting one (ensure_key_for_group).
+func (s *Service) GatewayForLaneChange(ctx context.Context, lane string, groupID *int64, groups []Group) (Gateway, *LaneBinding, error) {
+	credentials, client, err := s.session(ctx)
+	if err != nil {
+		return Gateway{}, nil, err
+	}
+	laneKey := canonicalLaneKey(lane)
+	if laneKey == "" {
+		return Gateway{}, nil, &AuthError{Kind: ErrorResponse, Op: "lane"}
+	}
+	token := credentials.AccessToken
+	catalog, err := client.ModelCatalog(ctx, token)
+	if err != nil {
+		return Gateway{}, nil, err
+	}
+	keys, err := client.Keys(ctx, token)
+	if err != nil {
+		return Gateway{}, nil, err
+	}
+	nextBindings := effectiveLaneBindings(credentials, groups, catalog.Items)
+	var target *LaneBinding
+	if groupID != nil && *groupID > 0 {
+		ensured, err := ensureGroupKey(ctx, client, token, &keys, *groupID)
+		if err != nil {
+			return Gateway{}, nil, err
+		}
+		target = &LaneBinding{GroupID: *groupID, APIKey: ensured}
+		nextBindings[laneKey] = *target
+	} else {
+		delete(nextBindings, laneKey)
+	}
+	gateway, err := buildGatewayForBindings(ctx, client, token, credentials.APIKey, catalog, &keys, nextBindings, groups)
+	if err != nil {
+		return Gateway{}, nil, err
+	}
+	return gateway, target, nil
+}
+
 // AvailableGroups returns the routing groups available to the signed-in account.
 func (s *Service) AvailableGroups(ctx context.Context) ([]Group, error) {
 	credentials, client, err := s.session(ctx)
@@ -262,7 +310,7 @@ func (s *Service) AvailableGroups(ctx context.Context) ([]Group, error) {
 	return client.AvailableGroups(ctx, credentials.AccessToken)
 }
 
-// SelectedGroup returns a copy of the currently bound group ID, or nil for default.
+// SelectedGroup returns a copy of the legacy single bound group ID, or nil.
 func (s *Service) SelectedGroup() *int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -272,7 +320,111 @@ func (s *Service) SelectedGroup() *int64 {
 	return cloneInt64Ptr(s.credentials.GroupID)
 }
 
-// SetGroup persists the bound group ID after a group switch succeeds.
+// LaneBindings returns a UI-safe snapshot of lane -> bound group ID (no keys).
+func (s *Service) LaneBindings() map[string]int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.credentials == nil || len(s.credentials.LaneBindings) == 0 {
+		return nil
+	}
+	out := make(map[string]int64, len(s.credentials.LaneBindings))
+	for lane, binding := range s.credentials.LaneBindings {
+		if key := canonicalLaneKey(lane); key != "" && binding.GroupID > 0 {
+			out[key] = binding.GroupID
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// LaneBindingFor returns a copy of the currently persisted binding for lane.
+func (s *Service) LaneBindingFor(lane string) *LaneBinding {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.credentials == nil {
+		return nil
+	}
+	key := canonicalLaneKey(lane)
+	if binding, ok := s.credentials.LaneBindings[key]; ok && binding.GroupID > 0 {
+		copied := binding
+		return &copied
+	}
+	return nil
+}
+
+// SetLaneBinding atomically updates or clears only the specified lane's binding.
+func (s *Service) SetLaneBinding(ctx context.Context, lane string, binding *LaneBinding) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	key := canonicalLaneKey(lane)
+	if key == "" {
+		return &AuthError{Kind: ErrorResponse, Op: "lane"}
+	}
+	credentialLock.Lock()
+	defer credentialLock.Unlock()
+	if err := s.adoptLocked(); err != nil {
+		return err
+	}
+	updated := *s.credentials
+	updated.LaneBindings = cloneLaneBindings(s.credentials.LaneBindings)
+	if binding != nil && binding.GroupID > 0 {
+		if updated.LaneBindings == nil {
+			updated.LaneBindings = map[string]LaneBinding{}
+		}
+		updated.LaneBindings[key] = *binding
+	} else {
+		delete(updated.LaneBindings, key)
+	}
+	if len(updated.LaneBindings) == 0 {
+		updated.LaneBindings = nil
+	}
+	// Clear legacy single-group field once per-lane bindings are mutated.
+	updated.GroupID = nil
+	if err := s.store.Save(updated); err != nil {
+		return err
+	}
+	*s.credentials = updated
+	return nil
+}
+
+// MigrateLegacyGroup moves a legacy single GroupID binding into its inferred
+// lane once groups/catalog are available.
+func (s *Service) MigrateLegacyGroup(ctx context.Context, groups []Group, catalog []Model) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	credentialLock.Lock()
+	defer credentialLock.Unlock()
+	if err := s.adoptLocked(); err != nil {
+		return err
+	}
+	if s.credentials.GroupID == nil || *s.credentials.GroupID <= 0 || len(s.credentials.LaneBindings) > 0 {
+		return nil
+	}
+	lane := inferLaneForGroupID(*s.credentials.GroupID, groups, catalog)
+	if lane == "" {
+		return nil
+	}
+	updated := *s.credentials
+	updated.LaneBindings = map[string]LaneBinding{
+		lane: {GroupID: *s.credentials.GroupID},
+	}
+	updated.GroupID = nil
+	if err := s.store.Save(updated); err != nil {
+		return err
+	}
+	*s.credentials = updated
+	return nil
+}
+
+// SetGroup persists the bound group ID after a legacy group switch succeeds.
 func (s *Service) SetGroup(ctx context.Context, groupID *int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -294,7 +446,104 @@ func (s *Service) SetGroup(ctx context.Context, groupID *int64) error {
 }
 
 func readGateway(ctx context.Context, client *Client, credentials Credentials) (Gateway, error) {
-	return readGatewayForGroup(ctx, client, credentials, credentials.GroupID)
+	return readGatewayWithGroups(ctx, client, credentials, nil)
+}
+
+func readGatewayWithGroups(ctx context.Context, client *Client, credentials Credentials, groups []Group) (Gateway, error) {
+	if len(credentials.LaneBindings) == 0 && credentials.GroupID != nil {
+		return readGatewayForGroup(ctx, client, credentials, credentials.GroupID)
+	}
+	token := credentials.AccessToken
+	catalog, err := client.ModelCatalog(ctx, token)
+	if err != nil {
+		return Gateway{}, err
+	}
+	keys, err := client.Keys(ctx, token)
+	if err != nil {
+		return Gateway{}, err
+	}
+	bindings := effectiveLaneBindings(credentials, groups, catalog.Items)
+	return buildGatewayForBindings(ctx, client, token, credentials.APIKey, catalog, &keys, bindings, groups)
+}
+
+func buildGatewayForBindings(
+	ctx context.Context,
+	client *Client,
+	token, bridgeKey string,
+	catalog ModelCatalog,
+	keys *KeyPage,
+	bindings map[string]LaneBinding,
+	groups []Group,
+) (Gateway, error) {
+	baseURL := strings.TrimRight(strings.TrimSpace(catalog.BaseURL), "/")
+	if baseURL == "" {
+		baseURL = client.Endpoint() + "/v1"
+	}
+	if len(bindings) == 0 {
+		key := accountKey(*keys, bridgeKey)
+		if key == "" {
+			created, err := client.CreateKeyForGroup(ctx, token, CheapRouterKeyName, nil)
+			if err != nil {
+				return Gateway{}, err
+			}
+			key = strings.TrimSpace(created.Key)
+			if key == "" {
+				return Gateway{}, &AuthError{Kind: ErrorResponse, Op: "/keys"}
+			}
+		}
+		return Gateway{
+			BaseURL: baseURL,
+			APIKey:  key,
+			Models:  catalog.Items,
+			Catalog: catalog.Items,
+		}, nil
+	}
+
+	laneKeys := make(map[string]string, len(bindings))
+	laneGroupIDs := make(map[string]int64, len(bindings))
+	for lane, binding := range bindings {
+		if binding.GroupID <= 0 {
+			continue
+		}
+		key := reusableLaneKey(*keys, binding)
+		if key == "" {
+			ensured, err := ensureGroupKey(ctx, client, token, keys, binding.GroupID)
+			if err != nil {
+				return Gateway{}, err
+			}
+			key = ensured
+		}
+		laneKeys[lane] = key
+		laneGroupIDs[lane] = binding.GroupID
+	}
+
+	models, modelLanes := SelectCatalogForBindings(catalog.Items, laneGroupIDs, groups)
+	fallbackKey := accountKey(*keys, bridgeKey)
+	if fallbackKey == "" {
+		for _, lane := range CanonicalLanes {
+			if k := laneKeys[lane]; k != "" {
+				fallbackKey = k
+				break
+			}
+		}
+		if fallbackKey == "" {
+			for _, k := range laneKeys {
+				if k != "" {
+					fallbackKey = k
+					break
+				}
+			}
+		}
+	}
+	return Gateway{
+		BaseURL:      baseURL,
+		APIKey:       fallbackKey,
+		LaneKeys:     laneKeys,
+		ModelLanes:   modelLanes,
+		Models:       models,
+		Catalog:      catalog.Items,
+		LaneBindings: laneGroupIDs,
+	}, nil
 }
 
 func readGatewayForGroup(ctx context.Context, client *Client, credentials Credentials, groupID *int64) (Gateway, error) {
@@ -330,7 +579,103 @@ func readGatewayForGroup(ctx context.Context, client *Client, credentials Creden
 	if baseURL == "" {
 		baseURL = client.Endpoint() + "/v1"
 	}
-	return Gateway{BaseURL: baseURL, APIKey: key, Models: models, GroupID: cloneInt64Ptr(groupID)}, nil
+	return Gateway{BaseURL: baseURL, APIKey: key, Models: models, Catalog: catalog.Items, GroupID: cloneInt64Ptr(groupID)}, nil
+}
+
+func ensureGroupKey(ctx context.Context, client *Client, token string, keys *KeyPage, groupID int64) (string, error) {
+	if key := groupKey(*keys, groupID); key != "" {
+		return key, nil
+	}
+	gid := groupID
+	created, err := client.CreateKeyForGroup(ctx, token, CheapRouterKeyName, &gid)
+	if err != nil {
+		return "", err
+	}
+	key := strings.TrimSpace(created.Key)
+	if key == "" {
+		return "", &AuthError{Kind: ErrorResponse, Op: "/keys"}
+	}
+	keys.Items = append(keys.Items, APIKey{
+		ID:      created.ID,
+		Key:     key,
+		Name:    created.Name,
+		GroupID: &gid,
+		Status:  "active",
+	})
+	return key, nil
+}
+
+func reusableLaneKey(page KeyPage, binding LaneBinding) string {
+	saved := strings.TrimSpace(binding.APIKey)
+	if saved != "" {
+		for _, candidate := range page.Items {
+			key := strings.TrimSpace(candidate.Key)
+			if key != saved {
+				continue
+			}
+			if candidate.GroupID != nil && *candidate.GroupID == binding.GroupID && keyStatusActive(candidate.Status) {
+				return key
+			}
+			return ""
+		}
+		if len(page.Items) == 0 || page.Total > int64(len(page.Items)) {
+			return saved
+		}
+	}
+	return groupKey(page, binding.GroupID)
+}
+
+func keyStatusActive(status string) bool {
+	return status == "" || strings.EqualFold(status, "active") || strings.EqualFold(status, "enabled")
+}
+
+func effectiveLaneBindings(credentials Credentials, groups []Group, catalog []Model) map[string]LaneBinding {
+	out := make(map[string]LaneBinding, len(credentials.LaneBindings))
+	for lane, binding := range credentials.LaneBindings {
+		if key := canonicalLaneKey(lane); key != "" && binding.GroupID > 0 {
+			out[key] = binding
+		}
+	}
+	if len(out) == 0 && credentials.GroupID != nil && *credentials.GroupID > 0 {
+		if lane := inferLaneForGroupID(*credentials.GroupID, groups, catalog); lane != "" {
+			out[lane] = LaneBinding{GroupID: *credentials.GroupID}
+		}
+	}
+	return out
+}
+
+func inferLaneForGroupID(groupID int64, groups []Group, catalog []Model) string {
+	for _, g := range groups {
+		if g.ID == groupID {
+			if lane := GroupLane(g, catalog); lane != "" {
+				return lane
+			}
+		}
+	}
+	for _, item := range catalog {
+		if item.ServesGroup(groupID) {
+			if lane := ModelLane(item); lane != "" {
+				return lane
+			}
+		}
+	}
+	return ""
+}
+
+func canonicalLaneKey(lane string) string {
+	if normalized := NormalizeLane(lane); normalized != "" {
+		return normalized
+	}
+	return strings.ToLower(strings.TrimSpace(lane))
+}
+
+func cloneLaneBindings(src map[string]LaneBinding) map[string]LaneBinding {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]LaneBinding, len(src))
+	maps.Copy(dst, src)
+	return dst
 }
 
 func groupKey(page KeyPage, groupID int64) string {
@@ -339,7 +684,7 @@ func groupKey(page KeyPage, groupID int64) string {
 		if key == "" || candidate.GroupID == nil || *candidate.GroupID != groupID {
 			continue
 		}
-		if candidate.Status != "" && !strings.EqualFold(candidate.Status, "active") && !strings.EqualFold(candidate.Status, "enabled") {
+		if !keyStatusActive(candidate.Status) {
 			continue
 		}
 		return key
@@ -383,10 +728,10 @@ func credentialsEqual(a, b Credentials) bool {
 		a.ExpiresAt != b.ExpiresAt || a.Endpoint != b.Endpoint || a.APIKey != b.APIKey {
 		return false
 	}
-	if a.GroupID == nil || b.GroupID == nil {
-		return a.GroupID == b.GroupID
+	if (a.GroupID == nil) != (b.GroupID == nil) || (a.GroupID != nil && *a.GroupID != *b.GroupID) {
+		return false
 	}
-	return *a.GroupID == *b.GroupID
+	return maps.Equal(a.LaneBindings, b.LaneBindings)
 }
 
 // accountKey picks the key the whole catalog is routed with: the bridge's

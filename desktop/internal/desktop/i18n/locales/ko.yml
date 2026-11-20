@@ -2308,6 +2308,7 @@ meter_state_plenty: 여유 있음
 meter_state_filling: 채워지는 중
 meter_state_near: 곧 압축
 meter_state_unknown: 아직 측정 전
+meter_limit_unknown: 알 수 없음/추정
 meter_left: '%{count} 남음'
 meter_tokens: Token
 meter_speed: 속도

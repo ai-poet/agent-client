@@ -15,8 +15,8 @@ import (
 )
 
 // accountFooter renders the bottom-left CheapRouter account avatar entry and
-// its two-level popover panel (account summary + level-1 "分组" entry +
-// level-2 group selection submenu).
+// its two-level popover panel (account summary + per-lane group entries +
+// level-2 single-select group submenu per lane).
 func (a *App) accountFooter(c *ui.Context) {
 	state := a.Settings.CheapRouter
 	if state == nil {
@@ -25,7 +25,7 @@ func (a *App) accountFooter(c *ui.Context) {
 	p := theme.Of(c)
 	signedIn := state.SignedIn()
 	if !a.accountOpen || !signedIn {
-		a.accountGroupsOpen = false
+		a.accountGroupLane = ""
 	}
 	width, height := c.Size()
 	panelWidth := max(0, min(288, width-32))
@@ -74,7 +74,7 @@ func (a *App) accountFooter(c *ui.Context) {
 		}).OnClick(func() {
 			opening := !a.accountOpen
 			a.accountOpen = opening
-			a.accountGroupsOpen = false
+			a.accountGroupLane = ""
 			if opening && state.SignedIn() && state.RefreshGroups != nil {
 				state.RefreshGroups()
 			}
@@ -99,7 +99,7 @@ func (a *App) accountFooter(c *ui.Context) {
 		kit.Snapped(panel).Padding(0).MinWidth(0).AttachTo(trigger, ui.AnchorTopStart, ui.AnchorBottomStart).
 			Margin(0, 0, 6, 0).Width(panelWidth).MaxHeight(max(0, height-72))
 		if panel.Dismissed() {
-			a.accountGroupsOpen = false
+			a.accountGroupLane = ""
 		}
 	}
 }
@@ -152,7 +152,7 @@ func accountInitial(user core.User) string {
 
 func (a *App) openCheapAccountSettings() {
 	a.accountOpen = false
-	a.accountGroupsOpen = false
+	a.accountGroupLane = ""
 	a.Navigate(SettingsPage)
 	a.Settings.Open(settings.CheapAccount)
 }
@@ -179,13 +179,7 @@ func (a *App) accountSignedOutContent(c *ui.Context, state *cheapauthui.State) {
 
 func (a *App) accountSignedInContent(c *ui.Context, state *cheapauthui.State) {
 	p := theme.Of(c)
-	currentGroup := state.ActiveGroupName()
-	if currentGroup == "" {
-		currentGroup = "默认分组（自动）"
-		if state.SelectedGroupID != nil {
-			currentGroup = fmt.Sprintf("#%d", *state.SelectedGroupID)
-		}
-	}
+	lanes := state.Lanes()
 
 	_, height := c.Size()
 	ui.Scroll(c.Key("signed-in-panel")).FillWidth().MaxHeight(max(0, height-74)).Padding(10).Gap(10).Children(func() {
@@ -216,32 +210,76 @@ func (a *App) accountSignedInContent(c *ui.Context, state *cheapauthui.State) {
 
 		ui.Box(c).FillWidth().Height(1).Background(p.Border)
 
-		ui.Column(c.Key("groups-entry-section")).Gap(6).Children(func() {
-			groupTrigger := ui.ButtonBase(c.Key("group-menu-trigger")).Label("分组").FillWidth().Height(34).PaddingX(8).Gap(8).
-				Radius(p.Radius).Cursor(ui.CursorPointer).AlignItems(ui.Center).
-				HasPopup(ui.PopupMenu).Expanded(a.accountGroupsOpen)
+		ui.Column(c.Key("groups-entry-section")).Gap(4).Children(func() {
+			ui.Row(c.Key("groups-section-header")).AlignItems(ui.Center).Justify(ui.SpaceBetween).PaddingX(4).Children(func() {
+				ui.Text(c, "模型分组").FontSize(12).FontWeight(600).TextColor(p.MutedForeground)
+				if state.RefreshGroups != nil {
+					kit.IconButton(c.Key("refresh-groups"), icons.Reload, "刷新分组", 22, false).
+						Disabled(state.GroupsLoading || state.SwitchingGroup || state.LoggingOut).
+						OnClick(state.RefreshGroups)
+				}
+			})
+
 			switch {
-			case groupTrigger.Pressed() || a.accountGroupsOpen:
-				groupTrigger.Background(p.Active)
-			case groupTrigger.Hovered():
-				groupTrigger.Background(p.Hover)
+			case state.GroupsLoading && len(lanes) == 0:
+				ui.Text(c, "正在加载可用分组…").FontSize(12).Padding(4, 8).TextColor(p.MutedForeground)
+			case state.GroupsError != "" && len(lanes) == 0:
+				ui.Text(c, state.GroupsError).FontSize(12).Padding(4, 8).TextColor(p.Danger)
+				if state.RefreshGroups != nil {
+					kit.Ghost(c.Key("retry-groups"), "重试加载分组", false).Height(28).
+						Disabled(state.LoggingOut).OnClick(state.RefreshGroups)
+				}
+			case len(lanes) == 0:
+				ui.Text(c, "暂无可用分组").FontSize(12).Padding(4, 8).TextColor(p.MutedForeground)
+			default:
+				if state.GroupsError != "" {
+					ui.Text(c, state.GroupsError).FontSize(12).Padding(2, 8).TextColor(p.Danger)
+				}
+				for _, l := range lanes {
+					lane := l
+					laneLabel := core.LaneDisplayName(lane)
+					boundName := state.BoundGroupName(lane)
+					if boundName == "" {
+						boundName = "未绑定"
+					}
+					open := a.accountGroupLane == lane
+					laneTrigger := ui.ButtonBase(c.Key("lane-menu-" + lane)).Label(laneLabel).FillWidth().Height(32).PaddingX(8).Gap(8).
+						Radius(p.Radius).Cursor(ui.CursorPointer).AlignItems(ui.Center).
+						HasPopup(ui.PopupMenu).Expanded(open)
+					switch {
+					case laneTrigger.Pressed() || open:
+						laneTrigger.Background(p.Active)
+					case laneTrigger.Hovered():
+						laneTrigger.Background(p.Hover)
+					}
+					laneTrigger.Children(func() {
+						ui.Icon(c, icons.Network).FontSize(13).Shrink(0).TextColor(p.MutedForeground)
+						ui.Text(c, laneLabel).FontSize(13).FontWeight(500).SingleLine().Shrink(0).TextColor(p.PopoverForeground)
+						ui.Spacer(c)
+						ui.Text(c, boundName).FontSize(12).SingleLine().Shrink(1).MinWidth(0).TextColor(p.MutedForeground)
+						ui.Icon(c, icons.ChevronRight).FontSize(14).Shrink(0).TextColor(p.MutedForeground)
+					}).OnClick(func() {
+						if a.accountGroupLane == lane {
+							a.accountGroupLane = ""
+						} else {
+							a.accountGroupLane = lane
+						}
+					})
+					if laneTrigger.Shortcut(0, ui.KeyRight) {
+						a.accountGroupLane = lane
+					}
+					a.accountLaneSubmenu(c, p, state, lane, laneTrigger)
+				}
 			}
-			groupTrigger.Children(func() {
-				ui.Icon(c, icons.Network).FontSize(14).Shrink(0).TextColor(p.MutedForeground)
-				ui.Text(c, "分组").FontSize(13).FontWeight(500).SingleLine().Shrink(0).TextColor(p.PopoverForeground)
-				ui.Spacer(c)
-				ui.Text(c, currentGroup).FontSize(12).SingleLine().Shrink(1).MinWidth(0).TextColor(p.MutedForeground)
-				ui.Icon(c, icons.ChevronRight).FontSize(14).Shrink(0).TextColor(p.MutedForeground)
-			}).OnClick(func() { a.accountGroupsOpen = !a.accountGroupsOpen })
-			if groupTrigger.Shortcut(0, ui.KeyRight) {
-				a.accountGroupsOpen = true
-			}
-			a.accountGroupSubmenu(c, p, state, groupTrigger)
 
 			if state.SwitchingGroup {
 				ui.Row(c.Key("switching")).Padding(4, 8).Gap(6).AlignItems(ui.Center).Children(func() {
 					kit.Busy(c)
-					ui.Text(c, "正在切换分组并刷新模型…").FontSize(12).TextColor(p.MutedForeground)
+					text := "正在切换分组并刷新模型…"
+					if state.SwitchingLane != "" {
+						text = "正在更新 " + core.LaneDisplayName(state.SwitchingLane) + " 分组并刷新模型…"
+					}
+					ui.Text(c, text).FontSize(12).TextColor(p.MutedForeground)
 				})
 			}
 
@@ -258,7 +296,7 @@ func (a *App) accountSignedInContent(c *ui.Context, state *cheapauthui.State) {
 			kit.Ghost(c.Key("popover-account-page"), "账号详情", false).Grow(1).Height(30).OnClick(a.openCheapAccountSettings)
 			kit.DangerBusy(c.Key("popover-logout"), "退出登录", state.LoggingOut).Grow(1).Height(30).OnClick(func() {
 				a.accountOpen = false
-				a.accountGroupsOpen = false
+				a.accountGroupLane = ""
 				if state.Logout != nil {
 					state.Logout()
 				}
@@ -267,16 +305,30 @@ func (a *App) accountSignedInContent(c *ui.Context, state *cheapauthui.State) {
 	})
 }
 
-func (a *App) accountGroupSubmenu(c *ui.Context, p *theme.Palette, state *cheapauthui.State, trigger ui.Element) {
-	disabled := state.SwitchingGroup || state.LoggingOut || state.Stage == cheapauthui.SyncingGateway || state.SelectGroup == nil
+func (a *App) accountLaneSubmenu(c *ui.Context, p *theme.Palette, state *cheapauthui.State, lane string, trigger ui.Element) {
+	disabled := state.SwitchingGroup || state.LoggingOut || state.Stage == cheapauthui.SyncingGateway || (state.SelectLaneGroup == nil && state.SelectGroup == nil)
 	width, height := c.Size()
 	menuHeight := max(0, min(360, height-32))
-	panel := kit.Popover(c, trigger, &a.accountGroupsOpen, func() {
-		ui.Column(c.Key("group-submenu-panel")).FillWidth().Shrink(1).Padding(8).Gap(6).Children(func() {
-			ui.Row(c.Key("group-submenu-header")).AlignItems(ui.Center).Justify(ui.SpaceBetween).PaddingX(4).Children(func() {
-				ui.Text(c, "模型分组").FontSize(12).FontWeight(600).TextColor(p.MutedForeground)
+	open := a.accountGroupLane == lane
+	laneLabel := core.LaneDisplayName(lane)
+	boundID := state.BoundGroupID(lane)
+	laneGroups := state.GroupsForLane(lane)
+	choose := func(groupID *int64) {
+		a.accountGroupLane = ""
+		trigger.Focus()
+		if state.SelectLaneGroup != nil {
+			state.SelectLaneGroup(lane, groupID)
+		} else if state.SelectGroup != nil {
+			state.SelectGroup(groupID)
+		}
+	}
+
+	panel := kit.Popover(c, trigger, &open, func() {
+		ui.Column(c.Key("group-submenu-panel-" + lane)).FillWidth().Shrink(1).Padding(8).Gap(6).Children(func() {
+			ui.Row(c.Key("group-submenu-header-" + lane)).AlignItems(ui.Center).Justify(ui.SpaceBetween).PaddingX(4).Children(func() {
+				ui.Text(c, laneLabel+" 分组").FontSize(12).FontWeight(600).TextColor(p.MutedForeground)
 				if state.RefreshGroups != nil {
-					refreshBtn := kit.IconButton(c.Key("refresh-groups"), icons.Reload, "刷新分组", 22, false).
+					refreshBtn := kit.IconButton(c.Key("refresh-groups-"+lane), icons.Reload, "刷新分组", 22, false).
 						Disabled(state.GroupsLoading || state.SwitchingGroup || state.LoggingOut)
 					refreshBtn.OnClick(state.RefreshGroups)
 				}
@@ -284,38 +336,25 @@ func (a *App) accountGroupSubmenu(c *ui.Context, p *theme.Palette, state *cheapa
 
 			ui.Box(c).FillWidth().Height(1).Background(p.Border)
 
-			ui.Scroll(c.Key("groups-list")).MaxHeight(max(0, menuHeight-53)).Gap(2).Children(func() {
-				switch {
-				case state.GroupsLoading && len(state.Groups) == 0:
-					ui.Text(c, "正在加载可用分组…").FontSize(12).Padding(6, 8).TextColor(p.MutedForeground)
-				default:
-					if state.GroupsError != "" {
-						ui.Text(c, state.GroupsError).FontSize(12).Padding(6, 8).TextColor(p.Danger)
-						if len(state.Groups) == 0 && state.RefreshGroups != nil {
-							kit.Ghost(c.Key("retry-groups"), "重试加载分组", false).Height(28).
-								Disabled(state.LoggingOut).OnClick(state.RefreshGroups)
-						}
-					}
-					groupRow(c, p, "group-default", "默认分组（自动）", "", state.SelectedGroupID == nil, disabled, func() {
-						a.accountGroupsOpen = false
-						trigger.Focus()
-						state.SelectGroup(nil)
+			ui.Scroll(c.Key("groups-list-" + lane)).MaxHeight(max(0, menuHeight-53)).Gap(2).Children(func() {
+				groupRow(c, p, "group-unbound-"+lane, "未绑定（留空）", "", boundID == nil, disabled, func() {
+					choose(nil)
+				})
+				for _, g := range laneGroups {
+					group := g
+					selected := boundID != nil && *boundID == group.ID
+					meta := formatGroupMeta(group)
+					groupRow(c, p, fmt.Sprintf("group-%s-%d", lane, group.ID), group.Name, meta, selected, disabled, func() {
+						id := group.ID
+						choose(&id)
 					})
-					for _, g := range state.Groups {
-						group := g
-						selected := state.SelectedGroupID != nil && *state.SelectedGroupID == group.ID
-						meta := formatGroupMeta(group)
-						groupRow(c, p, fmt.Sprintf("group-%d", group.ID), group.Name, meta, selected, disabled, func() {
-							a.accountGroupsOpen = false
-							trigger.Focus()
-							id := group.ID
-							state.SelectGroup(&id)
-						})
-					}
 				}
 			})
 		})
 	})
+	if !open && a.accountGroupLane == lane {
+		a.accountGroupLane = ""
+	}
 	if panel == (ui.Element{}) {
 		return
 	}
@@ -327,7 +366,7 @@ func (a *App) accountGroupSubmenu(c *ui.Context, p *theme.Palette, state *cheapa
 		panel.AttachTo(trigger, ui.AnchorTopStart, ui.AnchorBottomStart).Margin(0, 0, 6, 0)
 	}
 	if panel.Shortcut(0, ui.KeyLeft) {
-		a.accountGroupsOpen = false
+		a.accountGroupLane = ""
 		trigger.Focus()
 	}
 }

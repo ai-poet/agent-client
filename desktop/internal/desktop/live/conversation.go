@@ -108,7 +108,8 @@ func (r *Runtime) projectModels() {
 				name = *m.DisplayName
 			}
 			key := modelKey(p.ID, m.ID)
-			v := composer.Model{ID: key, Name: name, Provider: p.Name, Reasoning: m.Reasoning, Family: composerModelVendor(p, m), ContextWindow: m.Context, DefaultEffort: effortName(m.DefaultEffort), Score: r.measuredScore(key, m.DefaultEffort)}
+			limits, contextEstimated := nodeproviders.ResolveModelLimits(p.Api, m, nodeproviders.ModelLimits{})
+			v := composer.Model{ID: key, Name: name, Provider: p.Name, Reasoning: m.Reasoning, Family: composerModelVendor(p, m), ContextWindow: limits.Context, ContextUnknown: contextEstimated, DefaultEffort: effortName(m.DefaultEffort), Score: r.measuredScore(key, m.DefaultEffort)}
 			for _, e := range m.Efforts {
 				v.Efforts = append(v.Efforts, effortName(e))
 			}
@@ -270,17 +271,33 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 			if saved := r.Preferences.Data.Composer; saved != nil {
 				comp.Mode = modeChoice(saved.Mode)
 				comp.Permission = permissionChoice(saved.Permission)
-				if m := saved.Model; m != nil && (m.Source == snapshot.Node || r.forwards(m.Provider) && m.Source == r.parent.controller.Target()) {
+				applySaved := func(providerID protocol.ProviderID, modelID string, effort protocol.Effort, features map[string]string) bool {
 					for _, p := range r.composerProviders() {
-						if p.ID == m.Provider && p.Enabled && r.draftProviderUsable(p.ID) && slices.ContainsFunc(p.Models, func(v protocol.ConversationModel) bool { return v.ID == m.Model }) {
+						if p.ID == providerID && p.Enabled && r.draftProviderUsable(p.ID) && slices.ContainsFunc(p.Models, func(v protocol.ConversationModel) bool { return v.ID == modelID }) {
 							config := protocol.DefaultSessionConfig()
-							config.Provider = m.Provider
-							config.Model = m.Model
-							config.Effort = m.Effort
-							config.Features = m.Features
+							config.Provider = providerID
+							config.Model = modelID
+							config.Effort = effort
+							config.Features = features
 							config.Mode = saved.Mode
 							config.Permission = saved.Permission
 							r.applyComposer(comp, config)
+							return true
+						}
+					}
+					return false
+				}
+				applied := false
+				if m := saved.Model; m != nil && (m.Source == snapshot.Node || r.forwards(m.Provider) && m.Source == r.parent.controller.Target()) {
+					applied = applySaved(m.Provider, m.Model, m.Effort, m.Features)
+				}
+				if !applied {
+					for _, recent := range saved.RecentModels() {
+						if recent.Source != snapshot.Node && !(r.forwards(recent.Provider) && recent.Source == r.parent.controller.Target()) {
+							continue
+						}
+						if applySaved(recent.Provider, recent.Model, protocol.Effort{Kind: "default"}, nil) {
+							break
 						}
 					}
 				}
@@ -312,13 +329,14 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 		}
 	}
 	ctx.Models = r.offeredModels(cv.ID, ctx.Models)
-	// A group switch may remove a draft's model. Do not rewrite an admitted
-	// conversation or a captured draft submission.
-	if provider, _, _ := strings.Cut(comp.Model, "/"); provider == nodeproviders.CheapRouterProviderID.String() &&
+	// A group switch or lane unbind may remove a draft's model. Do not rewrite an
+	// admitted conversation or a captured draft submission.
+	if provider, oldModelID, _ := strings.Cut(comp.Model, "/"); provider == nodeproviders.CheapRouterProviderID.String() &&
 		unsentDraft(cv) && !r.draftSubmitted(cv) && r.controller.Connected() &&
 		!slices.ContainsFunc(ctx.Models, func(m composer.Model) bool { return m.ID == comp.Model }) {
+		prevFamily := composerModelVendor(protocol.ConversationProvider{ID: nodeproviders.CheapRouterProviderID}, protocol.ConversationModel{ID: oldModelID})
 		comp.Model, comp.Features = "", map[string]string{}
-		r.defaultComposer(comp)
+		r.defaultComposerForFamily(comp, prevFamily)
 	}
 	r.nameModelSources(c, cv.ID, ctx.Models)
 	ctx.MemberModels = r.memberModels(ctx.Models)
@@ -443,11 +461,18 @@ func (r *Runtime) applyComposer(c *composer.State, config protocol.SessionConfig
 	for k, v := range config.Features {
 		c.Features[k] = v
 	}
+	c.Effort = 0
 	for _, m := range r.models() {
 		if m.ID == c.Model {
+			if !m.Reasoning {
+				break
+			}
 			if i := slices.Index(m.Efforts, effortName(config.Effort)); i >= 0 {
 				c.Effort = float64(i)
+			} else if i := slices.Index(m.Efforts, m.DefaultEffort); i >= 0 {
+				c.Effort = float64(i)
 			}
+			break
 		}
 	}
 }
@@ -468,12 +493,20 @@ func (r *Runtime) composerConfig(id string, comp *composer.State, m composer.Mes
 			config.Provider = p.ID
 			config.Model = model.ID
 			config.Credential = p.Credential
-			config.Effort = parseEffort(m.Effort)
+			if !model.Reasoning {
+				config.Effort = protocol.Effort{Kind: "default"}
+			} else {
+				config.Effort = parseEffort(m.Effort)
+				if m.Effort == "" || m.Effort == "composer_effort_unavailable" {
+					config.Effort = model.DefaultEffort
+				} else if len(model.Efforts) > 0 && !slices.ContainsFunc(model.Efforts, func(allowed protocol.Effort) bool {
+					return effortName(allowed) == effortName(config.Effort)
+				}) {
+					config.Effort = model.DefaultEffort
+				}
+			}
 			config.Mode = []protocol.WorkMode{"code", "plan", "flagship"}[min(max(int(m.Mode), 0), 2)]
 			config.Permission = []protocol.Permission{"ask", "project", "full"}[min(max(int(m.Permission), 0), 2)]
-			if m.Effort == "" || m.Effort == "composer_effort_unavailable" {
-				config.Effort = model.DefaultEffort
-			}
 			config.Features = map[string]string{}
 			if model.Capabilities != nil {
 				for _, f := range model.Capabilities.Features {

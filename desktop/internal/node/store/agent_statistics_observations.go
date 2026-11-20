@@ -11,6 +11,7 @@ import (
 	"slices"
 
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
+	"github.com/ai-poet/agent-client/desktop/internal/node/providers"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
@@ -105,7 +106,7 @@ func agentStatisticCalls(ctx context.Context, db *sql.Conn, session protocol.Ses
 			return nil, err
 		}
 		request.TurnIndex = nil
-		if request.ContextLimit == nil && limit.Valid && limit.Int64 > 0 {
+		if request.ContextLimit == nil && limit.Valid && limit.Int64 >= int64(providers.MinCatalogContext) {
 			value := uint32(limit.Int64)
 			request.ContextLimit = &value
 		}

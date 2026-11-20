@@ -2322,6 +2322,7 @@ meter_state_plenty
 meter_state_filling
 meter_state_near
 meter_state_unknown
+meter_limit_unknown
 meter_left
 meter_tokens
 meter_speed

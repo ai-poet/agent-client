@@ -14,6 +14,7 @@ import (
 
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/tokens"
+	"github.com/ai-poet/agent-client/desktop/internal/node/providers"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
@@ -75,7 +76,7 @@ func readAgentContextObservation(ctx context.Context, db *sql.Conn, session prot
 		value.first = &v
 	}
 	if count.Valid || estimate.Valid || value.summary {
-		if limit.Valid && limit.Int64 > 0 {
+		if limit.Valid && limit.Int64 >= int64(providers.MinCatalogContext) {
 			v := uint32(limit.Int64)
 			value.limit = &v
 		}

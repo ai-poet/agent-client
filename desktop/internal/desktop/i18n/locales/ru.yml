@@ -2308,6 +2308,7 @@ meter_state_plenty: Много места
 meter_state_filling: Заполняется
 meter_state_near: Скоро сжатие
 meter_state_unknown: Ещё не измерено
+meter_limit_unknown: Неизвестно / Оценка
 meter_left: Осталось %{count}
 meter_tokens: Tokens
 meter_speed: Скорость

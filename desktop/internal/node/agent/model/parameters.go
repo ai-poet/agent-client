@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
+	"github.com/ai-poet/agent-client/desktop/internal/node/providers"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
@@ -101,10 +102,55 @@ func requestParameters(binding Binding, call *fantasy.Call) *callParameters {
 			call.Temperature = nil
 		}
 		params.Developer = openai && api != protocol.ConversationModelApiResponses
-		if enabled && level != "" && !(provider.Api == protocol.ConversationModelApiDeepSeek && level == "none") {
-			params.Body["reasoning_effort"] = level
+		deepseekOrGLM := provider.Api == protocol.ConversationModelApiDeepSeek ||
+			providers.IsDeepSeekModel(binding.Config.Model) ||
+			providers.IsGLMThinkingModel(binding.Config.Model)
+		kimiK3 := providers.IsKimiK3Model(binding.Config.Model)
+		if enabled && level != "" {
+			switch {
+			case deepseekOrGLM:
+				// Matches Rust provider_options.rs: DeepSeek & GLM >= 4.5 use
+				// thinking={"type":"enabled"|"disabled"} + reasoning_effort="high"|"max".
+				thinking, _ := params.Body["thinking"].(map[string]any)
+				if thinking == nil {
+					thinking = map[string]any{}
+				}
+				switch level {
+				case "none", "low":
+					thinking["type"] = "disabled"
+					delete(params.Body, "reasoning_effort")
+				case "xhigh", "max":
+					thinking["type"] = "enabled"
+					params.Body["reasoning_effort"] = "max"
+				default:
+					thinking["type"] = "enabled"
+					params.Body["reasoning_effort"] = "high"
+				}
+				params.Body["thinking"] = thinking
+			case kimiK3:
+				// Matches Rust provider_options.rs: Kimi K3 always thinks and
+				// takes top-level reasoning_effort="low"|"high"|"max" with no thinking switch.
+				switch level {
+				case "none", "minimal", "low":
+					params.Body["reasoning_effort"] = "low"
+				case "xhigh", "max":
+					params.Body["reasoning_effort"] = "max"
+				default:
+					params.Body["reasoning_effort"] = "high"
+				}
+			case providers.IsGeminiThinkingModel(binding.Config.Model) && api == protocol.ConversationModelApiChatCompletions:
+				params.Body["reasoning_effort"] = providers.GoogleThinkingLevelForEffort(level)
+			case api == protocol.ConversationModelApiResponses:
+				params.Body["reasoning_effort"] = providers.OpenAIReasoningEffortForLevel(level, true)
+			case provider.ID == providers.CheapRouterProviderID:
+				params.Body["reasoning_effort"] = level
+			case openai:
+				params.Body["reasoning_effort"] = providers.OpenAIReasoningEffortForLevel(level, false)
+			default:
+				params.Body["reasoning_effort"] = level
+			}
 		}
-		if level != "" && (provider.Api == protocol.ConversationModelApiDeepSeek || params.Body["thinking"] != nil) {
+		if level != "" && !deepseekOrGLM && !kimiK3 && params.Body["thinking"] != nil {
 			thinking, _ := params.Body["thinking"].(map[string]any)
 			if thinking == nil {
 				thinking = map[string]any{}
@@ -117,8 +163,9 @@ func requestParameters(binding Binding, call *fantasy.Call) *callParameters {
 			params.Body["thinking"] = thinking
 		}
 		if api == protocol.ConversationModelApiResponses {
+			isGrok := strings.HasPrefix(strings.ToLower(leaf), "grok")
 			isReasoning := enabled && (reasoning != nil || openai || responsesModel.MatchString(binding.Config.Model))
-			if isReasoning {
+			if isReasoning && !isGrok {
 				params.Body["include"] = []string{"reasoning.encrypted_content"}
 			}
 			if value, ok := params.Body["reasoning_effort"]; ok {
@@ -129,7 +176,7 @@ func requestParameters(binding Binding, call *fantasy.Call) *callParameters {
 				if _, exists := reasoning["effort"]; !exists {
 					reasoning["effort"] = value
 				}
-				if _, exists := reasoning["summary"]; !exists {
+				if _, exists := reasoning["summary"]; !exists && !isGrok {
 					reasoning["summary"] = "auto"
 				}
 				params.Body["reasoning"] = reasoning
@@ -222,25 +269,33 @@ func requestParameters(binding Binding, call *fantasy.Call) *callParameters {
 			} else if strings.HasPrefix(name, "gemini-2.5-flash") {
 				thinking = map[string]any{"thinkingBudget": 0, "includeThoughts": false}
 			}
-		} else if strings.HasPrefix(name, "gemini-3") && level != "" {
-			selected := level
-			switch level {
-			case "minimal", "low":
+		} else if (strings.HasPrefix(name, "gemini-3") || strings.HasPrefix(name, "gemini-4")) && level != "" {
+			selected := providers.GoogleThinkingLevelForEffort(level)
+			if selected == "medium" && strings.HasPrefix(name, "gemini-3-pro") {
 				selected = "low"
-			case "medium":
-				if strings.HasPrefix(name, "gemini-3-pro") {
-					selected = "low"
-				}
-			default:
-				selected = "high"
 			}
 			thinking = map[string]any{"thinkingLevel": selected, "includeThoughts": true}
 		} else if strings.HasPrefix(name, "gemini-2.5") {
 			budget := int64(8192)
-			if effort.Kind == "budget" && effortBudget(effort) >= 0 {
-				budget = effortBudget(effort)
+			switch effort.Kind {
+			case "budget":
+				if effortBudget(effort) >= 0 {
+					budget = effortBudget(effort)
+				}
+			case "minimal":
+				budget = 1024
+			case "low":
+				budget = 0
+			case "medium":
+				budget = 5000
+			case "high":
+				budget = 10000
+			case "xhigh":
+				budget = 16000
+			case "max":
+				budget = 20000
 			}
-			thinking = map[string]any{"thinkingBudget": budget, "includeThoughts": true}
+			thinking = map[string]any{"thinkingBudget": budget, "includeThoughts": budget > 0}
 		}
 		if thinking != nil {
 			generation, _ := params.Body["generationConfig"].(map[string]any)
@@ -304,7 +359,7 @@ func requestParameters(binding Binding, call *fantasy.Call) *callParameters {
 	}
 	openaiAPI := api == protocol.ConversationModelApiResponses || api == protocol.ConversationModelApiChatCompletions || api == protocol.ConversationModelApiDeepSeek || api == protocol.ConversationModelApiAzureOpenAi
 	if openaiAPI && enabled && level != "" {
-		if provider.Api != protocol.ConversationModelApiDeepSeek || level != "none" {
+		if params.Body["reasoning_effort"] != nil || api == protocol.ConversationModelApiResponses && params.Body["reasoning"] != nil {
 			appendOrder("reasoning_effort")
 		}
 		if params.Body["thinking"] != nil {

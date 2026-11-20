@@ -42,6 +42,24 @@ func DefaultModel(models []Model) Model {
 	return best
 }
 
+// DefaultModelForFamily prefers a model in preferredFamily (still preferring
+// Sonnet within the Anthropic family, else first available in that family),
+// falling back to DefaultModel across all models when none matches.
+func DefaultModelForFamily(models []Model, preferredFamily string) Model {
+	if preferredFamily != "" {
+		var same []Model
+		for _, m := range models {
+			if vendorID(m) == preferredFamily {
+				same = append(same, m)
+			}
+		}
+		if len(same) > 0 {
+			return DefaultModel(same)
+		}
+	}
+	return DefaultModel(models)
+}
+
 func vendorID(m Model) string {
 	if m.Family == "" {
 		return "other"
@@ -75,8 +93,16 @@ func pickerVendors(c *ui.Context, models []Model, overrides []Family) ([]Family,
 			name = "Google"
 		case id == "grok":
 			name = "xAI"
+		case id == "deepseek":
+			name = "DeepSeek"
+		case id == "zhipu":
+			name = "Zhipu"
 		case id == "kimi":
 			name = "Kimi"
+		case id == "minimax":
+			name = "MiniMax"
+		case id == "qwen":
+			name = "Qwen"
 		case name == f.Label:
 			name = id
 		}

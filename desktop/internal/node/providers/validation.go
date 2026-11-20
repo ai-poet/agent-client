@@ -135,7 +135,7 @@ func validateEffort(api protocol.ConversationModelApi, effort protocol.Effort, o
 	case protocol.ConversationModelApiAzureOpenAi:
 		return validateEffort(protocol.ConversationModelApiChatCompletions, effort, output)
 	case protocol.ConversationModelApiDeepSeek:
-		supported = effort.Kind == "default" || effort.Kind == "none" || effort.Kind == "high" || effort.Kind == "max"
+		supported = effort.Kind == "default" || effort.Kind == "none" || effort.Kind == "low" || effort.Kind == "high" || effort.Kind == "max"
 	case protocol.ConversationModelApiOpenCodeGo:
 		if effort.Kind == "budget" {
 			supported = budget >= 1024 && uint32(budget) < output

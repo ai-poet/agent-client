@@ -2308,6 +2308,7 @@ meter_state_plenty: Beaucoup d'espace
 meter_state_filling: Se remplit
 meter_state_near: Compaction imminente
 meter_state_unknown: Pas encore mesuré
+meter_limit_unknown: Inconnu / Est.
 meter_left: '%{count} restants'
 meter_tokens: Tokens
 meter_speed: Vitesse

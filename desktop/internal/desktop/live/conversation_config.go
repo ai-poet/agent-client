@@ -25,12 +25,18 @@ func (r *Runtime) composerKey(id string, c *composer.State) string {
 }
 
 func (r *Runtime) defaultComposer(c *composer.State) {
+	r.defaultComposerForFamily(c, "")
+}
+
+func (r *Runtime) defaultComposerForFamily(c *composer.State, preferredFamily string) {
 	snapshot := r.snapshot()
-	if config := snapshot.Defaults.Config; config != nil {
-		for _, p := range snapshot.Providers {
-			if p.Enabled && r.listedProviderUsable(p) && p.ID == config.Provider && slices.ContainsFunc(p.Models, func(m protocol.ConversationModel) bool { return m.ID == config.Model }) {
-				r.applyComposer(c, *config)
-				return
+	if preferredFamily == "" {
+		if config := snapshot.Defaults.Config; config != nil {
+			for _, p := range snapshot.Providers {
+				if p.Enabled && r.listedProviderUsable(p) && p.ID == config.Provider && slices.ContainsFunc(p.Models, func(m protocol.ConversationModel) bool { return m.ID == config.Model }) {
+					r.applyComposer(c, *config)
+					return
+				}
 			}
 		}
 	}
@@ -40,7 +46,7 @@ func (r *Runtime) defaultComposer(c *composer.State) {
 			continue
 		}
 		for _, m := range p.Models {
-			display := composer.Model{ID: modelKey(p.ID, m.ID)}
+			display := composer.Model{ID: modelKey(p.ID, m.ID), Family: composerModelVendor(p, m)}
 			if m.DisplayName != nil {
 				display.Name = *m.DisplayName
 			}
@@ -50,7 +56,7 @@ func (r *Runtime) defaultComposer(c *composer.State) {
 	if len(candidates) == 0 {
 		return
 	}
-	c.Model, c.Effort = composer.DefaultModel(candidates).ID, 0
+	c.Model, c.Effort = composer.DefaultModelForFamily(candidates, preferredFamily).ID, 0
 	for _, display := range r.models() {
 		if display.ID == c.Model {
 			if i := slices.Index(display.Efforts, display.DefaultEffort); i >= 0 {

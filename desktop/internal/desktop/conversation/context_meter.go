@@ -25,6 +25,7 @@ type ContextStats struct {
 	// Limit is the model's window, Threshold the size that starts automatic
 	// compaction and Reserve the room kept for output; 0 where unknown.
 	Limit, Threshold, Reserve uint64
+	LimitEstimated            bool
 	Compacting                bool
 	Compactions               uint64
 	// Steps are each turn's latest request, oldest first; Parts the context
@@ -197,10 +198,16 @@ func (d *ContextStats) State() (string, kit.Tone) {
 	return "meter_state_near", kit.Caution
 }
 
-// used is the window used of its size, 345k / 1M; "" where either is
-// unknown.
-func (d *ContextStats) used() string {
-	if d.Tokens == nil || d.Limit == 0 {
+// used is the window used of its size, 345k / 1M; shows unknown/estimated when
+// tokens are known but the model's context limit is unknown.
+func (d *ContextStats) used(c *ui.Context) string {
+	if d.Tokens == nil {
+		return ""
+	}
+	if d.Limit == 0 {
+		if d.LimitEstimated {
+			return Count(int(*d.Tokens)) + " / " + i18n.T(c, "meter_limit_unknown")
+		}
 		return ""
 	}
 	return Count(int(*d.Tokens)) + " / " + Count(int(d.Limit))
@@ -298,8 +305,10 @@ func contextSummary(c *ui.Context, d *ContextStats) {
 		})
 		ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
 			ui.Text(c, i18n.T(c, key)).FontSize(15).FontWeight(500).TextColor(color).SingleLine()
-			if used := d.used(); used != "" {
+			if used := d.used(c); used != "" {
 				ui.Text(c, used).FontSize(13).TextColor(p.MutedForeground).FontFeatures("tnum").SingleLine()
+			} else if d.Limit == 0 && d.LimitEstimated {
+				ui.Text(c, i18n.T(c, "meter_limit_unknown")).FontSize(13).TextColor(p.MutedForeground).SingleLine()
 			}
 		})
 	})

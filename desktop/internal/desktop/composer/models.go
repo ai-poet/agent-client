@@ -377,6 +377,12 @@ func (s *State) controls(c *ui.Context, ctx *Context, actions Actions) {
 	// The main page has the team row's divider (1, and a gap of 8); the
 	// team list is as tall as its rows, the model picker the full height.
 	h := float32(108 + teamRow + 9)
+	if s.layer == layerMain {
+		m := s.controlModel(s.controlModels(ctx))
+		if len(efforts(m)) == 0 {
+			h = float32(68 + teamRow + 9)
+		}
+	}
 	switch s.layer {
 	case layerModels:
 		// As tall as ten rows, less in a window
@@ -422,28 +428,36 @@ func (s *State) mainPanel(c *ui.Context, ctx *Context) {
 	effortIndex := s.controlEffort()
 	list := efforts(m)
 	s.teamRow(c, ctx)
-	effort := s.controlEffortName(c, m)
+	hasReasoning := len(list) > 0
+	effort := ""
+	if hasReasoning {
+		effort = s.controlEffortName(c, m)
+	}
 	highest := len(list) > 1 && int(*effortIndex) == len(list)-1
 	ui.Column(c.Key("controls")).FillWidth().Shrink(0).Gap(4).AlignItems(ui.Center).Children(func() {
 		ui.Box(c.Key("effort-row")).FillWidth().Height(28).Children(func() {
 			ui.Row(c.Key("features")).Absolute().Left(0).Top(0).Height(28).Gap(4).AlignItems(ui.Center).Children(func() {
 				s.features(c, m)
 			})
-			// The effort stays centered; its score's help mark follows it.
-			ui.Row(c.Key("effort-label")).FillWidth().Height(28).Center().Gap(4).Children(func() {
-				e := ui.Text(c.Key("effort"), effort).FontSize(16).SingleLine().TextColor(p.Primary)
-				if highest {
-					e.TextColor(p.Warning)
-				}
-				if sc := measuredAt(m, effort); sc != nil {
-					scoreHelp(c, sc)
-				}
-			})
+			if hasReasoning {
+				// The effort stays centered; its score's help mark follows it.
+				ui.Row(c.Key("effort-label")).FillWidth().Height(28).Center().Gap(4).Children(func() {
+					e := ui.Text(c.Key("effort"), effort).FontSize(16).SingleLine().TextColor(p.Primary)
+					if highest {
+						e.TextColor(p.Warning)
+					}
+					if sc := measuredAt(m, effort); sc != nil {
+						scoreHelp(c, sc)
+					}
+				})
+			}
 			ui.Row(c.Key("reset-row")).Absolute().Right(0).Top(0).Height(28).AlignItems(ui.Center).Children(func() {
-				resettable := int(*effortIndex) != defaultEffort(m) || len(s.controlFeatures()) > 0
+				resettable := (hasReasoning && int(*effortIndex) != defaultEffort(m)) || len(s.controlFeatures()) > 0
 				kit.IconButton(c.Key("reset"), icons.Restore, i18n.T(c, "composer_effort_reset"), 28, false).Radius(14).
 					Disabled(!resettable).OnClick(func() {
-					*effortIndex = float64(defaultEffort(m))
+					if hasReasoning {
+						*effortIndex = float64(defaultEffort(m))
+					}
 					s.setControlFeatures(map[string]string{})
 					s.markMemberOverride()
 				})
@@ -458,10 +472,12 @@ func (s *State) mainPanel(c *ui.Context, ctx *Context) {
 			s.efforts = effortState{enter: true}
 		})
 	})
-	before := *effortIndex
-	track(c, effortIndex, len(list), highest, len(list) < 2)
-	if before != *effortIndex {
-		s.markMemberOverride()
+	if hasReasoning {
+		before := *effortIndex
+		track(c, effortIndex, len(list), highest, len(list) < 2)
+		if before != *effortIndex {
+			s.markMemberOverride()
+		}
 	}
 }
 
@@ -898,8 +914,10 @@ func (s *State) modelPicker(c *ui.Context, ctx *Context) {
 			field.Focus()
 		}
 		e.back = false
-		line("effort-line")
-		s.effortColumn(c, column, chosen, right || tab)
+		if len(levels) > 0 {
+			line("effort-line")
+			s.effortColumn(c, column, chosen, right || tab)
+		}
 	})
 }
 
@@ -968,7 +986,7 @@ func (s *State) modelRow(c *ui.Context, m, chosen Model, vendor, source string) 
 			detail = append(detail, label)
 		}
 	}
-	if m.ContextWindow > 0 {
+	if m.ContextWindow >= 8192 {
 		count := strconv.FormatUint(uint64(m.ContextWindow), 10)
 		if m.ContextWindow >= 1000 {
 			key, value := "provider_tokens_k", float64(m.ContextWindow)/1000
@@ -978,6 +996,8 @@ func (s *State) modelRow(c *ui.Context, m, chosen Model, vendor, source string) 
 			count = i18n.T(c, key, "count", strconv.FormatFloat(value, 'f', -1, 64))
 		}
 		detail = append(detail, count)
+	} else if m.ContextUnknown {
+		detail = append(detail, i18n.T(c, "meter_limit_unknown"))
 	}
 	subtitle := strings.Join(detail, " · ")
 	if m.Reasoning {
