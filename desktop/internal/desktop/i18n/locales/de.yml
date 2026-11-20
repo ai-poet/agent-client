@@ -1372,8 +1372,6 @@ market_kind: Marktplatztyp
 market_search_plugins: Plugins suchen
 market_search_skills: Skills suchen
 market_search_themes: Designs suchen
-market_source_official: Offiziell
-market_source_community: Community
 market_all: Alle
 market_installed_only: Nur installierte
 market_theme_current: Aktiv

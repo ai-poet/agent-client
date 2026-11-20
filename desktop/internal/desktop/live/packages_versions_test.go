@@ -22,7 +22,7 @@ func TestPluginVersionProjection(t *testing.T) {
 			compatible,
 			{Version: "0.9.0", Withdrawn: true, Compatibility: protocol.PluginCompatibility{Kind: "compatible"}, ReleaseNotes: &protocol.PluginCatalogReleaseNotes{Text: "Historical notes"}},
 		}}
-	market := catalogPackageView(entry, "zh-CN", 0)
+	market := catalogPackageView(entry, "zh-CN")
 	if !market.Installable || market.Version != compatible.Version || market.MarketVersion != latest || market.Requires != "" || market.Unsupported != "" {
 		t.Fatalf("compatible catalog default is %+v", market)
 	}
@@ -71,7 +71,7 @@ func TestPluginVersionProjection(t *testing.T) {
 		})
 	}
 	entry.CompatibleVersion = nil
-	if view := catalogPackageView(entry, "en", 0); view.Installable || view.Unsupported == "" {
+	if view := catalogPackageView(entry, "en"); view.Installable || view.Unsupported == "" {
 		t.Fatalf("unsupported catalog without compatible history is installable: %+v", view)
 	}
 }
@@ -105,7 +105,6 @@ func TestOfficialPluginVersionCommands(t *testing.T) {
 				r.packages.catalog["notes"] = protocol.PluginCatalogEntry{ID: "notes", Version: new("2.0.0"),
 					Compatibility:     protocol.PluginCompatibility{Kind: "requires_newer", Data: protocol.PluginCompatibilityRequiresNewerPayload{Required: "9.0.0"}},
 					CompatibleVersion: &protocol.PluginCatalogVersion{Version: selectedVersion, Compatibility: protocol.PluginCompatibility{Kind: "compatible"}}, Bundled: test.bundled}
-				r.packages.catalogSources["notes"] = protocol.PluginCatalogSourceOfficial
 				if test.current {
 					current := selected
 					current.Summary.Version, current.Summary.Revision, current.Summary.Pinned = new("1.2.0"), 7, !test.update

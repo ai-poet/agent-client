@@ -691,6 +691,8 @@ permissions or offering an update, and checks local requirements for packages
 with Desktop contributions. The loader checks those requirements again for
 remote UI code. Bundled installation also honors withdrawals in the embedded
 catalog, including offline fallback and default initialization.
+Desktop Market browses only the official plugin catalog. Node retains the
+third-party catalog protocol for older clients and the agent's plugin tools.
 
 Installations keep exact content provenance separately from their ongoing update
 source and pinned preference. Official updates continue following the official

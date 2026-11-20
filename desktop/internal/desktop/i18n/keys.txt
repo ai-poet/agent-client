@@ -1384,8 +1384,6 @@ market_kind
 market_search_plugins
 market_search_skills
 market_search_themes
-market_source_official
-market_source_community
 market_all
 market_installed_only
 market_theme_current

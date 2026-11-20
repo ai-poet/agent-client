@@ -110,13 +110,9 @@ func (r *Runtime) projectPluginMarket() {
 			continue
 		}
 		id, name := row.ID, row.ID
-		source := 0
-		if r.packages.catalogSources[id] == protocol.PluginCatalogSourceThirdParty {
-			source = 1
-		}
-		*row = catalogPackageView(entry, r.packageLocale(), source)
+		*row = catalogPackageView(entry, r.packageLocale())
 		info, inspected := r.packages.catalogInfos[id]
-		if inspected && source == 0 {
+		if inspected {
 			selection, err := officialPackageSelection(info)
 			candidate := entry.CompatibleVersion
 			if err != nil || candidate == nil || stringValue(info.Summary.Version) != candidate.Version || selection.Source.Commit != candidate.Commit {
@@ -133,7 +129,7 @@ func (r *Runtime) projectPluginMarket() {
 		} else {
 			row.Installed = false
 		}
-		row.ID, row.InstallName, row.Source = id, name, catalogPackageView(entry, r.packageLocale(), source).Source
+		row.ID, row.InstallName, row.Source = id, name, "market_details_source_official"
 		row.Host = r.packageHostLabel()
 		applyPackageCatalog(row, entry, r.packageLocale())
 		if current, installed := r.packages.infos[name]; installed {
@@ -142,38 +138,15 @@ func (r *Runtime) projectPluginMarket() {
 	}
 }
 
-func (r *Runtime) readInstalledCatalogCandidates(entries []protocol.PluginCatalogEntry) {
-	for _, entry := range entries {
-		if entry.Repository == nil || r.packages.catalogSources[entry.ID] != protocol.PluginCatalogSourceThirdParty {
-			continue
-		}
-		selected, err := plugins.ParseRepositorySource(protocol.PluginSkillsSource{Repository: *entry.Repository})
-		if err != nil {
-			continue
-		}
-		for _, info := range r.packages.infos {
-			if info.Origin == nil || info.Origin.Kind != "online" {
-				continue
-			}
-			origin, valid := detail[protocol.PluginOriginOnlinePayload](info.Origin.Data)
-			if valid && origin.Source.Repository == selected.Repository {
-				r.readCatalogInformation(entry, nil)
-				break
-			}
-		}
-	}
-}
-
 func (r *Runtime) readCatalogInformation(entry protocol.PluginCatalogEntry, done func()) {
 	generation := r.packages.marketGeneration
-	source := r.packages.catalogSources[entry.ID]
-	if source == protocol.PluginCatalogSourceOfficial && entry.CompatibleVersion == nil {
+	if entry.CompatibleVersion == nil {
 		if done != nil {
 			done()
 		}
 		return
 	}
-	key := "catalog/" + string(source) + "/" + entry.ID + "/" + strconv.FormatUint(generation, 10)
+	key := "catalog/" + entry.ID + "/" + strconv.FormatUint(generation, 10)
 	if r.packages.reads[key] {
 		if done != nil {
 			r.packages.catalogWaiters[key] = append(r.packages.catalogWaiters[key], done)
@@ -197,7 +170,7 @@ func (r *Runtime) readCatalogInformation(entry protocol.PluginCatalogEntry, done
 		r.packages.catalogWaiters[key] = append(r.packages.catalogWaiters[key], done)
 	}
 	r.async(func() {
-		out, err := r.controller.Do(r.ctx, protocol.Command{Kind: "read_catalog_plugin_info", Data: protocol.CommandReadCatalogPluginInfoPayload{Source: source, ID: entry.ID, Bundled: entry.Bundled && entry.Commit == nil}})
+		out, err := r.controller.Do(r.ctx, protocol.Command{Kind: "read_catalog_plugin_info", Data: protocol.CommandReadCatalogPluginInfoPayload{Source: protocol.PluginCatalogSourceOfficial, ID: entry.ID, Bundled: entry.Bundled && entry.Commit == nil}})
 		value, valid := detail[protocol.PluginCatalogDetails](out.Data)
 		info, validInfo := detail[protocol.PluginInfo](value.Data)
 		if err == nil && (!valid || out.Kind != "catalog_details" || value.Kind != "plugin" || !validInfo) {
@@ -227,10 +200,8 @@ func (r *Runtime) readCatalogInformation(entry protocol.PluginCatalogEntry, done
 func (r *Runtime) readInstalledPackageDetails(info protocol.PluginInfo, done func()) {
 	reference := packageReference(info.Summary)
 	version := packageVersion(info.Summary)
-	source, catalog := r.packages.catalogSources[info.Summary.Name]
-	if info.UpdateSource != nil && info.UpdateSource.Kind == "official" || info.Origin != nil && info.Origin.Kind == "bundled" {
-		source, catalog = protocol.PluginCatalogSourceOfficial, true
-	}
+	_, catalog := r.packages.catalog[info.Summary.Name]
+	catalog = catalog || info.UpdateSource != nil && info.UpdateSource.Kind == "official" || info.Origin != nil && info.Origin.Kind == "bundled"
 	r.async(func() {
 		out, err := r.controller.Do(r.ctx, protocol.Command{Kind: "read_plugin_version", Data: protocol.CommandReadPluginVersionPayload{Package: reference}})
 		captured, valid := detail[protocol.PluginInfo](out.Data)
@@ -240,7 +211,7 @@ func (r *Runtime) readInstalledPackageDetails(info protocol.PluginInfo, done fun
 		var entry *protocol.PluginCatalogEntry
 		var catalogErr error
 		if err == nil && catalog {
-			out, catalogErr = r.controller.Do(r.ctx, protocol.Command{Kind: "search_plugin_catalog", Data: protocol.CommandSearchPluginCatalogPayload{Source: source, Query: info.Summary.Name, Page: 1}})
+			out, catalogErr = r.controller.Do(r.ctx, protocol.Command{Kind: "search_plugin_catalog", Data: protocol.CommandSearchPluginCatalogPayload{Source: protocol.PluginCatalogSourceOfficial, Query: info.Summary.Name, Page: 1}})
 			page, valid := detail[protocol.PluginCatalogPage](out.Data)
 			if catalogErr == nil && (!valid || out.Kind != "plugin_catalog") {
 				catalogErr = errors.New("unexpected plugin catalog response")
@@ -266,7 +237,7 @@ func (r *Runtime) readInstalledPackageDetails(info protocol.PluginInfo, done fun
 				}
 				r.packages.infos[info.Summary.Name] = captured
 				if entry != nil {
-					r.packages.catalog[entry.ID], r.packages.catalogSources[entry.ID] = *entry, source
+					r.packages.catalog[entry.ID] = *entry
 				}
 				r.projectPackages()
 			}
@@ -380,7 +351,7 @@ func (r *Runtime) readPackageUpdates(names []string) {
 		r.enqueue(func(c *ui.Context) {
 			if err == nil {
 				for id, entry := range catalogs {
-					r.packages.catalog[id], r.packages.catalogSources[id] = entry, protocol.PluginCatalogSourceOfficial
+					r.packages.catalog[id] = entry
 				}
 				for _, report := range batch.Reports {
 					r.recordPackageUpdate(report, batch.Failures)

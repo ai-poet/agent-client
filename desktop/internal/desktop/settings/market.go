@@ -12,7 +12,7 @@ import (
 )
 
 // The Market page (settings/market*, market/*): Plugins, Skills and
-// Themes as segments, a search with the plugins' source, the filters
+// Themes as segments, a search, the filters
 // (categories, theme modes, installed only) and the cards, each with
 // Install, Installed or Update; a card opens its details.
 
@@ -76,10 +76,7 @@ func MarketPage(c *ui.Context, s *State) {
 						m.PackageActions.RetryMarket()
 					}
 				})
-				switch m.MarketKind {
-				case 0:
-					pick(c, "source", t("market_details_source"), &m.MarketSource, []string{t("market_source_official"), t("market_source_community")}, false).Width(140)
-				case 2:
+				if m.MarketKind == 2 {
 					ui.Text(c, t("market_local")).FontSize(14).TextColor(theme.Of(c).MutedForeground)
 				}
 			})
@@ -187,12 +184,11 @@ func marketSkeleton(c *ui.Context) {
 
 func marketPlugins(c *ui.Context, s *State) {
 	m := s.Model
-	source := []string{"market_details_source_official", "market_details_source_community"}[m.MarketSource]
 	var shown []*preview.Package
 	for i := range m.MarketPlugins {
 		x := &m.MarketPlugins[i]
 		installed := m.installedPackage(x.ID) != nil
-		if x.Source != source || !marketMatch(m.MarketQuery, x.Name+" "+x.Description) ||
+		if !marketMatch(m.MarketQuery, x.Name+" "+x.Description) ||
 			m.MarketCategory > 0 && x.Category != marketCategories[m.MarketCategory] || m.MarketInstalled && !installed {
 			continue
 		}
@@ -206,8 +202,6 @@ func marketPlugins(c *ui.Context, s *State) {
 		for _, x := range shown {
 			inst := m.installedPackage(x.ID)
 			action := MarketAction(inst != nil, inst != nil && Update(inst))
-			// The source is the filter above the cards, not repeated on each.
-			desc := x.Description
 			var install func()
 			if inst == nil && x.Installable || inst != nil && Update(inst) {
 				install = func() {
@@ -218,7 +212,7 @@ func marketPlugins(c *ui.Context, s *State) {
 					notice(c)
 				}
 			}
-			marketCard(c, x.ID, x.Name, desc, func() { iconTile(c, x.Name, x.Icon, x.Tint, icons.Puzzle, kit.TileSize) }, action, m.Busy[BusyPackage+x.ID],
+			marketCard(c, x.ID, x.Name, x.Description, func() { iconTile(c, x.Name, x.Icon, x.Tint, icons.Puzzle, kit.TileSize) }, action, m.Busy[BusyPackage+x.ID],
 				func() { s.ShowDetails(DetailPlugin, x.ID) }, install)
 		}
 	})

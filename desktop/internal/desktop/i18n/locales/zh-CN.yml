@@ -1372,8 +1372,6 @@ market_kind: 市场类型
 market_search_plugins: 搜索插件
 market_search_skills: 搜索技能
 market_search_themes: 搜索主题
-market_source_official: 官方
-market_source_community: 社区
 market_all: 全部
 market_installed_only: 只看已安装
 market_theme_current: 使用中

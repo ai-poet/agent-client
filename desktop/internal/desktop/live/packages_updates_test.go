@@ -164,7 +164,7 @@ func TestDesktopRequirementsFenceExplicitInstallations(t *testing.T) {
 				selected.Requirements = &protocol.PluginRequirements{APIVersion: "v1", MinSailryVersion: new("999.0.0")}
 				selected.Extension.Desktop = &protocol.PluginDesktopManifest{Entry: new("desktop/main.js")}
 				r.packages.infos[current.Summary.Name] = current
-				r.packages.catalog[entry.ID], r.packages.catalogSources[entry.ID] = entry, protocol.PluginCatalogSourceOfficial
+				r.packages.catalog[entry.ID] = entry
 				source.respond = func(request protocol.Request) link.Response {
 					switch request.Command.Kind {
 					case "read_catalog_plugin_info":
