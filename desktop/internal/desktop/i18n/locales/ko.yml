@@ -80,6 +80,7 @@ appearance_effects: 테마 애니메이션
 settings_interface: 인터페이스
 settings_theme_builtin: 기본값
 settings_version: 버전
+settings_about_based_on: Sailry 기반으로 개발
 settings_license: 라이선스
 welcome_name: CheapRouter
 welcome_title: 오늘 뭘 하시겠습니까

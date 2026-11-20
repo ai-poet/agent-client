@@ -80,6 +80,7 @@ appearance_effects: 主题动画
 settings_interface: 界面主题
 settings_theme_builtin: 默认
 settings_version: 版本
+settings_about_based_on: 基于 Sailry 开发
 settings_license: 许可证
 welcome_name: CheapRouter
 welcome_title: 今天，想一起做点什么

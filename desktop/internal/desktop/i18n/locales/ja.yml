@@ -80,6 +80,7 @@ appearance_effects: テーマのアニメーション
 settings_interface: インターフェーステーマ
 settings_theme_builtin: デフォルト
 settings_version: バージョン
+settings_about_based_on: Sailry をベースに開発
 settings_license: ライセンス
 welcome_name: CheapRouter
 welcome_title: 今日は何をしたい
