@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -78,13 +79,7 @@ func openLegacy(ctx context.Context, path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fail("detect", "resolve database", err)
 	}
-	uri := &url.URL{Scheme: "file", Path: filepath.ToSlash(absolute)}
-	query := uri.Query()
-	query.Set("mode", "ro")
-	query.Add("_pragma", "query_only(1)")
-	query.Add("_pragma", "busy_timeout(0)")
-	uri.RawQuery = query.Encode()
-	db, err := sql.Open("sqlite", uri.String())
+	db, err := sql.Open("sqlite", legacyReadOnlyURI(absolute))
 	if err != nil {
 		return nil, fail("detect", "open read-only database", err)
 	}
@@ -94,6 +89,41 @@ func openLegacy(ctx context.Context, path string) (*sql.DB, error) {
 		return nil, fail("detect", "open read-only database", err)
 	}
 	return db, nil
+}
+
+func legacyReadOnlyURI(path string) string {
+	query := url.Values{}
+	query.Set("mode", "ro")
+	query.Add("_pragma", "query_only(1)")
+	query.Add("_pragma", "busy_timeout(0)")
+	uri := &url.URL{
+		Scheme:   "file",
+		Path:     normalizeSQLiteURIPath(path),
+		RawQuery: query.Encode(),
+	}
+	return uri.String()
+}
+
+func normalizeSQLiteURIPath(path string) string {
+	if isWindowsDrivePath(path) {
+		return "/" + strings.ReplaceAll(path, `\`, "/")
+	}
+	if strings.HasPrefix(path, `\\`) {
+		return strings.ReplaceAll(path, `\`, "/")
+	}
+	slashed := filepath.ToSlash(path)
+	if strings.HasPrefix(slashed, "//") || strings.HasPrefix(slashed, "/") {
+		return slashed
+	}
+	return "/" + slashed
+}
+
+func isWindowsDrivePath(path string) bool {
+	if len(path) < 2 || path[1] != ':' {
+		return false
+	}
+	drive := path[0]
+	return (drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z')
 }
 
 func openLegacySnapshot(ctx context.Context, path string) (*sql.DB, func(), error) {

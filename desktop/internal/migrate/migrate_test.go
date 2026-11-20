@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -354,6 +355,118 @@ func TestCredentialSecretsStayOutOfReportAndTarget(t *testing.T) {
 			t.Fatalf("account metadata contains %q", secret)
 		}
 	}
+}
+
+func TestLegacyReadOnlyURI(t *testing.T) {
+	cases := []struct {
+		name           string
+		input          string
+		wantPrefix     string
+		wantParsedPath string
+	}{
+		{
+			name:           "windows drive path",
+			input:          `C:\Users\x\.cheaprouter\app.db`,
+			wantPrefix:     "file:///C:/Users/x/.cheaprouter/app.db?",
+			wantParsedPath: "/C:/Users/x/.cheaprouter/app.db",
+		},
+		{
+			name:           "windows drive path with spaces and non-ascii",
+			input:          `D:\Users\张 三\App Data\.cheaprouter\app.db`,
+			wantPrefix:     "file:///D:/Users/%E5%BC%A0%20%E4%B8%89/App%20Data/.cheaprouter/app.db?",
+			wantParsedPath: "/D:/Users/张 三/App Data/.cheaprouter/app.db",
+		},
+		{
+			name:           "windows unc path",
+			input:          `\\server\share\.cheaprouter\app.db`,
+			wantPrefix:     "file:////server/share/.cheaprouter/app.db?",
+			wantParsedPath: "//server/share/.cheaprouter/app.db",
+		},
+		{
+			name:           "windows unc path with spaces and non-ascii",
+			input:          `\\fileserver\共享 目录\my profile\app.db`,
+			wantPrefix:     "file:////fileserver/%E5%85%B1%E4%BA%AB%20%E7%9B%AE%E5%BD%95/my%20profile/app.db?",
+			wantParsedPath: "//fileserver/共享 目录/my profile/app.db",
+		},
+		{
+			name:           "macos path with spaces",
+			input:          `/Users/alice/Library/Application Support/CheapRouter/app.db`,
+			wantPrefix:     "file:///Users/alice/Library/Application%20Support/CheapRouter/app.db?",
+			wantParsedPath: "/Users/alice/Library/Application Support/CheapRouter/app.db",
+		},
+		{
+			name:           "path with reserved URI characters",
+			input:          `/tmp/测试 dir/a#b%20c/app.db`,
+			wantPrefix:     "file:///tmp/%E6%B5%8B%E8%AF%95%20dir/a%23b%2520c/app.db?",
+			wantParsedPath: "/tmp/测试 dir/a#b%20c/app.db",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := legacyReadOnlyURI(tc.input)
+			if !strings.HasPrefix(got, tc.wantPrefix) {
+				t.Fatalf("legacyReadOnlyURI(%q) = %q, want prefix %q", tc.input, got, tc.wantPrefix)
+			}
+			parsed, err := url.Parse(got)
+			if err != nil {
+				t.Fatalf("url.Parse(%q): %v", got, err)
+			}
+			if parsed.Scheme != "file" {
+				t.Fatalf("scheme = %q, want file", parsed.Scheme)
+			}
+			if parsed.Host != "" {
+				t.Fatalf("host/authority = %q, want empty", parsed.Host)
+			}
+			if parsed.Path != tc.wantParsedPath {
+				t.Fatalf("parsed path = %q, want %q", parsed.Path, tc.wantParsedPath)
+			}
+			query := parsed.Query()
+			if query.Get("mode") != "ro" {
+				t.Fatalf("mode = %q, want ro", query.Get("mode"))
+			}
+			if !slices.Equal(query["_pragma"], []string{"query_only(1)", "busy_timeout(0)"}) {
+				t.Fatalf("_pragma = %v, want [query_only(1) busy_timeout(0)]", query["_pragma"])
+			}
+
+			// Verify SQLite's own URI parser accepts the URI without an authority error.
+			db, err := sql.Open("sqlite", got)
+			if err != nil {
+				t.Fatalf("sql.Open(%q): %v", got, err)
+			}
+			defer db.Close()
+			if err := db.Ping(); err != nil && strings.Contains(strings.ToLower(err.Error()), "invalid uri authority") {
+				t.Fatalf("sqlite rejected URI authority for %q: %v", got, err)
+			}
+		})
+	}
+}
+
+func TestDetectAndRunWithSpacesAndNonASCIIPath(t *testing.T) {
+	base := t.TempDir()
+	legacy := filepath.Join(base, "用户 数据", "legacy #1")
+	profile := filepath.Join(base, "目标 配置", "profile #1")
+	if err := os.MkdirAll(legacy, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	createLegacyFixture(t, legacy)
+
+	state, err := Detect(legacy)
+	if err != nil {
+		t.Fatalf("Detect(%q): %v", legacy, err)
+	}
+	if !state.HasDatabase || state.Counts != (Counts{Projects: 1, Sessions: 1, Messages: 2}) {
+		t.Fatalf("state = %+v", state)
+	}
+
+	result, err := Run(context.Background(), legacy, profile, Options{})
+	if err != nil {
+		t.Fatalf("Run(%q): %v", legacy, err)
+	}
+	if result.Counts != (Counts{Projects: 1, Sessions: 1, Messages: 2}) {
+		t.Fatalf("counts = %+v", result.Counts)
+	}
+	assertTargetCounts(t, profile, Counts{Projects: 1, Sessions: 1, Messages: 2})
 }
 
 func createLegacyFixture(t *testing.T, root string) {
