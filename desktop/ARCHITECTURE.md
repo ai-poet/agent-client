@@ -242,6 +242,14 @@ even after the channel selects a newer key. Plugin-backed authentication checks
 the current installation's availability while loading its captured package and
 settings; changing a package does not replace an existing account's binding.
 
+A model sign-in is durable once its credential is saved. The Node publishes that
+credential with the `exchanging` state before model discovery, and a later
+cancel leaves it in place. A controller closes its dialog on that update and
+stops following the attempt without asking the Node to cancel it. The ChatGPT
+OAuth channel discovers the signed-in account's model list using the Node's
+reviewed Codex catalog version unless the channel specifies an override. The
+public model catalog can supplement the account's metadata.
+
 Sign-in and renewal run on the controller. Execution hosts receive static keys
 and the current runtime credentials needed for their captured operations, with
 the original account identity, generation and real expiry. Refresh tokens, OAuth

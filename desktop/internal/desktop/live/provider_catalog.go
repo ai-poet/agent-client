@@ -17,7 +17,9 @@ func (r *Runtime) finishDiscovery(provider protocol.ConversationProvider, discov
 		defer cancel()
 		metadata, err := r.readProviderCatalog(ctx, provider.Api, discovered)
 		r.enqueue(func(c *ui.Context) {
-			if err != nil {
+			// An account server owns its model list. The public catalog only
+			// enriches its metadata and may lag or be unavailable.
+			if err != nil && provider.Authentication == protocol.AuthenticationApiKey {
 				key := "provider_catalog_read_failed"
 				if faultCode(err) == protocol.ErrorCodeNotConfigured {
 					key = "provider_catalog_required"

@@ -428,6 +428,9 @@ func (r *Runtime) projectProviderSnapshot() {
 				if json.Unmarshal(body, &options) == nil {
 					if options.CatalogVersion != nil {
 						ch.OAuth[0] = *options.CatalogVersion
+						if p.Authentication == protocol.AuthenticationChatGptOAuth && ch.OAuth[0] == nodeproviders.LegacyCatalogVersion {
+							ch.OAuth[0] = nodeproviders.DefaultCatalogVersion
+						}
 					}
 					ch.OAuth[1], ch.OAuth[2], ch.OAuth[3] = options.UserAgent, options.EditorVersion, options.EditorPluginVersion
 				}

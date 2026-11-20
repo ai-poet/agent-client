@@ -1,11 +1,13 @@
 package live
 
 import (
+	"context"
 	"slices"
 	"testing"
 
 	"github.com/ai-poet/agent-client/desktop/internal/client"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preferences"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/settings"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/shell"
@@ -150,6 +152,231 @@ func TestProviderCredentialMetadataDropsStaleReply(t *testing.T) {
 	ch := r.App.Settings.Channels[0]
 	if reads != 2 || ch.AccountPending || ch.SignedIn || ch.Account != "New account" || settings.ProviderStatus(&ch) != "provider_status_signed_out" {
 		t.Fatalf("new credential metadata was not applied: %+v after %d reads", ch, reads)
+	}
+}
+
+func TestProviderLoginRefreshesOpenDraft(t *testing.T) {
+	for _, modelFailure := range []bool{false, true} {
+		name := "models discovered"
+		if modelFailure {
+			name = "model discovery failed"
+		}
+		t.Run(name, func(t *testing.T) {
+			provider := providerRouteFixture()
+			provider.Enabled = true
+			account := provider
+			account.ID, account.Authentication, account.Credential = protocol.ProviderID{9}, protocol.AuthenticationChatGptOAuth, nil
+			snapshot := protocol.DefaultSnapshot()
+			snapshot.Node, snapshot.Providers = protocol.NodeID{1}, []protocol.ConversationProvider{provider, account}
+			// A changed channel reads the media assignments again; this
+			// fixture answers them so only the sign-in outcome is toasted.
+			transport := &conversationTestTransport{snapshot: snapshot, handle: func(request protocol.Request) (link.Response, bool) {
+				switch request.Command.Kind {
+				case "read_media_settings":
+					return link.Response{Output: protocol.Output{Kind: "media_settings", Data: protocol.MediaSettings{Revision: 1}}}, true
+				case "list_media_models":
+					return link.Response{Output: protocol.Output{Kind: "media_models", Data: []protocol.MediaCandidate{}}}, true
+				}
+				return link.Response{}, false
+			}}
+			controller := client.New(transport)
+			if err := controller.Start(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			defer controller.Close()
+			r, err := NewWithPreferences(t.Context(), controller, preferences.Open(t.TempDir()+"/preferences.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			id := r.App.FocusedConversation()
+			cv, comp := r.App.Data.Find(id), r.App.Composer(id)
+			var offered *composer.Context
+			var toasts []ui.Toast
+			tester := ui.NewTester(func(c *ui.Context) {
+				r.drain(c)
+				offered, _ = r.conversation(c, cv, comp)
+				r.finishFrame()
+				ui.ToastViewportBase(c, func(_ ui.Element, values []ui.Toast) { toasts = slices.Clone(values) })
+			}, 640, 400)
+			tester.SetLocale("en")
+			settle := func() {
+				for range 6 {
+					r.workers.Wait()
+					tester.Frame()
+				}
+			}
+			settle()
+			toastCount := len(toasts)
+			comp.Draft = "Keep this draft"
+			selected := comp.Model
+			account.Credential = &protocol.CredentialRef{Node: snapshot.Node, ID: protocol.CredentialID{9}}
+			account.Revision++
+			transport.snapshot.Cursor++
+			transport.snapshot.Providers = []protocol.ConversationProvider{provider, account}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			view := r.App.Settings.ProviderAuthorization()
+			view.Open = true
+			attempt := &liveAuthorization{provider: account.ID.String(), ctx: ctx, cancel: cancel, view: view}
+			r.authorizations.provider = attempt
+			r.enqueue(func(c *ui.Context) {
+				r.applyProviderLogin(c, attempt, protocol.ConversationLoginUpdate{
+					State: protocol.ConversationLoginState{Kind: "exchanging"}, Credential: account.Credential,
+				})
+			})
+			settle()
+			if view.Open || view.Busy || ctx.Err() != nil || len(toasts) != toastCount {
+				t.Fatal("saved credential did not dismiss the dialog while keeping discovery active")
+			}
+			update := protocol.ConversationLoginUpdate{State: protocol.ConversationLoginState{Kind: "connected"}, Credential: account.Credential}
+			if modelFailure {
+				update.ModelError = &protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "fixture model discovery failed"}
+			}
+			r.enqueue(func(c *ui.Context) { r.applyProviderLogin(c, attempt, update) })
+			settle()
+			if !slices.ContainsFunc(offered.Models, func(model composer.Model) bool { return model.ID == modelKey(account.ID, account.Models[0].ID) }) {
+				t.Fatal("login did not refresh credential-backed models without a subscription event")
+			}
+			if view.Open || ctx.Err() == nil || comp.Model != selected || comp.Draft != "Keep this draft" {
+				t.Fatal("login did not close cleanly or replaced the draft")
+			}
+			wantType, wantKey := "success", "authorization_connected"
+			if modelFailure {
+				wantType, wantKey = "warning", "provider_login_models_failed"
+			}
+			if len(toasts) != toastCount+1 || toasts[toastCount].Type != wantType || toasts[toastCount].Title != i18n.In("en", wantKey) {
+				t.Fatalf("login outcome toasts: %+v", toasts)
+			}
+		})
+	}
+}
+
+// The Node publishes a saved credential twice, with "exchanging" and with
+// "connected". A paused task's sign-in is resumed for the first one only.
+func TestProviderLoginFollowsSavedCredentialOnce(t *testing.T) {
+	account := providerRouteFixture()
+	account.Enabled, account.Authentication, account.Credential = true, protocol.AuthenticationChatGptOAuth, nil
+	snapshot := protocol.DefaultSnapshot()
+	snapshot.Node, snapshot.Providers = protocol.NodeID{1}, []protocol.ConversationProvider{account}
+	transport := &conversationTestTransport{snapshot: snapshot}
+	controller := client.New(transport)
+	if err := controller.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer controller.Close()
+	r, err := NewWithPreferences(t.Context(), controller, preferences.Open(t.TempDir()+"/preferences.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	// The viewport shows only the latest toasts, so every one is kept by ID.
+	toasts := map[string]string{}
+	tester := ui.NewTester(func(c *ui.Context) {
+		r.drain(c)
+		ui.ToastViewportBase(c, func(_ ui.Element, values []ui.Toast) {
+			for _, toast := range values {
+				toasts[toast.ID] = toast.Title
+			}
+		})
+	}, 640, 400)
+	tester.SetLocale("en")
+	settle := func() {
+		for range 6 {
+			r.workers.Wait()
+			tester.Frame()
+		}
+	}
+	settle()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	view := r.App.Settings.ProviderAuthorization()
+	view.Open = true
+	// A credential of another Node cannot resume the task: each attempt to
+	// resume it is reported, so the reports count the attempts.
+	foreign := &protocol.CredentialRef{Node: protocol.NodeID{2}, ID: protocol.CredentialID{9}}
+	attempt := &liveAuthorization{id: protocol.RequestID{7}, provider: account.ID.String(), ctx: ctx, cancel: cancel, view: view, recovery: &controllerLoginRecovery{executor: r}}
+	r.authorizations.provider = attempt
+	for _, kind := range []string{"exchanging", "connected"} {
+		r.enqueue(func(c *ui.Context) {
+			r.applyProviderLogin(c, attempt, protocol.ConversationLoginUpdate{State: protocol.ConversationLoginState{Kind: kind}, Credential: foreign})
+		})
+		settle()
+	}
+	reported := 0
+	for _, title := range toasts {
+		if title == i18n.In("en", "controller_login_restore_failed") {
+			reported++
+		}
+	}
+	if reported != 1 || !attempt.connected || ctx.Err() == nil {
+		t.Fatalf("the saved credential was followed %d times; connected=%v ended=%v", reported, attempt.connected, ctx.Err() != nil)
+	}
+}
+
+// The Node keeps a credential it has saved and answers a later cancel without
+// stopping model discovery. Desktop therefore sends no cancel for such an
+// attempt: it only stops following it.
+func TestProviderLoginCancelAfterSavedCredential(t *testing.T) {
+	for _, saved := range []bool{true, false} {
+		name := "credential saved"
+		if !saved {
+			name = "still awaiting authorization"
+		}
+		t.Run(name, func(t *testing.T) {
+			account := providerRouteFixture()
+			account.Enabled, account.Authentication, account.Credential = true, protocol.AuthenticationChatGptOAuth, nil
+			snapshot := protocol.DefaultSnapshot()
+			snapshot.Node, snapshot.Providers = protocol.NodeID{1}, []protocol.ConversationProvider{account}
+			transport := &conversationTestTransport{snapshot: snapshot}
+			controller := client.New(transport)
+			if err := controller.Start(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			defer controller.Close()
+			r, err := NewWithPreferences(t.Context(), controller, preferences.Open(t.TempDir()+"/preferences.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			tester := ui.NewTester(func(c *ui.Context) {
+				r.drain(c)
+				ui.ToastViewportBase(c, func(ui.Element, []ui.Toast) {})
+			}, 640, 400)
+			settle := func() {
+				for range 6 {
+					r.workers.Wait()
+					tester.Frame()
+				}
+			}
+			settle()
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			view := r.App.Settings.ProviderAuthorization()
+			view.Open = true
+			attempt := &liveAuthorization{id: protocol.RequestID{7}, provider: account.ID.String(), ctx: ctx, cancel: cancel, view: view}
+			r.authorizations.provider = attempt
+			state := protocol.ConversationLoginUpdate{State: protocol.ConversationLoginState{Kind: "exchanging"}}
+			if saved {
+				state.Credential = &protocol.CredentialRef{Node: snapshot.Node, ID: protocol.CredentialID{9}}
+			}
+			r.enqueue(func(c *ui.Context) { r.applyProviderLogin(c, attempt, state) })
+			settle()
+			r.enqueue(func(*ui.Context) { r.cancelProviderLogin() })
+			settle()
+			transport.mu.Lock()
+			cancels := len(slices.DeleteFunc(slices.Clone(transport.requests), func(request protocol.Request) bool { return request.Command.Kind != "cancel_provider_login" }))
+			transport.mu.Unlock()
+			if saved {
+				if cancels != 0 || view.Open || view.Cancelling || ctx.Err() == nil || r.authorizations.provider != nil {
+					t.Fatalf("a saved sign-in was not released locally: cancels=%d open=%v cancelling=%v followed=%v", cancels, view.Open, view.Cancelling, r.authorizations.provider != nil)
+				}
+				return
+			}
+			if cancels != 1 || !view.Busy {
+				t.Fatalf("an unsaved exchange did not ask the Node to cancel: cancels=%d busy=%v", cancels, view.Busy)
+			}
+		})
 	}
 }
 

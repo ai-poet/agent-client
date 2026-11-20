@@ -1217,12 +1217,12 @@ func providerForm(c *ui.Context, m *Model, e *providerEditor) {
 				label = t("provider_querying")
 			}
 			kit.SecondaryBusy(c.Key("discover"), label, e.probing && !e.saving).Disabled(e.probing).OnClick(func() {
-				if !requireProviderCatalog(c, m) {
+				if !e.login() && !requireProviderCatalog(c, m) {
 					return
 				}
 				if m.Live && m.ProviderActions.Discover != nil {
 					e.probing = true
-					draft := ProviderDraft{Channel: preview.Channel{ID: e.id, API: e.current().API, Endpoint: e.endpoint, Method: e.current().ID, APIVersion: strings.TrimSpace(e.apiVersion)}, Key: e.keyUpdate(), ExpectedRevision: e.revision}
+					draft := ProviderDraft{Channel: preview.Channel{ID: e.id, API: e.current().API, Endpoint: e.endpoint, Method: e.current().ID, APIVersion: strings.TrimSpace(e.apiVersion)}, Key: e.keyUpdate(), OAuth: e.oauth, ExpectedRevision: e.revision}
 					generation := e.generation
 					m.ProviderActions.Discover(draft, func(models []preview.ChannelModel) {
 						if e.generation != generation || !e.open {

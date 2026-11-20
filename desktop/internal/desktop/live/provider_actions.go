@@ -26,21 +26,26 @@ func (r *Runtime) saveProvider(d settings.ProviderDraft, done func(bool)) {
 		if ok {
 			r.project()
 			r.projectProviderSnapshot()
-			// Completion and the Node subscription are independent streams. A
-			// fresh ordered snapshot makes the saved models available to existing
-			// drafts without retaining a second provider inventory in Desktop.
-			r.async(func() {
-				err := r.controller.Refresh(r.ctx)
-				r.enqueue(func(c *ui.Context) {
-					if err != nil {
-						r.reportKeys(c, err, "provider_catalog_read_failed", "provider_catalog_read_failed", "provider_catalog_read_failed")
-						return
-					}
-					r.project()
-					r.projectProviderSnapshot()
-				})
-			})
+			r.refreshProviderSnapshot()
 		}
+	})
+}
+
+// refreshProviderSnapshot reads a fresh ordered snapshot. Completion and the
+// Node subscription are independent streams, so this makes saved models and
+// credentials available to existing drafts without retaining a second
+// provider inventory in Desktop.
+func (r *Runtime) refreshProviderSnapshot() {
+	r.async(func() {
+		err := r.controller.Refresh(r.ctx)
+		r.enqueue(func(c *ui.Context) {
+			if err != nil {
+				r.reportKeys(c, err, "provider_catalog_read_failed", "provider_catalog_read_failed", "provider_catalog_read_failed")
+				return
+			}
+			r.project()
+			r.projectProviderSnapshot()
+		})
 	})
 }
 func (r *Runtime) enableProvider(id string, revision uint64, enabled bool) {
