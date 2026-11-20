@@ -15,6 +15,11 @@ var promptText string
 
 const Request = "Please summarize the conversation history provided in the system prompt."
 
+const (
+	RetryInvalidOutput = "Your previous response was not a valid structured handoff JSON object. Reply with ONLY one ```json code block matching the schema in the system prompt, with at least one populated field and no surrounding commentary or tool calls."
+	RetryEmptyOutput   = "Your previous response was empty. Reply with ONLY one ```json code block matching the schema in the system prompt, with at least one populated field and no surrounding commentary or tool calls."
+)
+
 // Output is the output limit a summary request asks for in a context window:
 // twice the handoff's cap, since the JSON document is larger than the text
 // rendered from it. Small windows reserve at most a quarter for output so the
@@ -63,8 +68,8 @@ func Prepare(records []canonical.Record, contextLimit, outputLimit uint64, reque
 	records = filtered
 	base := instructions(limit, "")
 	requestReserve := uint64(256)
-	if len(request) > 0 {
-		requestReserve = max(requestReserve, tokens.Text(request[0])+7)
+	for _, prompt := range request {
+		requestReserve = max(requestReserve, tokens.Text(prompt)+7)
 	}
 	reserve := outputLimit + tokens.Text(base) + requestReserve
 	if contextLimit < reserve {

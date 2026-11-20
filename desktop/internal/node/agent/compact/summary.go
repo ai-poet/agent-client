@@ -5,8 +5,10 @@ package compact
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/tokens"
 )
@@ -85,7 +87,38 @@ func optional(value any) *string {
 // Parse reads the handoff of a summary response and bounds its rendered text
 // to limit tokens.
 func Parse(text string, limit uint64) (Summary, error) {
+	candidates := extractCandidates(text)
+	for _, candidate := range candidates {
+		fields, ok := decodeObject(candidate)
+		if !ok {
+			continue
+		}
+		summary := buildSummary(fields)
+		if summary.empty() {
+			continue
+		}
+		summary.Bound(limit)
+		if tokens.Text(summary.Render()) > limit {
+			continue
+		}
+		return summary, nil
+	}
+	return Summary{}, fmt.Errorf("compaction summary was not a structured handoff")
+}
+
+func extractCandidates(text string) []string {
 	var candidates []string
+	seen := map[string]bool{}
+	add := func(candidate string, later int, enforceTerminator bool) {
+		if candidate == "" || seen[candidate] {
+			return
+		}
+		if enforceTerminator && strings.Count(candidate, "</analysis>") != later {
+			return
+		}
+		seen[candidate] = true
+		candidates = append(candidates, candidate)
+	}
 	cuts := []int{}
 	for offset := 0; ; {
 		i := strings.Index(text[offset:], "</analysis>")
@@ -100,77 +133,388 @@ func Parse(text string, limit uint64) (Summary, error) {
 	}
 	for i := len(cuts) - 1; i >= 0; i-- {
 		tail := text[cuts[i]:]
+		if strings.HasPrefix(strings.TrimSpace(tail), "<analysis>") {
+			continue // An unfinished analysis block is not an answer.
+		}
 		later := strings.Count(tail, "</analysis>")
-		appendCandidate := func(candidate string) {
-			if candidate != "" && strings.Count(candidate, "</analysis>") == later {
-				candidates = append(candidates, candidate)
+		for _, block := range fencedBlocks(tail) {
+			if candidate := object(block); candidate != "" {
+				add(candidate, later, true)
+			}
+			for _, candidate := range embeddedObjects(block, true) {
+				add(candidate, later, true)
 			}
 		}
-		markers := []int{}
-		for offset := 0; ; {
-			index := strings.Index(tail[offset:], "```json")
-			if index < 0 {
-				break
+		for _, block := range taggedBlocks(tail) {
+			if candidate := object(block); candidate != "" {
+				add(candidate, later, true)
 			}
-			offset += index + len("```json")
-			markers = append(markers, offset)
+			for _, candidate := range embeddedObjects(block, true) {
+				add(candidate, later, true)
+			}
 		}
-		for j := len(markers) - 1; j >= 0; j-- {
-			appendCandidate(object(tail[markers[j]:]))
+		add(object(tail), later, true)
+		for _, candidate := range embeddedObjects(tail, false) {
+			add(candidate, later, true)
 		}
-		appendCandidate(object(tail))
 	}
-	if candidate := object(text); candidate != "" {
-		candidates = append(candidates, candidate)
-	}
-	for _, candidate := range candidates {
-		var fields map[string]any
-		variants := []string{candidate, repair(candidate), escape(candidate), repair(escape(candidate))}
-		parsed := false
-		for _, variant := range variants {
-			decoder := json.NewDecoder(strings.NewReader(variant))
-			decoder.UseNumber()
-			if decoder.Decode(&fields) == nil && fields != nil {
-				parsed = true
-				break
-			}
+	add(object(text), 0, false)
+	return candidates
+}
+
+// fencedBlocks extracts markdown code-fence bodies (``` or ~~~, with or without
+// a json/JSON/jsonc language tag), ordered newest-first.
+func fencedBlocks(text string) []string {
+	var blocks []string
+	for offset := 0; offset < len(text); {
+		lineEnd := strings.IndexByte(text[offset:], '\n')
+		var line string
+		if lineEnd < 0 {
+			line = text[offset:]
+			offset = len(text)
+		} else {
+			line = text[offset : offset+lineEnd]
+			offset += lineEnd + 1
 		}
-		if !parsed {
+		trimmed := strings.TrimSpace(line)
+		fenceChar := byte(0)
+		if strings.HasPrefix(trimmed, "```") {
+			fenceChar = '`'
+		} else if strings.HasPrefix(trimmed, "~~~") {
+			fenceChar = '~'
+		}
+		if fenceChar == 0 {
 			continue
 		}
-		summary := Summary{UserIntent: texts(fields["user_intent"]), TechnicalConcepts: texts(fields["technical_concepts"]), ErrorsAndFixes: texts(fields["errors_and_fixes"]), ProblemSolving: texts(fields["problem_solving"]), UserMessages: texts(fields["user_messages"]), PendingTasks: texts(fields["pending_tasks"]), CurrentWork: optional(fields["current_work"]), NextStep: optional(fields["next_step"]), Files: []File{}}
-		files := []any{}
-		if items, ok := fields["files"].([]any); ok {
-			files = items
-		} else if fields["files"] != nil {
-			files = append(files, fields["files"])
+		fenceLen := 0
+		for fenceLen < len(trimmed) && trimmed[fenceLen] == fenceChar {
+			fenceLen++
 		}
-		for _, file := range files {
-			value := File{}
-			if fields, ok := file.(map[string]any); ok {
-				value = File{Path: stringify(fields["path"]), Summary: stringify(fields["summary"]), KeyCode: optional(fields["key_code"])}
+		rest := strings.TrimSpace(trimmed[fenceLen:])
+		if !supportedFenceLang(rest) {
+			// A fence with inline JSON on the same line, e.g. ```json {"user_intent":...}
+			if idx := strings.IndexByte(rest, '{'); idx >= 0 {
+				prefix := strings.TrimSpace(rest[:idx])
+				if supportedFenceLang(prefix) {
+					blocks = append(blocks, rest[idx:])
+				}
+			}
+			continue
+		}
+		// Collect until a matching closing fence or EOF.
+		bodyStart := offset
+		bodyEnd := len(text)
+		closed := false
+		for scan := offset; scan < len(text); {
+			nextNL := strings.IndexByte(text[scan:], '\n')
+			var scanLine string
+			nextScan := len(text)
+			if nextNL < 0 {
+				scanLine = text[scan:]
 			} else {
-				value.Path = stringify(file)
+				scanLine = text[scan : scan+nextNL]
+				nextScan = scan + nextNL + 1
 			}
-			if strings.TrimSpace(value.Path) != "" || strings.TrimSpace(value.Summary) != "" || value.KeyCode != nil {
-				summary.Files = append(summary.Files, value)
+			closeTrimmed := strings.TrimSpace(scanLine)
+			if isClosingFence(closeTrimmed, fenceChar, fenceLen) {
+				bodyEnd = scan
+				offset = nextScan
+				closed = true
+				break
 			}
+			scan = nextScan
 		}
-		if len(summary.UserIntent)+len(summary.TechnicalConcepts)+len(summary.ErrorsAndFixes)+len(summary.ProblemSolving)+len(summary.UserMessages)+len(summary.PendingTasks)+len(summary.Files) == 0 && summary.CurrentWork == nil && summary.NextStep == nil {
-			continue
+		if !closed {
+			offset = len(text)
 		}
-		summary.Bound(limit)
-		if tokens.Text(summary.Render()) > limit {
-			continue
+		if bodyEnd > bodyStart {
+			blocks = append(blocks, text[bodyStart:bodyEnd])
 		}
-		return summary, nil
 	}
-	return Summary{}, fmt.Errorf("compaction summary was not a structured handoff")
+	slices.Reverse(blocks)
+	return blocks
+}
+
+func supportedFenceLang(tag string) bool {
+	if tag == "" {
+		return true
+	}
+	field := strings.ToLower(strings.Fields(tag)[0])
+	switch field {
+	case "json", "jsonc", "json5", "javascript", "js":
+		return true
+	}
+	return false
+}
+
+func isClosingFence(trimmed string, fenceChar byte, minLen int) bool {
+	if len(trimmed) < minLen {
+		return false
+	}
+	for i := 0; i < len(trimmed); i++ {
+		if trimmed[i] != fenceChar {
+			return false
+		}
+	}
+	return true
+}
+
+// taggedBlocks extracts contents inside <summary>, <handoff>, or <json> tags,
+// ordered newest-first.
+func taggedBlocks(text string) []string {
+	// Fold only ASCII tag names so offsets also index the original UTF-8.
+	lower := strings.Map(func(r rune) rune {
+		if r >= 'A' && r <= 'Z' {
+			return r + 'a' - 'A'
+		}
+		return r
+	}, text)
+	var blocks []string
+	for _, tag := range []string{"handoff", "summary", "json"} {
+		openTag := "<" + tag + ">"
+		closeTag := "</" + tag + ">"
+		for offset := 0; ; {
+			start := strings.Index(lower[offset:], openTag)
+			if start < 0 {
+				break
+			}
+			bodyStart := offset + start + len(openTag)
+			end := strings.Index(lower[bodyStart:], closeTag)
+			if end < 0 {
+				blocks = append(blocks, text[bodyStart:])
+				break
+			}
+			blocks = append(blocks, text[bodyStart:bodyStart+end])
+			offset = bodyStart + end + len(closeTag)
+		}
+	}
+	slices.Reverse(blocks)
+	return blocks
+}
+
+// embeddedObjects scans text for balanced top-level JSON objects embedded
+// amid explanatory prose. Unless allowInline is true, single-line snippets
+// embedded mid-sentence without a leading colon or line break (such as
+// `A quoted example {"user_intent":["Wrong"]} is not a handoff`) are skipped.
+func embeddedObjects(text string, allowInline bool) []string {
+	trimmed := strings.TrimSpace(text)
+	if strings.HasPrefix(trimmed, "[") && json.Valid([]byte(trimmed)) {
+		return nil // An array of examples is not a handoff object.
+	}
+	var found []string
+	for i := 0; i < len(text); i++ {
+		if text[i] == '[' {
+			if array := balancedValue(text[i:], '[', ']'); array != "" && json.Valid([]byte(array)) {
+				i += len(array) - 1
+				continue
+			}
+		}
+		if text[i] != '{' {
+			continue
+		}
+		candidate := object(text[i:])
+		if candidate == "" {
+			continue
+		}
+		end := i + len(candidate)
+		if allowInline || standsAloneObject(text, i, end) {
+			found = append(found, candidate)
+		}
+		i = end - 1
+	}
+	return found
+}
+
+func standsAloneObject(text string, start, end int) bool {
+	candidate := text[start:end]
+	if strings.ContainsRune(candidate, '\n') {
+		return true
+	}
+	lineStart := strings.LastIndexByte(text[:start], '\n') + 1
+	before := strings.TrimSpace(text[lineStart:start])
+	if before == "" {
+		return true
+	}
+	// A leading colon/arrow introduces the JSON block on the same line.
+	lastRune := rune(0)
+	for _, r := range before {
+		lastRune = r
+	}
+	if lastRune == ':' || lastRune == '：' {
+		return true
+	}
+	// Otherwise require that nothing meaningful continues on the same line.
+	restEnd := strings.IndexByte(text[end:], '\n')
+	var after string
+	if restEnd < 0 {
+		after = strings.TrimSpace(text[end:])
+	} else {
+		after = strings.TrimSpace(text[end : end+restEnd])
+	}
+	return after == "" || after == "." || after == "。"
+}
+
+func decodeObject(candidate string) (map[string]any, bool) {
+	decode := func(variant string) (map[string]any, bool) {
+		var fields map[string]any
+		decoder := json.NewDecoder(strings.NewReader(variant))
+		decoder.UseNumber()
+		ok := decoder.Decode(&fields) == nil && fields != nil
+		return fields, ok
+	}
+	if fields, ok := decode(candidate); ok {
+		return fields, true
+	}
+	repaired := stripTrailingCommas(escape(candidate))
+	if fields, ok := decode(repaired); ok {
+		return fields, true
+	}
+	return decode(repair(repaired))
+}
+
+func stripTrailingCommas(text string) string {
+	var out strings.Builder
+	out.Grow(len(text))
+	quoted, escaped := false, false
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		if quoted {
+			out.WriteByte(c)
+			if escaped {
+				escaped = false
+			} else if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				quoted = false
+			}
+			continue
+		}
+		if c == '"' {
+			quoted = true
+			out.WriteByte(c)
+			continue
+		}
+		if c == ',' {
+			j := i + 1
+			for j < len(text) && (text[j] == ' ' || text[j] == '\t' || text[j] == '\n' || text[j] == '\r') {
+				j++
+			}
+			if j < len(text) && (text[j] == '}' || text[j] == ']') {
+				continue
+			}
+		}
+		out.WriteByte(c)
+	}
+	return out.String()
+}
+
+func normalizeKey(key string) string {
+	var out strings.Builder
+	var prev rune
+	for i, r := range strings.TrimSpace(key) {
+		switch {
+		case r == '-' || r == ' ' || r == '\t':
+			if out.Len() > 0 && prev != '_' {
+				out.WriteByte('_')
+				prev = '_'
+			}
+		case unicode.IsUpper(r):
+			if i > 0 && prev != '_' && !unicode.IsUpper(prev) {
+				out.WriteByte('_')
+			}
+			out.WriteRune(unicode.ToLower(r))
+			prev = r
+		default:
+			out.WriteRune(r)
+			prev = r
+		}
+	}
+	return strings.Trim(out.String(), "_")
+}
+
+func normalizeFields(raw map[string]any) map[string]any {
+	normalized := make(map[string]any, len(raw))
+	for _, key := range slices.Sorted(maps.Keys(raw)) {
+		norm := normalizeKey(key)
+		if _, exists := normalized[norm]; !exists || key == norm {
+			normalized[norm] = raw[key]
+		}
+	}
+	return normalized
+}
+
+func firstField(fields map[string]any, keys ...string) any {
+	for _, key := range keys {
+		if value := fields[key]; value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func (s Summary) empty() bool {
+	return len(s.UserIntent)+len(s.TechnicalConcepts)+len(s.ErrorsAndFixes)+len(s.ProblemSolving)+len(s.UserMessages)+len(s.PendingTasks)+len(s.Files) == 0 && s.CurrentWork == nil && s.NextStep == nil
+}
+
+func buildSummary(raw map[string]any) Summary {
+	normalized := normalizeFields(raw)
+	pick := func(keys ...string) any { return firstField(normalized, keys...) }
+	summary := Summary{
+		UserIntent:        texts(pick("user_intent", "goal", "goals", "intent", "objective", "objectives")),
+		TechnicalConcepts: texts(pick("technical_concepts", "essential_context", "context", "key_context", "references", "commands")),
+		ErrorsAndFixes:    texts(pick("errors_and_fixes", "errors", "issues", "fixes", "blockers")),
+		ProblemSolving:    texts(pick("problem_solving", "decisions", "key_decisions", "approach")),
+		UserMessages:      texts(pick("user_messages", "constraints", "requirements", "user_constraints", "rules")),
+		PendingTasks:      texts(pick("pending_tasks", "open_tasks", "remaining_tasks", "tasks", "todo", "todos")),
+		CurrentWork:       optional(pick("current_work", "state", "status", "progress", "work_in_progress")),
+		NextStep:          optional(pick("next_step", "next_steps", "action_items")),
+		Files:             []File{},
+	}
+	filesVal := pick("files", "key_files", "relevant_files", "modified_files", "touched_files")
+	files := []any{}
+	if items, ok := filesVal.([]any); ok {
+		files = items
+	} else if filesVal != nil {
+		files = append(files, filesVal)
+	}
+	for _, file := range files {
+		value := File{}
+		if entry, ok := file.(map[string]any); ok {
+			entryNorm := normalizeFields(entry)
+			pickFile := func(keys ...string) any { return firstField(entryNorm, keys...) }
+			value = File{
+				Path:    stringify(pickFile("path", "file", "filepath", "file_path", "filename", "name")),
+				Summary: stringify(pickFile("summary", "description", "reason", "notes", "status", "changes")),
+				KeyCode: optional(pickFile("key_code", "code", "snippet", "excerpt")),
+			}
+		} else {
+			value.Path = stringify(file)
+		}
+		if strings.TrimSpace(value.Path) != "" || strings.TrimSpace(value.Summary) != "" || value.KeyCode != nil {
+			summary.Files = append(summary.Files, value)
+		}
+	}
+	if summary.empty() {
+		for _, wrapper := range []string{"handoff", "summary", "result", "data"} {
+			if inner, ok := normalized[wrapper].(map[string]any); ok {
+				if nested := buildSummary(inner); !nested.empty() {
+					return nested
+				}
+			}
+		}
+		if textSummary, ok := normalized["summary"].(string); ok {
+			summary.CurrentWork = optional(textSummary)
+		}
+	}
+	return summary
 }
 
 func object(text string) string {
-	text = strings.TrimSpace(text)
-	if !strings.HasPrefix(text, "{") {
+	return balancedValue(strings.TrimSpace(text), '{', '}')
+}
+
+func balancedValue(text string, open, close rune) string {
+	if len(text) == 0 || rune(text[0]) != open {
 		return ""
 	}
 	depth := 0
@@ -189,9 +533,9 @@ func object(text string) string {
 		switch r {
 		case '"':
 			quoted = true
-		case '{':
+		case open:
 			depth++
-		case '}':
+		case close:
 			depth--
 			if depth == 0 {
 				return text[:i+1]
@@ -242,25 +586,48 @@ func repair(text string) string {
 }
 func escape(text string) string {
 	var out strings.Builder
+	quoted, escaped := false, false
 	for _, r := range text {
-		if r < 32 {
-			switch r {
-			case '\b':
-				out.WriteString(`\b`)
-			case '\f':
-				out.WriteString(`\f`)
-			case '\n':
-				out.WriteString(`\n`)
-			case '\r':
-				out.WriteString(`\r`)
-			case '\t':
-				out.WriteString(`\t`)
-			default:
-				fmt.Fprintf(&out, `\u%04x`, r)
+		if quoted {
+			if escaped {
+				out.WriteRune(r)
+				escaped = false
+				continue
 			}
-		} else {
+			if r == '\\' {
+				out.WriteRune(r)
+				escaped = true
+				continue
+			}
+			if r == '"' {
+				out.WriteRune(r)
+				quoted = false
+				continue
+			}
+			if r < 32 {
+				switch r {
+				case '\b':
+					out.WriteString(`\b`)
+				case '\f':
+					out.WriteString(`\f`)
+				case '\n':
+					out.WriteString(`\n`)
+				case '\r':
+					out.WriteString(`\r`)
+				case '\t':
+					out.WriteString(`\t`)
+				default:
+					fmt.Fprintf(&out, `\u%04x`, r)
+				}
+				continue
+			}
 			out.WriteRune(r)
+			continue
 		}
+		if r == '"' {
+			quoted = true
+		}
+		out.WriteRune(r)
 	}
 	return out.String()
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -225,36 +226,151 @@ func TestCompactionHandoff(t *testing.T) {
 	t.Run("failed summaries retain usage", func(t *testing.T) {
 		for _, row := range []struct {
 			name, document, stop string
+			retries              int
 			reason               protocol.ConversationCompactionReason
 		}{
-			{"malformed", `{"user_intent":["unfinished`, "stop", protocol.ConversationCompactionReasonUnexpectedOutput},
-			{"empty", `{}`, "stop", protocol.ConversationCompactionReasonUnexpectedOutput},
-			{"blank", ` `, "stop", protocol.ConversationCompactionReasonEmptySummary},
-			{"truncated", `{"user_intent":["Valid but limited"]}`, "MAX_OUTPUT_TOKENS", protocol.ConversationCompactionReasonTruncatedSummary},
+			{"malformed", `{"user_intent":["unfinished`, "stop", 1, protocol.ConversationCompactionReasonUnexpectedOutput},
+			{"empty", `{}`, "stop", 1, protocol.ConversationCompactionReasonUnexpectedOutput},
+			{"blank", ` `, "stop", 1, protocol.ConversationCompactionReasonEmptySummary},
+			{"truncated", `{"user_intent":["Valid but limited"]}`, "MAX_OUTPUT_TOKENS", 0, protocol.ConversationCompactionReasonTruncatedSummary},
 		} {
 			t.Run(row.name, func(t *testing.T) {
 				part := finish()
 				part.FinishReason = fantasy.FinishReason(row.stop)
 				count := int64(77)
 				part.ProviderMetadata = fantasy.ProviderMetadata{model.UsageMetadataKey: &model.UsageMetadata{Reported: true, Total: &count}}
-				f, x, binding, before := compactionFixture(t, &scriptedModel{scripts: []script{response(text(row.document), part)}})
-				if err := f.r.compact(x, binding, before, true); err == nil {
+				scripts := make([]script, 0, 1+row.retries)
+				for range 1 + row.retries {
+					scripts = append(scripts, response(text(row.document), part))
+				}
+				m := &scriptedModel{scripts: scripts}
+				f, x, binding, before := compactionFixture(t, m)
+				visibleBefore := model.VisibleRecords(before.Records)
+				err := f.r.compact(x, binding, before, true)
+				if err == nil {
 					t.Fatal("invalid summary replaced context")
 				}
+				var fault *protocol.Fault
+				if !errors.As(err, &fault) {
+					t.Fatalf("expected *protocol.Fault, got %T: %v", err, err)
+				}
+				if fault.Code == protocol.ErrorCodeUnavailable {
+					t.Fatalf("expected actionable fault code instead of bare unavailable, got %+v", fault)
+				}
+				if fault.Details == nil || fault.Details.Kind != "model_request" {
+					t.Fatalf("expected model_request fault details, got %+v", fault)
+				}
+				if req, ok := fault.Details.Data.(protocol.FaultDetailsModelRequestPayload); !ok || req.Reason != protocol.ModelFailureInvalidResponse {
+					t.Fatalf("expected invalid_response reason, got %+v", fault.Details.Data)
+				}
+				if m.count() != 1+row.retries {
+					t.Fatalf("model calls = %d, want %d", m.count(), 1+row.retries)
+				}
 				after := f.state()
-				if len(after.Records) != len(before.Records)+2 {
-					t.Fatal("failed summary usage observation or failure record was lost")
+				if !reflect.DeepEqual(model.VisibleRecords(after.Records), visibleBefore) {
+					t.Fatal("failed summary mutated visible conversation history")
 				}
-				observation := after.Records[len(before.Records)]
-				if observation.Kind != "message" || !compactionUsage(observation) || observation.Metadata.Runtime.AgentVisible || observation.Message().Usage.Total == nil || *observation.Message().Usage.Total != 77 {
-					t.Fatal("failed summary usage was not preserved independently")
+				wantAdded := 1 + row.retries + 1
+				if len(after.Records) != len(before.Records)+wantAdded {
+					t.Fatalf("added %d records, want %d", len(after.Records)-len(before.Records), wantAdded)
 				}
-				failure := compactionFailed(t, f, after.Records[len(before.Records)+1])
-				if failure.Source != protocol.ConversationCompactionSourceManual || failure.Stage != protocol.ConversationCompactionStageSummary || failure.Reason != row.reason || failure.Continued || failure.Cause == nil || *failure.Cause == "" {
-					t.Fatalf("failure = %+v", failure)
+				for i := range 1 + row.retries {
+					observation := after.Records[len(before.Records)+i]
+					if observation.Kind != "message" || !compactionUsage(observation) || observation.Metadata.Runtime.AgentVisible || observation.Message().Usage.Total == nil || *observation.Message().Usage.Total != 77 {
+						t.Fatalf("attempt %d failed summary usage was not preserved independently", i)
+					}
+				}
+				failure := compactionFailed(t, f, after.Records[len(after.Records)-1])
+				if failure.Source != protocol.ConversationCompactionSourceManual || failure.Stage != protocol.ConversationCompactionStageSummary || failure.Reason != row.reason || failure.Continued || failure.Cause == nil || *failure.Cause != fault.Message {
+					t.Fatalf("failure = %+v, fault = %+v", failure, fault)
 				}
 			})
 		}
+	})
+	t.Run("lenient extraction and format retry", func(t *testing.T) {
+		t.Run("prose wrapped json succeeds without retry", func(t *testing.T) {
+			doc := "Here is the handoff summary:\n\n```\n{\n  \"goal\": \"Ship compaction fix\",\n  \"state\": \"Parser updated\",\n  \"nextSteps\": \"Run tests\"\n}\n```\n\nReady to continue."
+			m := &scriptedModel{scripts: []script{response(text(doc), finish())}}
+			f, x, binding, before := compactionFixture(t, m)
+			if err := f.r.compact(x, binding, before, true); err != nil {
+				t.Fatalf("compact failed: %v", err)
+			}
+			if m.count() != 1 {
+				t.Fatalf("expected 1 model call, got %d", m.count())
+			}
+			after := f.state()
+			saved := after.Records[len(before.Records)]
+			if saved.Kind != "compaction" {
+				t.Fatalf("expected compaction record, got %q", saved.Kind)
+			}
+			rendered := saved.Data.(*canonical.Compaction).Summary.Content[0].Data.(*canonical.TextContent).Text
+			if !strings.Contains(rendered, "Ship compaction fix") || !strings.Contains(rendered, "Parser updated") {
+				t.Fatalf("rendered handoff lost extracted fields: %s", rendered)
+			}
+		})
+		t.Run("non-json first attempt retries once and succeeds", func(t *testing.T) {
+			firstUsage := int64(55)
+			firstDone := finish()
+			firstDone.ProviderMetadata = fantasy.ProviderMetadata{model.UsageMetadataKey: &model.UsageMetadata{Reported: true, Total: &firstUsage}}
+			secondUsage := int64(88)
+			secondDone := finish()
+			secondDone.ProviderMetadata = fantasy.ProviderMetadata{model.UsageMetadataKey: &model.UsageMetadata{Reported: true, Total: &secondUsage}}
+			m := &scriptedModel{scripts: []script{
+				response(text("We fixed the parser and should now verify the tests."), firstDone),
+				response(text("```json\n{\"user_intent\":[\"Recovered on retry\"],\"current_work\":\"Verified\"}\n```"), secondDone),
+			}}
+			f, x, binding, before := compactionFixture(t, m)
+			if err := f.r.compact(x, binding, before, true); err != nil {
+				t.Fatalf("compact retry failed: %v", err)
+			}
+			if m.count() != 2 {
+				t.Fatalf("expected 2 model calls (1 initial + 1 retry), got %d", m.count())
+			}
+			retryPrompt := m.calls[1].Prompt[1].Content[0].(fantasy.TextPart).Text
+			if !strings.Contains(retryPrompt, "structured handoff JSON") {
+				t.Fatalf("retry prompt missing format correction guidance: %q", retryPrompt)
+			}
+			after := f.state()
+			// First attempt observation + compaction record + synthetic continuation.
+			if len(after.Records) != len(before.Records)+3 {
+				t.Fatalf("records = %d, want %d", len(after.Records), len(before.Records)+3)
+			}
+			obs := after.Records[len(before.Records)]
+			if !compactionUsage(obs) || obs.Message().Usage.Total == nil || *obs.Message().Usage.Total != 55 {
+				t.Fatalf("first attempt observation lost: %+v", obs)
+			}
+			saved := after.Records[len(before.Records)+1]
+			if saved.Kind != "compaction" {
+				t.Fatalf("expected compaction record after retry, got %q", saved.Kind)
+			}
+			rendered := saved.Data.(*canonical.Compaction).Summary.Content[0].Data.(*canonical.TextContent).Text
+			if !strings.Contains(rendered, "Recovered on retry") {
+				t.Fatalf("rendered handoff missing retry output: %s", rendered)
+			}
+		})
+		t.Run("plain paragraph on both attempts fails cleanly without mutating history", func(t *testing.T) {
+			m := &scriptedModel{scripts: []script{
+				response(text("Plain summary paragraph without any JSON."), finish()),
+				response(text("Still just plain prose, no JSON block."), finish()),
+			}}
+			f, x, binding, before := compactionFixture(t, m)
+			visibleBefore := model.VisibleRecords(before.Records)
+			err := f.r.compact(x, binding, before, true)
+			if err == nil {
+				t.Fatal("expected error for non-JSON output on both attempts")
+			}
+			if m.count() != 2 {
+				t.Fatalf("expected 2 attempts, got %d", m.count())
+			}
+			fault := model.Fault(err)
+			if fault == nil || fault.Code != protocol.ErrorCodeInvalidRequest || !strings.Contains(fault.Message, "Conversation history was preserved") {
+				t.Fatalf("fault = %+v", fault)
+			}
+			after := f.state()
+			if !reflect.DeepEqual(model.VisibleRecords(after.Records), visibleBefore) {
+				t.Fatal("non-JSON compaction failure corrupted visible conversation history")
+			}
+		})
 	})
 	t.Run("failures are recorded", func(t *testing.T) {
 		status := func(code int) script {

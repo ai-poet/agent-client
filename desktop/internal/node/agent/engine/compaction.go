@@ -5,7 +5,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"strings"
 
 	"charm.land/fantasy"
@@ -117,7 +117,13 @@ func (r *Runtime) compactionFailure(x *execution, binding model.Binding, earlier
 	if len(attempts) > 0 {
 		detail.Status = attempts[len(attempts)-1].Status
 	}
-	cause := model.Classify(failure).Message
+	var cause string
+	var fault *protocol.Fault
+	if errors.As(failure, &fault) {
+		cause = fault.Message
+	} else {
+		cause = model.Classify(failure).Message
+	}
 	detail.Cause = &cause
 	record := canonical.NewRecord(x.inv.Run.Turn, "message", canonical.NewMessage(canonical.Assistant), r.clock.Now())
 	record.Provenance.Author = "system"
@@ -178,7 +184,9 @@ func (r *Runtime) compact(x *execution, binding model.Binding, state store.Agent
 		}
 		return failure
 	}
-	system, err := handoff.Prepare(selection.Prefix, uint64(selected.Context), uint64(output), requestText)
+	invalidRetry := requestText + "\n\n" + handoff.RetryInvalidOutput
+	emptyRetry := requestText + "\n\n" + handoff.RetryEmptyOutput
+	system, err := handoff.Prepare(selection.Prefix, uint64(selected.Context), uint64(output), requestText, invalidRetry, emptyRetry)
 	if err != nil {
 		return failed(protocol.ConversationCompactionStageBudget, protocol.ConversationCompactionReasonNoFittingPrefix, err)
 	}
@@ -186,42 +194,45 @@ func (r *Runtime) compact(x *execution, binding model.Binding, state store.Agent
 	if err != nil {
 		return failed(protocol.ConversationCompactionStageRequest, protocol.ConversationCompactionReasonRequestFailed, err)
 	}
-	request := canonical.NewRecord(x.inv.Run.Turn, "message", canonical.NewMessage(canonical.User, canonical.Text(0, requestText)), r.clock.Now())
-	call, err := model.BuildCall(summaryBinding, model.Request{System: system, Records: []canonical.Record{request}, MaxOutputTokens: &output, Delegated: x.inv.Session.Delegation != nil})
-	if err != nil {
-		return failed(protocol.ConversationCompactionStageRequest, protocol.ConversationCompactionReasonRequestFailed, err)
+	requestSummary := func(promptText string) (string, bool, canonical.Usage, error) {
+		request := canonical.NewRecord(x.inv.Run.Turn, "message", canonical.NewMessage(canonical.User, canonical.Text(0, promptText)), r.clock.Now())
+		call, err := model.BuildCall(summaryBinding, model.Request{System: system, Records: []canonical.Record{request}, MaxOutputTokens: &output, Delegated: x.inv.Session.Delegation != nil})
+		if err != nil {
+			return "", false, canonical.Usage{}, err
+		}
+		var text strings.Builder
+		limited, textBlock := false, false
+		var usage canonical.Usage
+		err = model.Run(x.ctx, languageModel, call, model.SummaryPurpose, r.clock, func(attempt model.Attempt) error {
+			x.timeline.attempt(attempt)
+			// An attempt that waits to be sent again shows as a main request's does.
+			if attempt.RetryDelay != nil {
+				return r.save(context.WithoutCancel(x.ctx), x.inv.Session.ID, r.retryRecord(x, summaryBinding, canonical.PurposeCompaction, attempt))
+			}
+			usage = attempt.Usage
+			attempts = append(attempts, attempt)
+			return nil
+		}, func(part fantasy.StreamPart) bool {
+			switch part.Type {
+			case fantasy.StreamPartTypeTextDelta:
+				if !textBlock && text.Len() > 0 {
+					text.WriteByte('\n')
+				}
+				text.WriteString(part.Delta)
+				textBlock = true
+			case fantasy.StreamPartTypeReasoningDelta, fantasy.StreamPartTypeReasoningEnd, fantasy.StreamPartTypeToolCall:
+				textBlock = false
+			case fantasy.StreamPartTypeFinish:
+				switch strings.ToLower(string(part.FinishReason)) {
+				case "length", "max_tokens", "max_output_tokens":
+					limited = true
+				}
+			}
+			return x.ctx.Err() == nil
+		}, nil)
+		return text.String(), limited, usage, err
 	}
-	var text strings.Builder
-	limited, textBlock := false, false
-	var usage canonical.Usage
-	err = model.Run(x.ctx, languageModel, call, model.SummaryPurpose, r.clock, func(attempt model.Attempt) error {
-		x.timeline.attempt(attempt)
-		// An attempt that waits to be sent again shows as a main request's does.
-		if attempt.RetryDelay != nil {
-			return r.save(context.WithoutCancel(x.ctx), x.inv.Session.ID, r.retryRecord(x, summaryBinding, canonical.PurposeCompaction, attempt))
-		}
-		usage = attempt.Usage
-		attempts = append(attempts, attempt)
-		return nil
-	}, func(part fantasy.StreamPart) bool {
-		switch part.Type {
-		case fantasy.StreamPartTypeTextDelta:
-			if !textBlock && text.Len() > 0 {
-				text.WriteByte('\n')
-			}
-			text.WriteString(part.Delta)
-			textBlock = true
-		case fantasy.StreamPartTypeReasoningDelta, fantasy.StreamPartTypeReasoningEnd, fantasy.StreamPartTypeToolCall:
-			textBlock = false
-		case fantasy.StreamPartTypeFinish:
-			switch strings.ToLower(string(part.FinishReason)) {
-			case "length", "max_tokens", "max_output_tokens":
-				limited = true
-			}
-		}
-		return x.ctx.Err() == nil
-	}, nil)
-	if err != nil {
+	failRequest := func(err error) error {
 		reason := protocol.ConversationCompactionReasonRequestFailed
 		switch model.Classify(err).Kind {
 		case model.RateLimited, model.Quota:
@@ -237,16 +248,39 @@ func (r *Runtime) compact(x *execution, binding model.Binding, state store.Agent
 		}
 		return failed(protocol.ConversationCompactionStageRequest, reason, err)
 	}
-	if limited {
-		return failed(protocol.ConversationCompactionStageSummary, protocol.ConversationCompactionReasonTruncatedSummary, fmt.Errorf("compaction summary reached its output limit"))
-	}
-	summary, err := handoff.Parse(text.String(), handoff.Cap(uint64(selected.Context), uint64(output)))
-	if err != nil {
-		reason := protocol.ConversationCompactionReasonUnexpectedOutput
-		if strings.TrimSpace(text.String()) == "" {
-			reason = protocol.ConversationCompactionReasonEmptySummary
+	capLimit := handoff.Cap(uint64(selected.Context), uint64(output))
+	var summary handoff.Summary
+	var usage canonical.Usage
+	promptText := requestText
+	for round := range 2 {
+		rawText, limited, roundUsage, err := requestSummary(promptText)
+		if err != nil {
+			return failRequest(err)
 		}
-		return failed(protocol.ConversationCompactionStageSummary, reason, err)
+		usage = roundUsage
+		if err := x.ctx.Err(); err != nil {
+			return failRequest(err)
+		}
+		if limited {
+			reason := protocol.ConversationCompactionReasonTruncatedSummary
+			return failed(protocol.ConversationCompactionStageSummary, reason, compactionSummaryFault(reason))
+		}
+		parsed, parseErr := handoff.Parse(rawText, capLimit)
+		if parseErr == nil {
+			summary = parsed
+			break
+		}
+		reason := protocol.ConversationCompactionReasonUnexpectedOutput
+		retryPrompt := invalidRetry
+		if strings.TrimSpace(rawText) == "" {
+			reason = protocol.ConversationCompactionReasonEmptySummary
+			retryPrompt = emptyRetry
+		}
+		if round == 0 {
+			promptText = retryPrompt
+			continue
+		}
+		return failed(protocol.ConversationCompactionStageSummary, reason, compactionSummaryFault(reason))
 	}
 	rendered := summary.Render()
 	boundary := selection.Boundary
@@ -356,6 +390,25 @@ func (r *Runtime) compact(x *execution, binding model.Binding, state store.Agent
 		records = append(records, carry)
 	}
 	return r.save(x.ctx, x.inv.Session.ID, records...)
+}
+func compactionSummaryFault(reason protocol.ConversationCompactionReason) *protocol.Fault {
+	message := "Compaction failed: the model did not return a valid structured handoff JSON after retry. Conversation history was preserved; try compacting again, switching models, or starting a new session."
+	switch reason {
+	case protocol.ConversationCompactionReasonEmptySummary:
+		message = "Compaction failed: the model returned an empty summary after retry. Conversation history was preserved; try compacting again, switching models, or starting a new session."
+	case protocol.ConversationCompactionReasonTruncatedSummary:
+		message = "Compaction failed: the summary reached the output token limit before completing. Conversation history was preserved; try compacting again or starting a new session."
+	}
+	return &protocol.Fault{
+		Code:    protocol.ErrorCodeInvalidRequest,
+		Message: message,
+		Details: &protocol.FaultDetails{
+			Kind: "model_request",
+			Data: protocol.FaultDetailsModelRequestPayload{
+				Reason: protocol.ModelFailureInvalidResponse,
+			},
+		},
+	}
 }
 func containsTool(message *canonical.Message) bool {
 	for _, block := range message.Content {
