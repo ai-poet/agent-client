@@ -1,4 +1,4 @@
-app: Sailry
+app: CheapRouter
 updates: "更新"
 updates_channel: "更新通道"
 updates_channel_stable: "正式版"
@@ -19,8 +19,8 @@ updates_checking: "正在检查"
 updates_verifying: "正在验证"
 updates_installing: "正在安装"
 updates_restart_needed: "需要重启"
-updates_current: "Sailry 已是最新版本"
-updates_completed: "Sailry 已更新"
+updates_current: "CheapRouter 已是最新版本"
+updates_completed: "CheapRouter 已更新"
 updates_source_unready: "更新源尚未配置"
 updates_network_failed: "更新下载失败，请重试"
 updates_manifest_invalid: "更新信息无效"
@@ -31,12 +31,12 @@ updates_platform: "此平台暂无可用更新"
 updates_system_unavailable: "无法读取系统版本"
 updates_system_old: "此更新需要更高的系统版本"
 updates_version_old: "所选更新不比当前版本新"
-updates_bundle_required: "请先安装打包的 Sailry 应用"
+updates_bundle_required: "请先安装打包的 CheapRouter 应用"
 updates_io_failed: "无法保存更新"
 updates_receipt_unread: "请先检查上次更新结果"
-updates_install_failed: "更新未完成，请重启 Sailry"
-updates_restart_failed: "无法重启 Sailry，请重新打开"
-updates_shutdown_failed: "本机 Node 未能停止，请重启 Sailry"
+updates_install_failed: "更新未完成，请重启 CheapRouter"
+updates_restart_failed: "无法重启 CheapRouter，请重新打开"
+updates_shutdown_failed: "本机 Node 未能停止，请重启 CheapRouter"
 updates_drafts_failed: "无法保存草稿，更新已暂停"
 updates_save_first: "请先保存打开的文档"
 updates_pending_request: "请等待当前操作完成后再更新"
@@ -590,16 +590,16 @@ mcp_oauth_client_id: 客户端 ID（可选）
 mcp_oauth_not_connected: 未授权
 mcp_oauth_callback_failed: 无法接收授权回调，请重试
 mcp_oauth_failed: 授权失败，请重试
-mcp_oauth_return: 返回 Sailry
+mcp_oauth_return: 返回 CheapRouter
 oauth_success_title: 登录成功
 oauth_failed_title: 登录失败
 oauth_cancelled_title: 登录已取消
-oauth_pending_title: 返回 Sailry 完成连接
-oauth_success_description: "账号已连接，可以返回 Sailry 继续使用"
-oauth_failed_description: "请返回 Sailry 重试"
-oauth_cancelled_description: "可以返回 Sailry 重新登录"
-oauth_pending_description: "请返回 Sailry 查看连接状态"
-oauth_return: 返回 Sailry
+oauth_pending_title: 返回 CheapRouter 完成连接
+oauth_success_description: "账号已连接，可以返回 CheapRouter 继续使用"
+oauth_failed_description: "请返回 CheapRouter 重试"
+oauth_cancelled_description: "可以返回 CheapRouter 重新登录"
+oauth_pending_description: "请返回 CheapRouter 查看连接状态"
+oauth_return: 返回 CheapRouter
 oauth_close_page: 您可以关闭此页面
 question_open_url: 打开页面
 mcp_oauth_remove: 移除授权
@@ -1040,7 +1040,7 @@ terminal: 终端
 ssh: SSH
 database: 数据库
 usage: 用量
-usage_description: 查看 Sailry 会话用量
+usage_description: 查看 CheapRouter 会话用量
 usage_range: 时间范围
 usage_filters: 筛选
 usage_range_days: '近 %{days} 天'
@@ -1092,12 +1092,12 @@ navigation: 导航
 hosts: 主机
 local_host: 本机 · 示例
 remote_host: 设计主机 · 示例
-local_host_name: sailry-mac.local
+local_host_name: cheaprouter-mac.local
 local_host_detail: macOS · aarch64 · 示例
 remote_host_name: design-node.local
 remote_host_detail: Linux · x86_64 · 示例
 projects: 项目
-project: sailry
+project: cheaprouter
 remote_project: studio
 session: 桌面界面重构
 session_long: 梳理跨主机的会话、文件与开发工具交互细节
@@ -1128,7 +1128,7 @@ host_dialog_description: 可检查输入与弹窗交互；此阶段不会创建�
 done: 完成预览
 resource_context: 示例项目
 user: 你
-assistant: Sailry
+assistant: CheapRouter
 turn_preview: 示例回合
 turn_preview_time: "10:09"
 turn_queued: 等待处理
@@ -1179,7 +1179,7 @@ turn_preview_failure: 示例错误：回复流中断，已保留部分回复
 composer: 描述你想完成的任务…
 welcome_hi: Hi，
 reference_load_failed: 引用加载失败
-welcome_name: Sailry
+welcome_name: CheapRouter
 welcome_title: 今天，想一起做点什么
 welcome_explore: 探索项目
 welcome_explore_detail: 了解结构与关键入口
@@ -1433,7 +1433,7 @@ git_stage_all: 暂存全部
 git_actions_preview: UI 预览，未接入真实 Git 操作
 git_preview_only: 仅预览，不执行 Git 操作
 git_diff_empty: 选择变更
-file_intro: "# Sailry\n\n一个原生的桌面 Agent 工作台。\n\n## 界面结构\n\n- 导航、主内容、上下文三栏\n- GPUI Kit 组件与语义主题\n- 会话、文件与开发工具共用资源标题区\n\n此文件是内置示例，不读取真实项目。"
+file_intro: "# CheapRouter\n\n一个原生的桌面 Agent 工作台。\n\n## 界面结构\n\n- 导航、主内容、上下文三栏\n- GPUI Kit 组件与语义主题\n- 会话、文件与开发工具共用资源标题区\n\n此文件是内置示例，不读取真实项目。"
 file_design: "# 桌面布局\n\n左栏保留主机与项目树；中间展示资源；右栏按需展开。\n\n缩窄窗口时优先收起右栏，恢复宽度后保留手动选择。"
 diff_intro: "```diff\n- workspace: nested cards\n+ workspace: three flat panels\n\n- toolbar: global resource actions\n+ toolbar: current resource header\n```"
 diff_design: "```diff\n- search: permanent search row\n+ search: command palette\n\n- theme: page-specific colors\n+ theme: GPUI Kit semantic theme\n```"
@@ -1706,7 +1706,7 @@ host_sampling: 等待采样
 host_sampling_failed: 主机数据未更新
 host_disk_read: "读取"
 host_disk_write: "写入"
-host_node_uptime: "Sailry 运行"
+host_node_uptime: "CheapRouter 运行"
 host_cores: "%{count} 核"
 host_load: "负载"
 host_core: "核心 %{index} · %{value}"
@@ -2405,12 +2405,12 @@ computer_permissions_refresh: 重新检测
 permission_request: 请求授权
 permission_title: 系统权限
 settings_permissions: 权限
-settings_permissions_description: Sailry 的系统访问权限
+settings_permissions_description: CheapRouter 的系统访问权限
 permission_full_disk: 完全磁盘访问
 permission_continue: 继续
-permission_disk_help: 若列表中没有 Sailry，点击 + 添加或将应用拖入列表
+permission_disk_help: 若列表中没有 CheapRouter，点击 + 添加或将应用拖入列表
 permission_show_app: 显示应用
-permission_app_unavailable: 请使用已安装的 Sailry 应用授权
+permission_app_unavailable: 请使用已安装的 CheapRouter 应用授权
 permission_screen: 屏幕录制
 permission_accessibility: 辅助功能
 permission_microphone: 麦克风
@@ -2428,7 +2428,7 @@ permission_settings: 打开设置
 permission_retry: 重试
 permission_check: 检查
 permission_cancelled: 已取消
-computer_permissions_remote: 请在执行电脑上打开 Sailry 设置并授权
+computer_permissions_remote: 请在执行电脑上打开 CheapRouter 设置并授权
 computer_permissions_unsupported: 此系统暂不支持权限检测与授权引导
 tool_computer_desktop: 查看桌面
 tool_computer_observe: 观察屏幕
@@ -2465,7 +2465,7 @@ composer_timed_output: 测速输出
 composer_back: 返回
 
 app_exit: 退出
-app_exit_confirm: 退出 Sailry
+app_exit_confirm: 退出 CheapRouter
 app_exit_description: 本机正在运行的任务和终端将停止
 tool_session_title: 设置会话标题
 
@@ -2563,7 +2563,7 @@ updates_restart_now: "立即重启"
 updates_later: "稍后"
 updates_view: "查看"
 updates_recovery_failed: "草稿恢复未完成"
-updates_profile_inside: "数据目录位于 Sailry 应用内，请移出后再更新"
+updates_profile_inside: "数据目录位于 CheapRouter 应用内，请移出后再更新"
 approval_unrestricted: 完整文件系统和网络访问
 approval_code_start: "在 %{worktree} 启动 %{server}"
 approval_ssh_trust: "信任 %{host}:%{port} — %{algorithm} %{fingerprint}"
@@ -2702,8 +2702,8 @@ knowledge_collection_failures: "%{count} 项未索引 · %{reason}"
 knowledge_pause: 暂停
 knowledge_resume: 继续
 knowledge_update: 更新
-start_failed: Sailry 无法启动
-start_profile_in_use: Sailry 已在使用此数据目录运行
+start_failed: CheapRouter 无法启动
+start_profile_in_use: CheapRouter 已在使用此数据目录运行
 backup_keep: 保留的备份
 backup_keep_all: 全部
 backup_keep_last: "最近 %{count} 个"
@@ -2713,9 +2713,9 @@ backup_last: 上次备份
 backup_last_done: 已完成
 backup_last_skipped: "已跳过 %{count} 项"
 backup_restart_restored: 使用恢复的数据重启
-backup_restart_consequence: Sailry 将使用恢复的数据重启，当前数据目录会以带日期的名称保留在其旁边
+backup_restart_consequence: CheapRouter 将使用恢复的数据重启，当前数据目录会以带日期的名称保留在其旁边
 backup_restart_invalid: 恢复的数据无法使用，未做任何更改
-backup_restart_failed: Sailry 无法切换到恢复的数据
+backup_restart_failed: CheapRouter 无法切换到恢复的数据
 git_copy_commit_id: 复制提交 ID
 git_cherry_pick_confirm: 将此提交应用到当前分支
 git_diff_side_by_side: 并排

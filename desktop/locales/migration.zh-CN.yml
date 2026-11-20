@@ -1,6 +1,6 @@
 migration_title: "旧数据迁移"
 migration_checking: "正在检测旧数据…"
-migration_description: "将旧 CheapRouter 客户端的项目和会话导入当前 Sailry 资料。"
+migration_description: "将旧 CheapRouter 客户端的项目和会话导入当前 CheapRouter 资料。"
 migration_counts: "{projects} 个项目 · {sessions} 个会话 · {messages} 条消息"
 migration_preserves_source: "已在旧客户端使用的数据不会删除，也不会修改。"
 migration_credentials_note: "仅保留账号标识与端点，不迁移访问令牌或 API Key；请在新客户端重新登录。"

@@ -6,6 +6,6 @@ host_network_conflict: "Настройки сети изменились; пов
 host_network_unavailable: "Настройки сети недоступны"
 host_network_load_failed: "Не удалось загрузить настройки сети"
 host_pairing_mode: "Код сопряжения"
-host_pairing_hint: "Подключить устройство с Sailry"
+host_pairing_hint: "Подключить устройство с CheapRouter"
 host_setup_unconfirmed: "Настройка не подтверждена, сначала проверьте хост"
-host_install_hint: Установите Sailry на сервер и подключитесь
+host_install_hint: Установите CheapRouter на сервер и подключитесь

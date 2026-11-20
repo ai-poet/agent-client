@@ -573,7 +573,7 @@ func firstRunChinese(t *testing.T, r *Runtime, tester *ui.Tester, view func() *u
 	}
 	// Device and package names retain their source language; UI copy is Chinese.
 	// The location control read Chats while packages were mounted in English.
-	hostNames := []string{"Sailry", "SSH", "Git"}
+	hostNames := []string{"CheapRouter", "SSH", "Git"}
 	for _, device := range r.App.Data.Hosts {
 		if device.Name != "" && device.Name != "local_host_name" {
 			hostNames = append(hostNames, device.Name)
@@ -668,7 +668,7 @@ func firstRunChinese(t *testing.T, r *Runtime, tester *ui.Tester, view func() *u
 			t.Errorf("entering the page sent %s %d times: %q", kind, entry[kind], sent()[before:])
 		}
 	}
-	translated("the scheduled tasks page", "Sailry", "SSH", "Git")
+	translated("the scheduled tasks page", "CheapRouter", "SSH", "Git")
 	shots("scheduled-tasks")
 
 	// The providers' settings of a profile without one.

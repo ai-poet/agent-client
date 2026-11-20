@@ -256,9 +256,9 @@ func deviceDetail(d viewmodel.Device) string {
 		return system
 	}
 	if system == "" {
-		return "Sailry " + d.Version
+		return "CheapRouter " + d.Version
 	}
-	return system + " · Sailry " + d.Version
+	return system + " · CheapRouter " + d.Version
 }
 
 // deviceStatus is the status label's key: the route of an online remote

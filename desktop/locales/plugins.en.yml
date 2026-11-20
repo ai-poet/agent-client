@@ -22,7 +22,7 @@ plugins_update_partial: "%{count} plugins updated; %{failed} failed"
 plugins_update_error: "%{name}: %{error}"
 plugins_search: Search plugins
 plugins_market_failed: Could not load the plugin catalog
-plugins_sailry_catalog: Sailry
+plugins_sailry_catalog: CheapRouter
 plugins_previous: Previous page
 plugins_next: Next page
 plugins_path: Plugin directory

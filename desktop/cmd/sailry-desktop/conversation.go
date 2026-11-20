@@ -36,7 +36,7 @@ func bindConversation(ctx context.Context, entry *desktopWindow, speech *reader.
 			runtime.ReportExport(err)
 			return
 		}
-		title := "Sailry"
+		title := "CheapRouter"
 		for _, candidate := range controller.Snapshot().Sessions {
 			if candidate.ID == session {
 				title = candidate.Activity.Title
@@ -61,7 +61,7 @@ func bindConversation(ctx context.Context, entry *desktopWindow, speech *reader.
 		}, title)
 		name = strings.TrimSpace(name)
 		if name == "" || name == "." || name == ".." {
-			name = "Sailry"
+			name = "CheapRouter"
 		}
 		name = string([]rune(name)[:min(len([]rune(name)), 120)])
 		lang := i18n.Match(mygo.App.Locale())

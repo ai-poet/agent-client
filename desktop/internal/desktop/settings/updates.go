@@ -113,7 +113,7 @@ func (u *Updater) advance(now time.Time, experience bool) bool {
 		}
 		if experience {
 			u.State = UpdateIdle
-			u.Failure = &UpdateFailure{"updates_network_failed", "The preview reaches no release feed: `GET https://sailry.dev/releases/experience.json` was not sent."}
+			u.Failure = &UpdateFailure{"updates_network_failed", "The preview reaches no release feed: `GET https://cheaprouter.cc/releases/experience.json` was not sent."}
 			return false
 		}
 		u.State, u.Version = UpdateAvailable, "0.2.0-preview"

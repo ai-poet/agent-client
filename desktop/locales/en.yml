@@ -14,7 +14,7 @@ git_index_busy: Git is busy or the operation timed out, try again shortly
 git_index_denied: Cannot access the file or index, check permissions
 git_index_missing: The file or repository no longer exists, select again
 git_index_unknown: Staging outcome is unconfirmed, refresh and review
-welcome_name: " Sailry"
+welcome_name: " CheapRouter"
 tool_read_file: Read file
 skills_license: License
 skills_compatibility: Compatibility
@@ -359,8 +359,8 @@ knowledge_collection_failures: "%{count} not indexed · %{reason}"
 knowledge_pause: Pause
 knowledge_resume: Resume
 knowledge_update: Update
-start_failed: Sailry could not start
-start_profile_in_use: Sailry is already running with this data folder
+start_failed: CheapRouter could not start
+start_profile_in_use: CheapRouter is already running with this data folder
 backup_keep: Backups to keep
 backup_keep_all: All
 backup_keep_last: "Last %{count}"
@@ -370,9 +370,9 @@ backup_last: Last backup
 backup_last_done: Completed
 backup_last_skipped: "%{count} items skipped"
 backup_restart_restored: Restart with restored profile
-backup_restart_consequence: Sailry restarts on the restored profile. The current data folder is kept beside it under a dated name
+backup_restart_consequence: CheapRouter restarts on the restored profile. The current data folder is kept beside it under a dated name
 backup_restart_invalid: The restored profile cannot be used; nothing was changed
-backup_restart_failed: Sailry could not switch to the restored profile
+backup_restart_failed: CheapRouter could not switch to the restored profile
 git_copy_commit_id: Copy commit ID
 git_cherry_pick_confirm: Apply this commit to the current branch
 git_diff_side_by_side: Side by side

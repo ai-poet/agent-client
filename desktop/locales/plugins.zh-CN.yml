@@ -22,7 +22,7 @@ plugins_update_partial: "已更新 %{count} 个，%{failed} 个失败"
 plugins_update_error: "%{name}：%{error}"
 plugins_search: 搜索插件
 plugins_market_failed: 无法加载插件目录
-plugins_sailry_catalog: Sailry
+plugins_sailry_catalog: CheapRouter
 plugins_previous: 上一页
 plugins_next: 下一页
 plugins_path: 插件目录

@@ -63,7 +63,7 @@ func SettingsData() *Settings {
 			{ID: "a1b2c3d4", Name: "Studio PC", Platform: "windows", Execution: true, Route: ""},
 			{ID: "5e6f7a8b", Name: "iPhone", Platform: "ios", Online: true, Route: "relay", RTT: 64, Version: "0.1.0"},
 		},
-		Relays: []string{"Sailry Asia", "Sailry Europe"},
+		Relays: []string{"CheapRouter Asia", "CheapRouter Europe"},
 		Hooks: []Hook{
 			{ID: "fmt", Name: "Format", Command: "gofmt -l .", Phase: AfterTool, TimeoutMS: 30000, Enabled: true},
 			{ID: "guard", Command: "./scripts/check-paths.sh", Phase: BeforeTool, TimeoutMS: 5000},

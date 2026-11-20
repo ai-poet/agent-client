@@ -172,9 +172,9 @@ func card(c *ui.Context, m mode, stacked bool, prompt func(string)) {
 var wordmarkSVG string
 
 // The wordmark's artwork: 6-unit square particles on an 8-unit grid in a
-// 328 x 112 box, its depth an alpha gradient along the diagonal.
+// 688 x 112 box, its depth an alpha gradient along the diagonal.
 const (
-	markW, markH = 328, 112
+	markW, markH = 688, 112
 	dot          = 6
 )
 

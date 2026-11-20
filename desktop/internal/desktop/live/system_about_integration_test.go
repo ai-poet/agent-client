@@ -169,15 +169,15 @@ func TestSystemAboutUI(t *testing.T) {
 	for range 30 {
 		window.frame()
 	}
-	if u.Failure != nil || len(aboutActions(window, "Details")) != 0 || shown(window, "Sailry is up to date") != 0 {
+	if u.Failure != nil || len(aboutActions(window, "Details")) != 0 || shown(window, "CheapRouter is up to date") != 0 {
 		t.Fatalf("a cancelled check reported %+v; visible text: %q", u.Failure, window.tester.Texts())
 	}
 	press(window, "Check for updates")
-	toast(window, "Sailry is up to date")
+	toast(window, "CheapRouter is up to date")
 	if hits := feed.Hits("/releases"); hits != 2 || u.State != settings.UpdateIdle || shown(window, link.ProductVersion) < 2 {
 		t.Fatalf("after an up-to-date check: %d feed requests, state %v", hits, u.State)
 	}
-	t.Logf("step 2 passed: Check showed Checking with Cancel and a locked channel; Cancel returned to idle without a toast; with only %s published the next Check toasted Sailry is up to date", older)
+	t.Logf("step 2 passed: Check showed Checking with Cancel and a locked channel; Cancel returned to idle without a toast; with only %s published the next Check toasted CheapRouter is up to date", older)
 
 	// (3) SABOUT-002, SABOUT-004: an available version.
 	feed.Publish(stable, false)
@@ -339,7 +339,7 @@ func TestSystemAboutUI(t *testing.T) {
 	proceed <- fmt.Errorf("the fixture Node did not stop")
 	settle(window, "the stopped installation offers Restart", systemUIWait, func() bool {
 		return u.State == settings.UpdateStopped && shown(window, "Restart required") == 1 && len(window.buttons("Restart")) == 1 && len(window.buttons("Installing")) == 0 &&
-			shown(window, "Could not stop the local Node; restart Sailry") == 1 && channel().Disabled
+			shown(window, "Could not stop the local Node; restart CheapRouter") == 1 && channel().Disabled
 	})
 	if version, err := updater.FixtureBundleVersion(installed); err != nil || version != link.ProductVersion {
 		t.Fatalf("an installation whose Node did not stop left the bundle at %q (%v)", version, err)

@@ -193,7 +193,7 @@ func TestDraftChecks(t *testing.T) {
 		}, 900, 900, ui.TesterOptions{Preferences: ui.Preferences{ReduceTransparency: true}})
 		tt.SetLocale("zh-CN")
 		tt.Frame()
-		for _, line := range []string{"macOS 27.2 · Sailry 0.1.6 ·", "Linux 24.04 · Sailry 0.1.6 ·", "Windows ·", "iOS · Sailry 0.1.6 ·", "325e9373", "c48e0d55", "5e6f7a8b"} {
+		for _, line := range []string{"macOS 27.2 · CheapRouter 0.1.6 ·", "Linux 24.04 · CheapRouter 0.1.6 ·", "Windows ·", "iOS · CheapRouter 0.1.6 ·", "325e9373", "c48e0d55", "5e6f7a8b"} {
 			if !tt.HasText(line) {
 				t.Fatalf("no %q: %q", line, tt.Texts())
 			}

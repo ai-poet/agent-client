@@ -84,12 +84,12 @@ func TestSystemShortcutsUI(t *testing.T) {
 	window := openTerminalWindow(t, ctx, desk.owner, profile, session, nil)
 	showSection(window, settings.Shortcuts)
 	settle(window, "the shortcuts page", systemUIWait, func() bool {
-		_, shown := rowAction(window, "Show Sailry", activate)
+		_, shown := rowAction(window, "Show CheapRouter", activate)
 		_, unset := rowAction(window, "Use selected text", "Not set")
 		return shown && unset
 	})
 	system(window, map[string]string{"Ctrl+Alt+Space": "system.activate"}, "the default system shortcuts")
-	t.Logf("step 1 passed: the page shows Show Sailry on %s and Use selected text as Not set; the entry point would register only Ctrl+Alt+Space for system.activate", activate)
+	t.Logf("step 1 passed: the page shows Show CheapRouter on %s and Use selected text as Not set; the entry point would register only Ctrl+Alt+Space for system.activate", activate)
 
 	// Step 2: recording a key for the selection shortcut saves it.
 	record(window, "Use selected text", "Not set")
@@ -130,7 +130,7 @@ func TestSystemShortcutsUI(t *testing.T) {
 	t.Logf("step 3 passed: recording Show Sailry's key for the selection shortcut showed the conflict toast and kept recording with the saved key; Escape cancelled; ReportShortcutConflict, the entry point's report of a refused registration, showed the same toast and left the keys")
 
 	// Step 4: rebinding and clearing change what the entry point registers.
-	record(window, "Show Sailry", activate)
+	record(window, "Show CheapRouter", activate)
 	window.tester.Key(ui.Ctrl|ui.Alt, ui.KeyK)
 	system(window, map[string]string{"Ctrl+Alt+K": "system.activate", "Ctrl+Alt+S": "system.selection"}, "the rebound activate shortcut")
 	settle(window, "the rebound key reaches preferences.json", systemUIWait, func() bool { return saved()["system.activate"] == "ctrl-alt-k" })
@@ -144,10 +144,10 @@ func TestSystemShortcutsUI(t *testing.T) {
 	if _, found := rowAction(window, "Use selected text", "Not set"); !found {
 		t.Fatalf("the cleared shortcut does not show Not set; elements: %s", window.elements())
 	}
-	record(window, "Show Sailry", kit.KeyText(ui.Ctrl|ui.Alt, ui.KeyK))
+	record(window, "Show CheapRouter", kit.KeyText(ui.Ctrl|ui.Alt, ui.KeyK))
 	press(window, "Reset to default")
 	system(window, map[string]string{"Ctrl+Alt+Space": "system.activate"}, "the reset activate shortcut")
-	t.Logf("step 4 passed: rebinding Show Sailry replaced Ctrl+Alt+Space by Ctrl+Alt+K in the set the entry point registers, Clear removed the selection shortcut and saved it as off, and Reset put Show Sailry back on its default")
+	t.Logf("step 4 passed: rebinding Show CheapRouter replaced Ctrl+Alt+Space by Ctrl+Alt+K in the set the entry point registers, Clear removed the selection shortcut and saved it as off, and Reset put Show CheapRouter back on its default")
 
 	// Step 5: the activate shortcut's command opens the search.
 	app := window.runtime.App

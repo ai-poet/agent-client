@@ -147,7 +147,7 @@ func content(c *ui.Context, state *State) {
 			feedback.Spin(c, feedback.SpinProps{Size: lobetheme.Small}, nil)
 			ui.Column(c).Gap(4).Children(func() {
 				ui.Text(c, "正在连接模型网关…").FontSize(14).FontWeight(600)
-				ui.Text(c, "正在读取账号、套餐、模型目录和网关密钥，并配置 sailry。").FontSize(13).TextColor(p.TextSecondary)
+				ui.Text(c, "正在读取账号、套餐、模型目录和网关密钥，并配置 CheapRouter。").FontSize(13).TextColor(p.TextSecondary)
 			})
 		})
 		action.Button(c.Key("stop-sync"), "取消本次配置", action.ButtonProps{}).

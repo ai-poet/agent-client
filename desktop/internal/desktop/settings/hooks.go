@@ -239,7 +239,7 @@ func consentDialog(c *ui.Context, m *Model, save func(HookSettings)) {
 		return
 	}
 	title := i18n.T(c, "hooks_enable")
-	location := i18n.T(c, "composer_host_local") + " · ~/Projects/sailry-go · main"
+	location := i18n.T(c, "composer_host_local") + " · ~/Projects/cheaprouter · main"
 	if m.Live && m.HooksContext != nil {
 		location, _ = m.HooksContext()
 	}

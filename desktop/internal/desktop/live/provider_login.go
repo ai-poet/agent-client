@@ -109,7 +109,7 @@ func localAuthorization(ctx context.Context, presentation *protocol.PluginModelA
 	server := &http.Server{MaxHeaderBytes: 16 * 1024}
 	page := fmt.Sprintf(`<!doctype html>
 <html lang="%s">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sailry</title></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CheapRouter</title></head>
 <body><main><h1>%s</h1><p>%s</p></main></body>
 </html>`, html.EscapeString(i18n.Match(locale)),
 		html.EscapeString(i18n.In(locale, "authorization_callback_received")),

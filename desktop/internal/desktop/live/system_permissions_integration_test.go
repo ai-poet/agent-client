@@ -253,7 +253,7 @@ func TestSystemPermissionsUI(t *testing.T) {
 	if counts := probe.counts(permissionflow.ScreenRecording); counts != [3]int{} {
 		t.Fatalf("screen recording was probed without a package that needs it: %v", counts)
 	}
-	if shown(window, "System access") != 1 || shown(window, "If Sailry is missing, add it with + or drag the app into the list") != 1 {
+	if shown(window, "System access") != 1 || shown(window, "If CheapRouter is missing, add it with + or drag the app into the list") != 1 {
 		t.Fatalf("the page lacks its title or the Full Disk Access help; visible text: %q", window.tester.Texts())
 	}
 	t.Logf("step 1 passed: opening the page checked each of the application's three grants once and showed Full Disk Access Unauthorized (the system reports it denied until granted), Accessibility Authorized, Microphone Access denied, no Screen recording row, and the Full Disk Access help")
@@ -330,7 +330,7 @@ func TestSystemPermissionsUI(t *testing.T) {
 	probe.set(permissionflow.FullDiskAccess, permissionflow.Granted, false)
 	press(window, "Check")
 	expect(window, "the granted disk access", map[string]string{disk: "Authorized"})
-	if shown(window, "If Sailry is missing, add it with + or drag the app into the list") != 0 || len(window.buttons("Show app")) != 0 {
+	if shown(window, "If CheapRouter is missing, add it with + or drag the app into the list") != 0 || len(window.buttons("Show app")) != 0 {
 		t.Fatal("the Full Disk Access help stays after the grant")
 	}
 	before = probe.counts(permissionflow.FullDiskAccess)
@@ -350,7 +350,7 @@ func TestSystemPermissionsUI(t *testing.T) {
 		t.Fatalf("the test binary lies in the bundle %q; Show app would reveal it in Finder", bundle)
 	}
 	press(window, "Show app")
-	settle(window, "the installed-app toast", systemUIWait, func() bool { return visible(window, "Use the installed Sailry app to grant access") })
+	settle(window, "the installed-app toast", systemUIWait, func() bool { return visible(window, "Use the installed CheapRouter app to grant access") })
 	for input, want := range map[string]string{
 		"/Applications/Sailry.app/Contents/MacOS/sailry-desktop":                                 "/Applications/Sailry.app",
 		"/Users/x/Apps/Sailry Beta.app/Contents/MacOS/sailry-desktop":                            "/Users/x/Apps/Sailry Beta.app",

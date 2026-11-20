@@ -57,7 +57,7 @@ func files() *FileNode {
 				f("sailry-go/internal/kit/floating.go", "package kit\n\n// Frosted is the material of floating layers.\nfunc Frosted(c *ui.Context) ui.Material {\n\treturn frosted{}\n}"),
 			),
 		),
-		f("sailry-go/README.md", "# Sailry\n\nA native desktop Agent workspace.\n\n## UI structure\n\n- Navigation, main content and context columns\n- Shared resource headers for conversations, files and development tools\n\nThis is a bundled example; no real project is read."),
+		f("sailry-go/README.md", "# CheapRouter\n\nA native desktop Agent workspace.\n\n## UI structure\n\n- Navigation, main content and context columns\n- Shared resource headers for conversations, files and development tools\n\nThis is a bundled example; no real project is read."),
 		f("sailry-go/go.mod", "module github.com/sailry/sailry-go\n\ngo 1.27.3\n\nrequire github.com/egoist/mygo v0.8.3"),
 	)
 }
@@ -114,7 +114,7 @@ func workspace() *Workspace {
 	// The reference's two diffs (diff_intro, diff_design) and two more.
 	w.Changes = []FileChange{
 		change("README.md", "M", hunk(1, 1,
-			" # Sailry", " ", "-workspace: nested cards", "+workspace: three flat panels", " ",
+			" # CheapRouter", " ", "-workspace: nested cards", "+workspace: three flat panels", " ",
 			"-toolbar: global resource actions", "+toolbar: current resource header")),
 		change("docs/example.md", "M", hunk(1, 1,
 			" # Desktop layout", "-search: permanent search row", "+search: command palette", " ",

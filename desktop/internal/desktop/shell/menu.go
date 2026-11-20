@@ -12,7 +12,7 @@ import (
 
 // Website and Feedback are the Help menu's pages.
 const (
-	Website  = "https://sailry.dev"
+	Website  = "https://cheaprouter.cc"
 	Feedback = "https://github.com/ai-poet/agent-client/desktop/issues"
 )
 

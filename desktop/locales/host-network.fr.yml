@@ -6,6 +6,6 @@ host_network_conflict: "Les paramètres réseau ont changé ; réessayez"
 host_network_unavailable: "Les paramètres réseau sont indisponibles"
 host_network_load_failed: "Impossible de charger les paramètres réseau"
 host_pairing_mode: "Code de jumelage"
-host_pairing_hint: "Connecter un appareil Sailry existant"
+host_pairing_hint: "Connecter un appareil CheapRouter existant"
 host_setup_unconfirmed: "Configuration non confirmée, vérifiez d’abord l’hôte"
-host_install_hint: Installer Sailry sur un serveur et s’y connecter
+host_install_hint: Installer CheapRouter sur un serveur et s’y connecter

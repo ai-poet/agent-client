@@ -142,7 +142,7 @@ func noticed(id string) cv.Turn {
 // compacted: a compaction turn, finished with its summary, failed, or
 // running, by the turn.
 func compacted(id string) cv.Turn {
-	k := &cv.Compaction{State: cv.Compacted, Summary: "The user ports Sailry's desktop UI to MyGo. Done: theme tokens, shell, sidebar, right panel. Next: the transcript's live features."}
+	k := &cv.Compaction{State: cv.Compacted, Summary: "The user ports CheapRouter's desktop UI to MyGo. Done: theme tokens, shell, sidebar, right panel. Next: the transcript's live features."}
 	switch len(id) % 3 {
 	case 1:
 		k = &cv.Compaction{State: cv.CompactionFailed, Cause: "context_window_exceeded: the summary did not fit"}

@@ -6,6 +6,6 @@ host_network_conflict: "ネットワーク設定が変更されました。再�
 host_network_unavailable: "ネットワーク設定は利用できません"
 host_network_load_failed: "ネットワーク設定を読み込めませんでした"
 host_pairing_mode: "ペアリングコード"
-host_pairing_hint: "既存の Sailry デバイスに接続"
+host_pairing_hint: "既存の CheapRouter デバイスに接続"
 host_setup_unconfirmed: "ホストの設定を確認できません。先にホストを確認してください"
-host_install_hint: サーバーに Sailry をインストールして接続
+host_install_hint: サーバーに CheapRouter をインストールして接続

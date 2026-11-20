@@ -6,6 +6,6 @@ host_network_conflict: "As configurações de rede mudaram; tente novamente"
 host_network_unavailable: "As configurações de rede não estão disponíveis"
 host_network_load_failed: "Não foi possível carregar as configurações de rede"
 host_pairing_mode: "Código de pareamento"
-host_pairing_hint: "Conectar a um dispositivo Sailry existente"
+host_pairing_hint: "Conectar a um dispositivo CheapRouter existente"
 host_setup_unconfirmed: "Configuração não confirmada, verifique o host primeiro"
-host_install_hint: Instale o Sailry em um servidor e conecte
+host_install_hint: Instale o CheapRouter em um servidor e conecte

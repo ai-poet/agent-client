@@ -35,7 +35,7 @@ type script struct {
 	summary string
 }
 
-var previewScript = script{label: "Read file", file: "README.md", output: "# sailry-go\n\nA Go prototype of Sailry's desktop UI.", answer: answer,
+var previewScript = script{label: "Read file", file: "README.md", output: "# cheaprouter\n\nA Go prototype of CheapRouter's desktop UI.", answer: answer,
 	summary: "The preview compacted this conversation without a model. The summary stands for the turns before it."}
 
 type stream struct {

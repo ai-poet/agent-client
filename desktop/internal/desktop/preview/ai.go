@@ -337,7 +337,7 @@ func ExtensionsData() *Extensions {
 			{ID: "changelog", Name: "changelog", Description: "Keep a changelog", Origin: "skills.sh/keep/changelog"},
 		},
 		Themes: []MarketTheme{
-			{ID: "neutral", Name: "Neutral", Description: "Sailry's default", Dark: true, Light: true, Installed: true, Builtin: true, Current: true},
+			{ID: "neutral", Name: "Neutral", Description: "CheapRouter's default", Dark: true, Light: true, Installed: true, Builtin: true, Current: true},
 			{ID: "paper", Name: "Paper", Description: "Warm light theme", Light: true, Installed: true, Update: true},
 			{ID: "midnight", Name: "Midnight", Description: "Deep blue dark theme", Dark: true},
 			{ID: "forest", Name: "Forest", Description: "Greens for day and night", Dark: true, Light: true},

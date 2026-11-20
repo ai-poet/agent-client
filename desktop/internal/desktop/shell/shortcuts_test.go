@@ -206,9 +206,9 @@ func TestMenu(t *testing.T) {
 	type entry struct{ label, key string }
 	cmd := func(mods ui.Modifiers, key ui.Key) string { return Accelerator(mods, key) }
 	want := map[string][]entry{
-		"Sailry": {{"About Sailry", ""}, {"Settings", cmd(ui.Cmd, ui.KeyComma)}, {"Services", ""},
-			{"Hide Sailry", cmd(ui.Super, ui.KeyH)}, {"Hide Others", cmd(ui.Super|ui.Alt, ui.KeyH)}, {"Show All", ""},
-			{"Quit Sailry", cmd(ui.Cmd, ui.KeyQ)}},
+		"CheapRouter": {{"About CheapRouter", ""}, {"Settings", cmd(ui.Cmd, ui.KeyComma)}, {"Services", ""},
+			{"Hide CheapRouter", cmd(ui.Super, ui.KeyH)}, {"Hide Others", cmd(ui.Super|ui.Alt, ui.KeyH)}, {"Show All", ""},
+			{"Quit CheapRouter", cmd(ui.Cmd, ui.KeyQ)}},
 		"File": {{"New Conversation", cmd(ui.Cmd, ui.KeyN)}, {"New Project", cmd(ui.Cmd|ui.Alt, ui.KeyN)},
 			{"Open Folder", cmd(ui.Cmd, ui.KeyO)}, {"Save", cmd(ui.Cmd, ui.KeyS)},
 			{"Close Tab", cmd(ui.Cmd, ui.KeyW)}, {"Close Window", cmd(ui.Super|ui.Shift, ui.KeyW)}},
@@ -219,7 +219,7 @@ func TestMenu(t *testing.T) {
 			{"Toggle Full Screen", cmd(ui.Ctrl|ui.Super, ui.KeyF)},
 			{"Chats", ""}, {"Activity board", ""}, {"Files", ""}, {"Git", ""}, {"Market", ""}},
 		"Window": {{"Minimize", cmd(ui.Super, ui.KeyM)}, {"Zoom", ""}, {"Bring All to Front", ""}},
-		"Help":   {{"Website", ""}, {"Feedback", ""}, {"Logs", ""}, {"Welcome to Sailry", ""}, {"Selected text", ""}},
+		"Help":   {{"Website", ""}, {"Feedback", ""}, {"Logs", ""}, {"Welcome to CheapRouter", ""}, {"Selected text", ""}},
 	}
 	var names []string
 	for _, m := range menu {
@@ -234,7 +234,7 @@ func TestMenu(t *testing.T) {
 			t.Errorf("%s: %q, want %q", m.Label, got, want[m.Label])
 		}
 	}
-	if !slices.Equal(names, []string{"Sailry", "File", "Edit", "View", "Window", "Help"}) {
+	if !slices.Equal(names, []string{"CheapRouter", "File", "Edit", "View", "Window", "Help"}) {
 		t.Errorf("menus %q", names)
 	}
 	// The items show the keys of now: a rebound one moves with the next

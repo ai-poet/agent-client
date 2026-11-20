@@ -100,7 +100,7 @@ func Render(ctx context.Context, parent *mygo.Window, document client.ExportDocu
 		return nil, exportError("conversation export exceeds 64 MiB")
 	}
 	if format == Markdown {
-		return []byte(document.Content + "\n---\n\n[Sailry](https://sailry.dev)\n"), nil
+		return []byte(document.Content + "\n---\n\n[CheapRouter](https://cheaprouter.cc)\n"), nil
 	}
 	if format != HTML && format != PNG {
 		return nil, exportError("export format is invalid")
@@ -224,7 +224,7 @@ func decorate(content, assets string, format Format) (string, error) {
 	}
 	logo, _ := resources.ReadFile("assets/sailry-mark.svg")
 	qr, _ := resources.ReadFile("assets/sailry-site-qr.svg")
-	footer := `<footer style="margin-top:40px;padding:28px;background:#f3f4f6;display:flex;align-items:center;gap:18px"><img alt="Sailry" width="60" height="60" src="data:image/svg+xml;base64,` + base64.StdEncoding.EncodeToString(logo) + `"><div style="flex:1"><strong style="font-size:24px">Sailry</strong><br><a href="https://sailry.dev" style="color:#596273;text-decoration:none">sailry.dev</a></div><img alt="https://sailry.dev" width="112" height="112" style="background:#fff" src="data:image/svg+xml;base64,` + base64.StdEncoding.EncodeToString(qr) + `"></footer>`
+	footer := `<footer style="margin-top:40px;padding:28px;background:#f3f4f6;display:flex;align-items:center;gap:18px"><img alt="CheapRouter" width="60" height="60" src="data:image/svg+xml;base64,` + base64.StdEncoding.EncodeToString(logo) + `"><div style="flex:1"><strong style="font-size:24px">CheapRouter</strong><br><a href="https://cheaprouter.cc" style="color:#596273;text-decoration:none">cheaprouter.cc</a></div><img alt="https://cheaprouter.cc" width="112" height="112" style="background:#fff" src="data:image/svg+xml;base64,` + base64.StdEncoding.EncodeToString(qr) + `"></footer>`
 	capture := `<script crossorigin="anonymous" src="` + assets + `/static.js"></script>`
 	if format == PNG {
 		capture = `<script crossorigin="anonymous" src="` + assets + `/html2canvas.js"></script><script crossorigin="anonymous" src="` + assets + `/capture.js"></script>`
