@@ -76,6 +76,9 @@ func Brand(id string) *ui.SVG {
 	if id == "" {
 		return nil
 	}
+	if BrandSlug(id) == "cheaprouter" {
+		return SailryMark
+	}
 	if mark := logo(BrandSlug(id), logoMono); mark != nil {
 		return mark
 	}

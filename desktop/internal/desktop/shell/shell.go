@@ -279,6 +279,11 @@ func newApp(d *viewmodel.Data, selected string, st *settings.State) *App {
 		Welcome: onboarding.Guide{Seen: true},
 	}
 	st.ConnectionActions = &settings.ConnectionActions{Inspect: func(device viewmodel.Device) { a.OpenHost(device.ID) }}
+	st.OpenCheapAccount = func() {
+		a.Welcome.Open, a.Welcome.Seen = false, true
+		a.Navigate(SettingsPage)
+		a.Settings.Open(settings.CheapAccount)
+	}
 	for _, f := range Features {
 		a.features = append(a.features, f.ID)
 	}

@@ -247,6 +247,8 @@ type Model struct {
 	pageScroll    ui.ScrollState
 	scrolled      Section
 	config        pluginConfig
+	// OpenCheapAccount navigates to the CheapRouter account page from pickers.
+	OpenCheapAccount func()
 	install       pluginInstall
 	download      pluginDownload
 	updates       pluginUpdates

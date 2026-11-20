@@ -91,6 +91,9 @@ func providers(c *ui.Context, s *State) {
 			})
 		})
 	})
+	if m.OpenCheapAccount == nil {
+		m.OpenCheapAccount = func() { s.Open(CheapAccount) }
+	}
 	providerEditorDialog(c, m)
 	providerAuthorizationDialog(c, m)
 	if ch := m.channel(m.removing); ch != nil {
@@ -906,7 +909,12 @@ func providerEditorDialog(c *ui.Context, m *Model) {
 		ui.Scroll(c.Key("body")).Grow(1).Shrink(1).Children(func() {
 			switch e.step {
 			case stepBrand:
-				brandPicker(c, m, nil, nil)
+				brandPicker(c, m, nil, nil, func() {
+					e.open = false
+					if m.OpenCheapAccount != nil {
+						m.OpenCheapAccount()
+					}
+				})
 			case stepMethod:
 				methodList(c, m)
 			default:
@@ -949,11 +957,12 @@ func apiMethods(b *preview.Brand) []preview.Method {
 }
 
 // brandPicker is two groups of outlined pills, each with its heading and
-// its marks: account sign-ins grouped by brand, then brands with API methods.
-// A brand opens its only method's form or asks which. before runs ahead of a
-// choice and after it, as the welcome guide opens the editor (nil for
-// none).
-func brandPicker(c *ui.Context, m *Model, before, after func()) {
+// its marks: account sign-ins (CheapRouter featured first, then other brands),
+// then brands with API methods. A brand opens its only method's form or asks
+// which. before runs ahead of a choice and after it, as the welcome guide opens
+// the editor (nil for none). openCheap handles selecting the featured
+// CheapRouter account option.
+func brandPicker(c *ui.Context, m *Model, before, after, openCheap func()) {
 	p := theme.Of(c)
 	chip := func(key, label, mark string, pick func()) {
 		b := ui.ButtonBase(c.Key(key)).Label(label).Height(32).Padding(0, 14, 0, 10).Gap(8).Radius(999).
@@ -981,6 +990,24 @@ func brandPicker(c *ui.Context, m *Model, before, after func()) {
 			ui.Text(c, label).FontSize(14).SingleLine()
 		})
 	}
+	featuredChip := func(key, label string, pick func()) {
+		b := ui.ButtonBase(c.Key(key)).Label(label).Checked(true).Height(32).Padding(0, 14, 0, 10).Gap(8).Radius(999).
+			Border(1, p.Primary).Background(p.Primary).TextColor(p.PrimaryForeground).Cursor(ui.CursorPointer).OnClick(func() {
+			if pick != nil {
+				pick()
+			}
+		})
+		switch {
+		case b.Pressed():
+			b.Background(p.PrimaryActive)
+		case b.Hovered():
+			b.Background(p.PrimaryHover)
+		}
+		b.Children(func() {
+			ui.Icon(c, icons.SailryMark).FontSize(16).TextColor(p.PrimaryForeground)
+			ui.Text(c, label).FontSize(14).FontWeight(600).SingleLine().TextColor(p.PrimaryForeground)
+		})
+	}
 	group := func(key string, n int, fill func()) {
 		if n == 0 {
 			return
@@ -1005,7 +1032,7 @@ func brandPicker(c *ui.Context, m *Model, before, after func()) {
 				methods = append(methods, x)
 			}
 		}
-		if len(methods) > 0 {
+		if len(methods) > 0 && !strings.EqualFold(b.ID, "cheaprouter") {
 			label := b.Name
 			if len(methods) == 1 {
 				label = loginLabel(c, methods[0])
@@ -1018,7 +1045,8 @@ func brandPicker(c *ui.Context, m *Model, before, after func()) {
 	}
 	slices.SortStableFunc(logins, func(a, b login) int { return strings.Compare(strings.ToLower(a.label), strings.ToLower(b.label)) })
 	ui.Column(c.Key("picker")).Gap(20).Padding(10, 12, 28, 12).Children(func() {
-		group("provider_access_login", len(logins), func() {
+		group("provider_access_login", len(logins)+1, func() {
+			featuredChip("login-cheaprouter", "CheapRouter", openCheap)
 			for _, x := range logins {
 				mark := x.brand.ID
 				if len(x.methods) == 1 && icons.Brand(x.methods[0].Icon) != nil {
@@ -1521,6 +1549,16 @@ func ProviderPicker(c *ui.Context, s *State, chosen, back func()) {
 	brandPicker(c, s.Model, func() { s.provider.add(s.Model) }, func() {
 		s.provider.returnTo = back
 		chosen()
+	}, func() {
+		s.provider.open = false
+		if s.OpenCheapAccount != nil {
+			s.OpenCheapAccount()
+			return
+		}
+		s.Open(CheapAccount)
+		if chosen != nil {
+			chosen()
+		}
 	})
 }
 
