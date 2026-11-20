@@ -12,12 +12,13 @@ const (
 	// Version is the migration document and field-mapping version.
 	Version = 1
 
-	MarkerFilename       = "migration.json"
-	ReportFilename       = "migration-report.json"
-	AccountFilename      = "cheaprouter-legacy-account.json"
-	legacyDatabaseName   = "app.db"
-	legacySettingsName   = "settings.json"
-	legacyCredentialName = "cloud-account.json"
+	MarkerFilename        = "migration.json"
+	ReportFilename        = "migration-report.json"
+	AccountFilename       = "cheaprouter-legacy-account.json"
+	legacyDatabaseName    = "app.db"
+	legacyAppSettingsName = "app.json"
+	legacySettingsName    = "settings.json"
+	legacyCredentialName  = "cloud-account.json"
 )
 
 // Status describes the durable outcome of a migration run.
@@ -27,6 +28,7 @@ const (
 	Completed   Status = "completed"
 	Partial     Status = "partial"
 	AlreadyDone Status = "already_done"
+	Failed      Status = "failed"
 )
 
 // Counts contains source counts for detection and inserted counts for a run.
@@ -41,14 +43,15 @@ type LegacyState struct {
 	Root           string `json:"root"`
 	DatabasePath   string `json:"database_path,omitempty"`
 	HasDatabase    bool   `json:"has_database"`
+	HasAppSettings bool   `json:"has_app_settings"`
 	HasSettings    bool   `json:"has_settings"`
 	HasCredentials bool   `json:"has_credentials"`
 	Counts         Counts `json:"counts"`
 }
 
-// Empty reports whether there is anything to offer to the migration wizard.
+// Empty reports whether there is anything to migrate from the legacy profile.
 func (s *LegacyState) Empty() bool {
-	return s == nil || !s.HasDatabase && !s.HasSettings && !s.HasCredentials
+	return s == nil || !s.HasDatabase && !s.HasAppSettings && !s.HasSettings && !s.HasCredentials
 }
 
 // Progress reports completed work. Processed is cumulative within Stage.
@@ -84,17 +87,20 @@ type Result struct {
 	WarningCount int    `json:"warning_count"`
 }
 
-// Marker is written only after a complete or partially mapped run commits.
+// Marker records the durable migration state (completed, partial, or failed
+// diagnostic state that allows retry without losing error context).
 type Marker struct {
 	Version      int       `json:"version"`
 	Source       string    `json:"source"`
 	DatabasePath string    `json:"database_path,omitempty"`
 	MigratedAt   time.Time `json:"migrated_at"`
 	Status       Status    `json:"status"`
+	Stage        string    `json:"stage,omitempty"`
+	Error        string    `json:"error,omitempty"`
 	Counts       Counts    `json:"counts"`
 	Skipped      Counts    `json:"skipped"`
-	BackupDir    string    `json:"backup_dir"`
-	ReportPath   string    `json:"report_path"`
+	BackupDir    string    `json:"backup_dir,omitempty"`
+	ReportPath   string    `json:"report_path,omitempty"`
 }
 
 // UnmappedField records a source field that has no lossless target mapping.

@@ -93,6 +93,66 @@ func jsonIdentifier(raw json.RawMessage) string {
 	return ""
 }
 
+// NormalizeLegacyLanguage maps legacy CheapRouter / Waku language values
+// (including Rust AppLanguage kebab-case values like "simplified-chinese")
+// into Sailry's validated preference value and corresponding BCP 47 locale.
+// Invalid or unsupported values return ok == false so no illegal value is stored.
+func NormalizeLegacyLanguage(raw string) (preference string, locale string, ok bool) {
+	key := strings.ToLower(strings.TrimSpace(raw))
+	key = strings.ReplaceAll(key, "_", "-")
+	switch key {
+	case "system":
+		return "system", "", true
+	case "english", "en", "en-us", "en-gb":
+		return "english", "en", true
+	case "simplified-chinese", "chinese", "zh-cn", "zh-hans", "zh-sg":
+		return "chinese", "zh-CN", true
+	case "traditional-chinese", "zh-tw", "zh-hant", "zh-hk", "zh-mo":
+		return "traditional_chinese", "zh-TW", true
+	case "japanese", "ja", "ja-jp":
+		return "japanese", "ja", true
+	case "korean", "ko", "ko-kr":
+		return "korean", "ko", true
+	case "french", "fr", "fr-fr":
+		return "french", "fr", true
+	case "german", "de", "de-de":
+		return "german", "de", true
+	case "spanish", "es", "es-es":
+		return "spanish", "es", true
+	case "portuguese-brazil", "pt-br":
+		return "portuguese_brazil", "pt-BR", true
+	case "russian", "ru", "ru-ru":
+		return "russian", "ru", true
+	default:
+		return "", "", false
+	}
+}
+
+func migrateLegacySettings(backupRoot string, hasAppSettings, hasSettings bool) (map[string]any, []UnmappedField, []Warning) {
+	merged := map[string]any{}
+	unmapped := []UnmappedField{}
+	warnings := []Warning{}
+	if hasSettings {
+		values, fileUnmapped, fileWarnings := migrateSettings(filepath.Join(backupRoot, legacySettingsName))
+		for k, v := range values {
+			merged[k] = v
+		}
+		unmapped = append(unmapped, fileUnmapped...)
+		warnings = append(warnings, fileWarnings...)
+	}
+	if hasAppSettings {
+		// app.json is the authoritative desktop preference file in main; its
+		// valid keys override any older settings.json fallback.
+		values, fileUnmapped, fileWarnings := migrateSettings(filepath.Join(backupRoot, legacyAppSettingsName))
+		for k, v := range values {
+			merged[k] = v
+		}
+		unmapped = append(unmapped, fileUnmapped...)
+		warnings = append(warnings, fileWarnings...)
+	}
+	return merged, unmapped, warnings
+}
+
 func migrateSettings(source string) (map[string]any, []UnmappedField, []Warning) {
 	settings := map[string]any{}
 	unmapped := []UnmappedField{}
@@ -114,17 +174,19 @@ func migrateSettings(source string) (map[string]any, []UnmappedField, []Warning)
 		case "theme":
 			var theme string
 			if json.Unmarshal(value, &theme) == nil {
-				switch theme {
+				switch strings.ToLower(strings.TrimSpace(theme)) {
 				case "light", "dark", "system":
-					settings["theme"] = theme
+					settings["theme"] = strings.ToLower(strings.TrimSpace(theme))
 					valid = true
 				}
 			}
 		case "language":
 			var language string
-			if json.Unmarshal(value, &language) == nil && strings.TrimSpace(language) != "" {
-				settings["language"] = language
-				valid = true
+			if json.Unmarshal(value, &language) == nil {
+				if normalized, _, ok := NormalizeLegacyLanguage(language); ok {
+					settings["language"] = normalized
+					valid = true
+				}
 			}
 		case "analytics_enabled":
 			var enabled bool

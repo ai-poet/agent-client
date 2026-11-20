@@ -27,16 +27,19 @@ type State struct {
 	LoggingOut     bool
 	Pasted         string
 	Failure        string
-	AccountFailure string
-	Account        core.User
-	ModelCount     int
+	AccountFailure         string
+	MigrationFailure       string
+	MigrationFailureDetail string
+	Account                core.User
+	ModelCount             int
 
-	Start       func(manual bool)
-	SubmitPaste func()
-	Cancel      func()
-	StopSync    func()
-	Retry       func()
-	Logout      func()
+	Start          func(manual bool)
+	SubmitPaste    func()
+	Cancel         func()
+	StopSync       func()
+	Retry          func()
+	RetryMigration func()
+	Logout         func()
 }
 
 func NewState() *State { return &State{Endpoint: core.PrimaryEndpoint} }

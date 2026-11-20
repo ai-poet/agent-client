@@ -40,7 +40,10 @@ func backupSources(ctx context.Context, state *LegacyState, profile string, now 
 		backup = filepath.Join(profile, fmt.Sprintf("%s-%02d", base, suffix))
 	}
 
-	for _, name := range []string{legacyDatabaseName, legacyDatabaseName + "-wal", legacySettingsName, legacyCredentialName} {
+	// Active credentials (cloud-account.json) are never copied into the backup
+	// directory: the legacy profile stays untouched and read-only on disk, and
+	// the new Sailry profile must not retain plaintext legacy tokens.
+	for _, name := range []string{legacyDatabaseName, legacyDatabaseName + "-wal", legacyAppSettingsName, legacySettingsName} {
 		if err := ctx.Err(); err != nil {
 			return "", fail("backup", "cancel", err)
 		}
@@ -151,6 +154,9 @@ func existingMarker(profile string) (bool, error) {
 	var marker Marker
 	if err := json.Unmarshal(raw, &marker); err != nil || marker.Version <= 0 {
 		return false, fail("detect", "decode migration marker", errors.New("invalid migration marker"))
+	}
+	if marker.Status == Failed {
+		return false, nil
 	}
 	return true, nil
 }

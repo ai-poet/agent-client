@@ -440,7 +440,20 @@ func preferenceLocale(language *string) string {
 	if language == nil || *language == "system" {
 		return i18n.MatchPreferred(mygo.App.PreferredLanguages()...)
 	}
-	return map[string]string{"english": "en", "chinese": "zh-CN", "traditional_chinese": "zh-TW", "japanese": "ja", "korean": "ko", "french": "fr", "german": "de", "spanish": "es", "portuguese_brazil": "pt-BR", "russian": "ru"}[*language]
+	return map[string]string{
+		"english":             "en",
+		"chinese":             "zh-CN",
+		"simplified-chinese":  "zh-CN",
+		"zh-CN":               "zh-CN",
+		"traditional_chinese": "zh-TW",
+		"japanese":            "ja",
+		"korean":              "ko",
+		"french":              "fr",
+		"german":              "de",
+		"spanish":             "es",
+		"portuguese_brazil":   "pt-BR",
+		"russian":             "ru",
+	}[*language]
 }
 
 // useSystemIcons gives the file picker the file manager's icons. A remote

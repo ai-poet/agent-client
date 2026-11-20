@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -55,7 +56,9 @@ func run(ctx context.Context, legacyRoot, profile string, opts Options) (*Result
 	// uses RunWithHandle so its existing writer and profile lock remain owners.
 	storage, err := store.Open(ctx, profile, protocol.NodeID{1})
 	if err != nil {
-		return nil, fail("storage", "open Sailry profile", err)
+		openErr := fail("storage", "open Sailry profile", err)
+		recordFailure(profile, legacyRoot, opts.LegacyDatabasePath, "", opts.clock(), openErr)
+		return nil, openErr
 	}
 	defer storage.Close()
 	return RunWithHandle(ctx, legacyRoot, profile, storage.Node, storage.NodeID, opts)
@@ -65,7 +68,9 @@ func run(ctx context.Context, legacyRoot, profile string, opts Options) (*Result
 // mutations in the handle's existing writer transaction.
 func RunWithHandle(ctx context.Context, legacyRoot, profile string, target *store.Handle, node protocol.NodeID, opts Options) (*Result, error) {
 	if target == nil {
-		return nil, fail("storage", "open Sailry profile", errors.New("missing target store"))
+		err := fail("storage", "open Sailry profile", errors.New("missing target store"))
+		recordFailure(profile, legacyRoot, opts.LegacyDatabasePath, "", opts.clock(), err)
+		return nil, err
 	}
 	if opts.ApplyPreferences == nil {
 		prefs := preferences.Open(filepath.Join(profile, "desktop", "preferences.json"))
@@ -76,67 +81,123 @@ func RunWithHandle(ctx context.Context, legacyRoot, profile string, target *stor
 	if !opts.FillMissing {
 		done, err := existingMarker(profile)
 		if err != nil {
+			recordFailure(profile, legacyRoot, opts.LegacyDatabasePath, "", opts.clock(), err)
 			return nil, err
 		}
 		if done {
 			return &Result{Status: AlreadyDone, MarkerPath: filepath.Join(profile, MarkerFilename), ReportPath: filepath.Join(profile, ReportFilename)}, nil
 		}
 	}
-	state, err := detect(ctx, legacyRoot)
-	if err != nil {
+	sourceRoot := legacyRoot
+	databasePath := opts.LegacyDatabasePath
+	backupDir := ""
+	failWith := func(err error) (*Result, error) {
+		recordFailure(profile, sourceRoot, databasePath, backupDir, opts.clock(), err)
 		return nil, err
 	}
+	state, err := detect(ctx, legacyRoot)
+	if err != nil {
+		return failWith(err)
+	}
+	sourceRoot = state.Root
+	databasePath = state.DatabasePath
 	if opts.LegacyDatabasePath != "" {
-		databasePath, err := absoluteClean(opts.LegacyDatabasePath)
-		if err != nil || filepath.Base(databasePath) != legacyDatabaseName {
-			return nil, fail("detect", "resolve legacy database override", errors.New("legacy database override must name app.db"))
+		overridePath, err := absoluteClean(opts.LegacyDatabasePath)
+		if err != nil || filepath.Base(overridePath) != legacyDatabaseName {
+			return failWith(fail("detect", "resolve legacy database override", errors.New("legacy database override must name app.db")))
 		}
-		databaseState, err := detect(ctx, filepath.Dir(databasePath))
+		databaseState, err := detect(ctx, filepath.Dir(overridePath))
 		if err != nil {
-			return nil, err
+			return failWith(err)
 		}
 		state.HasDatabase = databaseState.HasDatabase
 		state.Counts = databaseState.Counts
-		state.DatabasePath = databasePath
+		state.DatabasePath = overridePath
+		databasePath = overridePath
 	}
 	started := opts.clock()
 	backup, err := backupSources(ctx, state, profile, started)
 	if err != nil {
-		return nil, err
+		return failWith(err)
 	}
+	backupDir = backup
 	progress(opts, "backup", 1)
 	result := &Result{Status: Completed, BackupDir: backup, MarkerPath: filepath.Join(profile, MarkerFilename), ReportPath: filepath.Join(profile, ReportFilename)}
 	report := &Report{Version: Version, Source: state.Root, DatabasePath: state.DatabasePath, StartedAt: started, Status: Completed, BackupDir: backup, Unmapped: []UnmappedField{}, Warnings: []Warning{}}
 
 	if state.HasDatabase {
 		if err := importDatabase(ctx, filepath.Join(backup, legacyDatabaseName), target, node, result, report, opts); err != nil {
-			return nil, err
+			return failWith(err)
 		}
 	}
-	if state.HasSettings {
-		if err := importSettings(ctx, profile, backup, target, report, opts); err != nil {
-			return nil, err
+	if state.HasAppSettings || state.HasSettings {
+		if err := importSettings(ctx, profile, backup, state.HasAppSettings, state.HasSettings, target, report, opts); err != nil {
+			return failWith(err)
 		}
 	}
 	if state.HasCredentials {
-		credentials, warnings, err := migrateCredentials(profile, filepath.Join(backup, legacyCredentialName))
+		// Read only allowlisted account metadata directly from the read-only legacy
+		// directory; cloud-account.json is never copied into the backup directory.
+		credentials, warnings, err := migrateCredentials(profile, filepath.Join(state.Root, legacyCredentialName))
 		report.Credentials = credentials
 		report.Warnings = append(report.Warnings, warnings...)
 		if err != nil {
-			return nil, err
+			return failWith(err)
 		}
 		progress(opts, "credentials", 1)
 	}
 	finishReport(result, report, opts)
 	if err := writeJSONAtomic(result.ReportPath, report); err != nil {
-		return nil, fail("finalize", "write migration report", err)
+		return failWith(fail("finalize", "write migration report", err))
 	}
 	marker := Marker{Version: Version, Source: state.Root, DatabasePath: state.DatabasePath, MigratedAt: report.CompletedAt, Status: result.Status, Counts: result.Counts, Skipped: result.Skipped, BackupDir: backup, ReportPath: result.ReportPath}
 	if err := writeJSONAtomic(result.MarkerPath, marker); err != nil {
-		return nil, fail("finalize", "write migration marker", err)
+		return failWith(fail("finalize", "write migration marker", err))
 	}
 	progress(opts, "finalize", 1)
 	return result, nil
+}
+
+// RecordFailure logs a migration error and writes a diagnostic failed marker
+// to profile/migration.json without modifying legacyRoot.
+func RecordFailure(profile, sourceRoot, databasePath, backupDir string, err error) {
+	recordFailure(profile, sourceRoot, databasePath, backupDir, time.Now().UTC(), err)
+}
+
+func recordFailure(profile, sourceRoot, databasePath, backupDir string, at time.Time, err error) {
+	if err == nil {
+		return
+	}
+	stage := "unknown"
+	var structured *Error
+	if errors.As(err, &structured) && structured.Stage != "" {
+		stage = structured.Stage
+	}
+	slog.Error("legacy migration failed", "stage", stage, "source", sourceRoot, "error", err.Error())
+	if profile == "" {
+		return
+	}
+	if sourceRoot != "" {
+		if cleanSource, cleanErr := absoluteClean(sourceRoot); cleanErr == nil {
+			if ensureSeparateRoots(cleanSource, profile) != nil {
+				return
+			}
+			sourceRoot = cleanSource
+		}
+	}
+	marker := Marker{
+		Version:      Version,
+		Source:       sourceRoot,
+		DatabasePath: databasePath,
+		MigratedAt:   at.UTC(),
+		Status:       Failed,
+		Stage:        stage,
+		Error:        err.Error(),
+		BackupDir:    backupDir,
+	}
+	if writeErr := writeJSONAtomic(filepath.Join(profile, MarkerFilename), marker); writeErr != nil {
+		slog.Error("legacy migration failure marker write failed", "error", writeErr.Error())
+	}
 }
 
 func importDatabase(ctx context.Context, databasePath string, target *store.Handle, node protocol.NodeID, result *Result, report *Report, opts Options) error {
@@ -507,8 +568,8 @@ func finishReport(result *Result, report *Report, opts Options) {
 	result.WarningCount = len(report.Unmapped) + len(report.Warnings)
 }
 
-func importSettings(ctx context.Context, profile, root string, target *store.Handle, report *Report, opts Options) error {
-	values, unmapped, warnings := migrateSettings(filepath.Join(root, legacySettingsName))
+func importSettings(ctx context.Context, profile, root string, hasAppSettings, hasSettings bool, target *store.Handle, report *Report, opts Options) error {
+	values, unmapped, warnings := migrateLegacySettings(root, hasAppSettings, hasSettings)
 	report.Unmapped = append(report.Unmapped, unmapped...)
 	report.Warnings = append(report.Warnings, warnings...)
 	if enabled, found := values["analytics_enabled"].(bool); found {

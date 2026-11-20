@@ -25,9 +25,10 @@ func detect(ctx context.Context, legacyRoot string) (*LegacyState, error) {
 	}
 	state := &LegacyState{Root: root, DatabasePath: filepath.Join(root, legacyDatabaseName)}
 	for name, destination := range map[string]*bool{
-		legacyDatabaseName:   &state.HasDatabase,
-		legacySettingsName:   &state.HasSettings,
-		legacyCredentialName: &state.HasCredentials,
+		legacyDatabaseName:    &state.HasDatabase,
+		legacyAppSettingsName: &state.HasAppSettings,
+		legacySettingsName:    &state.HasSettings,
+		legacyCredentialName:  &state.HasCredentials,
 	} {
 		present, err := regularFile(filepath.Join(root, name))
 		if err != nil {

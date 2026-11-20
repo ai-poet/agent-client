@@ -42,6 +42,18 @@ func content(c *ui.Context, state *State) {
 	if state.SignedIn() && state.AccountFailure != "" && state.AccountFailure != state.Failure {
 		feedback.Alert(c.Key("account-failure"), state.AccountFailure, feedback.AlertProps{Type: feedback.Error, Selectable: true})
 	}
+	if state.MigrationFailure != "" {
+		message := i18n.T(c, state.MigrationFailure) + "：" + i18n.T(c, "migration_failed_retry")
+		if state.MigrationFailureDetail != "" {
+			message += "\n" + state.MigrationFailureDetail
+		}
+		ui.Column(c.Key("migration-failure")).Gap(8).Children(func() {
+			feedback.Alert(c.Key("migration-failure-alert"), message, feedback.AlertProps{Type: feedback.Error, Selectable: true})
+			if state.RetryMigration != nil {
+				action.Button(c.Key("retry-migration"), i18n.T(c, "migration_retry"), action.ButtonProps{}).OnClick(state.RetryMigration)
+			}
+		})
+	}
 	switch state.Stage {
 	case SignedOut, Starting:
 		disabled := state.Stage == Starting || state.LoggingOut

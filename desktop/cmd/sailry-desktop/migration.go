@@ -29,11 +29,16 @@ func (m *desktopMigration) Detect(ctx context.Context) (*migrate.LegacyState, er
 		return nil, err
 	}
 	if m.rootErr != nil {
+		migrate.RecordFailure(m.profile, m.root, "", "", m.rootErr)
 		return nil, m.rootErr
 	}
 	state, err := migrate.Detect(m.root)
-	if err != nil || state.HasDatabase {
+	if err != nil {
+		migrate.RecordFailure(m.profile, m.root, filepath.Join(m.root, "app.db"), "", err)
 		return state, err
+	}
+	if state.HasDatabase {
+		return state, nil
 	}
 	alternate, pathErr := migrate.LegacyApplicationSupportDatabase()
 	if pathErr != nil {
@@ -41,6 +46,7 @@ func (m *desktopMigration) Detect(ctx context.Context) (*migrate.LegacyState, er
 	}
 	database, databaseErr := migrate.Detect(filepath.Dir(alternate))
 	if databaseErr != nil {
+		migrate.RecordFailure(m.profile, m.root, alternate, "", databaseErr)
 		return nil, databaseErr
 	}
 	m.mu.Lock()

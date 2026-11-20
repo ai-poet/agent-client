@@ -10,20 +10,21 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// MigrationState is shared by the startup wizard and Settings › General.
+// MigrationState is shared by silent startup migration and Settings › General.
 type MigrationState struct {
-	Known      bool
-	Open       bool
-	ReportOpen bool
-	Checking   bool
-	Running    bool
-	Found      bool
-	Counts     migrate.Counts
-	Status     migrate.Status
-	Progress   migrate.Progress
-	Report     *migrate.Report
-	ReportPath string
-	Failure    string
+	Known         bool
+	Open          bool
+	ReportOpen    bool
+	Checking      bool
+	Running       bool
+	Found         bool
+	Counts        migrate.Counts
+	Status        migrate.Status
+	Progress      migrate.Progress
+	Report        *migrate.Report
+	ReportPath    string
+	Failure       string
+	FailureDetail string
 }
 
 // MigrationActions run against the local profile only.
@@ -39,6 +40,8 @@ func migrationStatusKey(status migrate.Status) string {
 		return "migration_status_partial"
 	case migrate.AlreadyDone:
 		return "migration_status_completed"
+	case migrate.Failed:
+		return "migration_failed"
 	default:
 		return "migration_status_pending"
 	}
@@ -74,6 +77,9 @@ func migration(c *ui.Context, m *Model) {
 			}
 			if state.Failure != "" {
 				ui.Text(c, i18n.T(c, "migration_failed_retry")).FontSize(13).TextColor(p.Danger)
+				if state.FailureDetail != "" {
+					ui.Text(c, state.FailureDetail).FontSize(12).Selectable().TextColor(p.Danger)
+				}
 			}
 			if state.Found || state.Failure != "" {
 				kit.Row(c, "retry", i18n.T(c, "migration_fill_missing"), i18n.T(c, "migration_fill_missing_description"), func() {

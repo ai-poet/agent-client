@@ -6,9 +6,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preferences"
@@ -179,12 +182,17 @@ func TestDetectMissingDatabaseReturnsEmptyInventory(t *testing.T) {
 	}
 }
 
-func TestTruncatedDatabaseReturnsErrorWithoutMarker(t *testing.T) {
+func TestTruncatedDatabaseRecordsFailureMarkerLogsAndAllowsRetry(t *testing.T) {
 	legacy := t.TempDir()
 	profile := t.TempDir()
 	if err := os.WriteFile(filepath.Join(legacy, "app.db"), append([]byte("SQLite format 3\x00"), make([]byte, 32)...), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	var logBuf bytes.Buffer
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prevLogger) })
+
 	result, err := Run(context.Background(), legacy, profile, Options{})
 	if err == nil || result != nil {
 		t.Fatalf("truncated database: result=%+v err=%v", result, err)
@@ -193,8 +201,141 @@ func TestTruncatedDatabaseReturnsErrorWithoutMarker(t *testing.T) {
 	if !errors.As(err, &structured) || structured.Stage == "" {
 		t.Fatalf("structured error: %T %v", err, err)
 	}
-	if _, statErr := os.Stat(filepath.Join(profile, MarkerFilename)); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("failed migration wrote marker: %v", statErr)
+	if !strings.Contains(logBuf.String(), "legacy migration failed") {
+		t.Fatalf("expected failure log, got %q", logBuf.String())
+	}
+	marker, readErr := ReadMarker(profile)
+	if readErr != nil || marker == nil {
+		t.Fatalf("failed migration did not write diagnostic marker: %+v, %v", marker, readErr)
+	}
+	if marker.Status != Failed || marker.Stage == "" || marker.Error == "" || marker.MigratedAt.IsZero() {
+		t.Fatalf("diagnostic failure marker = %+v", marker)
+	}
+
+	// Replacing the broken database with a valid fixture allows retry without
+	// being blocked by the failed marker.
+	if err := os.Remove(filepath.Join(legacy, "app.db")); err != nil {
+		t.Fatal(err)
+	}
+	createLegacyFixture(t, legacy)
+	retried, err := Run(context.Background(), legacy, profile, Options{})
+	if err != nil || retried == nil || retried.Status == Failed || retried.Status == AlreadyDone {
+		t.Fatalf("retry after failure = %+v, %v", retried, err)
+	}
+	recovered, err := ReadMarker(profile)
+	if err != nil || recovered == nil || recovered.Status == Failed {
+		t.Fatalf("recovered marker = %+v, %v", recovered, err)
+	}
+	third, err := Run(context.Background(), legacy, profile, Options{})
+	if err != nil || third.Status != AlreadyDone {
+		t.Fatalf("post-recovery rerun = %+v, %v", third, err)
+	}
+}
+
+func TestAppJSONMigrationTelemetryThemeAndSimplifiedChinese(t *testing.T) {
+	legacy := t.TempDir()
+	profile := t.TempDir()
+	createLegacyFixture(t, legacy)
+	// Simulate current main layout: settings.json belongs to the daemon without
+	// desktop keys (or has older values), while app.json holds user choices.
+	if err := os.WriteFile(filepath.Join(legacy, "settings.json"), []byte(`{"theme":"light","language":"english","analytics_enabled":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	appJSON := `{"analytics_enabled":false,"theme":"dark","language":"simplified-chinese","favorite_models":["claude-sonnet"]}`
+	if err := os.WriteFile(filepath.Join(legacy, "app.json"), []byte(appJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := Detect(legacy)
+	if err != nil || !state.HasAppSettings {
+		t.Fatalf("Detect app.json = %+v, %v", state, err)
+	}
+	result, err := Run(context.Background(), legacy, profile, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !bytes.Equal(readBytes(t, filepath.Join(legacy, "app.json")), readBytes(t, filepath.Join(result.BackupDir, "app.json"))) {
+		t.Fatal("app.json was not backed up")
+	}
+	if _, statErr := os.Stat(filepath.Join(result.BackupDir, legacyCredentialName)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("backup directory must not copy %s: %v", legacyCredentialName, statErr)
+	}
+
+	prefs := preferences.Open(filepath.Join(profile, "desktop", "preferences.json"))
+	if !prefs.Readable || prefs.Err != nil {
+		t.Fatalf("preferences not readable after app.json migration: %v", prefs.Err)
+	}
+	if prefs.Data.Appearance.Mode != "dark" {
+		t.Fatalf("theme = %q, want dark", prefs.Data.Appearance.Mode)
+	}
+	if prefs.Data.Language == nil || *prefs.Data.Language != "chinese" {
+		t.Fatalf("language = %v, want chinese (mapped from simplified-chinese)", prefs.Data.Language)
+	}
+	pref, locale, ok := NormalizeLegacyLanguage("simplified-chinese")
+	if !ok || pref != "chinese" || locale != "zh-CN" {
+		t.Fatalf("NormalizeLegacyLanguage(simplified-chinese) = (%q, %q, %v)", pref, locale, ok)
+	}
+
+	storage := openTarget(t, profile)
+	defer storage.Close()
+	if err := storage.Node.Read(context.Background(), func(db *sql.Conn) error {
+		telemetry, err := store.ReadTelemetry(context.Background(), db)
+		if err != nil {
+			return err
+		}
+		if telemetry.Errors || telemetry.Metrics || telemetry.Revision != 1 {
+			t.Fatalf("telemetry = %+v, want Errors=false Metrics=false Revision=1", telemetry)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAppJSONRejectsIllegalLanguageValue(t *testing.T) {
+	legacy := t.TempDir()
+	profile := t.TempDir()
+	if err := os.WriteFile(filepath.Join(legacy, "app.json"), []byte(`{"analytics_enabled":false,"theme":"light","language":"not-a-valid-lang"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Run(context.Background(), legacy, profile, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefs := preferences.Open(filepath.Join(profile, "desktop", "preferences.json"))
+	if !prefs.Readable || prefs.Data.Language != nil || prefs.Data.Appearance.Mode != "light" {
+		t.Fatalf("illegal language was not rejected cleanly: readable=%v data=%+v", prefs.Readable, prefs.Data)
+	}
+	report := readJSON[Report](t, result.ReportPath)
+	if !slices.ContainsFunc(report.Unmapped, func(f UnmappedField) bool { return f.Entity == "settings" && f.Field == "language" }) {
+		t.Fatalf("invalid language not recorded in unmapped: %+v", report.Unmapped)
+	}
+}
+
+func TestInterruptedMigrationRecoversWithoutDuplicates(t *testing.T) {
+	legacy := t.TempDir()
+	profile := t.TempDir()
+	createLegacyFixture(t, legacy)
+	first, err := Run(context.Background(), legacy, profile, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate crash before migration.json marker was written while backup and
+	// imported DB rows already landed.
+	if err := os.Remove(first.MarkerPath); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := Run(context.Background(), legacy, profile, Options{})
+	if err != nil {
+		t.Fatalf("recovery rerun: %v", err)
+	}
+	if recovered.Status == AlreadyDone || recovered.Counts != (Counts{}) || recovered.Skipped != (Counts{Projects: 1, Sessions: 1, Messages: 2}) {
+		t.Fatalf("recovery counts = %+v", recovered)
+	}
+	assertTargetCounts(t, profile, Counts{Projects: 1, Sessions: 1, Messages: 2})
+	third, err := Run(context.Background(), legacy, profile, Options{})
+	if err != nil || third.Status != AlreadyDone {
+		t.Fatalf("idempotent third run = %+v, %v", third, err)
 	}
 }
 
@@ -262,10 +403,13 @@ CREATE TABLE session_details(session_id TEXT PRIMARY KEY,data TEXT NOT NULL);`
 
 func assertBackupEqual(t *testing.T, legacy, backup string) {
 	t.Helper()
-	for _, name := range []string{"app.db", "settings.json", "cloud-account.json"} {
+	for _, name := range []string{"app.db", "settings.json"} {
 		if !bytes.Equal(readBytes(t, filepath.Join(legacy, name)), readBytes(t, filepath.Join(backup, name))) {
 			t.Fatalf("backup differs: %s", name)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(backup, legacyCredentialName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("backup directory must not contain %s: %v", legacyCredentialName, err)
 	}
 }
 
@@ -293,13 +437,23 @@ func assertHistory(t *testing.T, profile string) {
 
 func assertNoToken(t *testing.T, profile string, result *Result) {
 	t.Helper()
-	for _, path := range []string{result.ReportPath, result.MarkerPath, filepath.Join(profile, AccountFilename), filepath.Join(profile, "storage", "node.turso")} {
+	if _, err := os.Stat(filepath.Join(result.BackupDir, legacyCredentialName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("backup directory contains %s: %v", legacyCredentialName, err)
+	}
+	err := filepath.WalkDir(profile, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() {
+			return walkErr
+		}
 		raw := readBytes(t, path)
 		for _, secret := range []string{testToken, "legacy-refresh-token-plaintext", "legacy-derived-api-key"} {
 			if bytes.Contains(raw, []byte(secret)) {
-				t.Fatalf("%s contains credential secret", path)
+				t.Fatalf("%s contains credential secret %q", path, secret)
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
