@@ -1,40 +1,70 @@
 #!/usr/bin/env bash
 # Packages the macOS Desktop for release: build, sign, seal, notarize, disk
-# image and update archive. Run from the repository root on the target
-# architecture:
+# image, first-hop Sparkle zip and second-hop MyGo update archive. Run from
+# the desktop module root on the target architecture:
 #
-#   cmd/sailry-desktop/macos/package.sh [-artifacts <dir>]
+#   cmd/sailry-desktop/macos/package.sh [-artifacts <dir>] [-arch <arm64|amd64>] [--require-update-key] [--dry-run]
 #
 # -artifacts is the CI native job's directory of iroh, Turso and capture libraries;
 # without it the libraries already built in .runtime/native are used.
 #
 # .runtime/package/out/darwin-<arch> receives CheapRouter.app, the disk image
-# CheapRouter-<triple>.dmg and CheapRouter-<triple>-unsigned.zip, the archive
-# of the finished application that the update feed command signs.
+# CheapRouter-<triple>.dmg, CheapRouter-<triple>-unsigned.zip (for Sparkle),
+# and cheaprouter-<version>-darwin-<arch>.tar.gz (for MyGo second-hop updates).
 #
 # The environment selects signing, with the names the release settings use:
 #
 #   SAILRY_SIGNING=ad-hoc (default) or developer-id
-#   developer-id: APPLE_SIGNING_IDENTITY, APPLE_TEAM_ID and, for a temporary
-#     keychain, APPLE_SIGNING_KEYCHAIN
-#   SAILRY_NOTARIZE=1 (developer-id only): APPLE_API_KEY_PATH,
-#     APPLE_API_KEY_ID, APPLE_API_ISSUER_ID
+#   developer-id: APPLE_SIGNING_IDENTITY (or WAKU_SIGNING_IDENTITY),
+#     APPLE_TEAM_ID and, for a temporary keychain, APPLE_SIGNING_KEYCHAIN
+#   SAILRY_NOTARIZE=1 (developer-id only): APPLE_NOTARY_PROFILE, or
+#     APPLE_API_KEY_PATH, APPLE_API_KEY_ID, APPLE_API_ISSUER_ID
+#   MYGO_UPDATE_FEED_URL, MYGO_UPDATE_PUBLIC_KEY: MyGo second-hop updater
+#     feed base URL and base64 Ed25519 public key
 #   SAILRY_REVISION, SAILRY_SENTRY_DSN, SAILRY_TELEMETRY_KEY: telemetry build
 #     values, each optional
 #
 # The package opens the release profile ~/.sailry. Nothing here runs it.
 set -euo pipefail
 
-test "$(uname -s)" = Darwin || { echo 'package.sh needs macOS' >&2; exit 1; }
-test -f go.mod && test -f cmd/sailry-desktop/mygo.json || { echo 'run from the repository root' >&2; exit 1; }
+test -f go.mod && test -f cmd/sailry-desktop/mygo.json || { echo 'run from the desktop module root' >&2; exit 1; }
 
 artifacts=()
-if test "${1:-}" = -artifacts; then
-  test -d "${2:-}" || { echo '-artifacts needs a directory' >&2; exit 1; }
-  artifacts=(-artifacts "$2")
-  shift 2
+arch_override=""
+dry_run=0
+require_update_key=${MYGO_REQUIRE_UPDATE_KEY:-0}
+
+while test $# -gt 0; do
+  case "$1" in
+    -artifacts)
+      test $# -ge 2 || { echo '-artifacts needs a directory' >&2; exit 1; }
+      test -d "$2" || { echo '-artifacts needs a directory' >&2; exit 1; }
+      artifacts=(-artifacts "$2")
+      shift 2
+      ;;
+    -arch|--arch)
+      test $# -ge 2 || { echo '-arch needs arm64 or amd64' >&2; exit 1; }
+      arch_override="$2"
+      shift 2
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    --require-update-key)
+      require_update_key=1
+      shift
+      ;;
+    *)
+      echo 'usage: package.sh [-artifacts <dir>] [-arch <arm64|amd64>] [--require-update-key] [--dry-run]' >&2
+      exit 1
+      ;;
+  esac
+done
+
+if test "$dry_run" -eq 0; then
+  test "$(uname -s)" = Darwin || { echo 'package.sh needs macOS (pass --dry-run to validate on other platforms)' >&2; exit 1; }
 fi
-test $# -eq 0 || { echo 'usage: package.sh [-artifacts <dir>]' >&2; exit 1; }
 
 signing=${SAILRY_SIGNING:-ad-hoc}
 notarize=${SAILRY_NOTARIZE:-0}
@@ -51,42 +81,114 @@ case "$signing" in
     ;;
   *) echo 'SAILRY_SIGNING must be ad-hoc or developer-id' >&2; exit 1 ;;
 esac
+
 credentials=()
 if test "$notarize" = 1; then
-  test -f "${APPLE_API_KEY_PATH:-}" && test -n "${APPLE_API_KEY_ID:-}" && test -n "${APPLE_API_ISSUER_ID:-}" ||
-    { echo 'APPLE_API_KEY_PATH, APPLE_API_KEY_ID and APPLE_API_ISSUER_ID are required' >&2; exit 1; }
-  credentials=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID")
+  if test -n "${APPLE_NOTARY_PROFILE:-}"; then
+    credentials=(--keychain-profile "$APPLE_NOTARY_PROFILE")
+  elif test -f "${APPLE_API_KEY_PATH:-}" && test -n "${APPLE_API_KEY_ID:-}" && test -n "${APPLE_API_ISSUER_ID:-}"; then
+    credentials=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID")
+  else
+    echo 'APPLE_NOTARY_PROFILE or APPLE_API_KEY_PATH, APPLE_API_KEY_ID and APPLE_API_ISSUER_ID are required' >&2
+    exit 1
+  fi
 fi
 
 unset GOROOT
 export GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0
-case "$(uname -m)" in
-  arm64) arch=arm64 triple=aarch64-apple-darwin ;;
-  x86_64) arch=amd64 triple=x86_64-apple-darwin ;;
-  *) echo 'unsupported architecture' >&2; exit 1 ;;
+
+raw_arch="${arch_override:-$(uname -m)}"
+case "$raw_arch" in
+  arm64|aarch64) arch=arm64 triple=aarch64-apple-darwin ;;
+  x86_64|amd64) arch=amd64 triple=x86_64-apple-darwin ;;
+  *) echo "unsupported architecture: $raw_arch" >&2; exit 1 ;;
 esac
+
 platform=darwin/$arch
 out=.runtime/package/out/darwin-$arch
 app_name=$(jq -r .name cmd/sailry-desktop/mygo.json)
+app_slug=$(jq -r .slug cmd/sailry-desktop/mygo.json)
 bundle_identifier=$(jq -r .identifier cmd/sailry-desktop/mygo.json)
+version=$(jq -r .version cmd/sailry-desktop/mygo.json)
+sparkle_public_key=$(jq -r '.macos.infoPlist.SUPublicEDKey // ""' cmd/sailry-desktop/mygo.json)
 disk_image_identifier="${bundle_identifier}.disk-image"
 app=$out/$app_name.app
 image=$out/$app_name-$triple.dmg
 update=$out/$app_name-$triple-unsigned.zip
+mygo_archive=$out/$app_slug-$version-darwin-$arch.tar.gz
 resources=cmd/sailry-desktop/resources/darwin-$arch
 
-# codesign finds the identity of a temporary keychain through the search
-# list, which is restored when the script ends.
+bundle_version=${version%%[-+]*}
+IFS=. read -r version_major version_minor version_patch <<< "$bundle_version"
+bundle_build=$((10#$version_major * 1000000 + 10#$version_minor * 1000 + 10#$version_patch))
+
+revision=${SAILRY_REVISION:-$(git rev-parse HEAD)}
+telemetry=github.com/ai-poet/agent-client/desktop/internal/node/telemetry
+update_pkg=github.com/ai-poet/agent-client/desktop/internal/update
+flags="-X github.com/ai-poet/agent-client/desktop/internal/core.Default=~/.sailry"
+flags="$flags -X $telemetry.BuildRevision=$revision"
+test -z "${SAILRY_SENTRY_DSN:-}" || flags="$flags -X $telemetry.BuildDSN=$SAILRY_SENTRY_DSN"
+test -z "${SAILRY_TELEMETRY_KEY:-}" || flags="$flags -X $telemetry.BuildKey=$SAILRY_TELEMETRY_KEY"
+
+update_feed_base="${MYGO_UPDATE_FEED_URL:-$(jq -r '.updates.url // ""' cmd/sailry-desktop/mygo.json)}"
+update_feed_manifest="${update_feed_base%/}/update-darwin-$arch.json"
+update_public_key="${MYGO_UPDATE_PUBLIC_KEY:-$(jq -r '.updates.publicKey // ""' cmd/sailry-desktop/mygo.json)}"
+if test "$require_update_key" = 1 && test -z "$update_public_key"; then
+  echo 'MYGO_UPDATE_PUBLIC_KEY is required for release packaging' >&2
+  exit 1
+fi
+if test -n "$update_feed_base"; then
+  flags="$flags -X $update_pkg.BuildFeedURL=$update_feed_manifest"
+fi
+if test -n "$update_public_key"; then
+  flags="$flags -X $update_pkg.BuildPublicKey=$update_public_key"
+  flags="$flags -X github.com/egoist/mygo.packageUpdateFeed=$update_feed_manifest"
+  flags="$flags -X github.com/egoist/mygo.packageUpdateKey=$update_public_key"
+fi
+
+if test "$dry_run" -eq 1; then
+  test "$bundle_identifier" = "sh.waku" || { echo "unexpected bundle identifier: $bundle_identifier" >&2; exit 1; }
+  test -n "$sparkle_public_key" || { echo 'mygo.json macos.infoPlist.SUPublicEDKey is required for Sparkle appcast signing' >&2; exit 1; }
+  cat <<EOF
+[dry-run] macOS package plan:
+  platform          : $platform ($triple)
+  app               : $app_name ($bundle_identifier)
+  version           : $version (CFBundleShortVersionString=$bundle_version, CFBundleVersion=$bundle_build)
+  signing           : $signing (notarize=$notarize)
+  sparkle_pub_key   : $sparkle_public_key
+  mygo_feed_url     : $update_feed_manifest
+  mygo_public_key   : ${update_public_key:-(unconfigured)}
+  outputs:
+    bundle          : $app
+    dmg             : $image
+    sparkle_zip     : $update
+    mygo_archive    : $mygo_archive
+EOF
+  exit 0
+fi
+
+# Restore both temporary keychain search list and mygo.json on exit.
+keychain_previous=()
+keychain_modified=0
+mygo_config_backup=""
+cleanup() {
+  if test -n "$mygo_config_backup" && test -f "$mygo_config_backup"; then
+    mv "$mygo_config_backup" cmd/sailry-desktop/mygo.json
+  fi
+  if test "$keychain_modified" -eq 1; then
+    security list-keychains -d user -s ${keychain_previous[@]+"${keychain_previous[@]}"}
+  fi
+}
+trap cleanup EXIT
+
 if test -n "${APPLE_SIGNING_KEYCHAIN:-}"; then
-  previous=()
   while IFS= read -r line; do
     line=${line#"${line%%[![:space:]]*}"}
     line=${line#\"}
-    previous+=("${line%\"}")
+    keychain_previous+=("${line%\"}")
   done < <(security list-keychains -d user)
-  restore() { security list-keychains -d user -s ${previous[@]+"${previous[@]}"}; }
-  trap restore EXIT
-  security list-keychains -d user -s "$APPLE_SIGNING_KEYCHAIN" ${previous[@]+"${previous[@]}"}
+  keychain_modified=1
+  security list-keychains -d user -s "$APPLE_SIGNING_KEYCHAIN" ${keychain_previous[@]+"${keychain_previous[@]}"}
 fi
 
 go run ./native/fetch -target "$platform" ${artifacts[@]+"${artifacts[@]}"} -bundle "$resources"
@@ -101,8 +203,6 @@ go build -o .runtime/package/bin/mygo github.com/egoist/mygo/cmd/mygo
 
 # Shipped beside the runtimes: the dependency notices and the build record
 # the updater requires of every package it installs.
-revision=${SAILRY_REVISION:-$(git rev-parse HEAD)}
-version=$(jq -r .version cmd/sailry-desktop/mygo.json)
 rm -rf -- "$resources/licenses"
 bash internal/node/host/deployment/licenses.sh "$platform" "$triple" "$resources/licenses" ./cmd/sailry-desktop
 dirty=false
@@ -111,59 +211,41 @@ jq -n --arg revision "$revision" --argjson dirty "$dirty" --arg target "$triple"
   '{version:1,source_revision:$revision,source_dirty:$dirty,profile:"release",target:$target,application_version:$version}' \
   > "$resources/build.json"
 
-telemetry=github.com/ai-poet/agent-client/desktop/internal/node/telemetry
-update_pkg=github.com/ai-poet/agent-client/desktop/internal/update
-flags="-X github.com/ai-poet/agent-client/desktop/internal/core.Default=~/.sailry"
-flags="$flags -X $telemetry.BuildRevision=$revision"
-test -z "${SAILRY_SENTRY_DSN:-}" || flags="$flags -X $telemetry.BuildDSN=$SAILRY_SENTRY_DSN"
-test -z "${SAILRY_TELEMETRY_KEY:-}" || flags="$flags -X $telemetry.BuildKey=$SAILRY_TELEMETRY_KEY"
-
-update_feed_base="${MYGO_UPDATE_FEED_URL:-$(jq -r '.updates.url // ""' cmd/sailry-desktop/mygo.json)}"
-update_feed_manifest="${update_feed_base%/}/update-darwin-$arch.json"
-update_public_key="${MYGO_UPDATE_PUBLIC_KEY:-${SPARKLE_PUBLIC_KEY:-$(jq -r '.updates.publicKey // ""' cmd/sailry-desktop/mygo.json)}}"
-if test -n "$update_feed_base"; then
-  flags="$flags -X $update_pkg.BuildFeedURL=$update_feed_manifest"
-fi
 mygo_config_backup=$(mktemp "${TMPDIR:-/tmp}/mygo-config-XXXXXX")
 cp cmd/sailry-desktop/mygo.json "$mygo_config_backup"
-restore_mygo_config() {
-  if test -f "$mygo_config_backup"; then
-    mv "$mygo_config_backup" cmd/sailry-desktop/mygo.json
-  fi
-}
 if test -n "$update_public_key"; then
-  flags="$flags -X $update_pkg.BuildPublicKey=$update_public_key"
-  flags="$flags -X github.com/egoist/mygo.packageUpdateFeed=$update_feed_manifest"
-  flags="$flags -X github.com/egoist/mygo.packageUpdateKey=$update_public_key"
   jq --arg url "${update_feed_base%/}" --arg key "$update_public_key" \
     '.updates.url = $url | .updates.publicKey = $key' "$mygo_config_backup" > cmd/sailry-desktop/mygo.json
 else
-  echo 'warning: MYGO_UPDATE_PUBLIC_KEY (or SPARKLE_PUBLIC_KEY) is not set; MyGo updater will build unconfigured' >&2
+  echo 'warning: MYGO_UPDATE_PUBLIC_KEY is not set; MyGo updater will build unconfigured' >&2
   jq 'del(.updates)' "$mygo_config_backup" > cmd/sailry-desktop/mygo.json
 fi
 
-rm -rf -- "$app" "$image" "$update"
-# mygo signs nested code and the bundle. Notarization and the disk image
-# follow the seal, which changes the bundle after mygo has signed it.
+rm -rf -- "$app" "$image" "$update" "$mygo_archive"
+# mygo signs nested code and the bundle. Unset MYGO_UPDATER_PRIVATE_KEY here
+# so mygo build does not emit a premature unsealed/unnotarized update archive;
+# we pack the finalized bundle with cmd/mygo-manifest after seal + notarize.
 build_status=0
-MYGO_LDFLAGS=$flags .runtime/package/bin/mygo build -platform "$platform" -sign "$identity" -skip-notarize -skip-dmg cmd/sailry-desktop || build_status=$?
-restore_mygo_config
+env -u MYGO_UPDATER_PRIVATE_KEY MYGO_LDFLAGS="$flags" \
+  .runtime/package/bin/mygo build -platform "$platform" -sign "$identity" -skip-notarize -skip-dmg cmd/sailry-desktop || build_status=$?
+mv "$mygo_config_backup" cmd/sailry-desktop/mygo.json
+mygo_config_backup=""
 test "$build_status" -eq 0
 test -d "$app"
 
-# Align bundle identity and numeric CFBundleVersion with main (sh.waku,
-# CheapRouter, major*1_000_000 + minor*1_000 + patch) so Sparkle performs an
-# in-place upgrade instead of rejecting or duplicating the app.
+# Align bundle identity, numeric CFBundleVersion, and SUPublicEDKey with main
+# (sh.waku, CheapRouter, major*1_000_000 + minor*1_000 + patch) so Sparkle
+# signs and performs an in-place upgrade instead of rejecting or duplicating.
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_identifier" "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable $app_name" "$app/Contents/Info.plist"
-
-bundle_version=${version%%[-+]*}
-IFS=. read -r version_major version_minor version_patch <<< "$bundle_version"
-bundle_build=$((10#$version_major * 1000000 + 10#$version_minor * 1000 + 10#$version_patch))
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $bundle_version" "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $bundle_build" "$app/Contents/Info.plist"
+if test -n "$sparkle_public_key"; then
+  /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $sparkle_public_key" "$app/Contents/Info.plist" 2>/dev/null || \
+    /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string $sparkle_public_key" "$app/Contents/Info.plist"
+fi
 
-# Signing rewrote the native libraries and the rename changed the bundle:
+# Signing rewrote the native libraries and plist changes updated the bundle:
 # record the libraries as shipped and sign the bundle again over the records.
 go run ./native/fetch -target "$platform" -seal "$app" -sign "$identity"
 
@@ -221,7 +303,10 @@ if test "$notarize" = 1; then
   spctl --assess --type open --context context:primary-signature "$image"
 fi
 
-# The update archive holds the application exactly as the disk image does.
+# First-hop Sparkle update archive (ditto preserves symlinks and signatures).
 ditto -c -k --norsrc --keepParent "$app" "$update"
 
-shasum -a 256 "$image" "$update"
+# Second-hop MyGo update archive built from the finalized sealed/notarized bundle.
+go run ./cmd/mygo-manifest pack -root "$out" -out "$mygo_archive" -target "darwin-$arch" "$app_name.app"
+
+shasum -a 256 "$image" "$update" "$mygo_archive"

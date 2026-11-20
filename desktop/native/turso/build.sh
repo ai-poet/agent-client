@@ -8,9 +8,16 @@ case "$(uname -s)" in
     MINGW*|MSYS*) platform=windows; library=turso_sync_sdk_kit.dll ;;
     *) printf '%s\n' 'Unsupported native build platform' >&2; exit 1 ;;
 esac
-case "$(uname -m)" in
-    arm64|aarch64) architecture=arm64 ;;
-    x86_64|amd64) architecture=amd64 ;;
+raw_arch="${SAILRY_ARCH:-}"
+if [ -z "$raw_arch" ] && [ "$platform" = windows ] && [ -n "${PROCESSOR_ARCHITECTURE:-}" ]; then
+    raw_arch="$PROCESSOR_ARCHITECTURE"
+fi
+if [ -z "$raw_arch" ]; then
+    raw_arch="$(uname -m)"
+fi
+case "$raw_arch" in
+    ARM64|arm64|aarch64) architecture=arm64 ;;
+    AMD64|x86_64|amd64) architecture=amd64 ;;
     *) printf '%s\n' 'Unsupported native build architecture' >&2; exit 1 ;;
 esac
 output="$root/.runtime/native/$platform-$architecture"

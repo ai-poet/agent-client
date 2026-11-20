@@ -85,6 +85,15 @@ func TestProductIdentityAlignedWithMain(t *testing.T) {
 	if plistBuild != buildNumber {
 		t.Fatalf("mygo.json macos.infoPlist.CFBundleVersion = %q, want %q", plistBuild, buildNumber)
 	}
+	plistSparkleKey, _ := config.MacOS.InfoPlist["SUPublicEDKey"].(string)
+	if plistSparkleKey == "" {
+		t.Fatal("mygo.json macos.infoPlist.SUPublicEDKey must be set so Sparkle generate_appcast signs first-hop macOS zip")
+	}
+	if rootPlist, err := os.ReadFile("../../../resources/Info.plist"); err == nil {
+		if !strings.Contains(string(rootPlist), "<string>"+plistSparkleKey+"</string>") {
+			t.Fatalf("mygo.json SUPublicEDKey %q does not match resources/Info.plist", plistSparkleKey)
+		}
+	}
 
 	macScript, err := os.ReadFile("macos/package.sh")
 	if err != nil {
@@ -99,9 +108,30 @@ func TestProductIdentityAlignedWithMain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"Sailry.exe", "sailry-setup-"} {
+	for _, forbidden := range []string{"Sailry.exe", "sailry-setup-", "makensis"} {
 		if strings.Contains(string(winScript), forbidden) {
-			t.Fatalf("windows/package.sh still contains stale identity token %q", forbidden)
+			t.Fatalf("windows/package.sh still contains stale or NSIS token %q", forbidden)
+		}
+	}
+	if !strings.Contains(string(winScript), "-skip-installer") || !strings.Contains(string(winScript), "cheaprouter.iss") {
+		t.Fatal("windows/package.sh must use -skip-installer and Inno Setup cheaprouter.iss")
+	}
+	issRaw, err := os.ReadFile("windows/cheaprouter.iss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	issText := string(issRaw)
+	for _, required := range []string{
+		"AppId={" + core.WindowsInnoAppID,
+		"PrivilegesRequired=lowest",
+		"UsePreviousAppDir=yes",
+		"OutputBaseFilename=CheapRouter-{#AppVersion}-{#Arch}-Setup",
+		"CheapRouter.exe",
+		"waku.exe",
+		"client-daemon.exe",
+	} {
+		if !strings.Contains(issText, required) {
+			t.Fatalf("windows/cheaprouter.iss missing required Inno Setup contract %q", required)
 		}
 	}
 }

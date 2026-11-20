@@ -14,9 +14,16 @@ case "$(uname -s)" in
     MINGW*|MSYS*) platform=windows; name=sailry-capture.dll ;;
     *) printf '%s\n' 'Unsupported native build platform; see native/capture/README.md' >&2; exit 1 ;;
 esac
-case "$(uname -m)" in
-    arm64|aarch64) architecture=arm64 ;;
-    x86_64|amd64) architecture=amd64 ;;
+raw_arch="${SAILRY_ARCH:-}"
+if [ -z "$raw_arch" ] && [ "$platform" = windows ] && [ -n "${PROCESSOR_ARCHITECTURE:-}" ]; then
+    raw_arch="$PROCESSOR_ARCHITECTURE"
+fi
+if [ -z "$raw_arch" ]; then
+    raw_arch="$(uname -m)"
+fi
+case "$raw_arch" in
+    ARM64|arm64|aarch64) architecture=arm64 ;;
+    AMD64|x86_64|amd64) architecture=amd64 ;;
     *) printf '%s\n' 'Unsupported native build architecture' >&2; exit 1 ;;
 esac
 
@@ -63,13 +70,13 @@ if [ "$platform" = windows ]; then
     # cl runs inside the MSVC developer environment, which Git Bash does not
     # carry: a batch file enters it for this architecture and compiles there.
     case "$architecture" in
-        arm64) tools=arm64 ;;
-        *) tools=x64 ;;
+        arm64) tools=arm64; vc_component=Microsoft.VisualStudio.Component.VC.Tools.ARM64 ;;
+        *) tools=x64; vc_component=Microsoft.VisualStudio.Component.VC.Tools.x86.x64 ;;
     esac
     vswhere='/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe'
-    studio=$("$vswhere" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | tr -d '\r')
+    studio=$("$vswhere" -latest -products '*' -requires "$vc_component" -property installationPath | tr -d '\r')
     if [ -z "$studio" ]; then
-        printf '%s\n' 'MSVC build tools are unavailable' >&2
+        printf '%s\n' "MSVC build tools ($vc_component) are unavailable" >&2
         exit 1
     fi
     objects="$output/capture-objects"

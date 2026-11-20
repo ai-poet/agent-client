@@ -20,6 +20,7 @@
     },
     "infoPlist": {
       "CFBundleVersion": "4000",
+      "SUPublicEDKey": "IUd9ZU+OYtZIzWi/MmSrVKXY4cbfrTC3ahtEz52H8ZI=",
       "NSAppTransportSecurity": {
         "NSAllowsArbitraryLoadsInWebContent": true
       },
