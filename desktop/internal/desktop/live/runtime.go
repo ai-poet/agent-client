@@ -60,8 +60,8 @@ type Runtime struct {
 	workspace                *workspaceState
 	workspaceSettings        workspaceSettingsState
 	workspaceSettingsOwner   *Runtime
-	settingsShown            *Runtime // the Node the settings pages hold, once settingsTurned (settings_target.go)
-	settingsTurned           bool
+	settingsShown            *Runtime // the Node the settings pages hold, once settingsGeneration > 0 (settings_target.go)
+	settingsGeneration       uint64
 	terminalSettings         terminalSettingsState
 	backupSettings           backupSettingsState
 	knowledge                knowledgeState
@@ -122,6 +122,7 @@ type Runtime struct {
 	lastFeatures              string
 	lastKeys                  string
 	powerObservedRevision     uint64
+	powerSaving               map[protocol.PowerSettings]func() bool
 	compactionObserved        uint64
 	updates                   *Updates
 	updatesFocused            func() bool

@@ -18,7 +18,7 @@ func (r *Runtime) settingsOwner() *Runtime { return r.localRuntime() }
 // Normal frames keep this on the local Node.
 func (r *Runtime) shownSettings() *Runtime {
 	root := r.localRuntime()
-	if !root.settingsTurned {
+	if root.settingsGeneration == 0 {
 		return root
 	}
 	return root.settingsShown
@@ -26,6 +26,14 @@ func (r *Runtime) shownSettings() *Runtime {
 
 // showsSettings reports whether the pages hold this Runtime's Node.
 func (r *Runtime) showsSettings() bool { return r.shownSettings() == r }
+
+// settingsCurrent checks whether a response still belongs to the same
+// binding, including when the user switches away and back before it arrives.
+func (r *Runtime) settingsCurrent() func() bool {
+	root := r.localRuntime()
+	generation := root.settingsGeneration
+	return func() bool { return root.settingsGeneration == generation && r.showsSettings() }
+}
 
 // initNodeSettings builds the pages' actions once, on the local Runtime.
 // Each runs on the Node shown when it is called; with no Node shown a save
@@ -189,12 +197,14 @@ func (r *Runtime) showNodeSettings(owner *Runtime) {
 	if previous := root.shownSettings(); previous != nil {
 		previous.leaveNodeSettings()
 	}
-	root.settingsShown, root.settingsTurned = owner, true
+	root.settingsShown = owner
+	root.settingsGeneration++
 	m := root.App.Settings
 	m.CloseNodeDialogs()
 	// Without a Node the controls wait, as the other host pages do.
 	waiting := owner == nil
 	m.Power, m.Compaction, m.Concurrency = settings.Stored[bool]{Pending: waiting}, settings.Stored[float64]{Pending: waiting}, settings.Stored[float64]{Pending: waiting}
+	m.ConcurrencyReadOnly = false
 	m.Media, m.MediaOptions, m.MediaUnavailable = settings.Stored[[4]string]{Pending: waiting}, nil, [4]bool{}
 	m.CodeIndex = settings.Stored[bool]{Pending: waiting}
 	m.Channels, m.Brands, m.Catalog = nil, nil, viewmodel.Catalog{}
