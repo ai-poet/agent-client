@@ -43,13 +43,15 @@ func (x *conversationActions) stageOutgoing(message composer.Message) {
 			input.Files = append(input.Files, file)
 		}
 	}
-	x.r.composerOutgoing[x.cv.ID] = &conversationOutgoing{input: input, transcript: true, restore: func(c *ui.Context, err error) bool {
+	pending := &conversationOutgoing{input: input, transcript: true, restore: func(c *ui.Context, err error) bool {
 		if x.restore == nil || x.restoreDraft == composerFingerprint(x.comp) {
 			return false
 		}
-		x.offerRestore(c, err)
+		x.restoreFailedDraft(c, err)
 		return true
 	}}
+	x.r.composerOutgoing[x.cv.ID] = pending
+	x.comp.HoldOutgoingAttachments(message.Attachments, func() bool { return x.r.composerOutgoing[x.cv.ID] == pending })
 	x.r.projectOutgoing(x.cv, protocol.ConversationPage{})
 	x.r.App.Messages.List(x.cv.ID).ScrollToEnd()
 }

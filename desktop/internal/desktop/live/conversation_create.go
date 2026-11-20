@@ -37,7 +37,7 @@ func (r *Runtime) detachConversationCreations() {
 		delete(r.conversationCreations, id)
 		delete(r.conversationCreating, id)
 		r.discardOutgoing(id)
-		if !root.openDrafts[id] || root.App.Data.Find(id) == nil {
+		if _, open := root.openDrafts[id]; !open || root.App.Data.Find(id) == nil {
 			continue
 		}
 		x := pending.actions
@@ -314,7 +314,7 @@ func (r *Runtime) resumeCreation(before string, pending conversationCreation, fi
 					delete(r.conversationCreations, before)
 				}
 				if terminal && x.restore != nil && x.restoreDraft != composerFingerprint(x.comp) {
-					x.offerRestore(c, err)
+					x.restoreFailedDraft(c, err)
 				} else {
 					r.reportCreation(c, err)
 				}

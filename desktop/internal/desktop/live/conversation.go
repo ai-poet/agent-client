@@ -732,7 +732,7 @@ func (x *conversationActions) submit(m composer.Message, guide, queue bool, draf
 				if err != nil {
 					x.r.discardUnsubmitted(x.cv.ID)
 					if faultCode(err) != protocol.ErrorCodeOutcomeUnknown && x.restoreDraft != composerFingerprint(x.comp) {
-						x.offerRestore(c, err)
+						x.restoreFailedDraft(c, err)
 					} else {
 						x.r.reportKeys(c, err, "workspace_action_failed", "workspace_changed", "workspace_action_unknown")
 					}

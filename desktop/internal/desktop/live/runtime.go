@@ -310,11 +310,7 @@ func NewWithPreferences(ctx context.Context, controller *client.Client, prefs *p
 	r.conversationCreations = map[string]conversationCreation{}
 	r.conversationCreating = map[string]bool{}
 	r.listSidebar()
-	if ids := r.App.Sidebar.Order(); len(ids) > 0 {
-		r.App.Sidebar.Selected = ids[0]
-	} else {
-		r.newDraft(nil)
-	}
+	r.ensureConversationSelection()
 	r.unsubscribe = controller.OnChange(r.changed)
 	r.unsubscribePrefs = prefs.OnChange(r.wake)
 	if err := prefs.FinishStartup(); err != nil {
@@ -516,6 +512,7 @@ func (r *Runtime) drain(c *ui.Context) {
 	r.networkFrame(c)
 	r.browserFrame()
 	r.aboutFrame(c)
+	r.ensureConversationSelection()
 	r.attentionFrame()
 }
 
@@ -614,7 +611,6 @@ func (r *Runtime) project() {
 	}
 	r.projectHosts(d)
 	r.applyConversationData(d)
-	r.selectPendingSession()
 	r.projectConversations()
 	if owner := r.shownSettings(); owner != nil {
 		owner.projectProviderSnapshot()
