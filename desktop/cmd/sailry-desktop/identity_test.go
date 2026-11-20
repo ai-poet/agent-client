@@ -10,6 +10,7 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/ai-poet/agent-client/desktop/internal/core"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
+	clientupdate "github.com/ai-poet/agent-client/desktop/internal/update"
 )
 
 func TestProductIdentityAlignedWithMain(t *testing.T) {
@@ -22,7 +23,11 @@ func TestProductIdentityAlignedWithMain(t *testing.T) {
 		Slug       string `json:"slug"`
 		Identifier string `json:"identifier"`
 		Version    string `json:"version"`
-		MacOS      struct {
+		Updates    *struct {
+			URL       string `json:"url"`
+			PublicKey string `json:"publicKey"`
+		} `json:"updates"`
+		MacOS struct {
 			InfoPlist map[string]any `json:"infoPlist"`
 		} `json:"macos"`
 		Windows struct {
@@ -32,6 +37,9 @@ func TestProductIdentityAlignedWithMain(t *testing.T) {
 	}
 	if err := json.Unmarshal(raw, &config); err != nil {
 		t.Fatal(err)
+	}
+	if config.Updates == nil || config.Updates.URL != clientupdate.DefaultFeedBaseURL || config.Updates.PublicKey != "" {
+		t.Fatalf("mygo.json updates = %+v, want url=%q and empty compile-time publicKey placeholder", config.Updates, clientupdate.DefaultFeedBaseURL)
 	}
 	if core.MacOSBundleIdentifier != "sh.waku" || config.Identifier != core.MacOSBundleIdentifier {
 		t.Fatalf("mygo.json identifier = %q (constant %q), want %q", config.Identifier, core.MacOSBundleIdentifier, "sh.waku")

@@ -7,6 +7,10 @@
   "icon": "../../assets/branding/sailry-windows.png",
   "main": ".",
   "out": "../../.runtime/package/out",
+  "updates": {
+    "url": "https://s3.cheaprouter.cc/cheaprouter-releases/mygo",
+    "publicKey": ""
+  },
   "macos": {
     "icon": "../../assets/branding/Sailry.icns",
     "minimumSystemVersion": "13.0",

@@ -13,9 +13,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -245,10 +247,26 @@ func TestInstallForwardsMonotonicProgress(t *testing.T) {
 }
 
 func TestConfigStoreDefaultsAndPermissions(t *testing.T) {
+	t.Setenv("MYGO_UPDATE_PUBLIC_KEY", "")
+	t.Setenv("SPARKLE_PUBLIC_KEY", "")
+	origFeed, origKey := BuildFeedURL, BuildPublicKey
+	BuildFeedURL, BuildPublicKey = "", ""
+	t.Cleanup(func() { BuildFeedURL, BuildPublicKey = origFeed, origKey })
+
 	path := filepath.Join(t.TempDir(), "profile", ConfigName)
 	store, err := OpenStore(path)
-	if err != nil || store.Config().Configured() {
-		t.Fatalf("missing config = %+v, %v", store.Config(), err)
+	if err != nil {
+		t.Fatalf("missing config error = %v", err)
+	}
+	cfg := store.Config()
+	if !cfg.Enabled || !cfg.Automatic || cfg.Prereleases || cfg.FeedURL != DefaultFeedURL() || cfg.PublicKey != "" {
+		t.Fatalf("default config without key = %+v", cfg)
+	}
+	if cfg.Configured() {
+		t.Fatalf("missing public key must not be configured: %+v", cfg)
+	}
+	if err := cfg.Validate(); !errors.Is(err, ErrUnconfigured) {
+		t.Fatalf("Validate without public key = %v, want ErrUnconfigured", err)
 	}
 	public, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -270,6 +288,143 @@ func TestConfigStoreDefaultsAndPermissions(t *testing.T) {
 	reopened, err := OpenStore(path)
 	if err != nil || reopened.Config() != want {
 		t.Fatalf("reopened = %+v, %v", reopened.Config(), err)
+	}
+}
+
+func TestDefaultConfigWithInjectedPublicKeyEnablesChecksWithoutAutoInstall(t *testing.T) {
+	t.Setenv("MYGO_UPDATE_PUBLIC_KEY", "")
+	t.Setenv("SPARKLE_PUBLIC_KEY", "")
+	origFeed, origKey := BuildFeedURL, BuildPublicKey
+	t.Cleanup(func() { BuildFeedURL, BuildPublicKey = origFeed, origKey })
+
+	public, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedKey := base64.StdEncoding.EncodeToString(public)
+
+	var installed atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"version":"0.4.1","url":"https://example.test/app.tar.gz","size":1,"signature":"unused"}`)
+	}))
+	defer server.Close()
+
+	BuildFeedURL = server.URL + "/update.json"
+	BuildPublicKey = encodedKey
+
+	store, err := OpenStore(filepath.Join(t.TempDir(), ConfigName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := store.Config()
+	if !cfg.Enabled || !cfg.Automatic || cfg.Prereleases || !cfg.Configured() || cfg.FeedURL != BuildFeedURL || cfg.PublicKey != encodedKey {
+		t.Fatalf("injected default config = %+v", cfg)
+	}
+	native := &fakeNative{enabled: true, checkFunc: func(ctx context.Context, source mygo.UpdateSource, pre bool) (*nativeRelease, error) {
+		rel, err := manifestCheck("0.4.0")(ctx, source, pre)
+		if rel != nil {
+			rel.install = func(context.Context, func(int64, int64)) error {
+				installed.Store(true)
+				return nil
+			}
+		}
+		return rel, err
+	}}
+	client := &Client{config: cfg, version: "0.4.0", native: native}
+	if !client.Enabled() {
+		t.Fatal("client.Enabled() = false with injected public key")
+	}
+	found, err := client.Check(context.Background())
+	if err != nil || found == nil || found.Version != "0.4.1" {
+		t.Fatalf("Check() = %+v, %v; want 0.4.1", found, err)
+	}
+	if installed.Load() {
+		t.Fatal("Check() must not auto-install without user confirmation")
+	}
+}
+
+func TestMissingPublicKeyReportsUnconfiguredWithoutCrashOrNetwork(t *testing.T) {
+	t.Setenv("MYGO_UPDATE_PUBLIC_KEY", "")
+	t.Setenv("SPARKLE_PUBLIC_KEY", "")
+	origFeed, origKey := BuildFeedURL, BuildPublicKey
+	BuildFeedURL, BuildPublicKey = "", ""
+	t.Cleanup(func() { BuildFeedURL, BuildPublicKey = origFeed, origKey })
+
+	var requests atomic.Int32
+	native := &fakeNative{enabled: true, checkFunc: func(context.Context, mygo.UpdateSource, bool) (*nativeRelease, error) {
+		requests.Add(1)
+		return nil, nil
+	}}
+	store, err := OpenStore(filepath.Join(t.TempDir(), ConfigName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &Client{config: store.Config(), version: "0.4.0", native: native}
+	if client.Enabled() {
+		t.Fatal("client.Enabled() must be false when public key is absent")
+	}
+	if _, err := client.Check(context.Background()); !errors.Is(err, ErrUnconfigured) {
+		t.Fatalf("Check() error = %v, want ErrUnconfigured", err)
+	}
+	if requests.Load() != 0 || native.checks.Load() != 0 {
+		t.Fatalf("unconfigured check triggered %d requests / %d native checks", requests.Load(), native.checks.Load())
+	}
+}
+
+func TestEnvPublicKeyInjectionFallback(t *testing.T) {
+	origFeed, origKey := BuildFeedURL, BuildPublicKey
+	BuildFeedURL, BuildPublicKey = "", ""
+	t.Cleanup(func() { BuildFeedURL, BuildPublicKey = origFeed, origKey })
+
+	public, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedKey := base64.StdEncoding.EncodeToString(public)
+
+	for _, envName := range []string{"MYGO_UPDATE_PUBLIC_KEY", "SPARKLE_PUBLIC_KEY"} {
+		t.Run(envName, func(t *testing.T) {
+			t.Setenv("MYGO_UPDATE_PUBLIC_KEY", "")
+			t.Setenv("SPARKLE_PUBLIC_KEY", "")
+			t.Setenv(envName, encodedKey)
+			cfg := DefaultConfig()
+			if !cfg.Configured() || cfg.PublicKey != encodedKey {
+				t.Fatalf("DefaultConfig with %s = %+v", envName, cfg)
+			}
+		})
+	}
+}
+
+func TestMyGoNativeUpdaterEnabledWithBuildFlags(t *testing.T) {
+	if os.Getenv("UPDATE_LDFLAGS_PROBE") == "1" {
+		if !mygo.Updater.Enabled() {
+			t.Fatal("mygo.Updater.Enabled() = false despite injected feed/key/production ldflags")
+		}
+		client := NewClient(DefaultConfig(), "0.4.0")
+		if !client.Enabled() || !client.NativeEnabled() {
+			t.Fatalf("client Enabled=%v NativeEnabled=%v, want both true", client.Enabled(), client.NativeEnabled())
+		}
+		return
+	}
+	public, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedKey := base64.StdEncoding.EncodeToString(public)
+	feedURL := DefaultFeedBaseURL + "/update-" + runtime.GOOS + "-" + runtime.GOARCH + ".json"
+	ldflags := strings.Join([]string{
+		"-X github.com/egoist/mygo.production=1",
+		"-X github.com/egoist/mygo.packageUpdateFeed=" + feedURL,
+		"-X github.com/egoist/mygo.packageUpdateKey=" + encodedKey,
+		"-X github.com/ai-poet/agent-client/desktop/internal/update.BuildFeedURL=" + feedURL,
+		"-X github.com/ai-poet/agent-client/desktop/internal/update.BuildPublicKey=" + encodedKey,
+	}, " ")
+	cmd := exec.CommandContext(t.Context(), "go", "test", "-run", "^TestMyGoNativeUpdaterEnabledWithBuildFlags$", "-count=1", "-ldflags", ldflags, ".")
+	cmd.Env = append(os.Environ(), "UPDATE_LDFLAGS_PROBE=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ldflags probe failed: %v\n%s", err, out)
 	}
 }
 

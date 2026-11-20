@@ -6,6 +6,7 @@ import "errors"
 // configuration material or depending on a platform-specific network error.
 var (
 	ErrDisabled      = errors.New("updates are disabled")
+	ErrUnconfigured  = errors.New("update public key is not configured")
 	ErrUnavailable   = errors.New("this build cannot install updates")
 	ErrConfiguration = errors.New("update configuration is invalid")
 	ErrNetwork       = errors.New("update network request failed")

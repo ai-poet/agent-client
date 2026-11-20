@@ -142,7 +142,11 @@ func (n *NativeUpdates) check(quiet bool) {
 		if !quiet {
 			cause := clientupdate.ErrUnavailable
 			if !config.Configured() {
-				cause = clientupdate.ErrDisabled
+				if err := config.Validate(); err != nil {
+					cause = err
+				} else {
+					cause = clientupdate.ErrDisabled
+				}
 			}
 			n.failure = nativeFailure(cause)
 			n.notices = append(n.notices, nativeUpdateNotice{key: n.failure.Key, failure: true})
@@ -325,6 +329,8 @@ func nativeFailure(err error) *settings.UpdateFailure {
 		key = "updates_manifest_invalid"
 	case errors.Is(err, clientupdate.ErrSignature):
 		key = "updates_signature_invalid"
+	case errors.Is(err, clientupdate.ErrUnconfigured):
+		key = "updates_not_configured"
 	case errors.Is(err, clientupdate.ErrDisabled), errors.Is(err, clientupdate.ErrConfiguration):
 		key = "updates_source_unready"
 	case errors.Is(err, clientupdate.ErrUnavailable):

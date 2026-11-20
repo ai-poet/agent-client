@@ -56,8 +56,11 @@ func (c *Client) NativeEnabled() bool {
 // Check returns only a version newer than the running application. MyGo owns
 // manifest parsing and semantic-version comparison; nil means up to date.
 func (c *Client) Check(ctx context.Context) (*Update, error) {
-	if !c.Enabled() {
+	if c == nil || !c.config.Enabled {
 		return nil, ErrDisabled
+	}
+	if err := c.config.Validate(); err != nil {
+		return nil, err
 	}
 	if !c.native.Enabled() {
 		return nil, ErrUnavailable
@@ -111,7 +114,7 @@ func classifyCheck(err error) error {
 	if err == nil {
 		return nil
 	}
-	for _, class := range []error{ErrDisabled, ErrUnavailable, ErrConfiguration, ErrNetwork, ErrNotFound, ErrManifest} {
+	for _, class := range []error{ErrDisabled, ErrUnconfigured, ErrUnavailable, ErrConfiguration, ErrNetwork, ErrNotFound, ErrManifest} {
 		if errors.Is(err, class) {
 			return err
 		}

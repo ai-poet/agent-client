@@ -10,11 +10,59 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 )
 
-const ConfigName = "update.json"
+const (
+	ConfigName = "update.json"
+	// DefaultFeedBaseURL is the release bucket prefix hosting MyGo second-hop
+	// manifests (update-<goos>-<goarch>.json).
+	DefaultFeedBaseURL = "https://s3.cheaprouter.cc/cheaprouter-releases/mygo"
+)
+
+// BuildFeedURL and BuildPublicKey are compile-time injection targets via
+// -ldflags -X (populated from MYGO_UPDATE_FEED_URL and MYGO_UPDATE_PUBLIC_KEY
+// or SPARKLE_PUBLIC_KEY during packaging). BuildPublicKey is intentionally
+// empty in source and is never fabricated.
+var (
+	BuildFeedURL   string
+	BuildPublicKey string
+)
+
+// DefaultFeedURL returns the compiled-in manifest URL, or the running
+// platform's manifest under DefaultFeedBaseURL.
+func DefaultFeedURL() string {
+	if configured := strings.TrimSpace(BuildFeedURL); configured != "" {
+		return configured
+	}
+	return fmt.Sprintf("%s/update-%s-%s.json", strings.TrimRight(DefaultFeedBaseURL, "/"), runtime.GOOS, runtime.GOARCH)
+}
+
+func effectiveBuildPublicKey() string {
+	if key := strings.TrimSpace(BuildPublicKey); key != "" {
+		return key
+	}
+	if key := strings.TrimSpace(os.Getenv("MYGO_UPDATE_PUBLIC_KEY")); key != "" {
+		return key
+	}
+	return strings.TrimSpace(os.Getenv("SPARKLE_PUBLIC_KEY"))
+}
+
+// DefaultConfig returns the initial update configuration used when update.json
+// is absent: updates and quiet background checks are enabled by default while
+// installation still requires explicit user confirmation. When no public key
+// was injected at build time, PublicKey remains empty and Configured() is false.
+func DefaultConfig() Config {
+	return Config{
+		FeedURL:     DefaultFeedURL(),
+		PublicKey:   effectiveBuildPublicKey(),
+		Enabled:     true,
+		Automatic:   true,
+		Prereleases: false,
+	}
+}
 
 // Config is the client-owned update configuration. FeedURL is the full URL of
 // the running platform's MyGo manifest. PublicKey is the base64 Ed25519 public
@@ -30,13 +78,16 @@ type Config struct {
 }
 
 // Validate rejects a partial or malformed source configuration. The empty
-// configuration remains valid and disabled.
+// disabled configuration remains valid.
 func (c Config) Validate() error {
 	if !c.Enabled && strings.TrimSpace(c.FeedURL) == "" && strings.TrimSpace(c.PublicKey) == "" {
 		return nil
 	}
-	if strings.TrimSpace(c.FeedURL) == "" || strings.TrimSpace(c.PublicKey) == "" {
-		return fmt.Errorf("%w: feed URL and public key are both required", ErrConfiguration)
+	if strings.TrimSpace(c.PublicKey) == "" {
+		return fmt.Errorf("%w: %w", ErrUnconfigured, ErrConfiguration)
+	}
+	if strings.TrimSpace(c.FeedURL) == "" {
+		return fmt.Errorf("%w: feed URL is required", ErrConfiguration)
 	}
 	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(c.PublicKey))
 	if err != nil || len(key) != ed25519.PublicKeySize {
@@ -59,13 +110,15 @@ type Store struct {
 	err  error
 }
 
-// OpenStore reads path. A missing file is the default, disabled configuration;
-// a read or decode failure leaves updates disabled and is returned to the
-// caller without preventing application startup.
+// OpenStore reads path. A missing file falls back to DefaultConfig so packaged
+// builds keep second-hop update checks active without auto-installing; a read
+// or decode failure leaves updates disabled and is returned to the caller
+// without preventing application startup.
 func OpenStore(path string) (*Store, error) {
 	s := &Store{path: path}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
+		s.data = DefaultConfig()
 		return s, nil
 	}
 	if err != nil {

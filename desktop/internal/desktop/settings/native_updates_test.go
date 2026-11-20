@@ -1,6 +1,9 @@
 package settings
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"path/filepath"
 	"testing"
 	"time"
@@ -12,6 +15,11 @@ import (
 )
 
 func TestNativeUpdateSettings(t *testing.T) {
+	public, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MYGO_UPDATE_PUBLIC_KEY", base64.StdEncoding.EncodeToString(public))
 	m := NewModel(preview.SettingsData())
 	m.Updater = Updater{Native: true, Configured: true, NativeEnabled: true}
 	var saved [][2]bool

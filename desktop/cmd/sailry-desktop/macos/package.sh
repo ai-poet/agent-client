@@ -112,15 +112,43 @@ jq -n --arg revision "$revision" --argjson dirty "$dirty" --arg target "$triple"
   > "$resources/build.json"
 
 telemetry=github.com/ai-poet/agent-client/desktop/internal/node/telemetry
+update_pkg=github.com/ai-poet/agent-client/desktop/internal/update
 flags="-X github.com/ai-poet/agent-client/desktop/internal/core.Default=~/.sailry"
 flags="$flags -X $telemetry.BuildRevision=$revision"
 test -z "${SAILRY_SENTRY_DSN:-}" || flags="$flags -X $telemetry.BuildDSN=$SAILRY_SENTRY_DSN"
 test -z "${SAILRY_TELEMETRY_KEY:-}" || flags="$flags -X $telemetry.BuildKey=$SAILRY_TELEMETRY_KEY"
 
+update_feed_base="${MYGO_UPDATE_FEED_URL:-$(jq -r '.updates.url // ""' cmd/sailry-desktop/mygo.json)}"
+update_feed_manifest="${update_feed_base%/}/update-darwin-$arch.json"
+update_public_key="${MYGO_UPDATE_PUBLIC_KEY:-${SPARKLE_PUBLIC_KEY:-$(jq -r '.updates.publicKey // ""' cmd/sailry-desktop/mygo.json)}}"
+if test -n "$update_feed_base"; then
+  flags="$flags -X $update_pkg.BuildFeedURL=$update_feed_manifest"
+fi
+mygo_config_backup=$(mktemp "${TMPDIR:-/tmp}/mygo-config-XXXXXX")
+cp cmd/sailry-desktop/mygo.json "$mygo_config_backup"
+restore_mygo_config() {
+  if test -f "$mygo_config_backup"; then
+    mv "$mygo_config_backup" cmd/sailry-desktop/mygo.json
+  fi
+}
+if test -n "$update_public_key"; then
+  flags="$flags -X $update_pkg.BuildPublicKey=$update_public_key"
+  flags="$flags -X github.com/egoist/mygo.packageUpdateFeed=$update_feed_manifest"
+  flags="$flags -X github.com/egoist/mygo.packageUpdateKey=$update_public_key"
+  jq --arg url "${update_feed_base%/}" --arg key "$update_public_key" \
+    '.updates.url = $url | .updates.publicKey = $key' "$mygo_config_backup" > cmd/sailry-desktop/mygo.json
+else
+  echo 'warning: MYGO_UPDATE_PUBLIC_KEY (or SPARKLE_PUBLIC_KEY) is not set; MyGo updater will build unconfigured' >&2
+  jq 'del(.updates)' "$mygo_config_backup" > cmd/sailry-desktop/mygo.json
+fi
+
 rm -rf -- "$app" "$image" "$update"
 # mygo signs nested code and the bundle. Notarization and the disk image
 # follow the seal, which changes the bundle after mygo has signed it.
-MYGO_LDFLAGS=$flags .runtime/package/bin/mygo build -platform "$platform" -sign "$identity" -skip-notarize -skip-dmg cmd/sailry-desktop
+build_status=0
+MYGO_LDFLAGS=$flags .runtime/package/bin/mygo build -platform "$platform" -sign "$identity" -skip-notarize -skip-dmg cmd/sailry-desktop || build_status=$?
+restore_mygo_config
+test "$build_status" -eq 0
 test -d "$app"
 
 # Align bundle identity and numeric CFBundleVersion with main (sh.waku,
