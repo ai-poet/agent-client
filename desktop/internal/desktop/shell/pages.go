@@ -174,7 +174,7 @@ func (a *App) featurePage(c *ui.Context) {
 func (a *App) projectPrompt(c *ui.Context, k panel.Kind) {
 	kit.Result(c, kit.ResultProps{Icon: panel.ResourceOf(k).Icon, Title: i18n.T(c, "resource_project_empty"), Extra: func() {
 		label := i18n.T(c, "project_new")
-		kit.Primary(c.Key("new-project"), label, false).Children(func() {
+		kit.PrimaryLook(c, ui.ButtonBase(c.Key("new-project")), label, false).Children(func() {
 			ui.Icon(c, icons.Plus).FontSize(16)
 			ui.Text(c, label).FontSize(14)
 		}).OnClick(func() { a.Sidebar.OpenEditor(nil) })

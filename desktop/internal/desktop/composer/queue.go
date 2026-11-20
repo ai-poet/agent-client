@@ -385,8 +385,7 @@ func (s *State) queueEditor(c *ui.Context, ctx *Context, actions Actions) {
 			}
 			ui.Spacer(c)
 			button := func(key, label string) ui.Element {
-				return kit.Ghost(c.Key(key), label, false).Height(28).PaddingX(12).Radius(14).Border(1, p.Border).
-					Children(func() { ui.Text(c, label).FontSize(14) })
+				return kit.Ghost(c.Key(key), label, false).Height(28).PaddingX(12).Radius(14).Border(1, p.Border)
 			}
 			if ctx.Child {
 				kit.IconButton(c.Key("copy"), icons.Copy, i18n.T(c, "message_copy"), 28, false).Radius(14).Disabled(q.loading).

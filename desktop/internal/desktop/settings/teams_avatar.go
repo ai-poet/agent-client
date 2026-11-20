@@ -153,7 +153,7 @@ func avatarChoices(c *ui.Context, st *avatarPicker, kind avatarKind, current *st
 	body.Children(func() {
 		ui.Row(c.Key("head")).Gap(avatarGap).AlignItems(ui.Center).Children(func() {
 			name := i18n.T(c, "role_avatar_none")
-			none := kit.Ghost(c.Key("none"), name, false).Grow(1).Height(32).PaddingX(8).Gap(8).Justify(ui.Start).
+			none := kit.GhostLook(c, ui.ButtonBase(c.Key("none")).Label(name), false).Grow(1).Height(32).PaddingX(8).Gap(8).Justify(ui.Start).
 				AccessSelected(!kind.known(*current))
 			if !kind.known(*current) {
 				none.Background(p.Selected())

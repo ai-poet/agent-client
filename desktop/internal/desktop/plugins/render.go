@@ -332,8 +332,7 @@ func (mounted *Mounted) renderCore(context *ui.Context, element *NativeElement, 
 			break
 		}
 		variant := runtimeString(properties["variant"])
-		// labeled is whether the Kit button built its own label.
-		labeled := true
+		hasChildren := len(element.Children) != 0
 		// The Kit look's edges, which the package's own styles refine edge
 		// by edge as the reference refines its Button's.
 		palette := theme.Of(context)
@@ -341,35 +340,55 @@ func (mounted *Mounted) renderCore(context *ui.Context, element *NativeElement, 
 		element.look = look
 		switch {
 		case variant == "primary" || runtimeBool(properties["primary"]):
-			result = kit.Primary(context, label, runtimeBool(properties["disabled"]))
-			labeled = false
+			if hasChildren {
+				result = kit.PrimaryLook(context, ui.ButtonBase(context), label, runtimeBool(properties["disabled"]))
+			} else {
+				result = kit.Primary(context, label, runtimeBool(properties["disabled"]))
+			}
 		case variant == "outline" || runtimeBool(properties["outline"]) || runtimeBool(properties["secondary"]):
-			result = kit.Secondary(context, label)
+			if hasChildren {
+				result = kit.SecondaryLook(context, ui.ButtonBase(context).Label(label))
+			} else {
+				result = kit.Secondary(context, label)
+			}
 			look.border = [4]float32{1, 1, 1, 1}
 		case variant == "danger" || runtimeBool(properties["danger"]):
 			result = kit.Danger(context, label)
 		case runtimeBool(properties["success"]):
-			result = kit.Primary(context, label, runtimeBool(properties["disabled"])).Background(theme.Of(context).Success)
-			labeled = false
+			if hasChildren {
+				result = kit.PrimaryLook(context, ui.ButtonBase(context), label, runtimeBool(properties["disabled"])).Background(theme.Of(context).Success)
+			} else {
+				result = kit.Primary(context, label, runtimeBool(properties["disabled"])).Background(theme.Of(context).Success)
+			}
 		case runtimeBool(properties["warning"]):
-			result = kit.Primary(context, label, runtimeBool(properties["disabled"])).Background(theme.Of(context).Warning)
-			labeled = false
+			if hasChildren {
+				result = kit.PrimaryLook(context, ui.ButtonBase(context), label, runtimeBool(properties["disabled"])).Background(theme.Of(context).Warning)
+			} else {
+				result = kit.Primary(context, label, runtimeBool(properties["disabled"])).Background(theme.Of(context).Warning)
+			}
 		case runtimeBool(properties["link"]):
-			result = kit.Ghost(context, label, false).TextColor(theme.Of(context).Link)
-			labeled = false
+			if hasChildren {
+				result = kit.GhostLook(context, ui.ButtonBase(context).Label(label), false).TextColor(theme.Of(context).Link)
+			} else {
+				result = kit.Ghost(context, label, false).TextColor(theme.Of(context).Link)
+			}
 			look.padding = [4]float32{}
 		case element.Export != "Button" || runtimeBool(properties["ghost"]) || runtimeBool(properties["text"]) || variant == "ghost":
-			result = kit.Ghost(context, label, runtimeBool(properties["selected"])).Padding(6, 10)
-			labeled = false
+			if hasChildren {
+				result = kit.GhostLook(context, ui.ButtonBase(context).Label(label), runtimeBool(properties["selected"])).Padding(6, 10)
+			} else {
+				result = kit.Ghost(context, label, runtimeBool(properties["selected"])).Padding(6, 10)
+			}
 			look.padding = [4]float32{6, 10, 6, 10}
 		default:
 			// The reference's Button without a variant is Kit's default
 			// button, as the application's own secondary actions.
-			result = kit.Secondary(context, label)
+			if hasChildren {
+				result = kit.SecondaryLook(context, ui.ButtonBase(context).Label(label))
+			} else {
+				result = kit.Secondary(context, label)
+			}
 			look.border = [4]float32{1, 1, 1, 1}
-		}
-		if !labeled && len(element.Children) == 0 && label != "" {
-			result.Children(func() { ui.Text(context, label).FontSize(14).SingleLine() })
 		}
 	case "Checkbox", "Radio", "Toggle", "Switch":
 		identifier := mounted.widgetID(element)

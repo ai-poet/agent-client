@@ -84,7 +84,7 @@ func (a *App) bell(c *ui.Context) {
 	panel := kit.Popover(c, b, &a.activity, func() {
 		ui.Row(c.Key("head")).Height(40).PaddingStart(8).Gap(4).Children(func() {
 			center := i18n.T(c, "notification_center")
-			kit.Ghost(c.Key("center"), center, false).Height(28).PaddingX(4).Gap(4).Children(func() {
+			kit.GhostLook(c, ui.ButtonBase(c.Key("center")).Label(center), false).Height(28).PaddingX(4).Gap(4).Children(func() {
 				ui.Text(c, center).FontSize(14).FontWeight(500)
 				ui.Icon(c, icons.ChevronRight).FontSize(14).TextColor(p.MutedForeground)
 			}).OnClick(func() {
@@ -371,7 +371,7 @@ func (a *App) overflowRow(c *ui.Context, cv *preview.Conversation, l lane, open 
 	p := theme.Of(c)
 	_, glyph, color := l.look(p)
 	title := sidebar.Title(c, cv)
-	row := kit.Ghost(c.Key(cv.ID), title+" · "+i18n.T(c, l.key()), false).Height(36).PaddingX(8).Gap(8).Shrink(0).Justify(ui.Start)
+	row := kit.GhostLook(c, ui.ButtonBase(c.Key(cv.ID)).Label(title+" · "+i18n.T(c, l.key())), false).Height(36).PaddingX(8).Gap(8).Shrink(0).Justify(ui.Start)
 	row.Children(func() {
 		kit.Agent(c, cv.ID, kit.AgentColor(c, cv.ID), false, 16)
 		ui.Text(c, title).FontSize(14).SingleLine().Grow(1).Shrink(1).MinWidth(0)

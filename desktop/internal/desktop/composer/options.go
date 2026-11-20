@@ -451,12 +451,12 @@ func (s *State) settingsButton(c *ui.Context, ctx *Context, actions Actions) {
 		// row_text: a 16 icon, the label, and a 16 chevron, 8 apart, in a
 		// small ghost button 32 high.
 		row := func(key string, icon *ui.SVG, label string, color ui.Color, page settingsPage) {
-			MenuRow(c, kit.Ghost(c.Key(key), label, false), icon, label, color, icons.ChevronRight).
+			MenuRow(c, kit.GhostLook(c, ui.ButtonBase(c.Key(key)).Label(label), false), icon, label, color, icons.ChevronRight).
 				OnClick(func() { s.page = page })
 		}
 		back := func() {
 			label := i18n.T(c, "composer_back")
-			MenuRow(c, kit.Ghost(c.Key("back"), label, false), icons.ChevronLeft, label, p.Foreground, nil).
+			MenuRow(c, kit.GhostLook(c, ui.ButtonBase(c.Key("back")).Label(label), false), icons.ChevronLeft, label, p.Foreground, nil).
 				OnClick(func() { s.page = settingsMain })
 		}
 		// option is a choice of a page, the row the mode and permission
@@ -498,7 +498,6 @@ func (s *State) settingsButton(c *ui.Context, ctx *Context, actions Actions) {
 				// model_settings without a model: Select model, to the settings.
 				kit.Ghost(c.Key("select-model"), i18n.T(c, "composer_select_model"), false).FillWidth().Height(32).
 					Disabled(ctx.SelectModel == nil).
-					Children(func() { ui.Text(c, i18n.T(c, "composer_select_model")).FontSize(14).SingleLine() }).
 					OnClick(func() { ctx.SelectModel() })
 			} else {
 				s.controls(c, ctx, actions)

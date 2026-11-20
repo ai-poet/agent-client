@@ -221,7 +221,7 @@ func (binding *NativeBinding) renderTabs(view *ui.Context, identity string, prop
 				}
 				row := ui.Row(view.Key(itemID)).Gap(2).MaxWidth(nativeProp(props, "max_width", float32(240)))
 				row.Children(func() {
-					button := kit.Ghost(view, label, selected != nil && itemID == *selected).Padding(6, 10).Gap(6).MinWidth(0).Disabled(nativeProp(props, "disabled", false))
+					button := kit.GhostLook(view, ui.ButtonBase(view).Label(label), selected != nil && itemID == *selected).Padding(6, 10).Gap(6).MinWidth(0).Disabled(nativeProp(props, "disabled", false))
 					button.Children(func() {
 						if nativeProp(item, "loading", false) {
 							kit.Busy(view)

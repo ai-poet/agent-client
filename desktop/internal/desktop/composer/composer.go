@@ -476,7 +476,7 @@ func (s *State) toolbar(c *ui.Context, ctx *Context, actions Actions, submit fun
 func (s *State) sendButton(c *ui.Context, ctx *Context, submit func() bool, stop func()) {
 	v := theme.Of(c).Variant
 	if s.Running {
-		b := kit.Primary(c.Key("stop"), i18n.T(c, "chat_stop"), ctx.Readonly).Disabled(ctx.Readonly).Size(32, 32).PaddingX(0).Radius(16)
+		b := kit.PrimaryLook(c, ui.ButtonBase(c.Key("stop")), i18n.T(c, "chat_stop"), ctx.Readonly).Disabled(ctx.Readonly).Size(32, 32).PaddingX(0).Radius(16)
 		if v != nil {
 			kit.Fill(c, b, v.Composer.Stop, false)
 		}
@@ -485,7 +485,7 @@ func (s *State) sendButton(c *ui.Context, ctx *Context, submit func() bool, stop
 		return
 	}
 	blocked := !s.deliverable(ctx)
-	b := kit.Primary(c.Key("send"), i18n.T(c, "send"), blocked).Size(32, 32).PaddingX(0).Radius(16)
+	b := kit.PrimaryLook(c, ui.ButtonBase(c.Key("send")), i18n.T(c, "send"), blocked).Size(32, 32).PaddingX(0).Radius(16)
 	if v != nil {
 		kit.Fill(c, b, v.Composer.Send, blocked)
 	}

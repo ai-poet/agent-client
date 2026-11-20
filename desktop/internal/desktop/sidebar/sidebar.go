@@ -222,7 +222,7 @@ func (s *State) Order() []string {
 func View(c *ui.Context, s *State) {
 	s.drawn = false
 	ui.Column(c).Padding(16, 12, 8, 12).Children(func() {
-		b := kit.Primary(c.Key("new"), i18n.T(c, "conversation"), false).FillWidth()
+		b := kit.PrimaryLook(c, ui.ButtonBase(c.Key("new")), i18n.T(c, "conversation"), false).FillWidth()
 		if v := theme.Of(c).Variant; v != nil {
 			kit.Fill(c, b, v.NewSession, false)
 		}
@@ -385,9 +385,7 @@ func (s *State) limited(c *ui.Context, key string, list []*preview.Conversation,
 			label = i18n.T(c, "sidebar_sessions_less")
 		}
 		kit.Ghost(c.Key(key+"/more"), label, false).FillWidth().Height(28).PaddingStart(indent).Justify(ui.Start).
-			TextColor(p.MutedForeground.Alpha(0.7)).Children(func() {
-			ui.Text(c, label).FontSize(14).SingleLine()
-		}).OnClick(func() { s.more[key] = !s.more[key] })
+			TextColor(p.MutedForeground.Alpha(0.7)).OnClick(func() { s.more[key] = !s.more[key] })
 	}
 }
 

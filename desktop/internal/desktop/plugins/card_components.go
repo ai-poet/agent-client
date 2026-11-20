@@ -33,9 +33,6 @@ func (host *CardHost) renderAction(view *ui.Context, element NativeElement, _ fu
 	} else {
 		button = kit.Ghost(view, label, false).Disabled(disabled).Padding(6, 10)
 	}
-	if nativeProp(props, "icon", "") == "" {
-		button.Children(func() { nativeText(view, label) })
-	}
 	button.OnClick(func() {
 		if host.ctx.Err() == nil && host.binding.Action != nil && host.Permits(action) {
 			host.binding.Action(identity, action)

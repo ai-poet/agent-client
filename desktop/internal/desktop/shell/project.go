@@ -112,7 +112,7 @@ func (a *App) projectView(c *ui.Context) {
 			})
 			ui.Row(c.Key("actions")).Gap(8).Wrap().Children(func() {
 				label := i18n.T(c, "workspace_new_session")
-				kit.Primary(c.Key("new-session"), label, state.actions.NewSession == nil).Children(func() {
+				kit.PrimaryLook(c, ui.ButtonBase(c.Key("new-session")), label, state.actions.NewSession == nil).Children(func() {
 					ui.Icon(c, icons.Plus).FontSize(16)
 					ui.Text(c, label).FontSize(14)
 				}).OnClick(func() { state.actions.NewSession(project) })

@@ -780,7 +780,7 @@ func connectorDialog(c *ui.Context, m *Model) {
 // cannot be pressed while it cannot act or while the action is under way,
 // which shows as a spinner before its label.
 func pendingButton(c *ui.Context, key any, label string, disabled, pending bool) ui.Element {
-	return kit.Primary(c.Key(key), label, disabled || pending).Busy(pending).Children(func() {
+	return kit.PrimaryLook(c, ui.ButtonBase(c.Key(key)), label, disabled || pending).Busy(pending).Children(func() {
 		if pending {
 			kit.Busy(c)
 		}

@@ -129,7 +129,7 @@ func iconButton(c *ui.Context, key any, icon *ui.SVG, label string, primary, dis
 	p := theme.Of(c)
 	var b ui.Element
 	if primary {
-		b = kit.Primary(c.Key(key), label, disabled)
+		b = kit.PrimaryLook(c, ui.ButtonBase(c.Key(key)), label, disabled)
 	} else {
 		b = ui.ButtonBase(c.Key(key)).Label(label).Disabled(disabled).Radius(p.Radius).Center().Gap(6).PaddingX(12).Height(32).
 			Border(1, p.Border).Background(p.ButtonSecondary).TextColor(p.ButtonSecondaryForeground).Cursor(ui.CursorPointer)
@@ -262,7 +262,7 @@ func authorization(c *ui.Context, key any, a *Authorization, tile func(), refres
 					ui.TextInput(c.Key("pasted"), &a.Pasted).Label(t("provider_login_callback")).
 						Placeholder(t("provider_login_callback_placeholder")).Grow(1)
 					kit.Primary(c.Key("continue"), t("provider_login_continue"), false).
-						Children(func() { ui.Text(c, t("provider_login_continue")).FontSize(14) }).OnClick(submit)
+						OnClick(submit)
 				})
 			}
 			open := func() {
@@ -296,7 +296,7 @@ func authorization(c *ui.Context, key any, a *Authorization, tile func(), refres
 					}
 					if !callback {
 						kit.Primary(c.Key("primary"), t(primary), a.Busy || a.Cancelling).Grow(1).
-							Children(func() { ui.Text(c, t(primary)).FontSize(14) }).OnClick(onPrimary)
+							OnClick(onPrimary)
 					} else {
 						kit.Secondary(c.Key("primary"), t(primary)).Grow(1).Disabled(a.Busy || a.Cancelling).OnClick(onPrimary)
 					}

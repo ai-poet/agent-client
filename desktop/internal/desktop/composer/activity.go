@@ -200,7 +200,7 @@ func (s *State) gitChanges(c *ui.Context, ch Changes, actions Actions) {
 		})
 		for _, f := range ch.Recent {
 			dir, base := path.Split(f.Path)
-			kit.Ghost(c.Key(f.Path), f.Path, false).FillWidth().Height(32).PaddingX(4).Gap(8).Children(func() {
+			kit.GhostLook(c, ui.ButtonBase(c.Key(f.Path)).Label(f.Path), false).FillWidth().Height(32).PaddingX(4).Gap(8).Children(func() {
 				ui.Icon(c, icons.File).FontSize(14).TextColor(p.MutedForeground)
 				ui.Row(c).Grow(1).MinWidth(0).Gap(6).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, base).FontSize(14).SingleLine().Shrink(0).MaxWidth(200).TextColor(p.Foreground)
@@ -542,7 +542,7 @@ func (s *State) subagents(c *ui.Context, a Activity, actions Actions) {
 // subagentRow is a subagent's identicon, title and running time; a click opens
 // its session.
 func (s *State) subagentRow(c *ui.Context, k conversation.Child, name string, live bool, actions Actions) ui.Element {
-	row := kit.Ghost(c.Key(k.ID), name, false).Height(26).PaddingX(8).Gap(8).Justify(ui.Start).
+	row := kit.GhostLook(c, ui.ButtonBase(c.Key(k.ID)).Label(name), false).Height(26).PaddingX(8).Gap(8).Justify(ui.Start).
 		Children(func() {
 			kit.RoleIdenticon(c, k.ID, k.Avatar, live && !k.Unsynced && k.Status.Active(), 16)
 			ui.Text(c, name).FontSize(14).SingleLine().Grow(1).Shrink(1).MinWidth(0)

@@ -53,7 +53,7 @@ func (pr *Project) history(c *ui.Context, own bool) {
 			ui.Row(c.Key("more")).FillWidth().Height(32).Center().Children(func() { kit.Loader(c, 16) })
 		case v.log.Next:
 			label := i18n.T(c, "files_load_more")
-			kit.Ghost(c.Key("more"), label, false).FillWidth().Height(32).TextColor(p.MutedForeground).Children(func() {
+			kit.GhostLook(c, ui.ButtonBase(c.Key("more")).Label(label), false).FillWidth().Height(32).TextColor(p.MutedForeground).Children(func() {
 				ui.Text(c, label).FontSize(13).SingleLine()
 			}).OnClick(func() {
 				if pr.Actions.GitHistory != nil {

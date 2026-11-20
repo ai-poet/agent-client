@@ -423,7 +423,6 @@ func (r *Runtime) renderPluginHeaderFilter(view *ui.Context, mounted *pluginMoun
 						continue
 					}
 					kit.Ghost(current.Key(item.ID), item.Label, item.ID == filter.Selected).FillWidth().Justify(ui.Start).Padding(6, 10).
-						Children(func() { ui.Text(current, item.Label).SingleLine() }).
 						OnClick(func() { state.open = false; emit(item.ID) })
 				}
 			})

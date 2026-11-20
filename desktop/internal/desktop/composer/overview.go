@@ -243,7 +243,7 @@ func (s *OverviewState) body(c *ui.Context, o *Overview, popover bool) {
 			})
 		}
 		ghost := func(key, name string, content func()) ui.Element {
-			return kit.Ghost(c.Key(key), name, false).FillWidth().MinWidth(0).Height(30).PaddingX(6).Gap(10).Justify(ui.Start).
+			return kit.GhostLook(c, ui.ButtonBase(c.Key(key)).Label(name), false).FillWidth().MinWidth(0).Height(30).PaddingX(6).Gap(10).Justify(ui.Start).
 				Children(content)
 		}
 		// A row opens what it names, closing the popover; expand lists a

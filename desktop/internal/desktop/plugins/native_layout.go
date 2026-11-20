@@ -631,7 +631,7 @@ func (binding *NativeBinding) renderCollapse(view *ui.Context, element NativeEle
 	result := ui.Column(view).FillWidth().MinWidth(0).Children(func() {
 		heading := ui.Row(view).FillWidth().MinWidth(0)
 		heading.Children(func() {
-			button := kit.Ghost(view, nativeProp(props, "label", ""), false).Grow(1).MinWidth(0).Justify(ui.Start).Height(36).Gap(6)
+			button := kit.GhostLook(view, ui.ButtonBase(view).Label(nativeProp(props, "label", "")), false).Grow(1).MinWidth(0).Justify(ui.Start).Height(36).Gap(6)
 			if plain {
 				button.Height(32).PaddingX(4)
 			}

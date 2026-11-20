@@ -121,7 +121,7 @@ func (binding *NativeBinding) renderConfiguration(view *ui.Context, element Nati
 	}
 	label := nativeProp(props, "label", "")
 	available := binding.Operations["sailry/forms.openConfiguration"] != nil
-	button := kit.Ghost(view, label, false).Padding(6, 10).Gap(6).
+	button := kit.GhostLook(view, ui.ButtonBase(view).Label(label), false).Padding(6, 10).Gap(6).
 		Disabled(nativeProp(props, "disabled", false) || !available).Children(func() {
 		ui.Icon(view, icons.Settings).Size(16, 16)
 		nativeText(view, label).SingleLine()
@@ -154,7 +154,6 @@ func (binding *NativeBinding) renderCardAction(view *ui.Context, element NativeE
 	} else {
 		button = kit.Ghost(view, label, false).Disabled(nativeProp(props, "disabled", false)).Padding(6, 10)
 	}
-	button.Children(func() { nativeText(view, label) })
 	button.OnClick(func() { binding.invoke("sailry/card", "action", identity, props["action"]) })
 	return button, nil
 }

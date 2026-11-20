@@ -13,7 +13,7 @@ import (
 func (binding *NativeBinding) renderActivityButton(view *ui.Context, element NativeElement, identity string, props map[string]json.RawMessage, children func()) ui.Element {
 	palette := theme.Of(view)
 	label := nativeProp(props, "label", "")
-	button := kit.Ghost(view, label, false).FillWidth().MinWidth(0).Justify(ui.Start)
+	button := kit.GhostLook(view, ui.ButtonBase(view).Label(label), false).FillWidth().MinWidth(0).Justify(ui.Start)
 	if element.Export == "CardButton" {
 		background := palette.Surface
 		if palette.Dark {

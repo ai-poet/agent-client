@@ -684,7 +684,7 @@ func (pr *Project) diff(c *ui.Context, path string) {
 			bar.Children(func() {
 				editor.DefaultHunkActions(c, ui.Row(c.Key("hunk")), a)
 				stage := i18n.T(c, "hunks_stage")
-				kit.Ghost(c.Key("stage"), stage, false).Height(20).PaddingX(8).Children(func() {
+				kit.GhostLook(c, ui.ButtonBase(c.Key("stage")).Label(stage), false).Height(20).PaddingX(8).Children(func() {
 					ui.Text(c, stage).FontSize(12)
 				}).OnClick(func() {
 					if pr.Actions != nil && pr.Actions.Hunk != nil {
@@ -779,7 +779,7 @@ func (s *State) history(c *ui.Context) {
 					ui.Textf(c, "−%d", cp.Removed).FontSize(12).TextColor(p.Danger)
 					ui.Spacer(c)
 					undo := i18n.T(c, "turn_changes_undo_all")
-					kit.Ghost(c.Key("undo"), undo, false).Height(28).PaddingX(8).Gap(6).Border(1, p.Border).Children(func() {
+					kit.GhostLook(c, ui.ButtonBase(c.Key("undo")).Label(undo), false).Height(28).PaddingX(8).Gap(6).Border(1, p.Border).Children(func() {
 						ui.Icon(c, icons.Restore).FontSize(14)
 						ui.Text(c, undo).FontSize(14)
 					}).OnClick(func() {

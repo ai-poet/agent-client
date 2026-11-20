@@ -344,7 +344,7 @@ func (s *State) mainPanel(c *ui.Context, ctx *Context) {
 				})
 			})
 		})
-		kit.Ghost(c.Key("choose"), m.Name, false).Height(28).PaddingX(8).Gap(4).Radius(14).MaxWidth(panelWidth).Children(func() {
+		kit.GhostLook(c, ui.ButtonBase(c.Key("choose")).Label(m.Name), false).Height(28).PaddingX(8).Gap(4).Radius(14).MaxWidth(panelWidth).Children(func() {
 			ui.Text(c, m.Name).FontSize(14).SingleLine().Shrink(1).MinWidth(0)
 			ui.Icon(c, icons.ChevronRight).FontSize(12).TextColor(p.MutedForeground)
 		}).OnClick(func() {
@@ -561,7 +561,7 @@ func avatar(c *ui.Context, icon *ui.SVG, fill ui.Color, size float32, selected, 
 func (s *State) teamList(c *ui.Context, ctx *Context, actions Actions) {
 	p := theme.Of(c)
 	row := func(key, name string, face func(), count int, selected bool, pick func()) {
-		b := kit.Ghost(c.Key(key), name, false).FillWidth().Height(32).PaddingX(8).Gap(8).Justify(ui.Start).
+		b := kit.GhostLook(c, ui.ButtonBase(c.Key(key)).Label(name), false).FillWidth().Height(32).PaddingX(8).Gap(8).Justify(ui.Start).
 			AccessSelected(selected)
 		if selected {
 			b.Background(p.Selected())
@@ -575,7 +575,7 @@ func (s *State) teamList(c *ui.Context, ctx *Context, actions Actions) {
 		}).OnClick(pick)
 	}
 	ui.Scroll(c.Key("teams")).FillWidth().Grow(1).Gap(4).Children(func() {
-		kit.Ghost(c.Key("back"), i18n.T(c, "composer_back"), false).Height(28).PaddingX(8).Gap(6).Justify(ui.Start).
+		kit.GhostLook(c, ui.ButtonBase(c.Key("back")).Label(i18n.T(c, "composer_back")), false).Height(28).PaddingX(8).Gap(6).Justify(ui.Start).
 			Children(func() {
 				ui.Icon(c, icons.ArrowLeft).FontSize(14)
 				ui.Text(c, i18n.T(c, "composer_back")).FontSize(14)
@@ -600,7 +600,7 @@ func (s *State) teamList(c *ui.Context, ctx *Context, actions Actions) {
 			})
 		}
 		ui.Box(c).FillWidth().Height(1).Margin(4, 0).Background(p.Border).Shrink(0)
-		kit.Ghost(c.Key("manage"), i18n.T(c, "composer_team_manage"), false).FillWidth().Height(32).PaddingX(8).Gap(8).
+		kit.GhostLook(c, ui.ButtonBase(c.Key("manage")).Label(i18n.T(c, "composer_team_manage")), false).FillWidth().Height(32).PaddingX(8).Gap(8).
 			Justify(ui.Start).TextColor(p.MutedForeground).Children(func() {
 			ui.Box(c).Size(member, member).Shrink(0).Center().Children(func() { ui.Icon(c, icons.Settings).FontSize(16) })
 			ui.Text(c, i18n.T(c, "composer_team_manage")).FontSize(14).SingleLine()

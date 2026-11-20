@@ -32,7 +32,7 @@ func (binding *NativeBinding) renderPath(view *ui.Context, element NativeElement
 			if index+1 == len(segments) {
 				tone = palette.Foreground
 			}
-			button := kit.Ghost(view.Key(index), segment, false).Height(24).MinWidth(0).Shrink(1).Padding(0, 4).Disabled(disabled).Tooltip(segment)
+			button := kit.GhostLook(view, ui.ButtonBase(view.Key(index)).Label(segment), false).Height(24).MinWidth(0).Shrink(1).Padding(0, 4).Disabled(disabled).Tooltip(segment)
 			button.Children(func() { ui.Text(view, segment).FontSize(13).TextColor(tone).MinWidth(0).SingleLine() })
 			button.OnClick(func() { binding.emit("control", map[string]any{"id": identity, "value": index}) })
 		}

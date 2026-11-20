@@ -34,7 +34,7 @@ func (s *State) older(c *ui.Context, sess *Session, actions Actions) {
 	if sess.OlderFailed {
 		kit.Result(c.Key("older"), kit.ResultProps{Status: kit.ResultError, Title: i18n.T(c, "chat_history_failed"), Extra: func() {
 			kit.Ghost(c.Key("retry"), i18n.T(c, "chat_retry"), false).Height(28).PaddingX(8).
-				Children(func() { ui.Text(c, i18n.T(c, "chat_retry")).FontSize(14) }).OnClick(actions.LoadOlder)
+				OnClick(actions.LoadOlder)
 		}})
 		return
 	}
@@ -366,7 +366,7 @@ func (s *State) selection(c *ui.Context, session string, turn ui.Element, readon
 	pill.Children(func() {
 		button := func(key, label string, do func()) ui.Element {
 			return kit.Ghost(c.Key(key), label, false).Height(28).PaddingX(10).Radius(14).
-				Children(func() { ui.Text(c, label).FontSize(14) }).OnClick(func() {
+				OnClick(func() {
 				do()
 				at.hidden = true
 			})

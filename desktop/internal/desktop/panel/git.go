@@ -34,7 +34,7 @@ func (pr *Project) gitDetails(c *ui.Context, own bool, open func(path string)) {
 		if branch == "" {
 			branch = i18n.T(c, "git_branches")
 		}
-		b := kit.Ghost(c.Key("branch"), branch, false).Height(28).PaddingX(8).Gap(6).Shrink(1).MinWidth(0).Justify(ui.Start).Disabled(!pr.gitWritable())
+		b := kit.GhostLook(c, ui.ButtonBase(c.Key("branch")).Label(branch), false).Height(28).PaddingX(8).Gap(6).Shrink(1).MinWidth(0).Justify(ui.Start).Disabled(!pr.gitWritable())
 		b.Children(func() {
 			ui.Icon(c, icons.Network).FontSize(14).Shrink(0)
 			ui.Text(c, branch).FontSize(14).SingleLine().Shrink(1).MinWidth(0)
@@ -105,9 +105,9 @@ func (pr *Project) changesToolbar(c *ui.Context, open func(path string)) {
 	}
 	ui.Row(c.Key("git-toolbar")).PaddingX(8).PaddingY(4).Gap(4).Shrink(0).Children(func() {
 		label := i18n.T(c, "git_diff")
-		b := kit.GhostLook(c, ui.ButtonBase(c).Label(label), false).Height(28).PaddingX(8).Disabled(len(entries) == 0)
+		b := kit.GhostLook(c, ui.ButtonBase(c.Key("diff")).Label(label), false).Height(28).PaddingX(8).Disabled(len(entries) == 0)
 		kit.Tooltip(c, b, i18n.T(c, "git_view_diff"))
-		b.OnClick(func() { open(allChanges) })
+		b.Children(func() { ui.Text(c, label).FontSize(13) }).OnClick(func() { open(allChanges) })
 		stats(c, p, add, del)
 		ui.Spacer(c)
 		g := pr.menus(c)
@@ -329,7 +329,7 @@ func (pr *Project) commitBox(c *ui.Context) {
 			ui.Row(c.Key("options")).Gap(8).TextColor(p.MutedForeground).Children(func() {
 				if v.amend {
 					label := i18n.T(c, "git_amend")
-					kit.Ghost(c.Key("amend"), label, false).Height(20).PaddingX(6).
+					kit.GhostLook(c, ui.ButtonBase(c.Key("amend")).Label(label), false).Height(20).PaddingX(6).
 						Children(func() { ui.Text(c, label).FontSize(12) }).OnClick(func() { pr.toggleAmend() })
 				}
 				if v.signoff {

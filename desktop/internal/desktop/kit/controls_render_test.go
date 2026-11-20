@@ -111,6 +111,8 @@ func TestCaptionsAppearOnce(t *testing.T) {
 		{"SecondaryBusy busy", func(c *ui.Context) ui.Element { return SecondaryBusy(c, label, true) }},
 		{"Ghost", func(c *ui.Context) ui.Element { return Ghost(c, label, false) }},
 		{"Danger", func(c *ui.Context) ui.Element { return Danger(c, label) }},
+		{"DangerBusy idle", func(c *ui.Context) ui.Element { return DangerBusy(c, label, false) }},
+		{"DangerBusy busy", func(c *ui.Context) ui.Element { return DangerBusy(c, label, true) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			build := tc.build

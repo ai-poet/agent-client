@@ -100,7 +100,7 @@ func (pr *Project) fileSearchView(c *ui.Context) {
 				key, text string
 				value     *bool
 			}{{"file_search_case", "Aa", &state.query.CaseSensitive}, {"file_search_regex", ".*", &state.query.Regex}} {
-				button := kit.Ghost(c.Key(toggle.key), i18n.T(c, toggle.key), *toggle.value).Height(28).PaddingX(8).Children(func() { ui.Text(c, toggle.text).FontSize(13) })
+				button := kit.GhostLook(c, ui.ButtonBase(c.Key(toggle.key)).Label(i18n.T(c, toggle.key)), *toggle.value).Height(28).PaddingX(8).Children(func() { ui.Text(c, toggle.text).FontSize(13) })
 				button.OnClick(func() { *toggle.value = !*toggle.value; pr.ResetFileSearch() })
 			}
 			ui.Spacer(c)
@@ -131,7 +131,7 @@ func (pr *Project) fileSearchView(c *ui.Context) {
 			return
 		}
 		for index, match := range state.result.Matches {
-			kit.Ghost(c.Key(index), fmt.Sprintf("%s:%d", match.Path, match.Line), false).FillWidth().Padding(6, 8).Justify(ui.Start).Children(func() {
+			kit.GhostLook(c, ui.ButtonBase(c.Key(index)).Label(fmt.Sprintf("%s:%d", match.Path, match.Line)), false).FillWidth().Padding(6, 8).Justify(ui.Start).Children(func() {
 				ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Children(func() {
 					ui.Textf(c, "%s:%d", match.Path, match.Line).FontSize(14).SingleLine()
 					ui.Text(c, match.Text).FontSize(12).SingleLine().TextColor(p.MutedForeground)

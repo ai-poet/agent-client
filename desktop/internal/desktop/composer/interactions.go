@@ -335,7 +335,7 @@ func (s *State) questionReceipts(c *ui.Context, list []QuestionReceipt) {
 			for _, receipt := range list {
 				ui.Row(c.Key(receipt.ID)).Gap(8).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, receipt.Prompt).FontSize(14).Grow(1).MinWidth(0).MaxLines(3)
-					kit.Primary(c.Key("check"), label, receipt.Check == nil || receipt.Busy).Height(28).Radius(14).
+					kit.PrimaryLook(c, ui.ButtonBase(c.Key("check")), label, receipt.Check == nil || receipt.Busy).Height(28).Radius(14).
 						Children(func() { busyLabel(c, label, receipt.Busy) }).OnClick(func() {
 						if receipt.Check != nil {
 							receipt.Check()
@@ -436,7 +436,7 @@ func (s *State) approval(c *ui.Context, a Approval, actions Actions) {
 	}
 	if a.Receipt || a.Again != nil {
 		ui.Row(c.Key("decision")).Gap(8).Padding(4, 0, 0, 0).Justify(ui.End).AlignItems(ui.Center).Children(func() {
-			kit.Primary(c.Key("again"), retry, a.Again == nil || a.Busy).Height(28).Radius(14).MinWidth(48).
+			kit.PrimaryLook(c, ui.ButtonBase(c.Key("again")), retry, a.Again == nil || a.Busy).Height(28).Radius(14).MinWidth(48).
 				Children(func() { busyLabel(c, retry, a.Busy) }).
 				OnClick(func() { a.Again() })
 		})
@@ -451,7 +451,6 @@ func (s *State) approval(c *ui.Context, a Approval, actions Actions) {
 		// The decision's buttons are one family: pills 28 tall, Deny and the
 		// options outlined, Allow filled.
 		kit.Ghost(c.Key("deny"), deny, false).Height(28).PaddingX(12).MinWidth(48).Radius(14).Border(1, theme.Of(c).Border).Disabled(locked).
-			Children(func() { ui.Text(c, deny).FontSize(14) }).
 			OnClick(func() { actions.Decide(a.ID, Deny, "") })
 		ui.Row(c.Key("allow-group")).Gap(4).AlignItems(ui.Center).Children(func() {
 			allow := i18n.T(c, "approval_allow_once")
@@ -480,8 +479,7 @@ func (s *State) approval(c *ui.Context, a Approval, actions Actions) {
 // outlined is a popover's secondary button.
 func outlined(c *ui.Context, label string) ui.Element {
 	p := theme.Of(c)
-	return kit.Ghost(c, label, false).Height(28).PaddingX(12).MinWidth(48).Radius(14).Border(1, p.Border).
-		Children(func() { ui.Text(c, label).FontSize(14) })
+	return kit.Ghost(c, label, false).Height(28).PaddingX(12).MinWidth(48).Radius(14).Border(1, p.Border)
 }
 
 // busyLabel is a button's label, behind a spinner while its action runs.
@@ -620,7 +618,7 @@ func (s *State) ask(c *ui.Context, q *Ask, actions Actions) {
 			case q.Kind == AskLink:
 				submit = i18n.T(c, "question_open_url")
 			}
-			kit.Primary(c.Key("submit"), submit, held || q.Check == nil && answer == nil).Height(28).Radius(14).
+			kit.PrimaryLook(c, ui.ButtonBase(c.Key("submit")), submit, held || q.Check == nil && answer == nil).Height(28).Radius(14).
 				Children(func() { busyLabel(c, submit, q.Busy) }).
 				OnClick(func() {
 					if q.Check != nil {

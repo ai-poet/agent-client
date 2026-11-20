@@ -229,7 +229,7 @@ func (s *State) places(c *ui.Context, valid bool, title string) {
 				ui.Text(c.Key(g.key), s.title(c, g, n == 0)).FontSize(12).SingleLine().Padding(10, 8, 4, 8).TextColor(p.MutedForeground)
 				for i, loc := range g.items {
 					label := placeName(c, loc)
-					place := kit.Ghost(c.Key([2]any{g.key, i}), label, false).FillWidth().Height(30).PaddingX(8).Gap(8)
+					place := kit.GhostLook(c, ui.ButtonBase(c.Key([2]any{g.key, i})).Label(label), false).FillWidth().Height(30).PaddingX(8).Gap(8)
 					if s.loaded && loc.Path == near {
 						// The neutral selected fill, a step over the hover's.
 						place.Current(ui.CurrentLocation).Background(p.Selected())
@@ -824,7 +824,7 @@ func (s *State) footer(c *ui.Context, valid bool) {
 		}
 		kit.Secondary(c.Key("cancel"), i18n.T(c, "settings_cancel")).OnClick(s.Close)
 		confirm := i18n.T(c, s.o.Confirm)
-		button := kit.Primary(c.Key("confirm"), confirm, s.busy || s.reading || pending || !valid || paths == nil).Children(func() {
+		button := kit.PrimaryLook(c, ui.ButtonBase(c.Key("confirm")), confirm, s.busy || s.reading || pending || !valid || paths == nil).Children(func() {
 			if pending {
 				kit.Busy(c)
 			}

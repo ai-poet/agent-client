@@ -33,7 +33,7 @@ func (binding *NativeBinding) renderControl(view *ui.Context, element NativeElem
 		}
 		var button ui.Element
 		if nativeProp(props, "show_label", false) {
-			button = kit.Ghost(view, label, selected).Height(size).PaddingX(8).Gap(6).Children(func() {
+			button = kit.GhostLook(view, ui.ButtonBase(view).Label(label), selected).Height(size).PaddingX(8).Gap(6).Children(func() {
 				if icon := nativeIcon(nativeProp(props, "icon", "")); icon != nil {
 					ui.Icon(view, icon).Size(16, 16)
 				}
@@ -71,7 +71,7 @@ func (binding *NativeBinding) renderControl(view *ui.Context, element NativeElem
 		var control ui.Element
 		switch nativeProp(props, "variant", "") {
 		case "button":
-			control = kit.Ghost(view, label, *value).Padding(6, 10).Children(func() { nativeText(view, nativeProp(props, "text", label)) })
+			control = kit.GhostLook(view, ui.ButtonBase(view).Label(label), *value).Padding(6, 10).Children(func() { nativeText(view, nativeProp(props, "text", label)) })
 			control.OnClick(func() { send(!*value) })
 		case "checkbox":
 			control = ui.Checkbox(view, value, "").Label(label).OnChange(func() { send(*value) })
@@ -80,7 +80,7 @@ func (binding *NativeBinding) renderControl(view *ui.Context, element NativeElem
 		}
 		return control.Disabled(disabled), nil
 	case "SelectableRow":
-		row := kit.Ghost(view, label, selected).FillWidth().MinWidth(0).Justify(ui.Start).Disabled(disabled)
+		row := kit.GhostLook(view, ui.ButtonBase(view).Label(label), selected).FillWidth().MinWidth(0).Justify(ui.Start).Disabled(disabled)
 		if nativeProp(props, "variant", "") == "card" {
 			// The reference's card is its outline button padded 12, on the
 			// frosted surface and radius of a CardRow; the ghost's hover and
