@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/ai-poet/agent-client/desktop/internal/core"
 )
 
 // TestPublishedRelease signs a release with a throwaway key and checks it
@@ -64,7 +65,7 @@ func TestPublishedRelease(t *testing.T) {
 	}
 	release := selection.Release
 	archive := filepath.Join(output, release.Name)
-	if release.Version != "1.1.0" || release.Name != "Sailry-"+fixtureTarget+".zip" || release.MinimumSystem != "13.0" {
+	if release.Version != "1.1.0" || release.Name != core.AppName+"-"+fixtureTarget+".zip" || release.MinimumSystem != "13.0" {
 		t.Fatalf("release = %+v", release)
 	}
 	if err := verifyArchive(archive, release, keys); err != nil {

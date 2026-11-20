@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/ai-poet/agent-client/desktop/internal/core"
 )
 
 const maxExtracted = 8 * 1024 * 1024 * 1024
@@ -264,8 +265,13 @@ func validatePlist(root string, release Release) error {
 	if err != nil {
 		return failure("updates_package_invalid", "the application plist is invalid")
 	}
-	if values["CFBundleIdentifier"] != "ai.sailry.desktop" || values["CFBundleExecutable"] != "sailry-desktop" ||
+	expectedBuild, err := core.DerivedMacOSBuildNumber(release.Version)
+	if err != nil {
+		return failure("updates_package_invalid", "invalid application version")
+	}
+	if values["CFBundleIdentifier"] != core.MacOSBundleIdentifier || values["CFBundleExecutable"] != core.MacOSExecutableName ||
 		values["CFBundleShortVersionString"] != fmt.Sprintf("%d.%d.%d", version.Major(), version.Minor(), version.Patch()) ||
+		values["CFBundleVersion"] != expectedBuild ||
 		values["LSMinimumSystemVersion"] != release.MinimumSystem {
 		return failure("updates_package_invalid", "the application plist differs from signed update metadata")
 	}

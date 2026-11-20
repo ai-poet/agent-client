@@ -10,6 +10,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/MoeForge/moego/base64"
+	"github.com/ai-poet/agent-client/desktop/internal/core"
 )
 
 // Authenticated v1 metadata; an asset digest is never treated as publisher
@@ -212,9 +213,9 @@ func (c *Config) validate(release Release) error {
 func layout(target string) (bundle, executable string, err error) {
 	switch target {
 	case "aarch64-apple-darwin", "x86_64-apple-darwin":
-		return "Sailry.app", "Contents/MacOS/sailry-desktop", nil
+		return core.MacOSBundleName, core.MacOSExecutablePath, nil
 	case "aarch64-pc-windows-msvc", "x86_64-pc-windows-msvc":
-		return "Sailry", "sailry-desktop.exe", nil
+		return core.WindowsInstallDirName, core.WindowsExecutableName, nil
 	}
 	return "", "", failure("updates_platform", "unsupported desktop update target")
 }

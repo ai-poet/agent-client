@@ -18,6 +18,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/MoeForge/moego/base64"
+	"github.com/ai-poet/agent-client/desktop/internal/core"
 )
 
 // The publisher's side of the signed update-v1 format, run by the release
@@ -60,7 +61,7 @@ func publish(key ed25519.PrivateKey, keys []ed25519.PublicKey, version, director
 		if err != nil {
 			return err
 		}
-		name := "Sailry-" + target + ".zip"
+		name := core.AppName + "-" + target + ".zip"
 		path := filepath.Join(directory, name)
 		if err := signedCopy(key, unsigned[target], path); err != nil {
 			return err
@@ -176,7 +177,7 @@ func minimumSystem(archive string) (string, error) {
 	}
 	defer reader.Close()
 	for _, entry := range reader.File {
-		if entry.Name != "Sailry.app/Contents/Info.plist" {
+		if entry.Name != core.MacOSBundleName+"/Contents/Info.plist" {
 			continue
 		}
 		source, err := entry.Open()
@@ -194,7 +195,7 @@ func minimumSystem(archive string) (string, error) {
 		}
 		return values["LSMinimumSystemVersion"], nil
 	}
-	return "", errors.New("the archive holds no Sailry.app")
+	return "", errors.New("the archive holds no " + core.MacOSBundleName)
 }
 
 func measure(path string) (string, uint64, error) {

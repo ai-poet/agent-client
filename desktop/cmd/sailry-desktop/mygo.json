@@ -1,9 +1,9 @@
 {
-  "name": "Sailry",
-  "slug": "sailry",
-  "identifier": "ai.sailry.desktop",
-  "version": "0.2.0",
-  "copyright": "Copyright © 2026 Sailry",
+  "name": "CheapRouter",
+  "slug": "cheaprouter",
+  "identifier": "sh.waku",
+  "version": "0.4.0",
+  "copyright": "Copyright © 2026 CheapRouter",
   "icon": "../../assets/branding/sailry-windows.png",
   "main": ".",
   "out": "../../.runtime/package/out",
@@ -15,10 +15,15 @@
       "python/bin/python3.12": "macos/python.entitlements.plist"
     },
     "infoPlist": {
+      "CFBundleVersion": "4000",
       "NSAppTransportSecurity": {
         "NSAllowsArbitraryLoadsInWebContent": true
       },
       "NSMicrophoneUsageDescription": "Use the microphone for voice input"
     }
+  },
+  "windows": {
+    "displayName": "CheapRouter",
+    "installDirName": "CheapRouter"
   }
 }

@@ -21,7 +21,7 @@ func TestUpdateLocksEveryWindowDocuments(t *testing.T) {
 		t.Fatal(err)
 	}
 	profile := filepath.Join(root, "profile")
-	installed := filepath.Join(root, "Applications", "Sailry.app")
+	installed := filepath.Join(root, "Applications", "CheapRouter.app")
 	if err := updater.WriteFixtureBundle(installed, link.ProductVersion); err != nil {
 		t.Fatal(err)
 	}

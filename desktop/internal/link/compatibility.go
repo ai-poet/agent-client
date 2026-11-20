@@ -2,7 +2,7 @@ package link
 
 import "github.com/ai-poet/agent-client/desktop/internal/protocol"
 
-var ProductVersion = "0.2.0"
+var ProductVersion = "0.4.0"
 
 func CheckHost(hostProtocol *uint16, hostVersion *string) error {
 	local := uint16(protocol.VERSION)

@@ -24,6 +24,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/MoeForge/moego/base64"
+	"github.com/ai-poet/agent-client/desktop/internal/core"
 )
 
 // FixtureTarget is the release target the fixture feed publishes for.
@@ -120,7 +121,7 @@ func (f *FixtureFeed) Hits(path string) int {
 
 // ArchivePath is the feed's path of a version's archive for FixtureTarget.
 func (f *FixtureFeed) ArchivePath(version string) string {
-	return "/download/v" + version + "/Sailry-" + FixtureTarget + ".zip"
+	return "/download/v" + version + "/" + core.AppName + "-" + FixtureTarget + ".zip"
 }
 
 // Publish adds a release with its signed catalog and signed archives. A
@@ -136,9 +137,9 @@ func (f *FixtureFeed) Publish(version string, damaged bool) {
 	var signed payload
 	files := map[string][]byte{}
 	for _, target := range []string{"aarch64-apple-darwin", "x86_64-apple-darwin"} {
-		name := "Sailry-" + target + ".zip"
+		name := core.AppName + "-" + target + ".zip"
 		for _, suffix := range []string{".zip", ".zip.update.json", ".dmg"} {
-			asset("Sailry-" + target + suffix)
+			asset(core.AppName + "-" + target + suffix)
 		}
 		asset("SHA256SUMS-desktop-" + target)
 		archive := fixtureSigned(fixtureArchive(target, version), name, f.private)
@@ -149,7 +150,7 @@ func (f *FixtureFeed) Publish(version string, damaged bool) {
 		}
 		files["/download/"+tag+"/"+name] = archive
 		signed.Releases = append(signed.Releases, Release{Version: version, Target: target, MinimumSystem: "12.0", Name: name,
-			URL: downloads + "/" + name, SHA256: hex.EncodeToString(digest[:]), Size: uint64(len(archive)), Bundle: "Sailry.app", Executable: "Contents/MacOS/sailry-desktop"})
+			URL: downloads + "/" + name, SHA256: hex.EncodeToString(digest[:]), Size: uint64(len(archive)), Bundle: core.MacOSBundleName, Executable: core.MacOSExecutablePath})
 	}
 	body := fixtureMust(json.Marshal(signed))
 	files["/download/"+tag+"/update-v1.json"] = fixtureMust(json.Marshal(envelope{Version: 1, Payload: body, Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(f.private, body))}))
@@ -226,15 +227,20 @@ func fixtureSigned(archive []byte, name string, key ed25519.PrivateKey) []byte {
 
 func fixtureBundle(target, version string) map[string][]byte {
 	parsed := semver.MustParse(version)
+	buildNumber, err := core.DerivedMacOSBuildNumber(version)
+	if err != nil {
+		panic(err)
+	}
 	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleIdentifier</key><string>ai.sailry.desktop</string>
-<key>CFBundleExecutable</key><string>sailry-desktop</string>
+<key>CFBundleIdentifier</key><string>%s</string>
+<key>CFBundleExecutable</key><string>%s</string>
 <key>CFBundleShortVersionString</key><string>%d.%d.%d</string>
+<key>CFBundleVersion</key><string>%s</string>
 <key>LSMinimumSystemVersion</key><string>12.0</string>
 <key>NSHighResolutionCapable</key><true/>
-</dict></plist>`, parsed.Major(), parsed.Minor(), parsed.Patch())
+</dict></plist>`, core.MacOSBundleIdentifier, core.MacOSExecutableName, parsed.Major(), parsed.Minor(), parsed.Patch(), buildNumber)
 	header := make([]byte, 96)
 	binary.LittleEndian.PutUint32(header, 0xfeedfacf)
 	cpu := uint32(0x01000007)
@@ -243,7 +249,7 @@ func fixtureBundle(target, version string) map[string][]byte {
 	}
 	binary.LittleEndian.PutUint32(header[4:], cpu)
 	return map[string][]byte{
-		"Contents/MacOS/sailry-desktop": header,
+		core.MacOSExecutablePath:        header,
 		"Contents/Resources/build.json": fixtureMust(json.Marshal(build{Version: 1, Target: target, ApplicationVersion: version})),
 		"Contents/Info.plist":           []byte(plist),
 	}
@@ -254,8 +260,8 @@ func fixtureArchive(target, version string) []byte {
 	writer := zip.NewWriter(&buffer)
 	modified := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	files := fixtureBundle(target, version)
-	for _, name := range []string{"Contents/Info.plist", "Contents/MacOS/sailry-desktop", "Contents/Resources/build.json"} {
-		header := &zip.FileHeader{Name: "Sailry.app/" + name, Method: zip.Deflate, Modified: modified}
+	for _, name := range []string{"Contents/Info.plist", core.MacOSExecutablePath, "Contents/Resources/build.json"} {
+		header := &zip.FileHeader{Name: core.MacOSBundleName + "/" + name, Method: zip.Deflate, Modified: modified}
 		header.SetMode(0o644)
 		if strings.Contains(name, "MacOS") {
 			header.SetMode(0o755)
@@ -268,7 +274,7 @@ func fixtureArchive(target, version string) []byte {
 			panic(err)
 		}
 	}
-	resource := &zip.FileHeader{Name: "Sailry.app/Contents/Resources/current.json", Modified: modified}
+	resource := &zip.FileHeader{Name: core.MacOSBundleName + "/Contents/Resources/current.json", Modified: modified}
 	content := []byte("build.json")
 	if runtime.GOOS == "windows" {
 		// Windows does not extract Unix symbolic links. The portable fixture

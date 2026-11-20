@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/ai-poet/agent-client/desktop/internal/core"
 )
 
 // installedBundle is the application bundle the running executable belongs to.
@@ -19,7 +21,7 @@ func installedBundle() (string, error) {
 		if !strings.HasSuffix(root, ".app") {
 			continue
 		}
-		if filepath.Join(root, "Contents", "MacOS", "sailry-desktop") != executable {
+		if filepath.Join(root, filepath.FromSlash(core.MacOSExecutablePath)) != executable {
 			return "", failure("updates_bundle_required", "the executable is outside the expected application bundle")
 		}
 		return root, nil

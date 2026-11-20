@@ -9,9 +9,9 @@
 # and app-local Microsoft C++ runtime, including checksums and notices.
 #
 # .runtime/package/out/windows-amd64 receives the application directory, the
-# installer Sailry-x86_64-pc-windows-msvc-setup.exe and the portable
-# Sailry-x86_64-pc-windows-msvc.zip, whose top folder is Sailry. Nothing is
-# code signed.
+# installer CheapRouter-x86_64-pc-windows-msvc-setup.exe and the portable
+# CheapRouter-x86_64-pc-windows-msvc.zip, whose top folder is CheapRouter.
+# Nothing is code signed.
 #
 # SAILRY_REVISION, SAILRY_SENTRY_DSN, SAILRY_TELEMETRY_KEY: telemetry build
 # values, each optional.
@@ -27,8 +27,10 @@ platform=windows/amd64
 triple=x86_64-pc-windows-msvc
 out=.runtime/package/out/windows-amd64
 resources=cmd/sailry-desktop/resources/windows-amd64
-installer=$out/Sailry-$triple-setup.exe
-portable=$out/Sailry-$triple.zip
+app_name=$(jq -r .name cmd/sailry-desktop/mygo.json)
+app_slug=$(jq -r .slug cmd/sailry-desktop/mygo.json)
+installer=$out/$app_name-$triple-setup.exe
+portable=$out/$app_name-$triple.zip
 
 go run ./native/fetch -target "$platform" -artifacts "$2" -bundle "$resources"
 go build -o .runtime/package/bin/mygo github.com/egoist/mygo/cmd/mygo
@@ -55,18 +57,18 @@ test -z "${SAILRY_TELEMETRY_KEY:-}" || flags="$flags -X $telemetry.BuildKey=$SAI
 
 rm -rf -- "$out"
 MYGO_LDFLAGS=$flags .runtime/package/bin/mygo build -platform "$platform" cmd/sailry-desktop
-for name in Sailry.exe native-seal.json build.json; do
+for name in "$app_name.exe" native-seal.json build.json; do
   test -f "$out/$name" || { echo "the package has no $name" >&2; exit 1; }
 done
-mv "$out/sailry-setup-$version-amd64.exe" "$installer"
+mv "$out/$app_slug-setup-$version-amd64.exe" "$installer"
 
-# The portable archive is the application directory under the name Sailry.
-stage=$(mktemp -d "${TMPDIR:-/tmp}/sailry-portable-XXXXXX")
+# The portable archive is the application directory under the aligned product name.
+stage=$(mktemp -d "${TMPDIR:-/tmp}/cheaprouter-portable-XXXXXX")
 trap 'rm -rf -- "$stage"' EXIT
-mkdir "$stage/Sailry"
-(cd "$out" && find . -mindepth 1 -maxdepth 1 ! -name '*.zip' ! -name "Sailry-$triple-setup.exe" -exec cp -R {} "$stage/Sailry/" \;)
-portable=$(cd "$out" && pwd)/Sailry-$triple.zip
-(cd "$stage" && zip -q -r -X "$portable" Sailry)
+mkdir "$stage/$app_name"
+(cd "$out" && find . -mindepth 1 -maxdepth 1 ! -name '*.zip' ! -name "$app_name-$triple-setup.exe" -exec cp -R {} "$stage/$app_name/" \;)
+portable=$(cd "$out" && pwd)/$app_name-$triple.zip
+(cd "$stage" && zip -q -r -X "$portable" "$app_name")
 
 if command -v sha256sum >/dev/null; then
   sha256sum "$installer" "$portable"

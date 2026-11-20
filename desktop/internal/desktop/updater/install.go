@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/ai-poet/agent-client/desktop/internal/core"
 )
 
 // Whole-application installation, never a binary-only swap.
@@ -66,7 +68,7 @@ func replace(update *staged, config *Config, installed string) (string, error) {
 	if err != nil {
 		return "", ioFailure(err)
 	}
-	if err := copyTree(installed, filepath.Join(backup, "Sailry.app")); err != nil {
+	if err := copyTree(installed, filepath.Join(backup, core.MacOSBundleName)); err != nil {
 		_ = os.RemoveAll(backup)
 		return "", err
 	}

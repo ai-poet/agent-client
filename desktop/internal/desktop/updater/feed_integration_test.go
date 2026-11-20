@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/ai-poet/agent-client/desktop/internal/core"
 )
 
 // TestUpdaterLocalFeed installs a release from a local feed signed with a
@@ -27,7 +29,7 @@ func TestUpdaterLocalFeed(t *testing.T) {
 		source := newFeed(t)
 		source.publish(fixtureRelease{version: "1.1.0"})
 		home := t.TempDir()
-		installed := filepath.Join(home, "Applications", "Sailry.app")
+		installed := filepath.Join(home, "Applications", core.MacOSBundleName)
 		for name, data := range bundleFiles(fixtureTarget, current, "12.0") {
 			path := filepath.Join(installed, filepath.FromSlash(name))
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -82,7 +84,7 @@ func TestUpdaterLocalFeed(t *testing.T) {
 		if _, failure, notices := settle(service); failure != nil || len(notices) != 0 {
 			t.Fatalf("install = %v %+v", failure, notices)
 		}
-		if calls.stops != 1 || calls.quits != 1 || len(calls.launched) != 1 || calls.launched[0] != filepath.Join(installed, "Contents", "MacOS", "sailry-desktop") {
+		if calls.stops != 1 || calls.quits != 1 || len(calls.launched) != 1 || calls.launched[0] != filepath.Join(installed, filepath.FromSlash(core.MacOSExecutablePath)) {
 			t.Fatalf("handoff = %+v", calls)
 		}
 		if version := packaged(t, installed); version != "1.1.0" {
@@ -101,12 +103,12 @@ func TestUpdaterLocalFeed(t *testing.T) {
 			if target, err := os.Readlink(filepath.Join(installed, "Contents", "Resources", "current.json")); err != nil || target != "build.json" {
 				t.Fatalf("symbolic link = %q %v", target, err)
 			}
-			if info, err := os.Stat(filepath.Join(installed, "Contents", "MacOS", "sailry-desktop")); err != nil || info.Mode().Perm()&0o100 == 0 {
+			if info, err := os.Stat(filepath.Join(installed, filepath.FromSlash(core.MacOSExecutablePath))); err != nil || info.Mode().Perm()&0o100 == 0 {
 				t.Fatalf("executable mode = %v %v", info, err)
 			}
 		}
 		backups, _ := filepath.Glob(filepath.Join(filepath.Dir(installed), ".sailry-update-backup-*"))
-		if len(backups) != 1 || packaged(t, filepath.Join(backups[0], "Sailry.app")) != "1.0.0" {
+		if len(backups) != 1 || packaged(t, filepath.Join(backups[0], core.MacOSBundleName)) != "1.0.0" {
 			t.Fatalf("backups = %v", backups)
 		}
 		if leftovers, _ := filepath.Glob(filepath.Join(filepath.Dir(installed), ".sailry-update-*")); len(leftovers) != 1 {

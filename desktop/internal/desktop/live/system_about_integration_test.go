@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/ai-poet/agent-client/desktop/internal/core"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preferences"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/settings"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/updater"
@@ -72,7 +73,7 @@ func TestSystemAboutUI(t *testing.T) {
 	t.Cleanup(feed.Server.Close)
 	const older, stable, experience, damaged = "0.0.9", "9.1.0", "9.2.0-beta.1", "9.3.0-beta.2"
 	feed.Publish(older, false)
-	installed := filepath.Join(root, "Applications", "Sailry.app")
+	installed := filepath.Join(root, "Applications", core.MacOSBundleName)
 	if err := updater.WriteFixtureBundle(installed, link.ProductVersion); err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/ai-poet/agent-client/desktop/internal/core"
 )
 
 // GitHub discovery is untrusted; only the signed catalog admits an update.
@@ -52,7 +53,7 @@ func (p published) authenticate(data []byte, config *Config) error {
 		return invalid("the signed catalog does not match its exact published version")
 	}
 	for _, release := range releases {
-		if release.Version != p.version.String() || release.Name != "Sailry-"+release.Target+".zip" || release.URL != p.downloads+"/"+release.Name {
+		if release.Version != p.version.String() || release.Name != core.AppName+"-"+release.Target+".zip" || release.URL != p.downloads+"/"+release.Name {
 			return invalid("the signed catalog does not match its exact published version")
 		}
 	}
@@ -118,7 +119,7 @@ func (r listedRelease) published(config *Config) (*published, error) {
 	}
 	names := []string{"update-v1.json"}
 	for _, target := range targets {
-		archive := "Sailry-" + target
+		archive := core.AppName + "-" + target
 		names = append(names, archive+".zip", archive+".zip.update.json", "SHA256SUMS-desktop-"+target)
 		if strings.HasSuffix(target, "apple-darwin") {
 			names = append(names, archive+".dmg")

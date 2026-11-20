@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/ai-poet/agent-client/desktop/internal/core"
 )
 
 // receipt is what an installation leaves for the next start.
@@ -108,7 +109,7 @@ func cleanup(backup, installed string) {
 		return err == nil && info.IsDir()
 	}
 	if installed == "" || !filepath.IsAbs(backup) || !strings.HasPrefix(filepath.Base(backup), ".sailry-update-backup-") ||
-		!directory(backup) || !directory(filepath.Join(backup, "Sailry.app")) {
+		!directory(backup) || !directory(filepath.Join(backup, core.MacOSBundleName)) {
 		log.Printf("desktop update: backup kept unverified")
 		return
 	}

@@ -8,9 +8,9 @@
 # -artifacts is the CI native job's directory of iroh, Turso and capture libraries;
 # without it the libraries already built in .runtime/native are used.
 #
-# .runtime/package/out/darwin-<arch> receives Sailry.app, the disk image
-# Sailry-<triple>.dmg and Sailry-<triple>-unsigned.zip, the archive of the
-# finished application that the update feed command signs.
+# .runtime/package/out/darwin-<arch> receives CheapRouter.app, the disk image
+# CheapRouter-<triple>.dmg and CheapRouter-<triple>-unsigned.zip, the archive
+# of the finished application that the update feed command signs.
 #
 # The environment selects signing, with the names the release settings use:
 #
@@ -44,9 +44,10 @@ case "$signing" in
     identity=-
     ;;
   developer-id)
-    test -n "${APPLE_SIGNING_IDENTITY:-}" && test -n "${APPLE_TEAM_ID:-}" ||
-      { echo 'APPLE_SIGNING_IDENTITY and APPLE_TEAM_ID are required' >&2; exit 1; }
-    identity=$APPLE_SIGNING_IDENTITY
+    signing_identity="${APPLE_SIGNING_IDENTITY:-${WAKU_SIGNING_IDENTITY:-}}"
+    test -n "$signing_identity" && test -n "${APPLE_TEAM_ID:-}" ||
+      { echo 'APPLE_SIGNING_IDENTITY (or WAKU_SIGNING_IDENTITY) and APPLE_TEAM_ID are required' >&2; exit 1; }
+    identity=$signing_identity
     ;;
   *) echo 'SAILRY_SIGNING must be ad-hoc or developer-id' >&2; exit 1 ;;
 esac
@@ -66,9 +67,12 @@ case "$(uname -m)" in
 esac
 platform=darwin/$arch
 out=.runtime/package/out/darwin-$arch
-app=$out/Sailry.app
-image=$out/Sailry-$triple.dmg
-update=$out/Sailry-$triple-unsigned.zip
+app_name=$(jq -r .name cmd/sailry-desktop/mygo.json)
+bundle_identifier=$(jq -r .identifier cmd/sailry-desktop/mygo.json)
+disk_image_identifier="${bundle_identifier}.disk-image"
+app=$out/$app_name.app
+image=$out/$app_name-$triple.dmg
+update=$out/$app_name-$triple-unsigned.zip
 resources=cmd/sailry-desktop/resources/darwin-$arch
 
 # codesign finds the identity of a temporary keychain through the search
@@ -119,16 +123,17 @@ rm -rf -- "$app" "$image" "$update"
 MYGO_LDFLAGS=$flags .runtime/package/bin/mygo build -platform "$platform" -sign "$identity" -skip-notarize -skip-dmg cmd/sailry-desktop
 test -d "$app"
 
-# mygo names the executable after the product. The updater, like every
-# release before this one, identifies the application by sailry-desktop.
-mv "$app/Contents/MacOS/Sailry" "$app/Contents/MacOS/sailry-desktop"
-/usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable sailry-desktop' "$app/Contents/Info.plist"
+# Align bundle identity and numeric CFBundleVersion with main (sh.waku,
+# CheapRouter, major*1_000_000 + minor*1_000 + patch) so Sparkle performs an
+# in-place upgrade instead of rejecting or duplicating the app.
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_identifier" "$app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable $app_name" "$app/Contents/Info.plist"
 
-# Apple bundle versions are numeric; the complete release version remains
-# in build.json and the executable, including its prerelease suffix.
 bundle_version=${version%%[-+]*}
+IFS=. read -r version_major version_minor version_patch <<< "$bundle_version"
+bundle_build=$((10#$version_major * 1000000 + 10#$version_minor * 1000 + 10#$version_patch))
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $bundle_version" "$app/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $bundle_version" "$app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $bundle_build" "$app/Contents/Info.plist"
 
 # Signing rewrote the native libraries and the rename changed the bundle:
 # record the libraries as shipped and sign the bundle again over the records.
@@ -160,7 +165,7 @@ submit() {
 }
 
 if test "$notarize" = 1; then
-  archive=$out/Sailry-notarize.zip
+  archive=$out/$app_name-notarize.zip
   rm -f -- "$archive"
   ditto -c -k --keepParent "$app" "$archive"
   submit "$archive"
@@ -172,12 +177,12 @@ if test "$notarize" = 1; then
 fi
 
 stage=$(mktemp -d "$out/.dmg-XXXXXX")
-cp -R "$app" "$stage/Sailry.app"
+cp -R "$app" "$stage/$app_name.app"
 ln -s /Applications "$stage/Applications"
-hdiutil create -quiet -volname Sailry -srcfolder "$stage" -fs HFS+ -format UDZO "$image"
+hdiutil create -quiet -volname "$app_name" -srcfolder "$stage" -fs HFS+ -format UDZO "$image"
 rm -rf -- "$stage"
 if test "$signing" = developer-id; then
-  codesign --sign "$identity" --timestamp --identifier ai.sailry.disk-image "$image"
+  codesign --sign "$identity" --timestamp --identifier "$disk_image_identifier" "$image"
   codesign --verify --strict "$image"
 fi
 hdiutil verify -quiet "$image"
