@@ -450,6 +450,7 @@ shortcut_sync: 刷新主机状态
 shortcut_close_terminal: 关闭当前终端
 shortcut_scope: 生效范围
 shortcut_scope_description: 关闭终端仅在终端获得焦点时生效
+settings_about_based_on: 基于 Sailry 开发
 settings_license: 许可证
 settings_build_debug: 开发版
 settings_build_release: 发布版

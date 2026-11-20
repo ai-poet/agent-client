@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -12,22 +13,24 @@ import (
 )
 
 func TestBrandUnifiedAcrossLocalesAndUI(t *testing.T) {
+	const attributionKey = "settings_about_based_on"
+	const upstreamProject = "sailry-harness"
 	for _, lang := range i18n.Languages {
 		if got := i18n.In(lang, "app"); got != "CheapRouter" {
 			t.Errorf("locale %s: app = %q, want CheapRouter", lang, got)
 		}
 		for _, key := range i18n.Keys(lang) {
 			val := i18n.In(lang, key)
-			if strings.Contains(strings.ToLower(val), "sailry") {
+			if key != attributionKey && strings.Contains(strings.ToLower(val), "sailry") {
 				t.Errorf("locale %s key %s still contains Sailry: %q", lang, key, val)
 			}
 		}
 	}
 
-	assertNoSailry := func(t *testing.T, label string, texts []string) {
+	assertNoSailry := func(t *testing.T, label string, texts []string, allowed ...string) {
 		t.Helper()
 		for _, text := range texts {
-			if strings.Contains(strings.ToLower(text), "sailry") {
+			if strings.Contains(strings.ToLower(text), "sailry") && !slices.Contains(allowed, text) {
 				t.Errorf("%s rendered unexpected Sailry text: %q", label, text)
 			}
 		}
@@ -63,7 +66,7 @@ func TestBrandUnifiedAcrossLocalesAndUI(t *testing.T) {
 	if !tt.HasText("CheapRouter") {
 		t.Fatalf("About page missing CheapRouter brand: %q", tt.Texts())
 	}
-	assertNoSailry(t, "about page zh-CN", tt.Texts())
+	assertNoSailry(t, "about page zh-CN", tt.Texts(), i18n.In("zh-CN", attributionKey), upstreamProject)
 	shot(t, tt, "brand-about-zh")
 
 	a.Welcome.Open = true
@@ -89,7 +92,8 @@ func TestBrandUnifiedAcrossLocalesAndUI(t *testing.T) {
 	if !tt.HasText("CheapRouter") {
 		t.Fatalf("english About page missing CheapRouter brand: %q", tt.Texts())
 	}
-	assertNoSailry(t, "about page en", tt.Texts())
+	assertNoSailry(t, "about page en", tt.Texts(), i18n.In("en", attributionKey), upstreamProject)
+	shot(t, tt, "brand-about-en")
 
 	// Also verify preview dataset has no user-visible Sailry branding.
 	for _, theme := range preview.ExtensionsData().Themes {

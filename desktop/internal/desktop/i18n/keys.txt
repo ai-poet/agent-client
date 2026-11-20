@@ -83,6 +83,7 @@ appearance_effects
 settings_interface
 settings_theme_builtin
 settings_version
+settings_about_based_on
 settings_license
 # Welcome
 welcome_name

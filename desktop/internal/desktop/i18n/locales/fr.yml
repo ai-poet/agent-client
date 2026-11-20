@@ -80,6 +80,7 @@ appearance_effects: Animation du thème
 settings_interface: Thème d'interface
 settings_theme_builtin: Par défaut
 settings_version: Version
+settings_about_based_on: Basé sur Sailry
 settings_license: Licence
 welcome_name: CheapRouter
 welcome_title: Que voudriez-vous faire aujourd'hui

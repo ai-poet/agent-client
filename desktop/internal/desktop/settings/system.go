@@ -96,8 +96,7 @@ func ghostIcon(c *ui.Context, icon *ui.SVG, label string) ui.Element {
 	})
 }
 
-// about is the version, the build and the license, then the updater, whose
-// check reaches the network.
+// about shows build information and upstream attribution, then the updater.
 func about(c *ui.Context, m *Model) {
 	p := theme.Of(c)
 	text := func(s string) func() {
@@ -107,6 +106,9 @@ func about(c *ui.Context, m *Model) {
 		kit.Card(c, func() {
 			kit.Row(c, "version", i18n.T(c, "settings_version"), "", text(m.Version))
 			kit.Row(c, "build", i18n.T(c, "settings_build"), "", text(i18n.T(c, cmp.Or(m.Build, "preview"))))
+			kit.Row(c, "upstream", i18n.T(c, "settings_about_based_on"), "", func() {
+				ui.Link(c, "sailry-harness", "https://github.com/sailry/sailry-harness").FontSize(14).Underline().PaddingY(6)
+			})
 			kit.Row(c, "license", i18n.T(c, "settings_license"), "", text("Apache-2.0"))
 		})
 	})

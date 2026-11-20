@@ -54,6 +54,7 @@ func run() error {
 	if options.AcceptanceUI {
 		return runAcceptanceUI(options)
 	}
+	initWindowsAppIdentity()
 	successor := os.Getenv(successorVariable) != ""
 	_ = os.Unsetenv(successorVariable)
 	if !options.Preview && options.DataDir == "" && !instanceLock(mygo.App.RequestSingleInstanceLock, successor, successorWait) {
@@ -222,6 +223,7 @@ func run() error {
 				app.View(c)
 			}),
 		})
+		applyWindowsWindowIcon(entry.window)
 		if entry.live != nil {
 			runtime := entry.live
 			runtime.SetInvalidate(entry.window.Invalidate)
@@ -350,6 +352,7 @@ func run() error {
 	}
 	var composition error
 	mygo.App.WhenReady(func() {
+		applyWindowsAppIcon()
 		if backend.Preferences != nil {
 			mygo.App.SetLocale(preferenceLocale(backend.Preferences.Data.Language))
 		}

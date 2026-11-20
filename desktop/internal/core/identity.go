@@ -21,6 +21,7 @@ const (
 	WindowsInstallDirName    = "CheapRouter"
 	WindowsExecutableName    = "CheapRouter.exe"
 	WindowsInnoAppID         = "{7DC6C35B-FA40-4A95-B37A-626BF64556C5}"
+	WindowsAppUserModelID    = "sh.waku"
 	SigningIdentityEnv       = "APPLE_SIGNING_IDENTITY"
 	SigningIdentityFallback  = "WAKU_SIGNING_IDENTITY"
 	SigningTeamIDEnv         = "APPLE_TEAM_ID"

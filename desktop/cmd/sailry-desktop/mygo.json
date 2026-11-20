@@ -4,7 +4,7 @@
   "identifier": "sh.waku",
   "version": "0.4.0",
   "copyright": "Copyright © 2026 CheapRouter",
-  "icon": "../../assets/branding/sailry-windows.png",
+  "icon": "../../assets/branding/cheaprouter.png",
   "main": ".",
   "out": "../../.runtime/package/out",
   "updates": {
@@ -29,6 +29,7 @@
   },
   "windows": {
     "displayName": "CheapRouter",
-    "installDirName": "CheapRouter"
+    "installDirName": "CheapRouter",
+    "icon": "../../assets/branding/cheaprouter.ico"
   }
 }
