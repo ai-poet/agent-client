@@ -40,7 +40,7 @@ func CheapRouterProvider(gateway cheapauth.Gateway) (protocol.ConversationProvid
 	indexByID := make(map[string]int, len(gateway.Models))
 	for _, item := range gateway.Models {
 		id := strings.TrimSpace(item.ID)
-		if id == "" || len(id) > maxCheapRouterModelIDLen {
+		if id == "" || len(id) > maxCheapRouterModelIDLen || isNonConversationalCheapRouterModel(id) {
 			continue
 		}
 		mode := strings.ToLower(strings.TrimSpace(item.BillingMode))
@@ -48,10 +48,7 @@ func CheapRouterProvider(gateway cheapauth.Gateway) (protocol.ConversationProvid
 			continue
 		}
 		name := strings.TrimSpace(item.DisplayName)
-		platform := strings.TrimSpace(item.Platform)
-		if len(platform) > 64 {
-			platform = ""
-		}
+		platform := normalizeCheapRouterPlatform(item)
 		var window, output uint32
 		if item.ContextWindow >= int64(MinCatalogContext) {
 			window = uint32(min(item.ContextWindow, int64(MaxModelOutput)))
@@ -59,10 +56,15 @@ func CheapRouterProvider(gateway cheapauth.Gateway) (protocol.ConversationProvid
 		if item.MaxOutputTokens > 0 {
 			output = uint32(min(item.MaxOutputTokens, int64(MaxModelOutput)))
 		}
-		if idx, exists := indexByID[id]; exists {
+		key := strings.ToLower(id)
+		if idx, exists := indexByID[key]; exists {
 			existing := &provider.Models[idx]
-			if existing.Platform == "" {
-				existing.Platform = platform
+			if existing.Platform == "" || strings.EqualFold(existing.Platform, "composite") {
+				if platform != "" && !strings.EqualFold(platform, "composite") {
+					existing.Platform = platform
+				} else if existing.Platform == "" {
+					existing.Platform = platform
+				}
 			}
 			if existing.DisplayName == nil && name != "" && name != id {
 				display := name
@@ -83,7 +85,7 @@ func CheapRouterProvider(gateway cheapauth.Gateway) (protocol.ConversationProvid
 		model.Context, model.Output = window, output
 		model.Tools = true
 		model.CompactionTokens = nil
-		indexByID[id] = len(provider.Models)
+		indexByID[key] = len(provider.Models)
 		provider.Models = append(provider.Models, model)
 	}
 	if len(provider.Models) == 0 {
@@ -95,12 +97,82 @@ func CheapRouterProvider(gateway cheapauth.Gateway) (protocol.ConversationProvid
 			model.Output = min(model.Output, model.Context)
 		}
 	}
-	provider.DefaultModel = provider.Models[0].ID
+	provider.DefaultModel = defaultCheapRouterModel(provider.Models)
 	fitCheapRouterConfigBudget(&provider)
 	if err := ValidateConfiguration(provider); err != nil {
 		return provider, nil, err
 	}
 	return provider, secret, nil
+}
+
+func normalizeCheapRouterPlatform(item cheapauth.Model) string {
+	if family := cheapauth.ModelFamily(item.ID); family != "" {
+		return family
+	}
+	for _, candidate := range []string{item.Platform, item.Provider} {
+		value := strings.TrimSpace(candidate)
+		if value != "" && len(value) <= 64 {
+			return value
+		}
+	}
+	return ""
+}
+
+// isNonConversationalCheapRouterModel mirrors Rust native_agent::is_non_conversational_name.
+func isNonConversationalCheapRouterModel(modelID string) bool {
+	name := strings.ToLower(strings.TrimSpace(modelID))
+	name = name[strings.LastIndex(name, "/")+1:]
+	for _, prefix := range []string{"gpt-image", "dall-e", "sora", "tts-", "gpt-4o-mini-tts", "whisper", "grok-image"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	for _, word := range strings.FieldsFunc(name, func(r rune) bool {
+		return r == '-' || r == '.' || r == '/' || r == ':'
+	}) {
+		switch word {
+		case "embedding", "embeddings", "moderation", "rerank":
+			return true
+		}
+	}
+	return false
+}
+
+// defaultCheapRouterModel follows Rust native_agent::default_row: Sonnet 5.5,
+// then Sonnet 5, then any Sonnet, else the first available model.
+func defaultCheapRouterModel(models []protocol.ConversationModel) string {
+	if len(models) == 0 {
+		return ""
+	}
+	best := models[0].ID
+	rank := 4
+	for _, m := range models {
+		id := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(m.ID)), ".", "-")
+		id = id[strings.LastIndex(id, "/")+1:]
+		if _, bare, ok := strings.Cut(id, "::"); ok {
+			id = bare
+		}
+		display := ""
+		if m.DisplayName != nil {
+			display = strings.ToLower(*m.DisplayName)
+		}
+		preference := 3
+		switch {
+		case id == "claude-sonnet-5-5" || strings.HasPrefix(id, "claude-sonnet-5-5-"):
+			preference = 0
+		case strings.Contains(id, "sonnet-5"):
+			preference = 1
+		case strings.Contains(id, "sonnet") || strings.Contains(display, "claude sonnet"):
+			preference = 2
+		}
+		if preference < rank {
+			best, rank = m.ID, preference
+			if rank == 0 {
+				break
+			}
+		}
+	}
+	return best
 }
 
 func fitCheapRouterConfigBudget(provider *protocol.ConversationProvider) {
@@ -109,9 +181,16 @@ func fitCheapRouterConfigBudget(provider *protocol.ConversationProvider) {
 		return
 	}
 	for len(provider.Models) > 1 {
+		drop := len(provider.Models) - 1
+		if provider.Models[drop].ID == provider.DefaultModel && drop > 0 {
+			provider.Models[drop-1], provider.Models[drop] = provider.Models[drop], provider.Models[drop-1]
+		}
 		provider.Models = provider.Models[:len(provider.Models)-1]
 		if raw, err := json.Marshal(provider); err == nil && len(raw) <= maxCheapRouterConfigBytes {
 			return
 		}
+	}
+	if len(provider.Models) > 0 {
+		provider.DefaultModel = provider.Models[0].ID
 	}
 }

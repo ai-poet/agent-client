@@ -270,17 +270,33 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 			if saved := r.Preferences.Data.Composer; saved != nil {
 				comp.Mode = modeChoice(saved.Mode)
 				comp.Permission = permissionChoice(saved.Permission)
-				if m := saved.Model; m != nil && (m.Source == snapshot.Node || r.forwards(m.Provider) && m.Source == r.parent.controller.Target()) {
+				applySaved := func(providerID protocol.ProviderID, modelID string, effort protocol.Effort, features map[string]string) bool {
 					for _, p := range r.composerProviders() {
-						if p.ID == m.Provider && p.Enabled && r.draftProviderUsable(p.ID) && slices.ContainsFunc(p.Models, func(v protocol.ConversationModel) bool { return v.ID == m.Model }) {
+						if p.ID == providerID && p.Enabled && r.draftProviderUsable(p.ID) && slices.ContainsFunc(p.Models, func(v protocol.ConversationModel) bool { return v.ID == modelID }) {
 							config := protocol.DefaultSessionConfig()
-							config.Provider = m.Provider
-							config.Model = m.Model
-							config.Effort = m.Effort
-							config.Features = m.Features
+							config.Provider = providerID
+							config.Model = modelID
+							config.Effort = effort
+							config.Features = features
 							config.Mode = saved.Mode
 							config.Permission = saved.Permission
 							r.applyComposer(comp, config)
+							return true
+						}
+					}
+					return false
+				}
+				applied := false
+				if m := saved.Model; m != nil && (m.Source == snapshot.Node || r.forwards(m.Provider) && m.Source == r.parent.controller.Target()) {
+					applied = applySaved(m.Provider, m.Model, m.Effort, m.Features)
+				}
+				if !applied {
+					for _, recent := range saved.RecentModels() {
+						if recent.Source != snapshot.Node && !(r.forwards(recent.Provider) && recent.Source == r.parent.controller.Target()) {
+							continue
+						}
+						if applySaved(recent.Provider, recent.Model, protocol.Effort{Kind: "default"}, nil) {
+							break
 						}
 					}
 				}
@@ -312,13 +328,14 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 		}
 	}
 	ctx.Models = r.offeredModels(cv.ID, ctx.Models)
-	// A group switch may remove a draft's model. Do not rewrite an admitted
-	// conversation or a captured draft submission.
-	if provider, _, _ := strings.Cut(comp.Model, "/"); provider == nodeproviders.CheapRouterProviderID.String() &&
+	// A group switch or lane unbind may remove a draft's model. Do not rewrite an
+	// admitted conversation or a captured draft submission.
+	if provider, oldModelID, _ := strings.Cut(comp.Model, "/"); provider == nodeproviders.CheapRouterProviderID.String() &&
 		unsentDraft(cv) && !r.draftSubmitted(cv) && r.controller.Connected() &&
 		!slices.ContainsFunc(ctx.Models, func(m composer.Model) bool { return m.ID == comp.Model }) {
+		prevFamily := composerModelVendor(protocol.ConversationProvider{ID: nodeproviders.CheapRouterProviderID}, protocol.ConversationModel{ID: oldModelID})
 		comp.Model, comp.Features = "", map[string]string{}
-		r.defaultComposer(comp)
+		r.defaultComposerForFamily(comp, prevFamily)
 	}
 	r.nameModelSources(c, cv.ID, ctx.Models)
 	ctx.MemberModels = r.memberModels(ctx.Models)

@@ -12,7 +12,10 @@ func TestComposerModelVendor(t *testing.T) {
 	for _, tc := range []struct{ platform, model, want string }{
 		{"anthropic", "deployment-a", "anthropic"},
 		{"google", "deployment-b", "gemini"},
-		{"deepseek", "gpt-compatible-alias", "deepseek"},
+		{"openai", "deepseek-v4.1-flash", "deepseek"},
+		{"openai", "glm-5", "zhipu"},
+		{"openai", "kimi-k3", "kimi"},
+		{"openai", "qwen3-coder", "qwen"},
 		{"openai", "gpt-5", "openai"},
 		{"composite", "owner/deepseek-v4", "deepseek"},
 		{"", "claude-sonnet-4-6", "anthropic"},
