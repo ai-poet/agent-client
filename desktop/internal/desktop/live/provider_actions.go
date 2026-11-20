@@ -3,10 +3,11 @@ package live
 import (
 	"strings"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/settings"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
+	"github.com/ai-poet/agent-client/desktop/internal/node/providers"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 func (r *Runtime) saveProvider(d settings.ProviderDraft, done func(bool)) {
@@ -113,17 +114,10 @@ func (r *Runtime) discoverModels(d settings.ProviderDraft, done func([]viewmodel
 				model := protocol.DefaultConversationModel()
 				model.ID = m.ID
 				model.DisplayName = m.DisplayName
-				model.Context = 128000
-				model.Output = 16384
 				model.Tools = true
 				model.Vision = true
 				model.Capabilities = m.Capabilities
-				if m.Context != nil {
-					model.Context = *m.Context
-				}
-				if m.Output != nil {
-					model.Output = *m.Output
-				}
+				providers.ApplyDiscoveredLimits(&model, m)
 				if caps := m.Capabilities; caps != nil {
 					if caps.Vision != nil {
 						model.Vision = *caps.Vision

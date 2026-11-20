@@ -7,11 +7,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 // The composer's context meter is the core's: the window's occupancy and the
@@ -76,23 +76,11 @@ func contextStats(s *protocol.ConversationStatistics, model string, limit uint32
 	if s == nil {
 		return d
 	}
-	changed := model != "" && s.ContextModel != nil && model != *s.ContextModel
-	if !changed {
-		d.Tokens = s.ContextTokens
-		if d.Tokens == nil {
-			d.Tokens = s.ContextEstimate
-		}
-		d.Estimated = s.ContextTokens == nil && d.Tokens != nil
-		if s.ContextModel != nil {
-			d.Model = *s.ContextModel
-		}
-		if s.ContextLimit != nil {
-			d.Limit = uint64(*s.ContextLimit)
-		} else if d.Tokens != nil {
-			d.Limit = 0
-		}
+	d.Tokens, d.Limit, d.Estimated = contextReading(s, model, limit)
+	if d.Model == "" && s.ContextModel != nil {
+		d.Model = *s.ContextModel
 	}
-	if b := s.Budget; b != nil && b.Model == d.Model && uint64(b.ContextLimit) == d.Limit {
+	if b := s.Budget; b != nil && !b.ContextEstimated && b.Model == d.Model && uint64(b.ContextLimit) == d.Limit {
 		d.Threshold, d.Reserve = b.TriggerTokens, uint64(b.OutputReserve)
 	}
 	o := s.Observations
@@ -149,6 +137,38 @@ func contextStats(s *protocol.ConversationStatistics, model string, limit uint32
 	}
 	d.Response, d.FirstToken, d.Elapsed = o.Latency.ResponseUs, o.Latency.FirstTokenUs, o.Latency.ElapsedUs
 	return d
+}
+
+// contextReading pairs historical measurements with their captured capacity
+// and estimates with the selected model's current budget. A heuristic capacity
+// may trigger compaction but is never presented as a known denominator.
+func contextReading(s *protocol.ConversationStatistics, model string, fallback uint32) (*uint64, uint64, bool) {
+	if model == "" && s.ContextModel != nil {
+		model = *s.ContextModel
+	}
+	budget := s.Budget
+	hasBudget := budget != nil && budget.Model == model && budget.ContextLimit > 0
+	current := uint64(fallback)
+	if hasBudget {
+		current = 0
+		if !budget.ContextEstimated {
+			current = uint64(budget.ContextLimit)
+		}
+	}
+	if model != "" && s.ContextModel != nil && *s.ContextModel != model {
+		return nil, current, false
+	}
+	var captured uint64
+	if s.ContextLimit != nil {
+		captured = uint64(*s.ContextLimit)
+	}
+	if s.ContextTokens != nil {
+		return s.ContextTokens, captured, false
+	}
+	if !hasBudget && (s.ContextEstimate != nil || captured > 0) {
+		current = captured
+	}
+	return s.ContextEstimate, current, s.ContextEstimate != nil
 }
 
 // contextCategories are the context's categories in the meter's order, with

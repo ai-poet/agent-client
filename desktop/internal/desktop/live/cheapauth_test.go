@@ -671,7 +671,7 @@ func TestCheapGatewaySavesMultiOfferAndMissingContextCatalog(t *testing.T) {
 	}
 	provider := d.gateway(true)
 	if len(provider.Models) != 2 || provider.Models[0].ID != "claude-sonnet-4-6" || provider.Models[0].Context != 200000 ||
-		provider.Models[1].ID != "gpt-5" || provider.Models[1].Context != 128000 {
+		provider.Models[1].ID != "gpt-5" || provider.Models[1].Context != 0 {
 		t.Fatalf("saved provider models = %+v", provider.Models)
 	}
 }

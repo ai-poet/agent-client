@@ -22,15 +22,7 @@ func CompleteProviderModelDiscovery(ctx context.Context, db *sql.Conn, node prot
 		}
 		model := protocol.DefaultConversationModel()
 		model.ID, model.DisplayName, model.Capabilities = found.ID, found.DisplayName, found.Capabilities
-		model.Context, model.Output = 128000, 16384
-		if found.Context != nil {
-			model.Context = *found.Context
-		}
-		if found.Output != nil {
-			model.Output = *found.Output
-		} else {
-			model.Output = min(model.Output, model.Context)
-		}
+		providers.ApplyDiscoveredLimits(&model, found)
 		provider.Models = append(provider.Models, model)
 	}
 	if len(provider.Models) > 0 && !slices.ContainsFunc(provider.Models, func(model protocol.ConversationModel) bool { return model.ID == provider.DefaultModel }) {

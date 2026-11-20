@@ -40,6 +40,7 @@ func TestRollingCompactionPreservesTailAcrossUpdatesAndFailure(t *testing.T) {
 		response(text(`{"user_intent":["First rolling state"]}`), finish()),
 		response(text(`{"user_intent":["Second rolling state"]}`), finish()),
 		response(text(`{"user_intent":["unfinished`), finish()),
+		response(text(`{"user_intent":["still unfinished`), finish()),
 	}}
 	f, x, binding, _ := compactionFixture(t, modelScript)
 	compactionPrefix(t, f, x)
@@ -116,7 +117,7 @@ func TestRollingCompactionPreservesTailAcrossUpdatesAndFailure(t *testing.T) {
 		t.Fatal("malformed rolling summary was accepted")
 	}
 	afterFailure := f.state()
-	if len(afterFailure.Records) != len(beforeFailure.Records)+2 || !reflect.DeepEqual(model.VisibleRecords(afterFailure.Records), visibleBefore) || modelScript.count() != 3 {
+	if len(afterFailure.Records) != len(beforeFailure.Records)+3 || !reflect.DeepEqual(model.VisibleRecords(afterFailure.Records), visibleBefore) || modelScript.count() != 4 {
 		t.Fatal("failed rolling summary changed the boundary or lost its usage and failure records")
 	}
 	compactionFailed(t, f, afterFailure.Records[len(afterFailure.Records)-1])

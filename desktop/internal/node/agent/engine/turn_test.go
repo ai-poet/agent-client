@@ -757,10 +757,10 @@ func TestCompactionAtThreshold(t *testing.T) {
 	}
 	t.Run("unlisted model on an empty list", func(t *testing.T) {
 		binding := model.Binding{Config: protocol.SessionConfig{Model: "fixture/unknown"}, Provider: protocol.ConversationProvider{Api: protocol.ConversationModelApiAnthropic}}
-		if selected := capturedModel(binding); selected.Context != 128000 || selected.Tools {
+		if selected, estimated := model.ResolvedModel(binding); selected.Context != 256000 || selected.Tools || !estimated {
 			t.Fatalf("selected = %+v", selected)
 		}
-		for tokens, want := range map[uint64]bool{102400: false, 102401: true} {
+		for tokens, want := range map[uint64]bool{204800: false, 204801: true} {
 			usage := canonical.NewRecord(protocol.NewTurnID(), "message", canonical.NewMessage(canonical.User), manualNow())
 			usage.Message().Usage = &canonical.Usage{Total: &tokens}
 			if got := shouldCompact(binding, store.AgentState{Records: []canonical.Record{usage}}, 80); got != want {

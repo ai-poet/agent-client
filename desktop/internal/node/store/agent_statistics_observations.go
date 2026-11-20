@@ -104,8 +104,8 @@ func agentStatisticCalls(ctx context.Context, db *sql.Conn, session protocol.Ses
 			rows.Close()
 			return nil, err
 		}
-		request.ContextLimit, request.TurnIndex = nil, nil
-		if limit.Valid {
+		request.TurnIndex = nil
+		if request.ContextLimit == nil && limit.Valid && limit.Int64 > 0 {
 			value := uint32(limit.Int64)
 			request.ContextLimit = &value
 		}

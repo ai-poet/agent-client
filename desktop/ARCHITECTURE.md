@@ -250,6 +250,13 @@ OAuth channel discovers the signed-in account's model list using the Node's
 reviewed Codex catalog version unless the channel specifies an override. The
 public model catalog can supplement the account's metadata.
 
+Token limits are resolved on the Node. Saved provider declarations take
+precedence; an absent field can come from the shipped models.dev snapshot or,
+on supported routes, a cached model discovery result. Machine-discovered
+windows below 8,192 tokens do not establish a capacity. An unknown context
+uses an internal budget estimate, but the conversation meter does not display
+it as a known denominator. Recorded measurements retain their captured limit.
+
 Sign-in and renewal run on the controller. Execution hosts receive static keys
 and the current runtime credentials needed for their captured operations, with
 the original account identity, generation and real expiry. Refresh tokens, OAuth
@@ -553,8 +560,10 @@ contain attachment references rather than payloads and use no tool definitions;
 loaded tool declarations are retained only where used or discovered in the tail.
 An overflow recovery may summarize the full visible history while carrying the
 latest user request and its pending attachments. The previous summary is never
-silently omitted to make the summary request fit. A failed request leaves the
-original context intact; there is no background compaction or second summary pass.
+silently omitted to make the summary request fit. A complete response must
+contain a populated handoff object, which may be fenced or surrounded by prose.
+Empty or invalid output gets one format-correction request. Truncated output
+and a failed retry leave the original context intact; plain prose never replaces it.
 
 Hidden history is filtered before attachment materialization. A successful
 compaction must reach a main request before another threshold compaction.

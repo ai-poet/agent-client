@@ -478,8 +478,8 @@ func (r *Runtime) observationRecord(x *execution, binding model.Binding, purpose
 	observed.ReasoningReported = attempt.Usage.Reasoning != nil
 	observation.Attempts = []protocol.ConversationObservationAttempt{observed}
 	scope := model.Scope(binding)
-	selected := capturedModel(binding)
-	if selected.Context > 0 {
+	selected, estimated := model.ResolvedModel(binding)
+	if !estimated {
 		observation.ContextLimit = &selected.Context
 	}
 	record.Metadata.Execution = &canonical.Execution{Source: &scope, Purpose: &purpose, Timing: &timing, Observation: &observation, ContextTokens: attempt.Usage.Total}

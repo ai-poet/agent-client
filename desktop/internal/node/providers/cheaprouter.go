@@ -9,11 +9,8 @@ import (
 )
 
 const (
-	defaultCheapRouterContext uint32 = 128000
-	defaultCheapRouterOutput  uint32 = 16384
-	maxCheapRouterTokens      uint32 = 2147483647
-	maxCheapRouterModelIDLen         = 256
-	maxCheapRouterConfigBytes        = 64 * 1024
+	maxCheapRouterModelIDLen  = 256
+	maxCheapRouterConfigBytes = 64 * 1024
 )
 
 // CheapRouterProviderID is stable across sign-ins and endpoint switches, so
@@ -40,7 +37,6 @@ func CheapRouterProvider(gateway cheapauth.Gateway) (protocol.ConversationProvid
 	provider.Enabled = true
 
 	indexByID := make(map[string]int, len(gateway.Models))
-	explicitContext := make(map[string]bool, len(gateway.Models))
 	for _, item := range gateway.Models {
 		id := strings.TrimSpace(item.ID)
 		if id == "" || len(id) > maxCheapRouterModelIDLen {
@@ -55,7 +51,13 @@ func CheapRouterProvider(gateway cheapauth.Gateway) (protocol.ConversationProvid
 		if len(platform) > 64 {
 			platform = ""
 		}
-		ctxWindow, hasCtx := normalizeCheapRouterContext(item.ContextWindow)
+		var window, output uint32
+		if item.ContextWindow >= int64(MinCatalogContext) {
+			window = uint32(min(item.ContextWindow, int64(MaxModelOutput)))
+		}
+		if item.MaxOutputTokens > 0 {
+			output = uint32(min(item.MaxOutputTokens, int64(MaxModelOutput)))
+		}
 		if idx, exists := indexByID[id]; exists {
 			existing := &provider.Models[idx]
 			if existing.Platform == "" {
@@ -65,13 +67,8 @@ func CheapRouterProvider(gateway cheapauth.Gateway) (protocol.ConversationProvid
 				display := name
 				existing.DisplayName = &display
 			}
-			if hasCtx && (!explicitContext[id] || ctxWindow > existing.Context) {
-				existing.Context = ctxWindow
-				explicitContext[id] = true
-				existing.Output = normalizeCheapRouterOutput(item.MaxOutputTokens, existing.Context, existing.Output)
-			} else if item.MaxOutputTokens > 0 {
-				existing.Output = normalizeCheapRouterOutput(item.MaxOutputTokens, existing.Context, existing.Output)
-			}
+			existing.Context = max(existing.Context, window)
+			existing.Output = max(existing.Output, output)
 			continue
 		}
 
@@ -82,16 +79,20 @@ func CheapRouterProvider(gateway cheapauth.Gateway) (protocol.ConversationProvid
 			display := name
 			model.DisplayName = &display
 		}
-		model.Context = ctxWindow
-		model.Output = normalizeCheapRouterOutput(item.MaxOutputTokens, model.Context, 0)
+		model.Context, model.Output = window, output
 		model.Tools = true
 		model.CompactionTokens = nil
 		indexByID[id] = len(provider.Models)
-		explicitContext[id] = hasCtx
 		provider.Models = append(provider.Models, model)
 	}
 	if len(provider.Models) == 0 {
 		return provider, nil, invalid("CheapRouter model catalog has no chat models")
+	}
+	for i := range provider.Models {
+		model := &provider.Models[i]
+		if model.Context > 0 {
+			model.Output = min(model.Output, model.Context)
+		}
 	}
 	provider.DefaultModel = provider.Models[0].ID
 	fitCheapRouterConfigBudget(&provider)
@@ -100,37 +101,6 @@ func CheapRouterProvider(gateway cheapauth.Gateway) (protocol.ConversationProvid
 	}
 	secret := protocol.NewSecret(gateway.APIKey)
 	return provider, &secret, nil
-}
-
-func normalizeCheapRouterContext(raw int64) (uint32, bool) {
-	if raw <= 0 {
-		return defaultCheapRouterContext, false
-	}
-	if raw > int64(maxCheapRouterTokens) {
-		return maxCheapRouterTokens, true
-	}
-	return uint32(raw), true
-}
-
-func normalizeCheapRouterOutput(raw int64, contextWindow uint32, fallback uint32) uint32 {
-	var target uint32
-	switch {
-	case raw > int64(maxCheapRouterTokens):
-		target = maxCheapRouterTokens
-	case raw > 0:
-		target = uint32(raw)
-	case fallback > 0:
-		target = fallback
-	default:
-		target = defaultCheapRouterOutput
-	}
-	if target > contextWindow {
-		target = contextWindow
-	}
-	if target == 0 {
-		target = 1
-	}
-	return target
 }
 
 func fitCheapRouterConfigBudget(provider *protocol.ConversationProvider) {

@@ -62,17 +62,17 @@ func TestCheapRouterProviderDeduplicatesAndNormalizesCatalog(t *testing.T) {
 	}
 
 	small := provider.Models[1]
-	if small.ID != "small-ctx-model" || small.Context != 4096 || small.Output != 4096 {
+	if small.ID != "small-ctx-model" || small.Context != 0 || small.Output != 0 {
 		t.Fatalf("small context model = %+v", small)
 	}
 
 	overflow := provider.Models[2]
-	if overflow.ID != "overflow-model" || overflow.Context != maxCheapRouterTokens || overflow.Output != maxCheapRouterTokens {
+	if overflow.ID != "overflow-model" || overflow.Context != MaxModelOutput || overflow.Output != MaxModelOutput {
 		t.Fatalf("overflow model = %+v", overflow)
 	}
 
 	negative := provider.Models[3]
-	if negative.ID != "negative-model" || negative.Context != defaultCheapRouterContext || negative.Output != defaultCheapRouterOutput {
+	if negative.ID != "negative-model" || negative.Context != 0 || negative.Output != 0 {
 		t.Fatalf("negative model = %+v", negative)
 	}
 }

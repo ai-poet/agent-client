@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"slices"
 
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/canonical"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/model"
@@ -142,8 +141,7 @@ func AgentCompactionBudget(selected protocol.ConversationModel, percent uint8) *
 	if selected.CompactionTokens != nil {
 		trigger = uint64(*selected.CompactionTokens)
 	}
-	binding := model.Binding{Config: protocol.SessionConfig{Model: selected.ID}, Provider: protocol.ConversationProvider{Models: []protocol.ConversationModel{selected}}}
-	output := uint32(model.OutputLimit(binding, true))
+	output := model.SummaryOutputLimit(selected)
 	return &protocol.ConversationCompactionBudget{Model: selected.ID, ContextLimit: selected.Context, TriggerTokens: trigger, OutputReserve: selected.Output, SummaryInput: uint64(selected.Context - min(selected.Context, output)), SummaryOutput: output}
 }
 
@@ -185,15 +183,16 @@ func agentStatisticsBudget(ctx context.Context, db *sql.Conn, session protocol.S
 	} else {
 		return nil, err
 	}
-	if selected != nil {
-		if i := slices.IndexFunc(selected.Models, func(m protocol.ConversationModel) bool { return m.ID == session.Config.Model }); i >= 0 {
-			return AgentCompactionBudget(selected.Models[i], percent), nil
+	if selected != nil && session.Config.Model != "" {
+		allowed := len(selected.Models) == 0
+		for _, m := range selected.Models {
+			allowed = allowed || m.ID == session.Config.Model
 		}
-		if len(selected.Models) == 0 && session.Config.Model != "" {
-			// A provider without a model list runs any name on a derived window.
-			unlisted := protocol.DefaultConversationModel()
-			unlisted.ID, unlisted.Context = session.Config.Model, model.ContextLimit(model.Binding{Provider: *selected, Config: session.Config})
-			return AgentCompactionBudget(unlisted, percent), nil
+		if allowed {
+			resolved, estimated := model.ResolvedModel(model.Binding{Provider: *selected, Config: session.Config})
+			budget := AgentCompactionBudget(resolved, percent)
+			budget.ContextEstimated = estimated
+			return budget, nil
 		}
 	}
 	return nil, nil

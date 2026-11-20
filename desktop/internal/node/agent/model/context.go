@@ -12,12 +12,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egoist/mygo/netproxy"
+	"github.com/ai-poet/agent-client/desktop/internal/node/providers"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/netproxy"
 )
 
 // defaultContext is the window assumed for a model nothing describes.
-const defaultContext = 128000
+const defaultContext = 256000
 
 const (
 	contextProbeTimeout = 5 * time.Second
@@ -27,68 +28,107 @@ const (
 )
 
 type contextEntry struct {
-	limit   uint32
+	limits  providers.ModelLimits
 	expires time.Time
+}
+
+type modelLimitKey struct {
+	provider protocol.ProviderID
+	revision uint64
+	api      protocol.ConversationModelApi
+	endpoint string
+	model    string
 }
 
 var contextCache = struct {
 	sync.Mutex
-	entries map[string]contextEntry
-}{entries: map[string]contextEntry{}}
+	entries map[modelLimitKey]contextEntry
+}{entries: map[modelLimitKey]contextEntry{}}
 
-// ContextLimit returns the context window of the bound model: the size its
-// provider lists, else the size its server reported when the model was created,
-// else the bundled catalog's size, else 128000. It performs no I/O.
+// ContextLimit returns the effective window for budgeting. Call ResolvedModel
+// when the distinction between a declared window and an estimate matters.
 func ContextLimit(binding Binding) uint32 {
-	if listed := metadata(binding); listed != nil && listed.Context > 0 {
-		return listed.Context
-	}
-	if limit, _ := reportedContext(contextKey(binding)); limit > 0 {
-		return limit
-	}
-	return catalogContext(binding.Provider.Api, binding.Config.Model)
+	selected, _ := ResolvedModel(binding)
+	return selected.Context
 }
 
-func contextKey(binding Binding) string {
-	return string(binding.Provider.Api) + "\x00" + binding.Provider.Endpoint + "\x00" + binding.Config.Model
+// ResolvedModel is shared by execution and statistics. It never probes:
+// provider declarations > models.dev > cached probe > internal estimate.
+func ResolvedModel(binding Binding) (selected protocol.ConversationModel, estimated bool) {
+	selected = protocol.DefaultConversationModel()
+	selected.ID = binding.Config.Model
+	if listed := metadata(binding); listed != nil {
+		selected = *listed
+	}
+	if selected.Context == 0 || selected.Output == 0 {
+		registered := providers.CatalogModelLimits(binding.Provider.Api, selected.ID)
+		probed, _ := reportedContext(contextKey(binding))
+		if selected.Context == 0 {
+			selected.Context = registered.Context
+			if selected.Context == 0 {
+				selected.Context = probed.Context
+			}
+		}
+		if selected.Output == 0 {
+			selected.Output = registered.Output
+			if selected.Output == 0 {
+				selected.Output = probed.Output
+			}
+		}
+	}
+	estimated = selected.Context == 0
+	if estimated {
+		selected.Context = estimatedContext(selected.ID)
+	}
+	selected.Output = min(selected.Output, selected.Context, providers.MaxModelOutput)
+	return selected, estimated
 }
 
-func reportedContext(key string) (uint32, bool) {
+func contextKey(binding Binding) modelLimitKey {
+	p := binding.Provider
+	return modelLimitKey{p.ID, p.Revision, p.Api, p.Endpoint, binding.Config.Model}
+}
+
+func reportedContext(key modelLimitKey) (providers.ModelLimits, bool) {
 	contextCache.Lock()
 	defer contextCache.Unlock()
 	entry, ok := contextCache.entries[key]
 	if ok && !time.Now().Before(entry.expires) {
 		delete(contextCache.entries, key)
-		return 0, false
+		return providers.ModelLimits{}, false
 	}
-	return entry.limit, ok
+	return entry.limits, ok
 }
 
-func rememberContext(key string, limit uint32, life time.Duration) {
+func rememberContext(key modelLimitKey, limits providers.ModelLimits, life time.Duration) {
 	contextCache.Lock()
 	defer contextCache.Unlock()
 	now := time.Now()
 	if len(contextCache.entries) >= contextCapacity {
-		oldest := ""
+		var oldest modelLimitKey
+		oldestSet := false
 		for name, entry := range contextCache.entries {
 			if !now.Before(entry.expires) {
 				delete(contextCache.entries, name)
-			} else if oldest == "" || entry.expires.Before(contextCache.entries[oldest].expires) {
-				oldest = name
+			} else if !oldestSet || entry.expires.Before(contextCache.entries[oldest].expires) {
+				oldest, oldestSet = name, true
 			}
 		}
 		if len(contextCache.entries) >= contextCapacity {
 			delete(contextCache.entries, oldest)
 		}
 	}
-	contextCache.entries[key] = contextEntry{limit: limit, expires: now.Add(life)}
+	contextCache.entries[key] = contextEntry{limits: limits, expires: now.Add(life)}
 }
 
 // discoverContext asks an OpenAI-compatible server for the window it allocated
-// to an unlisted model. The answer, or its absence, is kept so that a turn asks
-// at most once per period; a cancelled turn keeps nothing.
+// to a model whose window is not declared or registered. The answer, or its
+// absence, is cached; a cancelled turn keeps nothing.
 func discoverContext(ctx context.Context, binding Binding, config transportConfig) {
-	if metadata(binding) != nil {
+	if listed := metadata(binding); listed != nil && listed.Context > 0 {
+		return
+	}
+	if known := providers.CatalogModelLimits(binding.Provider.Api, binding.Config.Model); known.Context > 0 {
 		return
 	}
 	key := contextKey(binding)
@@ -97,7 +137,7 @@ func discoverContext(ctx context.Context, binding Binding, config transportConfi
 	case protocol.ConversationModelApiAzureAi:
 		// A Foundry deployment is sized by the model it serves.
 		if config.Model != binding.Config.Model {
-			rememberContext(key, catalogContext(binding.Provider.Api, config.Model), contextKnown)
+			rememberContext(key, providers.CatalogModelLimits(binding.Provider.Api, config.Model), contextKnown)
 		}
 		return
 	default:
@@ -107,24 +147,24 @@ func discoverContext(ctx context.Context, binding Binding, config transportConfi
 		return
 	}
 	probe, cancel := context.WithTimeout(ctx, contextProbeTimeout)
-	limit, err := allocatedContext(probe, config, binding.Config.Model)
+	limits, err := allocatedContext(probe, config, binding.Config.Model)
 	cancel()
 	if ctx.Err() != nil {
 		return
 	}
 	life := contextKnown
-	if err != nil {
+	if err != nil || limits == (providers.ModelLimits{}) {
 		life = contextFailed
 	}
-	rememberContext(key, limit, life)
+	rememberContext(key, limits, life)
 }
 
-// allocatedContext reads data[].meta.n_ctx from the server's model list: the
-// entry of this model, or the only entry of a server that loads one model.
-func allocatedContext(ctx context.Context, config transportConfig, name string) (uint32, error) {
+// allocatedContext reads the model's limits from the server's model list.
+func allocatedContext(ctx context.Context, config transportConfig, name string) (providers.ModelLimits, error) {
+	var unknown providers.ModelLimits
 	target, err := url.Parse(config.Endpoint + "/models")
 	if err != nil {
-		return 0, err
+		return unknown, err
 	}
 	query := target.Query()
 	for key, value := range config.Query {
@@ -133,7 +173,7 @@ func allocatedContext(ctx context.Context, config transportConfig, name string) 
 	target.RawQuery = query.Encode()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
-		return 0, err
+		return unknown, err
 	}
 	for key, value := range config.Headers {
 		request.Header.Set(key, value)
@@ -141,80 +181,69 @@ func allocatedContext(ctx context.Context, config transportConfig, name string) 
 	client := &http.Client{Transport: netproxy.Transport(), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(request)
 	if err != nil {
-		return 0, &Failure{Kind: Network, Message: "model context discovery failed"}
+		return unknown, &Failure{Kind: Network, Message: "model context discovery failed"}
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusNotFound {
-		return 0, nil
+		return unknown, nil
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return 0, &Failure{Kind: Network, Message: "model context discovery failed"}
+		return unknown, &Failure{Kind: Network, Message: "model context discovery failed"}
+	}
+	type entry struct {
+		ID            string `json:"id"`
+		Context       uint32 `json:"context_window"`
+		ContextTokens uint32 `json:"context_window_tokens"`
+		ContextLength uint32 `json:"context_length"`
+		Output        uint32 `json:"max_output_tokens"`
+		Completion    uint32 `json:"max_completion_tokens"`
+		Meta          struct {
+			Context uint32 `json:"n_ctx"`
+		} `json:"meta"`
 	}
 	var body struct {
-		Data []struct {
-			ID   string `json:"id"`
-			Meta struct {
-				Context uint32 `json:"n_ctx"`
-			} `json:"meta"`
-		} `json:"data"`
+		Data []entry `json:"data"`
 	}
 	if err = json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&body); err != nil {
-		return 0, &Failure{Kind: Network, Message: "model context response is invalid"}
+		return unknown, &Failure{Kind: Network, Message: "model context response is invalid"}
 	}
-	for _, entry := range body.Data {
-		if entry.ID == name {
-			return entry.Meta.Context, nil
+	limits := func(found entry) providers.ModelLimits {
+		var window uint32
+		for _, candidate := range []uint32{found.Meta.Context, found.Context, found.ContextTokens, found.ContextLength} {
+			if candidate >= providers.MinCatalogContext {
+				window = candidate
+				break
+			}
+		}
+		output := found.Output
+		if output == 0 {
+			output = found.Completion
+		}
+		return providers.ModelLimits{Context: window, Output: min(output, providers.MaxModelOutput)}
+	}
+	for _, found := range body.Data {
+		if found.ID == name {
+			return limits(found), nil
 		}
 	}
+	// Retain the single-loaded-model alias for servers exposing n_ctx.
 	if len(body.Data) == 1 {
-		return body.Data[0].Meta.Context, nil
+		if found := body.Data[0]; found.Meta.Context >= providers.MinCatalogContext {
+			return limits(found), nil
+		}
 	}
-	return 0, nil
+	return unknown, nil
 }
 
-// catalogContext looks a model up in the bundled catalog: under its API's own
-// vendor first, then under any vendor, where the smallest window wins so that
-// a wrong guess compacts early instead of overflowing.
-func catalogContext(api protocol.ConversationModelApi, name string) uint32 {
-	family := ""
-	switch api {
-	case protocol.ConversationModelApiResponses, protocol.ConversationModelApiChatCompletions:
-		family = "openai"
-	case protocol.ConversationModelApiAnthropic:
-		family = "anthropic"
-	case protocol.ConversationModelApiGemini:
-		family = "gemini-grpc"
-	case protocol.ConversationModelApiAzureOpenAi, protocol.ConversationModelApiAzureAi:
-		family = "azure.openai"
-	case protocol.ConversationModelApiDeepSeek:
-		family = "deepseek"
-	case protocol.ConversationModelApiOpenCodeGo:
-		family = "opencode-go"
-	case protocol.ConversationModelApiOpenCodeZen:
-		family = "opencode"
+func estimatedContext(name string) uint32 {
+	name = strings.ToLower(name)
+	if strings.Contains(name, "claude-2") || strings.Contains(name, "claude-instant") {
+		return 100000
 	}
-	leaf := name[strings.LastIndex(name, "/")+1:]
-	for _, candidate := range []string{name, leaf} {
-		if entry, ok := catalogEntry(family, candidate); ok && entry.Limit.Context > 0 {
-			return entry.Limit.Context
+	for _, family := range []string{"claude", "opus", "sonnet", "haiku", "fable"} {
+		if strings.Contains(name, family) {
+			return 200000
 		}
-	}
-	if limit := catalogWindows()[strings.ToLower(leaf)]; limit > 0 {
-		return limit
 	}
 	return defaultContext
 }
-
-var catalogWindows = sync.OnceValue(func() map[string]uint32 {
-	catalogEntry("", "")
-	windows := map[string]uint32{}
-	for _, vendor := range catalog {
-		for name, entry := range vendor.Models {
-			name = strings.ToLower(name[strings.LastIndex(name, "/")+1:])
-			if limit := entry.Limit.Context; limit > 0 && (windows[name] == 0 || limit < windows[name]) {
-				windows[name] = limit
-			}
-		}
-	}
-	return windows
-})

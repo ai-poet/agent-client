@@ -597,7 +597,7 @@ func (r *Runtime) providerDraft(d settings.ProviderDraft) protocol.ConversationP
 				p.Models = nil
 				for _, id := range static.IDs {
 					model := protocol.DefaultConversationModel()
-					model.ID, model.Context, model.Output, model.Tools, model.Vision = id, 128000, 16384, true, true
+					model.ID, model.Tools, model.Vision = id, true, true
 					p.Models = append(p.Models, model)
 				}
 				if len(p.Models) > 0 {
@@ -656,7 +656,7 @@ func (r *Runtime) providerDraft(d settings.ProviderDraft) protocol.ConversationP
 	}
 	for _, model := range d.Channel.Models {
 		m := protocol.DefaultConversationModel()
-		m.Context, m.Output, m.Tools, m.Vision = 128000, 16384, true, true
+		m.Tools, m.Vision = true, true
 		m.ID = model.ID
 		known, discovered := discovery.models[model.ID]
 		if discovered {
@@ -681,9 +681,7 @@ func (r *Runtime) providerDraft(d settings.ProviderDraft) protocol.ConversationP
 			name := model.Name
 			m.DisplayName = &name
 		}
-		if model.Context > 0 {
-			m.Context = uint32(model.Context)
-		}
+		m.Context = uint32(max(0, model.Context))
 		if model.Output > 0 {
 			m.Output = uint32(model.Output)
 		}

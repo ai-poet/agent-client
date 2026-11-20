@@ -24,7 +24,7 @@ func ValidateConfiguration(provider protocol.ConversationProvider) error {
 	}
 	ids := map[string]bool{}
 	for _, model := range provider.Models {
-		if strings.TrimSpace(model.ID) == "" || len(model.ID) > 256 || ids[model.ID] || model.Context == 0 || model.Output == 0 || model.Output > model.Context || model.Output > 2147483647 || model.CompactionTokens != nil && *model.CompactionTokens == 0 {
+		if strings.TrimSpace(model.ID) == "" || len(model.ID) > 256 || ids[model.ID] || model.Context > 0 && model.Output > model.Context || model.Output > MaxModelOutput || model.CompactionTokens != nil && *model.CompactionTokens == 0 {
 			return invalid("model configuration is invalid or unsupported")
 		}
 		ids[model.ID] = true
