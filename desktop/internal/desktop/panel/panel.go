@@ -7,14 +7,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/editor"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preview"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 )
 
 // Panel layout metrics.
@@ -24,6 +24,9 @@ const (
 	tabMax    = 180
 	rowHeight = 28
 	footer    = 32
+	// DiffFileMenuMaxHeight bounds the diff file-switcher and tab-overflow
+	// dropdowns so long lists scroll instead of overflowing the viewport.
+	DiffFileMenuMaxHeight = 280
 )
 
 // notice tells that an action would leave the preview: write files, run
@@ -200,7 +203,7 @@ func Page(c *ui.Context, k Kind, pr *Project, files func()) {
 			pr.promptDialog(c)
 			pr.strip(c, k)
 		}
-		pr.document(c, k, pr.shownOr(k), true)
+		pr.document(c, k, pr.shownOr(k), true, func(path string) { pr.show(k, path) })
 		if pr != nil && k == Changes {
 			pr.gitDialogs(c)
 		}
@@ -319,7 +322,7 @@ func (pr *Project) view(c *ui.Context, k Kind, path string, own bool, open func(
 		kit.Result(c, kit.ResultProps{Icon: ResourceOf(k).Icon, Title: i18n.T(c, "resource_project_empty")}).Grow(1).Justify(ui.Center)
 		return
 	}
-	main := func() { pr.document(c, k, path, own) }
+	main := func() { pr.document(c, k, path, own, open) }
 	pr.promptDialog(c)
 	if k == Files {
 		pr.pair(c, "files", false, &pr.Files.side, filesLeast, main, func() { pr.tree(c, own, open) })
@@ -334,7 +337,7 @@ func (pr *Project) view(c *ui.Context, k Kind, path string, own bool, open func(
 }
 
 // document is the shared file editor or diff, without a host's columns.
-func (pr *Project) document(c *ui.Context, k Kind, path string, own bool) {
+func (pr *Project) document(c *ui.Context, k Kind, path string, own bool, open func(path string)) {
 	if pr == nil {
 		kit.Result(c, kit.ResultProps{Icon: ResourceOf(k).Icon, Title: i18n.T(c, "resource_project_empty")}).Grow(1).Justify(ui.Center)
 		return
@@ -346,12 +349,12 @@ func (pr *Project) document(c *ui.Context, k Kind, path string, own bool) {
 		}
 		pr.filePreview(c, path, own)
 	case path == allChanges:
-		pr.combined(c)
+		pr.combined(c, open)
 	default:
 		if path != "" && !pr.gitDocumentKnown(path) {
 			pr.readDiff(path, pr.Git.scope)
 		}
-		pr.diff(c, path)
+		pr.diff(c, path, open)
 	}
 }
 
@@ -413,7 +416,7 @@ func Strip(c *ui.Context, s *State, pr *Project, keys Shortcut) {
 					s.Show(t)
 				}
 			}
-		})
+		}, kit.MenuOptions{MaxHeight: DiffFileMenuMaxHeight})
 	}
 	kit.MenuButton(c.Key("add"), "panel-add", func(b ui.Element) {
 		kit.IconLook(c, b, icons.Plus, i18n.T(c, "details"), "", 28, false)
@@ -482,14 +485,98 @@ func status(c *ui.Context, path string, after func(), system ...func()) {
 	statusBar(c, path, 12, after, system...)
 }
 
-// diffStatus is a diff's footer: the path, the change's +N −M, and at the
-// far end the window's diff layout as one icon button (diffToggle). Every
-// view of a diff ends with it, a document of several diffs once.
-func (pr *Project) diffStatus(c *ui.Context, path string, counts func(), system ...func()) {
-	statusBar(c, path, 4, func() {
+// diffStatus adds the diff layout toggle to the change's footer.
+func (pr *Project) diffStatus(c *ui.Context, path string, counts func(), open func(string), system ...func()) {
+	pr.changeStatus(c, path, func() {
 		counts()
 		pr.diffToggle(c)
-	}, system...)
+	}, open, system...)
+}
+
+// changeStatus replaces the path with a switcher for the current change list.
+// Other Git documents keep their plain path or title.
+func (pr *Project) changeStatus(c *ui.Context, path string, after func(), open func(string), system ...func()) {
+	if open == nil || len(pr.Data.Changes) == 0 {
+		if path == allChanges {
+			path = i18n.T(c, "git_all_changes")
+		}
+		statusBar(c, path, 4, after, system...)
+		return
+	}
+	p := theme.Of(c)
+	ui.Row(c.Key("footer")).Height(footer).Shrink(0).PaddingStart(6).PaddingEnd(4).Gap(12).AlignItems(ui.Center).
+		BorderWidth(1, 0, 0, 0).BorderColor(p.Border).TextColor(p.MutedForeground).Children(func() {
+		ui.Row(c.Key("switcher-slot")).Grow(1).Shrink(1).MinWidth(0).AlignItems(ui.Center).Children(func() {
+			pr.diffFileSwitcher(c, path, open, system...)
+		})
+		after()
+	})
+}
+
+func diffCountSummary(added, removed int) string {
+	switch {
+	case added > 0 && removed > 0:
+		return "+" + strconv.Itoa(added) + " −" + strconv.Itoa(removed)
+	case added > 0:
+		return "+" + strconv.Itoa(added)
+	case removed > 0:
+		return "−" + strconv.Itoa(removed)
+	}
+	return ""
+}
+
+// diffFileSwitcher renders the in-panel file switcher dropdown in the overlay
+// layer with a capped height and vertical scroll so parent clips never cut it
+// off and long file lists stay navigable by pointer and keyboard.
+func (pr *Project) diffFileSwitcher(c *ui.Context, current string, open func(string), system ...func()) {
+	p := theme.Of(c)
+	label := current
+	if current == allChanges {
+		label = i18n.T(c, "git_all_changes")
+	}
+	choose := func(path string) {
+		open(path)
+		pr.RevealChange(path)
+		pr.Git.focusSwitcher = path
+	}
+	trigger := kit.MenuButton(c.Key("diff-file-switcher"), "diff-files-"+pr.ID, func(b ui.Element) {
+		kit.GhostLook(c, b.Label(label), false).Height(24).PaddingX(6).Gap(4).Radius(p.Radius).Shrink(1).MinWidth(0).
+			AlignItems(ui.Center).Cursor(ui.CursorPointer).TextColor(p.MutedForeground)
+		if b.Hovered() || b.FocusVisible() {
+			b.TextColor(p.Foreground)
+		}
+		b.ContextMenu(func(m *ui.Menu) {
+			if m.Item(i18n.T(c, "files_copy_path")).Chosen() {
+				c.WriteClipboard(label)
+			}
+			if len(system) > 0 && system[0] != nil && !kit.Demo(c) && m.Item(i18n.T(c, "files_open_system")).Chosen() {
+				system[0]()
+			}
+		})
+		b.Children(func() {
+			ui.Text(c, label).FontSize(12).SingleLine().Shrink(1).MinWidth(0)
+			ui.Icon(c, icons.ChevronDown).FontSize(12).Shrink(0)
+		})
+	}, func(m *kit.Menu) {
+		addAll, delAll := 0, 0
+		for _, ch := range pr.Data.Changes {
+			addAll += ch.Added
+			delAll += ch.Removed
+		}
+		if m.Item(i18n.T(c, "git_all_changes")).Icon(icons.Network).Trailing(diffCountSummary(addAll, delAll)).Checked(current == allChanges).Chosen() {
+			choose(allChanges)
+		}
+		m.Separator()
+		for _, ch := range pr.Data.Changes {
+			if m.Item(ch.Path).Icon(icons.File).Trailing(diffCountSummary(ch.Added, ch.Removed)).Checked(ch.Path == current).Chosen() {
+				choose(ch.Path)
+			}
+		}
+	}, kit.MenuOptions{At: ui.AnchorTopStart, Self: ui.AnchorBottomStart, MaxHeight: DiffFileMenuMaxHeight, CheckRight: true})
+	if pr.Git.focusSwitcher == current {
+		pr.Git.focusSwitcher = ""
+		trigger.Focus()
+	}
 }
 
 // diffSplit reports whether the host's diffs show side by side: the
@@ -642,7 +729,7 @@ func (pr *Project) filePreview(c *ui.Context, path string, own bool) {
 // content diff view or side by side by the footer's choice, with the change under the
 // pointer's Revert and Keep (editor.DefaultHunkActions) and Stage: in the
 // preview each toasts, as they would write the file and the index.
-func (pr *Project) diff(c *ui.Context, path string) {
+func (pr *Project) diff(c *ui.Context, path string, open func(string)) {
 	if pr.gitDocument(c, path) {
 		return
 	}
@@ -671,7 +758,7 @@ func (pr *Project) diff(c *ui.Context, path string) {
 		ui.Column(c.Key("binary")).Grow(1).MinHeight(0).Children(func() {
 			ui.Text(c, binaryDiff(c, metadata.Size)).FontSize(14).Padding(12).TextColor(p.MutedForeground)
 		})
-		status(c, ch.Path, counts, system)
+		pr.changeStatus(c, ch.Path, counts, open, system)
 		return
 	}
 	old, new := ch.Texts()
@@ -723,7 +810,7 @@ func (pr *Project) diff(c *ui.Context, path string) {
 	if metadata.Partial {
 		ui.Text(c, i18n.T(c, "git_diff_partial")).FontSize(12).Padding(8, 12).TextColor(p.MutedForeground)
 	}
-	pr.diffStatus(c, ch.Path, counts, system)
+	pr.diffStatus(c, ch.Path, counts, open, system)
 }
 
 func diffHunkIndex(change preview.FileChange, native editor.DiffHunk) int {

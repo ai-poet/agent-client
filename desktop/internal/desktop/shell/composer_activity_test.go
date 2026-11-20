@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
+	"github.com/egoist/mygo/ui"
 )
 
 // The working conversation's activity strip shows every capsule, their
@@ -102,30 +102,27 @@ func TestActivityStrip(t *testing.T) {
 		t.Fatalf("the idle conversation's strip: %q", tt.Texts())
 	}
 	badge, _ := tt.Find(git[0]) // the rail has a Git button too
-	// The badge opens its totals and the files changed last, not the
-	// panel; a file opens its diff.
+	// Clicking the Git badge opens the right Git diff panel directly on the
+	// current changed file instead of expanding an in-composer dropdown.
+	first := a.Data.Workspace.Changes[0].Path
 	tt.ClickAt(badge.X+badge.W/2, badge.Y+badge.H/2)
 	tt.Advance(time.Second)
 	tt.Frame()
-	if a.PanelOpen && a.Panel.Active.Kind == "git" {
-		t.Errorf("the Git badge opens the Git panel")
-	}
-	files := i18n.In("en", "directory_count_files", "count", len(a.Data.Workspace.Changes))
-	if !tt.HasText(files) {
-		t.Fatalf("the Git badge's popover does not show %q: %q", files, tt.Texts())
-	}
-	first := a.Data.Workspace.Changes[0].Path
-	snapshot(t, tt, "composer-activity-git")
-	clickButton(t, tt, first)
 	if !a.PanelOpen || a.Panel.Active.Kind != "git" || a.Panel.Active.ID != first {
-		t.Errorf("a changed file opens %+v, not its diff", a.Panel.Active)
+		t.Fatalf("the Git badge opened panel=%v active=%+v, want git diff %q", a.PanelOpen, a.Panel.Active, first)
 	}
-	// Compare activity rows at the same width. The file opened a detail
-	// panel, whose compact context bar has a different height.
-	a.PanelOpen = false
+	if len(panels(tt, ui.RolePopup)) != 0 {
+		t.Errorf("the Git badge still opened a popover: %v", panels(tt, ui.RolePopup))
+	}
+	snapshot(t, tt, "composer-activity-git")
+	// Escape closes the right Git diff panel and restores the idle layout.
+	tt.Key(0, ui.KeyEscape)
 	tt.Advance(time.Second)
 	tt.Frame()
 	tt.Frame()
+	if a.PanelOpen {
+		t.Fatalf("Escape did not close the Git diff panel")
+	}
 	draft, _ := tt.AccessByRole(ui.RoleTextField, i18n.In("en", "composer"))
 	// A chat outside a project has no capsule, but the row stays.
 	click(t, tt, "Regex for semantic versions")

@@ -209,18 +209,18 @@ func TestPanelProjection(t *testing.T) {
 			t.Fatal("automatic commit did not use tracked changes")
 		}
 	})
-	t.Run("native changes use timestamp order and complete totals", func(t *testing.T) {
+	t.Run("native changes choose the latest path and keep complete totals", func(t *testing.T) {
 		status := protocol.GitStatus{Kind: protocol.RepositoryKindReady, Truncated: true}
 		for index := range 12 {
 			modified := uint64(index)
 			status.Entries = append(status.Entries, protocol.GitEntry{Path: fmt.Sprintf("file-%02d", index), ModifiedMs: &modified, Diff: protocol.GitLineStats{Additions: uint64(index), Deletions: 1}})
 		}
 		projected := workspaceChanges(status)
-		if projected.Files != 12 || projected.Added != 66 || projected.Removed != 12 || len(projected.Recent) != 10 {
+		if projected.Files != 12 || projected.Added != 66 || projected.Removed != 12 {
 			t.Fatalf("native badge = %#v", projected)
 		}
-		if projected.Recent[0].Path != "file-11" || projected.Recent[9].Path != "file-02" {
-			t.Fatalf("recent order = %#v", projected.Recent)
+		if projected.LatestPath != "file-11" {
+			t.Fatalf("latest path = %q, want file-11", projected.LatestPath)
 		}
 		status.Kind = protocol.RepositoryKindDirectory
 		if workspaceChanges(status) != nil {

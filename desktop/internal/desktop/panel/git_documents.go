@@ -3,13 +3,13 @@ package panel
 import (
 	"slices"
 
-	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/editor"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
+	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 )
 
 // GitDocumentFile retains source flags beside the existing native diff model.
@@ -163,7 +163,7 @@ func (pr *Project) gitDocument(c *ui.Context, id string) bool {
 		})
 	}
 	if diffs {
-		pr.diffStatus(c, document.title, func() { stats(c, p, added, removed) })
+		pr.diffStatus(c, document.title, func() { stats(c, p, added, removed) }, nil)
 	} else {
 		status(c, document.title, func() { stats(c, p, added, removed) })
 	}

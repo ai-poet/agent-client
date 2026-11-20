@@ -5,13 +5,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/editor"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preview"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 )
 
 // allChanges is the item of the diff of every change (Diff, the git
@@ -207,6 +207,10 @@ func (pr *Project) changeList(c *ui.Context, own bool, open func(path string)) {
 				switch {
 				case r.id == selected && !group:
 					row.Background(p.Hover).TextColor(p.HoverForeground).AccessSelected(true)
+					if own && v.reveal == r.id {
+						row.ScrollIntoView()
+						v.reveal = ""
+					}
 				case row.Hovered():
 					row.TextColor(p.Foreground)
 				}
@@ -291,6 +295,45 @@ func (pr *Project) changeList(c *ui.Context, own bool, open func(path string)) {
 			}
 		})
 	})
+}
+
+// RevealChange switches to the Changes list, expands the group and parent
+// folders containing path, and marks path as the active change so its row is
+// visible and highlighted.
+func (pr *Project) RevealChange(path string) {
+	v := &pr.Git
+	v.view, v.reveal = 0, ""
+	v.Show(path)
+	v.scope = "all"
+	if path == "" || path == allChanges {
+		return
+	}
+	var shown *preview.FileChange
+	for i := range pr.Data.Changes {
+		if pr.Data.Changes[i].Path == path {
+			shown = &pr.Data.Changes[i]
+			break
+		}
+	}
+	id := selectedID(shown, v.nav.grouping, v.scope)
+	prefix, rel, ok := strings.Cut(id, "/")
+	if !ok {
+		return
+	}
+	expand := func(key string) {
+		if open := v.expanded[key]; open != nil {
+			*open = true
+		}
+	}
+	if v.nav.grouping != "none" {
+		expand(prefix)
+	}
+	if v.nav.hierarchical {
+		for dir := parentDir(rel); dir != ""; dir = parentDir(dir) {
+			expand("dir/" + prefix + "/" + dir)
+		}
+	}
+	v.current, v.reveal = id, id
 }
 
 // showChange opens a change's diff in scope.
@@ -513,7 +556,7 @@ func (pr *Project) gitDialogs(c *ui.Context) {
 
 // combined is every change's diff (view.js combined): each file under a
 // heading of its name, folder and +N −M, which closes it, with Undo.
-func (pr *Project) combined(c *ui.Context) {
+func (pr *Project) combined(c *ui.Context, openFile func(path string)) {
 	p := theme.Of(c)
 	v := &pr.Git
 	if len(pr.Data.Changes) == 0 {
@@ -565,5 +608,5 @@ func (pr *Project) combined(c *ui.Context) {
 			})
 		}
 	})
-	pr.diffStatus(c, i18n.T(c, "git_all_changes"), func() { stats(c, p, add, del) })
+	pr.diffStatus(c, allChanges, func() { stats(c, p, add, del) }, openFile)
 }

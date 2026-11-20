@@ -5,11 +5,11 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/panel"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 func TestWorkspaceHunkReads(t *testing.T) {
@@ -107,7 +107,7 @@ func TestWorkspaceHunkReads(t *testing.T) {
 }
 
 func TestWorkspaceTurnReview(t *testing.T) {
-	for _, scenario := range []string{"latest turn wins", "ordinary changes retires pending review", "repeated turn keeps latest path"} {
+	for _, scenario := range []string{"latest turn wins", "ordinary changes retires pending review", "repeated turn keeps latest path", "switching conversations leaves review closed"} {
 		t.Run(scenario, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				fixture := newPluginLocationTestFixture(t)
@@ -156,6 +156,8 @@ func TestWorkspaceTurnReview(t *testing.T) {
 					root.openWorkspaceChange(x, "ordinary.go")
 				case "repeated turn keeps latest path":
 					root.reviewWorkspaceTurn(x, oldTurn.String(), "second.go")
+				case "switching conversations leaves review closed":
+					root.App.Sidebar.Selected = "draft/first"
 				}
 				settle()
 				wantReads := 1
@@ -190,8 +192,37 @@ func TestWorkspaceTurnReview(t *testing.T) {
 					if project.turnView == nil || *project.turnView != oldTurn || project.panel.Git.Change() != "second.go" || len(project.data.Changes) != 2 {
 						t.Fatalf("deduplicated read lost the latest file: %v, %s, %+v", project.turnView, project.panel.Git.Change(), project.data.Changes)
 					}
+				case "switching conversations leaves review closed":
+					if project.turnView != nil || root.App.PanelOpen || root.App.Sidebar.Selected != "draft/first" {
+						t.Fatalf("late review changed the selected conversation or its panel: selected=%q open=%v turn=%v",
+							root.App.Sidebar.Selected, root.App.PanelOpen, project.turnView)
+					}
 				}
 			})
 		})
+	}
+}
+
+func TestOpenWorkspaceChangeForProjectDraft(t *testing.T) {
+	fixture := newPluginLocationTestFixture(t)
+	root := fixture.root
+	draft := root.App.Data.Find(root.App.Sidebar.Selected)
+	project := root.workspaceFor(fixture.main)
+	project.initialized, project.release = true, func() {}
+	root.workspace.selected = fixture.main.ID
+	const path = "docs/draft.md"
+	status := protocol.GitChangeKindModified
+	project.status = protocol.GitStatus{Kind: protocol.RepositoryKindReady, Entries: []protocol.GitEntry{{Path: path, Unstaged: &status}}}
+
+	x := &conversationActions{r: root, cv: draft}
+	x.OpenChange(path)
+
+	if !root.App.PanelOpen || root.App.Panel.Active != (panel.Tab{Kind: panel.Changes, ID: path}) || project.panel.Git.Change() != path {
+		t.Fatalf("draft change did not open in the right panel: open=%v tab=%+v file=%q",
+			root.App.PanelOpen, root.App.Panel.Active, project.panel.Git.Change())
+	}
+	if root.App.Sidebar.Selected != draft.ID || root.App.Panel.Session {
+		t.Fatalf("opening the draft's Git panel changed its session: selected=%q has session=%v",
+			root.App.Sidebar.Selected, root.App.Panel.Session)
 	}
 }

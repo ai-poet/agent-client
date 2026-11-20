@@ -1,17 +1,16 @@
 package composer
 
 import (
-	"path"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
 )
 
 // This file holds the composer's activity strip: one row over the composer of
@@ -40,11 +39,10 @@ type Activity struct {
 	Unsynced bool
 }
 
-// Changes are the totals of the worktree's Git status and its files
-// changed last.
+// Changes are the worktree's Git totals and the file changed most recently.
 type Changes struct {
 	Added, Removed, Files int
-	Recent                []ChangedFile // the files changed last, newest first, at most RecentChanges
+	LatestPath            string
 }
 
 // ActivityCallbacks adds labels for host-owned worktree identities.
@@ -62,16 +60,6 @@ type ActivityCallbacks struct {
 	WorktreeLabel   func(string) string
 	Worktree        func(string)
 	WorktreeEnabled func() bool
-}
-
-// RecentChanges is how many changed files the Git badge lists.
-const RecentChanges = 10
-
-// ChangedFile is a file of the worktree's Git status.
-type ChangedFile struct {
-	Path           string
-	Status         string // M, A, D
-	Added, Removed int
 }
 
 // Text is a plugin's label: its English and its translations by locale.
@@ -145,9 +133,9 @@ type Command struct {
 
 // activity is the State's part for the strip: which popovers are open.
 type activity struct {
-	changes, progress, commands, children bool
-	badges                                map[string]*bool
-	command                               string // the command row open
+	progress, commands, children bool
+	badges                       map[string]*bool
+	command                      string // the command row open
 }
 
 // activity builds the strip: min_h_7, px_4, gap_2.
@@ -155,7 +143,7 @@ func (s *State) activity(c *ui.Context, ctx *Context, actions Actions) {
 	a := ctx.Activity
 	ui.Row(c.Key("activity")).FillWidth().MinHeight(28).PaddingX(16).Gap(8).Wrap().AlignItems(ui.Center).Children(func() {
 		if a.Changes != nil {
-			s.gitChanges(c, *a.Changes, actions)
+			gitChanges(c, *a.Changes, actions)
 		}
 		for _, b := range a.Badges {
 			s.badge(c, b, actions)
@@ -178,42 +166,19 @@ func (s *State) activity(c *ui.Context, ctx *Context, actions Actions) {
 	})
 }
 
-// gitChanges is the worktree's +added −removed; it opens the totals and
-// the files changed last, each opening its diff in the panel.
-func (s *State) gitChanges(c *ui.Context, ch Changes, actions Actions) {
+// gitChanges is the worktree's +added −removed; clicking or pressing Enter/Space
+// opens the right Git diff panel directly on the current changed file.
+func gitChanges(c *ui.Context, ch Changes, actions Actions) {
 	p := theme.Of(c)
 	name := "Git +" + strconv.Itoa(ch.Added) + " -" + strconv.Itoa(ch.Removed)
-	b := chip(c.Key("git-changes"), name, s.act.changes, func() {
+	b := chipLook(c, ui.ButtonBase(c.Key("git-changes")).Label(name), false, func() {
 		ui.Icon(c, icons.Network).FontSize(14)
 		ui.Row(c).Gap(8).Children(func() {
 			chipText(c, "+"+strconv.Itoa(ch.Added)).TextColor(p.Success)
 			chipText(c, "-"+strconv.Itoa(ch.Removed)).TextColor(p.Danger)
 		})
-	}).HasPopup(ui.PopupDialog).OnClick(func() { s.act.changes = !s.act.changes })
-	placeStart(kit.Popover(c, b, &s.act.changes, func() {
-		// The files' count leads; the totals end the line, over the rows'.
-		ui.Row(c.Key("totals")).Gap(8).Padding(0, 4, 4, 4).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, i18n.T(c, "directory_count_files", "count", ch.Files)).FontSize(13).SingleLine().TextColor(p.MutedForeground)
-			ui.Spacer(c)
-			ui.Textf(c, "+%d", ch.Added).FontSize(13).FontWeight(600).SingleLine().TextColor(p.Success)
-			ui.Textf(c, "-%d", ch.Removed).FontSize(13).FontWeight(600).SingleLine().TextColor(p.Danger)
-		})
-		for _, f := range ch.Recent {
-			dir, base := path.Split(f.Path)
-			kit.Ghost(c.Key(f.Path), f.Path, false).FillWidth().Height(32).PaddingX(4).Gap(8).Children(func() {
-				ui.Icon(c, icons.File).FontSize(14).TextColor(p.MutedForeground)
-				ui.Row(c).Grow(1).MinWidth(0).Gap(6).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, base).FontSize(14).SingleLine().Shrink(0).MaxWidth(200).TextColor(p.Foreground)
-					ui.Text(c, strings.TrimSuffix(dir, "/")).FontSize(12).SingleLine().Shrink(1).MinWidth(0).TextColor(p.MutedForeground)
-				})
-				ui.Textf(c, "+%d", f.Added).FontSize(12).SingleLine().TextColor(p.Success)
-				ui.Textf(c, "-%d", f.Removed).FontSize(12).SingleLine().TextColor(p.Danger)
-			}).OnClick(func() {
-				s.act.changes = false
-				actions.OpenChange(f.Path)
-			})
-		}
-	}), b, 320, 8, 0)
+	}).OnClick(func() { actions.OpenChange(ch.LatestPath) })
+	kit.Tooltip(c, b, i18n.T(c, "git_view_diff")+" · "+i18n.T(c, "directory_count_files", "count", ch.Files))
 }
 
 // tone is a segment's color.
