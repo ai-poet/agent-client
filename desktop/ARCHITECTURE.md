@@ -306,6 +306,9 @@ The writer groups queued operations in a
 `BEGIN IMMEDIATE` transaction with a savepoint per operation. Results become
 visible to callers after commit. Identifiers and event sequences advance in the
 same transaction as their records.
+Readers pin a snapshot before calling application code. If a local commit's
+checkpoint blocks a new snapshot, the reader rolls back its read transaction and
+waits for the commit to finish. The read request can cancel that wait.
 
 The SDK's default `"node"` KV scope identifies the current controller's personal
 namespace. On an execution host, reads use a materialized base plus pending local
@@ -356,7 +359,9 @@ credential secrets; account metadata requires a fresh sign-in.
 
 Knowledge chunks, full-text indexes and vectors are derived data; their source
 files and configuration are independent. Worktree code indexes live under
-`cache/code-index/<WorktreeId>/index.turso`.
+`cache/code-index/<WorktreeId>/index.turso`. Code indexing bounds concurrent
+readers, parser memory and syntax query work. It reports partial results and
+drains idle parser arenas after high-allocation batches and when a query ends.
 
 Managed checkouts use the main worktree's `.sailry/worktrees/<id>` directory,
 excluded through Git's `info/exclude`. Command, browser and transfer staging uses
@@ -411,6 +416,10 @@ or is cancelled. Password-encrypted age
 archives support local folders, WebDAV and S3. Restore validates into an empty
 profile, retains Node identity and does not start it. Automatic backups use the
 Node's dispatch service. A restored identity must not run beside its original.
+Workspace archives preserve relative, absolute and dangling symbolic links.
+Validation rejects any archived entry beneath a link. Restore copies verified
+regular files first and creates links last, so archive extraction never writes
+through a restored link.
 
 ## Command admission and recovery
 
@@ -644,12 +653,18 @@ left by its previous process. Closing a view only detaches it, so a running
 terminal remains available to other controllers. The durable `takeover_terminal`
 operation advances the input revision even when controllers share an entry
 identity. The earlier transient `claim_terminal` and durable, non-claiming
-`open_terminal` retain their v1 wire contracts. An older Node that lacks
-`takeover_terminal` cannot provide its lease guarantee.
+`open_terminal` retain their v1 wire contracts. When an older or upstream Node
+rejects `takeover_terminal` as an invalid command, Desktop falls back to
+`claim_terminal` without the lease-rotation guarantee.
 
 Agent file operations exclude managed-checkout descendants and protected Git
 metadata. Authenticated manual workflows can access registered managed worktrees
-through the scoped resource services. User-created terminals use their login-shell
+through the scoped resource services. Linux fixes the ancestor mounts of discovered
+protected paths so a command cannot bypass them by renaming their parent.
+This does not confine native Git filters: native Git reads currently execute
+outside the command sandbox, including filters from newly created repositories
+or scripts and configuration included from writable workspace files.
+User-created terminals use their login-shell
 environment. Zsh starts from the Node account's home unless its launch specifies
 a startup directory; parent terminal hooks cannot replace that directory, and
 the user's `.zshenv` can select a custom one. Configured HTTP proxies are trusted
@@ -891,8 +906,10 @@ directory import. Commands, subscriptions and byte streams traverse the entry
 with the original request identity and actual resource target; each hop negotiates
 its own compression and retains frame boundaries and stream half-closes.
 A resource catalog normally returns one completion. A requester that can assemble
-an oversized catalog opts in on that call's envelope; a relay forwards that
-opt-in without adding it for older peers. The same snapshot frames carry the
+an oversized catalog opts in on that call's envelope (`catalog_pages`); a relay
+forwards that opt-in without adding it for older peers. Upstream requesters that
+do not send `catalog_pages` receive a single unpaged completion and can still hit
+the frame limit on oversized catalogs. The same snapshot frames carry the
 bounded pages, and the requester publishes the catalog only after assembly and
 route validation. The opt-in does not confer directory access.
 
@@ -992,6 +1009,10 @@ iroh. The installed `sailry` command offers an interactive menu;
 an alias using the current network. Host's `link`, `share`, `submit`, `wait`,
 `users` and `devices` management commands use the running owner's private Unix
 socket and never create another storage owner.
+Both published-package and local-artifact installers roll back the program,
+command link and service they created when a fresh installation fails. Only an
+empty newly created profile is removed; written data remains for inspection.
+Uncertain service cleanup retains recovery files and reports an unknown outcome.
 
 Host metrics use one Node sampler for local and remote reads. macOS disk rates map
 APFS volumes to physical device counters; volumes sharing a physical device share
