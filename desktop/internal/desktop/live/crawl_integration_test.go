@@ -47,7 +47,7 @@ import (
 // crawlNetwork are the commands that would leave this machine. The crawl's
 // transport refuses them at once, so their buttons answer with a failure.
 var crawlNetwork = []string{
-	"refresh_model_catalog", "search_plugin_catalog", "search_skill_catalog", "read_catalog_plugin", "read_catalog_plugin_info",
+	"refresh_model_catalog", "search_plugin_catalog", "search_skill_catalog", "read_catalog_plugin_info",
 	"check_plugin_updates", "install_plugin", "install_plugin_source", "inspect_plugin_source", "install_registry_skill",
 	"discover_registry_skill", "discover_models", "search_models", "resolve_model", "install_local_model", "register_local_model",
 	"read_model_versions", "read_model_scores", "send_diagnostics", "begin_provider_login", "start_connector_login", "probe_network",

@@ -5,8 +5,6 @@ market_themes: "主题"
 market_search_plugins: "搜索插件"
 market_search_skills: "搜索技能"
 market_search_themes: "搜索主题"
-market_source_official: "官方"
-market_source_community: "社区"
 market_install_to: "安装到 %{host}"
 market_local: "本机"
 market_installed_only: "只看已安装"
@@ -29,6 +27,8 @@ market_paste_link: "粘贴链接安装"
 market_kind: 市场类型
 
 market_skills_failed: "无法加载技能目录"
+market_skill_catalog_invalid_response: "技能目录响应格式无效"
+market_skill_catalog_timeout: "技能目录请求超时"
 market_themes_failed: "无法加载主题"
 market_no_themes: "暂无匹配主题"
 market_load_more: 加载更多

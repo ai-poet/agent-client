@@ -5,8 +5,6 @@ market_themes: "Themes"
 market_search_plugins: "Search plugins"
 market_search_skills: "Search skills"
 market_search_themes: "Search themes"
-market_source_official: "Official"
-market_source_community: "Community"
 market_install_to: "Install to %{host}"
 market_local: "This device"
 market_installed_only: "Installed only"
@@ -29,6 +27,8 @@ market_paste_link: "Install from link"
 market_kind: Market type
 
 market_skills_failed: "Could not load the skill catalog"
+market_skill_catalog_invalid_response: "Invalid catalog response"
+market_skill_catalog_timeout: "Catalog request timed out"
 market_themes_failed: "Could not load themes"
 market_no_themes: "No matching themes"
 market_load_more: Load more

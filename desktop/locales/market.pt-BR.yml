@@ -5,8 +5,6 @@ market_themes: "Temas"
 market_search_plugins: "Buscar plugins"
 market_search_skills: "Buscar habilidades"
 market_search_themes: "Buscar temas"
-market_source_official: "Oficial"
-market_source_community: "Comunidade"
 market_install_to: "Instalar em %{host}"
 market_local: "Este dispositivo"
 market_installed_only: "Apenas instalados"
@@ -29,6 +27,8 @@ market_paste_link: "Instalar por link"
 market_kind: Tipo de mercado
 
 market_skills_failed: "Não foi possível carregar o catálogo de habilidades"
+market_skill_catalog_invalid_response: "Resposta inválida do catálogo"
+market_skill_catalog_timeout: "A solicitação do catálogo excedeu o tempo limite"
 market_themes_failed: "Não foi possível carregar os temas"
 market_no_themes: "Nenhum tema correspondente"
 market_load_more: Carregar mais

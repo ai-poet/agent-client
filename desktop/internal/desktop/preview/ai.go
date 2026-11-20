@@ -320,10 +320,6 @@ func ExtensionsData() *Extensions {
 				Source: "market_details_source_official", Official: true, Tools: []string{"jira_issue"}, Permissions: []string{"market_permission_http_request"}, Installable: true, Versions: []PackageVersion{{Version: "0.2.1", Compatible: true}}},
 			{ID: "postgres", Name: "Postgres", Description: "Query databases from the conversation", Version: "0.3.0", Latest: "0.3.0", Icon: "phosphor:database", Tint: "teal", Category: "market_category_data",
 				Source: "market_details_source_official", Official: true, Tools: []string{"sql_query"}, Permissions: []string{"market_permission_databases_control"}, Installable: true, Versions: []PackageVersion{{Version: "0.3.0", Compatible: true}}},
-			{ID: "chess", Name: "Chess", Description: "Play a game while the agent works", Version: "0.1.2", Latest: "0.1.2", Icon: "phosphor:crown", Tint: "amber", Category: "market_category_entertainment",
-				Source: "market_details_source_community", Installable: true, Versions: []PackageVersion{{Version: "0.1.2", Compatible: true}}},
-			{ID: "pdf", Name: "PDF tools", Description: "Split, merge and read PDF files", Version: "0.1.0", Latest: "0.1.0", Icon: "phosphor:file-pdf", Tint: "violet", Category: "market_category_documents",
-				Source: "market_details_source_community", Tools: []string{"pdf_read"}, Permissions: []string{"market_permission_files_read"}, Installable: true, Versions: []PackageVersion{{Version: "0.1.0", Compatible: true}}},
 		},
 		Skills: []Skill{
 			{ID: "review", Name: "review", Description: "Review a diff for bugs", Package: "Review skills", Enabled: true},

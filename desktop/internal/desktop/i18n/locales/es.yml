@@ -1374,14 +1374,17 @@ market_kind: Tipo de mercado
 market_search_plugins: Buscar plugins
 market_search_skills: Buscar habilidades
 market_search_themes: Buscar temas
-market_source_official: Oficial
-market_source_community: Comunidad
 market_all: Todos
 market_installed_only: Solo instalados
 market_theme_current: En uso
 market_details_source_official: Catálogo oficial
 market_details_source_community: Comunidad
 skills_no_matches: No hay habilidades coincidentes
+market_load_more: Cargar más
+market_page_filter: El filtro se aplica a los resultados cargados
+market_skills_failed: No se pudo cargar el catálogo de habilidades
+market_skill_catalog_invalid_response: Respuesta del catálogo no válida
+market_skill_catalog_timeout: La solicitud del catálogo agotó el tiempo de espera
 market_theme_apply: Aplicar
 market_no_themes: No hay temas coincidentes
 market_theme_builtin: Integrado

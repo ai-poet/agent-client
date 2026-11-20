@@ -24,6 +24,7 @@ type PackageActions struct {
 	CancelDownload func()
 	LoadDetails    func(DetailKind, string, func())
 	RetryMarket    func()
+	MoreSkills     func()
 	MarketPlugin   func(string)
 	PluginVersion  func(string, string)
 	PinPlugin      func(string, bool)

@@ -236,13 +236,13 @@ type Model struct {
 	SkillQuery      string
 	MarketKind      int // 0 plugins, 1 skills, 2 themes
 	MarketQuery     string
-	MarketSource    int // 0 official, 1 community
 	MarketCategory  int // of marketCategories
 	MarketMode      int // 0 all, 1 dark, 2 light
 	MarketInstalled bool
 	// MarketLoad is the catalog's load: the cards' skeleton shows while
 	// it runs, from the market's first frame.
-	MarketLoad preview.Fetch
+	MarketLoad  preview.Fetch
+	SkillMarket SkillMarketState
 	// pageScroll is where the section's page is scrolled, of scrolled.
 	pageScroll    ui.ScrollState
 	scrolled      Section

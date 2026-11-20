@@ -31,11 +31,11 @@ type packageState struct {
 	settings           map[string]protocol.PluginSettingsState
 	updates            map[string]protocol.PluginUpdatesReport
 	directories        map[string]*localPackage // the updates read from a local directory
-	catalog            map[string]protocol.PluginCatalogEntry
-	catalogSources     map[string]protocol.PluginCatalogSource
+	catalog            map[string]protocol.PluginCatalogEntry // official plugin catalog
 	catalogInfos       map[string]protocol.PluginInfo
 	catalogWaiters     map[string][]func()
 	skillCatalog       map[string]protocol.PluginSkillcatalogEntry
+	skillMarket        *skillMarketSearch
 	updateChecks       map[string]string
 	documents          map[string]string
 	marketKey          string
@@ -78,7 +78,7 @@ func newPackageState() *packageState {
 	return &packageState{
 		infos: map[string]protocol.PluginInfo{}, removed: map[string]uint64{}, reads: map[string]bool{}, failures: map[string]string{},
 		settings: map[string]protocol.PluginSettingsState{}, updates: map[string]protocol.PluginUpdatesReport{}, directories: map[string]*localPackage{},
-		catalog: map[string]protocol.PluginCatalogEntry{}, catalogSources: map[string]protocol.PluginCatalogSource{}, catalogInfos: map[string]protocol.PluginInfo{}, catalogWaiters: map[string][]func(){}, skillCatalog: map[string]protocol.PluginSkillcatalogEntry{}, updateChecks: map[string]string{},
+		catalog: map[string]protocol.PluginCatalogEntry{}, catalogInfos: map[string]protocol.PluginInfo{}, catalogWaiters: map[string][]func(){}, skillCatalog: map[string]protocol.PluginSkillcatalogEntry{}, updateChecks: map[string]string{},
 		documents: map[string]string{}, requests: map[string]protocol.Request{}, pending: map[string]protocol.Request{},
 		themes: map[string]theme.Snapshot{}, themeBusy: map[string]bool{},
 	}
@@ -162,12 +162,23 @@ func (r *Runtime) initB8Packages() {
 		},
 		RetryMarket: func() {
 			if owner := r.packageOwner(); owner != nil {
-				owner.packages.marketKey = ""
 				root := r.localRuntime()
+				if root.App.Settings.MarketKind == 1 {
+					owner.searchSkillMarket(root.App.Settings.MarketQuery)
+					owner.loadSkillMarket(true)
+					return
+				}
+				owner.packages.marketKey = ""
 				if root.App.Settings.MarketKind == 2 {
 					root.packages.themeRead = false
 				}
-				r.searchPackageMarket(root.App.Settings.MarketKind, root.App.Settings.MarketSource, root.App.Settings.MarketQuery)
+				r.searchPackageMarket(root.App.Settings.MarketKind, root.App.Settings.MarketQuery)
+			}
+		},
+		MoreSkills: func() {
+			if owner := r.packageOwner(); owner != nil && owner.App.Settings.MarketKind == 1 {
+				owner.searchSkillMarket(owner.App.Settings.MarketQuery)
+				owner.loadSkillMarket(false)
 			}
 		},
 		MarketPlugin: func(id string) {
@@ -250,8 +261,9 @@ func (r *Runtime) packagesFrame(c *ui.Context) {
 		root.packages.selectedNode = node
 		r.App.Settings.Python, r.App.Settings.PythonVersion = owner.packages.pythonDraft, owner.packages.pythonVersion
 		r.App.Settings.PythonPreparing = owner.packages.preparations
-		root.App.Settings.MarketPlugins, root.App.Settings.MarketSkills = nil, nil
+		root.App.Settings.MarketPlugins = nil
 		owner.packages.marketKey = ""
+		owner.resetSkillMarket()
 		root.App.Settings.CloseDetails()
 		root.App.Settings.ClosePackageConfiguration()
 	}
@@ -265,7 +277,7 @@ func (r *Runtime) packagesFrame(c *ui.Context) {
 	}
 	if r.App.Page == shell.MarketPage {
 		m := r.App.Settings.Model
-		r.searchPackageMarket(m.MarketKind, m.MarketSource, m.MarketQuery)
+		r.searchPackageMarket(m.MarketKind, m.MarketQuery)
 	}
 	r.projectInstallations()
 	r.projectMarketThemes()
@@ -333,13 +345,6 @@ func (r *Runtime) projectPackages() {
 	sort.Slice(packages, func(first, second int) bool { return packages[first].Name < packages[second].Name })
 	sort.Slice(skills, func(first, second int) bool { return skills[first].Name < skills[second].Name })
 	r.App.Settings.Packages, r.App.Settings.SkillList = packages, skills
-	var catalogEntries []protocol.PluginCatalogEntry
-	for _, row := range r.App.Settings.MarketPlugins {
-		if entry, known := state.catalog[row.ID]; known {
-			catalogEntries = append(catalogEntries, entry)
-		}
-	}
-	r.readInstalledCatalogCandidates(catalogEntries)
 	r.projectPluginMarket()
 	r.projectSkillMarket()
 	if r.App.Page == shell.MarketPage {

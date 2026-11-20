@@ -1374,14 +1374,17 @@ market_kind: Тип каталога
 market_search_plugins: Поиск плагинов
 market_search_skills: Поиск навыков
 market_search_themes: Поиск тем
-market_source_official: Официальные
-market_source_community: Сообщество
 market_all: Все
 market_installed_only: Только установленные
 market_theme_current: Используется
 market_details_source_official: Официальный каталог
 market_details_source_community: Сообщество
 skills_no_matches: Не соответствующие навыки
+market_load_more: Загрузить ещё
+market_page_filter: Фильтр применяется к загруженным результатам
+market_skills_failed: Не удалось загрузить каталог навыков
+market_skill_catalog_invalid_response: Недопустимый ответ каталога
+market_skill_catalog_timeout: Время ожидания ответа каталога истекло
 market_theme_apply: Применить
 market_no_themes: Подходящих тем нет
 market_theme_builtin: Встроенная
