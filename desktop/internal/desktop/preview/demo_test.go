@@ -38,6 +38,7 @@ var unshown = map[string]string{
 	"conversation.Call.Load":                   "a live disclosure's request",
 	"conversation.Call.TrackLoad":              "tracks an active live disclosure's observation",
 	"conversation.Call.BackgroundDetail":       "reads the live process behind a disclosure",
+	"conversation.Turn.InputOnly":              "optimistic input while awaiting admission on a live host",
 	"composer.Attachment.Chip":                 "set by a pick in the live browser, which binds the file to its chip",
 	"composer.Queued.Load":                     "a live queue's request",
 	"composer.Queued.Save":                     "a live queue's request",

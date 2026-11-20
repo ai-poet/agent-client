@@ -1,7 +1,6 @@
 package live
 
 import (
-	"slices"
 	"time"
 
 	"github.com/ai-poet/agent-client/desktop/internal/client"
@@ -12,12 +11,13 @@ import (
 )
 
 // A presentation belongs to one view model and one observed source copy.
-// Completed turns keep their UI enrichment between frames; controls, images,
+// Turns keep their UI enrichment between frames; controls, images,
 // publications and outgoing input are still refreshed by the ordinary pipeline.
 type conversationPresentation struct {
 	generation uint64
 	language   string
 	connection conversation.Connection
+	clocks     transcriptClocks
 	mounted    bool
 }
 
@@ -79,18 +79,18 @@ func (r *Runtime) projectConversation(cv *viewmodel.Conversation, id protocol.Se
 		// Restore the observed connection when that Node becomes available.
 		cv.Session.Connection = saved.connection
 		cv.Session.LoadingOlder, cv.Session.OlderFailed = state.LoadingOlder, state.OlderErr != nil
+		saved.clocks.advance(cv.Turns, now)
 		saved.mounted = true
 		r.conversationPresentations[cv] = saved
 		return
 	}
-	cv.Turns, cv.Session, cv.Waiting, cv.Queue = conversationAt(state, now, language)
-	cacheable = cacheable && len(state.Snapshot.Drafts) == 0 && !slices.ContainsFunc(state.Snapshot.Page.Runs, func(run protocol.ConversationRun) bool {
-		return run.Status == protocol.ConversationStatusQueued || run.Status == protocol.ConversationStatusRunning || run.Status == protocol.ConversationStatusStopping
-	})
+	var clocks transcriptClocks
+	cv.Turns, cv.Session, cv.Waiting, cv.Queue, clocks = projectTranscript(state, language)
+	clocks.advance(cv.Turns, now)
 	presentation := conversationPresentation{mounted: true}
 	if cacheable {
 		presentation.generation, presentation.language = copy.generation, language
-		presentation.connection = cv.Session.Connection
+		presentation.connection, presentation.clocks = cv.Session.Connection, clocks
 	}
 	r.saveConversationPresentation(cv, presentation)
 }

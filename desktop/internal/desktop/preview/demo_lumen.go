@@ -23,7 +23,8 @@ func (b *demo) review() *Conversation {
 	first.Reply.Blocks = []cv.Block{
 		{Kind: cv.ChildrenBlock, Children: []cv.Child{
 			{ID: first.ID + "/visual", Title: b.t("review.child.visual"), Model: DemoModel, Effort: "high", Status: cv.ChildCompleted, Avatar: "avatar-cat"},
-			{ID: first.ID + "/a11y", Title: b.t("review.child.a11y"), Model: demoFast, Effort: "low", Status: cv.ChildFailed},
+			{ID: first.ID + "/a11y", Turn: first.ID + "/a11y/run", Title: b.t("review.child.a11y"), Model: demoFast, Effort: "low",
+				Status: cv.ChildFailed, Error: "The checkout test account is unavailable."},
 			{ID: first.ID + "/copy", Title: b.t("review.child.copy"), Model: demoFast, Effort: "low", Status: cv.ChildInterrupted},
 			{ID: first.ID + "/legacy", Title: b.t("review.child.legacy"), Model: demoFast, Status: cv.ChildCancelled},
 			{ID: first.ID + "/payments", Title: b.t("review.child.payments"), Model: DemoModel, Effort: "medium", Status: cv.ChildContinued},

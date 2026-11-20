@@ -11,8 +11,8 @@ import (
 
 func TestFinishFrameUnbindsOnlyUnmountedTranscripts(t *testing.T) {
 	s := New()
-	left := []Turn{{ID: "left-old", User: "Left transcript", Reply: Reply{Notice: true}}}
-	right := []Turn{{ID: "right", User: "Right transcript", Reply: Reply{Notice: true}}}
+	left := []Turn{{ID: "left-old", User: "Left transcript", InputOnly: true}}
+	right := []Turn{{ID: "right", User: "Right transcript", InputOnly: true}}
 	leftSession, rightSession := &Session{}, &Session{}
 	leftActions, rightActions := &still{}, &still{}
 	showLeft, showRightRail := true, true
@@ -72,7 +72,7 @@ func TestFinishFrameUnbindsOnlyUnmountedTranscripts(t *testing.T) {
 	assertRightMounted()
 
 	showLeft, s.Split, showRightRail = true, false, false
-	left = []Turn{{ID: "left-new", User: "Reopened transcript", Reply: Reply{Notice: true}}}
+	left = []Turn{{ID: "left-new", User: "Reopened transcript", InputOnly: true}}
 	leftActions = &still{}
 	tt.Frame()
 	if s.lists["left"] != leftList || oldKey(0) != "left-new" || leftList.frame.actions != leftActions ||
@@ -99,7 +99,7 @@ func TestFinishFramePreservesPixelAnchorAndRailKeys(t *testing.T) {
 	turns := make([]Turn, 36)
 	for i := range turns {
 		id := fmt.Sprintf("Message %02d", i)
-		turns[i] = Turn{ID: id, User: id, Reply: Reply{Notice: true}, Controls: Controls{ReadOnly: true}}
+		turns[i] = Turn{ID: id, User: id, InputOnly: true, Controls: Controls{ReadOnly: true}}
 	}
 	tt := ui.NewTesterWith(func(c *ui.Context) {
 		defer s.FinishFrame()
@@ -138,8 +138,8 @@ func TestFinishFramePreservesPixelAnchorAndRailKeys(t *testing.T) {
 	shown = false
 	tt.Frame()
 	turns = append([]Turn{
-		{ID: "older-1", User: "First older message"},
-		{ID: "older-2", User: "Second older message"},
+		{ID: "older-1", User: "First older message", InputOnly: true},
+		{ID: "older-2", User: "Second older message", InputOnly: true},
 	}, turns...)
 	shown = true
 	tt.Frame()

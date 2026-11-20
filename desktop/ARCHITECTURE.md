@@ -803,12 +803,21 @@ Desktop reuses the read-only conversation payload and completed projected rows
 while an older-page request is pending or fails. A merged page or a fresh
 authoritative snapshot replaces the payload even at the same history revision;
 connection and access changes still refresh the presentation. Controls and
-mutable overlays still refresh within the visible view model. Active runs and
-streaming drafts keep their timing and
-update path. Leaving a conversation releases its presentation cache and unbinds
+mutable overlays still refresh within the visible view model. An unchanged
+visible transcript projection is reused even for active runs; elapsed labels
+advance from each row's recorded start without rebuilding its history.
+Leaving a conversation releases its presentation cache and unbinds
 the transcript payload without resetting scroll. Historical command output opens
 on its original tool row; closing the disclosure releases the read, not the process.
 Command admission reads current Client state independently of rendering.
+
+Background activity stays on the rows that started it. A background command's
+state, exit code and retained output show on its launching call, and a task
+that ended without a recorded outcome reads as unknown, not completed. Each
+delegated execution keeps its own row at its delegation call, even when the
+session is reused, with its failure reason. An automatic follow-up turn shows
+only the reply it produced: its model-only input and the completion evidence it
+carried are not transcript or queue rows.
 
 Terminal rendering uses MyGo's terminal package and libghostty-vt. Mermaid uses
 CrychicUI, chart variants use the conversation painter over limu, and math uses

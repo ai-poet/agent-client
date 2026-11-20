@@ -76,7 +76,7 @@ func TestHistoricalCommandDisclosure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, cv, transport := watchCallbackTranscript(t, snapshot)
+	r, cv, transport, _ := watchCallbackTranscript(t, snapshot)
 	r.initCommands()
 	t.Cleanup(func() { r.closeCommands(); r.workers.Wait() })
 	transport.mu.Lock()

@@ -347,10 +347,7 @@ func (s *State) turn(c *ui.Context, session string, i int, t *Turn, n int, sess 
 		}
 		if len(t.Segments) == 0 {
 			s.user(c, session, t, q, current, marked, actions)
-			if len(t.Notices) > 0 {
-				notices(c, t.Notices)
-			}
-			if !t.Reply.Notice || len(t.Reply.Blocks) > 0 {
+			if !t.InputOnly {
 				s.reply(c, t, mark, actions)
 			}
 			return
@@ -376,9 +373,6 @@ func (s *State) turn(c *ui.Context, session string, i int, t *Turn, n int, sess 
 						s.user(c, session, &message, q, current, marked, actions)
 					})
 					current -= strings.Count(strings.ToLower(input.User), strings.ToLower(q))
-				}
-				if index == 0 && len(t.Notices) > 0 {
-					notices(c, t.Notices)
 				}
 				end := len(blocks)
 				latest := index == len(t.Segments)-1
@@ -627,8 +621,7 @@ func (s *State) replyPart(c *ui.Context, t *Turn, blocks []Block, mark string, a
 	})
 }
 
-// blocks builds blocks in order. continuing marks the latest tool row
-// running while the turn goes on.
+// blocks builds blocks in transcript order.
 func (s *State) blocks(c *ui.Context, turn string, blocks []Block, continuing bool, actions Actions) {
 	p := theme.Of(c)
 	size := textSize(c)
@@ -647,7 +640,7 @@ func (s *State) blocks(c *ui.Context, turn string, blocks []Block, continuing bo
 					})
 				})
 			case ToolsBlock:
-				s.tools(c, b.Calls, continuing && last)
+				s.tools(c, b.Calls)
 			case QuestionBlock:
 				s.question(c, b.Question)
 			case ChildrenBlock:
@@ -675,30 +668,21 @@ func (s *State) blocks(c *ui.Context, turn string, blocks []Block, continuing bo
 	}
 }
 
-// showPhase hides the phase row while the run waits on the user or a
-// call or child runs: their rows already say what goes on. A reply that
-// ends in tools, children or a retry keeps the activity on that row (tools
-// marks the last call running) until new content takes over, so the phase
-// row shows only before the first content, while the model thinks or
-// writes, and while the context compacts.
+// The tail reports the parent's current phase, not the last activity in its
+// history. A background child has its own status independent of the parent.
 func showPhase(r *Reply, blocks []Block) bool {
+	if r.Status == Stopping || r.Phase == WaitingUser || r.Phase == ExecutingTool {
+		return false
+	}
 	if r.Phase == WaitingController {
 		return true
 	}
-	if n := len(blocks); n > 0 && r.Phase != Compacting && r.Status != Queued {
-		switch blocks[n-1].Kind {
-		case ToolsBlock, ChildrenBlock, RetryBlock:
-			return false
-		}
+	if n := len(blocks); n > 0 && blocks[n-1].Kind == RetryBlock && (r.Phase == AwaitingResponse || r.Phase == PhaseNone) && r.Status == Running {
+		return false
 	}
-	for _, b := range blocks {
+	for _, b := range r.Blocks {
 		for _, call := range b.Calls {
 			if call.Pending || call.Running {
-				return false
-			}
-		}
-		for _, k := range b.Children {
-			if k.Status.Active() {
 				return false
 			}
 		}

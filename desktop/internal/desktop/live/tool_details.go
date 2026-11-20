@@ -80,6 +80,7 @@ func (r *Runtime) enrichDetails(cv *viewmodel.Conversation, state client.Convers
 						ProjectToolDetail(call, source.summary, value, locales...)
 					}
 				}
+				call.BackgroundDetail = nil
 				if ref := source.historical; ref != nil && state.Connected && !call.Pending && call.State != conversation.Denied && call.State != conversation.StateInterrupted {
 					binding := *ref
 					call.BackgroundDetail = func() conversation.BackgroundDetail {

@@ -1,6 +1,7 @@
 package live
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"testing/synctest"
@@ -224,10 +225,18 @@ func TestConversationPresentationTransientState(t *testing.T) {
 		turn := &cv.Turns[0]
 		elapsed := turn.Reply.Elapsed
 		r.projectConversation(cv, id, active, time.Unix(22, 0), "en")
-		if cv.Turns[0].Reply.Elapsed != elapsed+2*time.Second || cv.Turns[0].Reply.Status != conversation.Running {
-			t.Fatal("an unchanged live source stopped advancing its clock")
+		if turn != &cv.Turns[0] || turn.Reply.Elapsed != elapsed+2*time.Second || turn.Reply.Status != conversation.Running {
+			t.Fatal("an unchanged live source rebuilt its transcript or stopped advancing its clock")
 		}
-
+		active.Snapshot.Drafts[0].Parts = []protocol.ConversationPart{{
+			Kind: "resource", Data: json.RawMessage(`{"type":"compacting","started_ms":17500}`),
+		}}
+		apply(active, "en")
+		turn = &cv.Turns[0]
+		r.projectConversation(cv, id, active, time.Unix(22, 0), "en")
+		if turn != &cv.Turns[0] || turn.Reply.Phase != conversation.Compacting || turn.Reply.PhaseElapsed != 4500*time.Millisecond {
+			t.Fatal("a cached compaction did not advance from its own start time")
+		}
 	})
 }
 

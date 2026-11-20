@@ -65,10 +65,7 @@ func projectHistoricalCommand(value client.HistoricalCommandOutput, err error) c
 		}
 		return conversation.BackgroundDetail{Status: &conversation.Background{Outcome: conversation.OutcomeUnknown}}
 	}
-	status := &conversation.Background{Running: value.Running, Outcome: noticeOutcome(value.Outcome)}
-	if !value.Running && value.Outcome == "" {
-		status.Outcome = conversation.OutcomeUnknown
-	}
+	status := &conversation.Background{Running: value.Running, Outcome: backgroundOutcome(value.Outcome)}
 	if value.ExitCode != nil {
 		status.Exit = new(int(*value.ExitCode))
 	}
