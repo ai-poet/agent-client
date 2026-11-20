@@ -15,7 +15,8 @@ import (
 )
 
 // accountFooter renders the bottom-left CheapRouter account avatar entry and
-// its popover panel (login/logout, account summary, and group switching).
+// its two-level popover panel (account summary + level-1 "分组" entry +
+// level-2 group selection submenu).
 func (a *App) accountFooter(c *ui.Context) {
 	state := a.Settings.CheapRouter
 	if state == nil {
@@ -23,6 +24,11 @@ func (a *App) accountFooter(c *ui.Context) {
 	}
 	p := theme.Of(c)
 	signedIn := state.SignedIn()
+	if !a.accountOpen || !signedIn {
+		a.accountGroupsOpen = false
+	}
+	width, height := c.Size()
+	panelWidth := max(0, min(288, width-32))
 	primaryText := "登录 CheapRouter"
 	secondaryText := ""
 	if signedIn {
@@ -68,17 +74,33 @@ func (a *App) accountFooter(c *ui.Context) {
 		}).OnClick(func() {
 			opening := !a.accountOpen
 			a.accountOpen = opening
+			a.accountGroupsOpen = false
 			if opening && state.SignedIn() && state.RefreshGroups != nil {
 				state.RefreshGroups()
 			}
 		})
 	})
 
+	if !signedIn {
+		panel := kit.Popover(c, trigger, &a.accountOpen, func() {
+			a.accountSignedOutContent(c, state)
+		})
+		if panel != (ui.Element{}) {
+			panel.AttachTo(trigger, ui.AnchorTopStart, ui.AnchorBottomStart).Margin(0, 0, 6, 0).
+				Width(panelWidth).MinWidth(0).MaxHeight(max(0, min(460, height-32)))
+		}
+		return
+	}
+
 	panel := kit.Popover(c, trigger, &a.accountOpen, func() {
-		a.accountPopoverContent(c, state)
+		a.accountSignedInContent(c, state)
 	})
 	if panel != (ui.Element{}) {
-		panel.AttachTo(trigger, ui.AnchorTopStart, ui.AnchorBottomStart).Margin(0, 0, 6, 0).Width(288).MaxHeight(460)
+		kit.Snapped(panel).Padding(0).MinWidth(0).AttachTo(trigger, ui.AnchorTopStart, ui.AnchorBottomStart).
+			Margin(0, 0, 6, 0).Width(panelWidth).MaxHeight(max(0, height-72))
+		if panel.Dismissed() {
+			a.accountGroupsOpen = false
+		}
 	}
 }
 
@@ -128,36 +150,45 @@ func accountInitial(user core.User) string {
 	return strings.ToUpper(string(r))
 }
 
-func (a *App) accountPopoverContent(c *ui.Context, state *cheapauthui.State) {
+func (a *App) openCheapAccountSettings() {
+	a.accountOpen = false
+	a.accountGroupsOpen = false
+	a.Navigate(SettingsPage)
+	a.Settings.Open(settings.CheapAccount)
+}
+
+func (a *App) accountSignedOutContent(c *ui.Context, state *cheapauthui.State) {
 	p := theme.Of(c)
-	openAccountPage := func() {
-		a.accountOpen = false
-		a.Navigate(SettingsPage)
-		a.Settings.Open(settings.CheapAccount)
-	}
-
-	if !state.SignedIn() {
-		ui.Column(c.Key("signed-out-panel")).Padding(12).Gap(12).Children(func() {
-			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-				accountAvatar(c, p, state, 34)
-				ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(2).Children(func() {
-					ui.Text(c, "CheapRouter 账号").FontSize(14).FontWeight(600).TextColor(p.PopoverForeground)
-					ui.Text(c, "登录后自动同步模型网关与可用分组").FontSize(12).TextColor(p.MutedForeground)
-				})
+	ui.Column(c.Key("signed-out-panel")).Padding(12).Gap(12).Children(func() {
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+			accountAvatar(c, p, state, 34)
+			ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(2).Children(func() {
+				ui.Text(c, "CheapRouter 账号").FontSize(14).FontWeight(600).TextColor(p.PopoverForeground)
+				ui.Text(c, "登录后自动同步模型网关与可用分组").FontSize(12).TextColor(p.MutedForeground)
 			})
-			kit.Primary(c.Key("popover-login"), "在浏览器中登录", false).FillWidth().OnClick(func() {
-				openAccountPage()
-				if state.Start != nil && state.Stage == cheapauthui.SignedOut {
-					state.Start(false)
-				}
-			})
-			kit.Ghost(c.Key("popover-settings"), "账号设置", false).FillWidth().Height(32).OnClick(openAccountPage)
 		})
-		return
+		kit.Primary(c.Key("popover-login"), "在浏览器中登录", false).FillWidth().OnClick(func() {
+			a.openCheapAccountSettings()
+			if state.Start != nil && state.Stage == cheapauthui.SignedOut {
+				state.Start(false)
+			}
+		})
+		kit.Ghost(c.Key("popover-settings"), "账号设置", false).FillWidth().Height(32).OnClick(a.openCheapAccountSettings)
+	})
+}
+
+func (a *App) accountSignedInContent(c *ui.Context, state *cheapauthui.State) {
+	p := theme.Of(c)
+	currentGroup := state.ActiveGroupName()
+	if currentGroup == "" {
+		currentGroup = "默认分组（自动）"
+		if state.SelectedGroupID != nil {
+			currentGroup = fmt.Sprintf("#%d", *state.SelectedGroupID)
+		}
 	}
 
-	ui.Scroll(c.Key("signed-in-panel")).Padding(10).Gap(10).Children(func() {
-		// Account info summary.
+	_, height := c.Size()
+	ui.Scroll(c.Key("signed-in-panel")).FillWidth().MaxHeight(max(0, height-74)).Padding(10).Gap(10).Children(func() {
 		ui.Column(c.Key("account-summary")).Padding(4).Gap(6).Children(func() {
 			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 				accountAvatar(c, p, state, 34)
@@ -185,22 +216,27 @@ func (a *App) accountPopoverContent(c *ui.Context, state *cheapauthui.State) {
 
 		ui.Box(c).FillWidth().Height(1).Background(p.Border)
 
-		// Group switching section.
-		ui.Column(c.Key("groups-section")).Gap(6).Children(func() {
-			ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).PaddingX(4).Children(func() {
-				ui.Text(c, "模型分组").FontSize(12).FontWeight(600).TextColor(p.MutedForeground)
-				if state.RefreshGroups != nil {
-					refreshBtn := kit.IconButton(c.Key("refresh-groups"), icons.Reload, "刷新分组", 22, false).
-						Disabled(state.GroupsLoading || state.SwitchingGroup)
-					refreshBtn.OnClick(state.RefreshGroups)
-				}
-			})
-
-			if state.GroupError != "" {
-				ui.Column(c.Key("group-error")).Padding(8).Radius(p.Radius).Background(p.Danger.Alpha(0.12)).Border(1, p.Danger.Alpha(0.35)).Children(func() {
-					ui.Text(c, state.GroupError).FontSize(12).TextColor(p.Danger)
-				})
+		ui.Column(c.Key("groups-entry-section")).Gap(6).Children(func() {
+			groupTrigger := ui.ButtonBase(c.Key("group-menu-trigger")).Label("分组").FillWidth().Height(34).PaddingX(8).Gap(8).
+				Radius(p.Radius).Cursor(ui.CursorPointer).AlignItems(ui.Center).
+				HasPopup(ui.PopupMenu).Expanded(a.accountGroupsOpen)
+			switch {
+			case groupTrigger.Pressed() || a.accountGroupsOpen:
+				groupTrigger.Background(p.Active)
+			case groupTrigger.Hovered():
+				groupTrigger.Background(p.Hover)
 			}
+			groupTrigger.Children(func() {
+				ui.Icon(c, icons.Network).FontSize(14).Shrink(0).TextColor(p.MutedForeground)
+				ui.Text(c, "分组").FontSize(13).FontWeight(500).SingleLine().Shrink(0).TextColor(p.PopoverForeground)
+				ui.Spacer(c)
+				ui.Text(c, currentGroup).FontSize(12).SingleLine().Shrink(1).MinWidth(0).TextColor(p.MutedForeground)
+				ui.Icon(c, icons.ChevronRight).FontSize(14).Shrink(0).TextColor(p.MutedForeground)
+			}).OnClick(func() { a.accountGroupsOpen = !a.accountGroupsOpen })
+			if groupTrigger.Shortcut(0, ui.KeyRight) {
+				a.accountGroupsOpen = true
+			}
+			a.accountGroupSubmenu(c, p, state, groupTrigger)
 
 			if state.SwitchingGroup {
 				ui.Row(c.Key("switching")).Padding(4, 8).Gap(6).AlignItems(ui.Center).Children(func() {
@@ -209,49 +245,91 @@ func (a *App) accountPopoverContent(c *ui.Context, state *cheapauthui.State) {
 				})
 			}
 
-			switch {
-			case state.GroupsLoading && len(state.Groups) == 0:
-				ui.Text(c, "正在加载可用分组…").FontSize(12).Padding(4, 8).TextColor(p.MutedForeground)
-			case state.GroupsError != "" && len(state.Groups) == 0:
-				ui.Column(c.Key("groups-load-error")).Padding(6, 8).Gap(6).Children(func() {
-					ui.Text(c, state.GroupsError).FontSize(12).TextColor(p.Danger)
-					if state.RefreshGroups != nil {
-						kit.Ghost(c.Key("retry-groups"), "重试加载分组", false).Height(28).OnClick(state.RefreshGroups)
-					}
+			if state.GroupError != "" {
+				ui.Column(c.Key("group-error")).Padding(8).Radius(p.Radius).Background(p.Danger.Alpha(0.12)).Border(1, p.Danger.Alpha(0.35)).Children(func() {
+					ui.Text(c, state.GroupError).FontSize(12).TextColor(p.Danger)
 				})
-			default:
-				groupRow(c, p, "group-default", "默认分组（自动）", "", state.SelectedGroupID == nil, state.SwitchingGroup, func() {
-					if state.SelectGroup != nil {
-						state.SelectGroup(nil)
-					}
-				})
-				for _, g := range state.Groups {
-					group := g
-					selected := state.SelectedGroupID != nil && *state.SelectedGroupID == group.ID
-					meta := formatGroupMeta(group)
-					groupRow(c, p, fmt.Sprintf("group-%d", group.ID), group.Name, meta, selected, state.SwitchingGroup, func() {
-						if state.SelectGroup != nil {
-							id := group.ID
-							state.SelectGroup(&id)
-						}
-					})
-				}
 			}
 		})
 
 		ui.Box(c).FillWidth().Height(1).Background(p.Border)
 
-		// Footer actions: Account details & Sign out.
 		ui.Row(c.Key("account-actions")).Gap(6).Children(func() {
-			kit.Ghost(c.Key("popover-account-page"), "账号详情", false).Grow(1).Height(30).OnClick(openAccountPage)
+			kit.Ghost(c.Key("popover-account-page"), "账号详情", false).Grow(1).Height(30).OnClick(a.openCheapAccountSettings)
 			kit.DangerBusy(c.Key("popover-logout"), "退出登录", state.LoggingOut).Grow(1).Height(30).OnClick(func() {
 				a.accountOpen = false
+				a.accountGroupsOpen = false
 				if state.Logout != nil {
 					state.Logout()
 				}
 			})
 		})
 	})
+}
+
+func (a *App) accountGroupSubmenu(c *ui.Context, p *theme.Palette, state *cheapauthui.State, trigger ui.Element) {
+	disabled := state.SwitchingGroup || state.LoggingOut || state.Stage == cheapauthui.SyncingGateway || state.SelectGroup == nil
+	width, height := c.Size()
+	menuHeight := max(0, min(360, height-32))
+	panel := kit.Popover(c, trigger, &a.accountGroupsOpen, func() {
+		ui.Column(c.Key("group-submenu-panel")).FillWidth().Shrink(1).Padding(8).Gap(6).Children(func() {
+			ui.Row(c.Key("group-submenu-header")).AlignItems(ui.Center).Justify(ui.SpaceBetween).PaddingX(4).Children(func() {
+				ui.Text(c, "模型分组").FontSize(12).FontWeight(600).TextColor(p.MutedForeground)
+				if state.RefreshGroups != nil {
+					refreshBtn := kit.IconButton(c.Key("refresh-groups"), icons.Reload, "刷新分组", 22, false).
+						Disabled(state.GroupsLoading || state.SwitchingGroup || state.LoggingOut)
+					refreshBtn.OnClick(state.RefreshGroups)
+				}
+			})
+
+			ui.Box(c).FillWidth().Height(1).Background(p.Border)
+
+			ui.Scroll(c.Key("groups-list")).MaxHeight(max(0, menuHeight-53)).Gap(2).Children(func() {
+				switch {
+				case state.GroupsLoading && len(state.Groups) == 0:
+					ui.Text(c, "正在加载可用分组…").FontSize(12).Padding(6, 8).TextColor(p.MutedForeground)
+				default:
+					if state.GroupsError != "" {
+						ui.Text(c, state.GroupsError).FontSize(12).Padding(6, 8).TextColor(p.Danger)
+						if len(state.Groups) == 0 && state.RefreshGroups != nil {
+							kit.Ghost(c.Key("retry-groups"), "重试加载分组", false).Height(28).
+								Disabled(state.LoggingOut).OnClick(state.RefreshGroups)
+						}
+					}
+					groupRow(c, p, "group-default", "默认分组（自动）", "", state.SelectedGroupID == nil, disabled, func() {
+						a.accountGroupsOpen = false
+						trigger.Focus()
+						state.SelectGroup(nil)
+					})
+					for _, g := range state.Groups {
+						group := g
+						selected := state.SelectedGroupID != nil && *state.SelectedGroupID == group.ID
+						meta := formatGroupMeta(group)
+						groupRow(c, p, fmt.Sprintf("group-%d", group.ID), group.Name, meta, selected, disabled, func() {
+							a.accountGroupsOpen = false
+							trigger.Focus()
+							id := group.ID
+							state.SelectGroup(&id)
+						})
+					}
+				}
+			})
+		})
+	})
+	if panel == (ui.Element{}) {
+		return
+	}
+	kit.Snapped(panel).Padding(0).MinWidth(0).Width(max(0, min(272, width-32))).MaxHeight(menuHeight)
+	if width >= 660 {
+		panel.AttachTo(trigger, ui.AnchorRight, ui.AnchorLeft).Margin(0, 0, 0, 16)
+	} else {
+		// Stack above the trigger when there is no room to cascade sideways.
+		panel.AttachTo(trigger, ui.AnchorTopStart, ui.AnchorBottomStart).Margin(0, 0, 6, 0)
+	}
+	if panel.Shortcut(0, ui.KeyLeft) {
+		a.accountGroupsOpen = false
+		trigger.Focus()
+	}
 }
 
 func groupRow(c *ui.Context, p *theme.Palette, key, name, meta string, selected, disabled bool, onClick func()) {
@@ -265,9 +343,9 @@ func groupRow(c *ui.Context, p *theme.Palette, key, name, meta string, selected,
 		row.Background(p.Hover)
 	}
 	row.Children(func() {
-		ui.Text(c, name).FontSize(13).SingleLine().Grow(1).Shrink(1).TextColor(p.PopoverForeground)
+		ui.Text(c, name).FontSize(13).SingleLine().Grow(1).Shrink(1).MinWidth(0).TextColor(p.PopoverForeground)
 		if meta != "" {
-			ui.Text(c, meta).FontSize(11).SingleLine().TextColor(p.MutedForeground)
+			ui.Text(c, meta).FontSize(11).SingleLine().MaxWidth(112).Shrink(1).TextColor(p.MutedForeground)
 		}
 		if selected {
 			ui.Icon(c, icons.Check).FontSize(14).Shrink(0).TextColor(p.Primary)

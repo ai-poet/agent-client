@@ -46,6 +46,12 @@ type cheapLoginAttempt struct {
 type cheapProviderWrite struct {
 	generation *cheapAuthGeneration
 	request    protocol.Request
+	binding    *cheapGroupBinding
+}
+
+type cheapGroupBinding struct {
+	previous *int64
+	target   *int64
 }
 
 func (a *cheapAuthRuntime) advance(parent context.Context) *cheapAuthGeneration {
@@ -69,7 +75,7 @@ func (r *Runtime) initCheapAuth() {
 	state.SubmitPaste = r.submitCheapPaste
 	state.Cancel = r.cancelCheapLogin
 	state.Retry = func() {
-		if state.Stage == cheapauthui.GatewayFailed && !state.LoggingOut {
+		if state.Stage == cheapauthui.GatewayFailed && !state.LoggingOut && !state.SwitchingGroup {
 			r.startCheapSync(account, account.generation)
 		}
 	}
@@ -236,13 +242,22 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 	account.state.Stage, account.state.Failure = cheapauthui.SyncingGateway, ""
 	account.state.AccountFailure = ""
 	r.async(func() {
+		// A group write can outlive its reply. Resolve it before reading the
+		// catalog so a confirmed rejection restores the previous binding first.
+		account.effects.Lock()
+		var gatewayErr error
+		if pending := account.pending; pending != nil && pending.binding != nil {
+			_, gatewayErr = r.resolveCheapProvider(ctx, account)
+		}
+		account.effects.Unlock()
 		user, accountErr := account.service.Account(ctx)
 		var gateway core.Gateway
-		var gatewayErr error
 		var groups []core.Group
 		var groupsErr error
 		if !cheapAuthRejected(accountErr) && ctx.Err() == nil {
-			gateway, gatewayErr = account.service.Gateway(ctx)
+			if gatewayErr == nil {
+				gateway, gatewayErr = account.service.Gateway(ctx)
+			}
 			if !cheapAuthRejected(gatewayErr) && ctx.Err() == nil {
 				groups, groupsErr = account.service.AvailableGroups(ctx)
 			}
@@ -284,6 +299,7 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 				}
 				account.state.Account, account.state.ModelCount = core.User{}, 0
 				account.state.Groups, account.state.SelectedGroupID = nil, nil
+				account.state.GroupsLoading = false
 				account.state.GroupsError, account.state.GroupError = "", ""
 				return
 			}
@@ -334,7 +350,12 @@ func (r *Runtime) saveCheapGateway(ctx context.Context, account *cheapAuthRuntim
 	if err != nil {
 		return 0, err
 	}
-	err = r.updateCheapProvider(ctx, account, generation, func(existing *protocol.ConversationProvider) *protocol.CommandSaveProviderPayload {
+	err = r.saveCheapProvider(ctx, account, generation, provider, secret)
+	return len(provider.Models), err
+}
+
+func (r *Runtime) saveCheapProvider(ctx context.Context, account *cheapAuthRuntime, generation *cheapAuthGeneration, provider protocol.ConversationProvider, secret *protocol.Secret) error {
+	err := r.updateCheapProvider(ctx, account, generation, func(existing *protocol.ConversationProvider) *protocol.CommandSaveProviderPayload {
 		provider.Revision = 0
 		if existing != nil {
 			provider.Revision = existing.Revision
@@ -344,11 +365,10 @@ func (r *Runtime) saveCheapGateway(ctx context.Context, account *cheapAuthRuntim
 	if err != nil {
 		var fault *protocol.Fault
 		if !errors.Is(err, context.Canceled) && (!errors.As(err, &fault) || fault.Code != protocol.ErrorCodeInvalidRequest) {
-			return 0, &cheapProviderSaveError{err: err}
+			return &cheapProviderSaveError{err: err}
 		}
-		return 0, err
 	}
-	return len(provider.Models), nil
+	return err
 }
 
 // updateCheapProvider writes next's answer over the stored CheapRouter
@@ -405,14 +425,68 @@ func (r *Runtime) writeCheapProvider(ctx context.Context, account *cheapAuthRunt
 }
 
 func (r *Runtime) resolveCheapProvider(ctx context.Context, account *cheapAuthRuntime) (protocol.Output, error) {
-	resolution, err := r.controller.Resolve(ctx, account.pending.request)
+	pending := account.pending
+	resolution, err := r.controller.Resolve(ctx, pending.request)
 	if err != nil {
 		return protocol.Output{}, err
+	}
+	output, outcomeErr := resolution.Result()
+	if binding := pending.binding; binding != nil && (resolution.State == client.RequestAbsent || resolution.State == client.RequestFailed) {
+		if err := restoreCheapGroup(r.ctx, account, binding); err != nil {
+			return protocol.Output{}, errors.Join(outcomeErr, err)
+		}
+		// The earlier switch failed definitively and was rolled back. Do not
+		// fail a newer switch or a gateway retry with that stale result.
+		outcomeErr = nil
 	}
 	if resolution.State != client.RequestPending {
 		account.pending = nil
 	}
-	return resolution.Result()
+	return output, outcomeErr
+}
+
+func restoreCheapGroup(ctx context.Context, account *cheapAuthRuntime, binding *cheapGroupBinding) error {
+	if !account.service.SignedIn() || !sameGroupID(account.service.SelectedGroup(), binding.target) {
+		return nil
+	}
+	return account.service.SetGroup(ctx, binding.previous)
+}
+
+func (r *Runtime) bindCheapGroup(account *cheapAuthRuntime, generation *cheapAuthGeneration, target *int64) (int, error) {
+	account.effects.Lock()
+	defer account.effects.Unlock()
+	ctx := generation.ctx
+	if account.pending != nil {
+		if _, err := r.resolveCheapProvider(ctx, account); err != nil {
+			return 0, err
+		}
+	}
+	gateway, err := account.service.GatewayForGroup(ctx, target)
+	if err != nil {
+		return 0, err
+	}
+	provider, secret, err := providers.CheapRouterProvider(gateway)
+	if err != nil {
+		return 0, err
+	}
+	binding := &cheapGroupBinding{previous: account.service.SelectedGroup(), target: target}
+	// Persist first: a local write failure must never replace the working Node
+	// route. If Node rejects the change, restore the old preference. Effects
+	// keeps logout from overtaking either write or its rollback.
+	if err := account.service.SetGroup(ctx, target); err != nil {
+		return 0, err
+	}
+	if err := r.saveCheapProvider(ctx, account, generation, provider, secret); err != nil {
+		if account.pending != nil {
+			account.pending.binding = binding
+			return 0, err
+		}
+		if faultCode(err) == protocol.ErrorCodeOutcomeUnknown {
+			return 0, err // No confirmed result: don't claim rollback.
+		}
+		return 0, errors.Join(err, restoreCheapGroup(r.ctx, account, binding))
+	}
+	return len(provider.Models), nil
 }
 
 func (r *Runtime) logoutCheapAuth() {
@@ -465,7 +539,7 @@ func (r *Runtime) refreshCheapGroups() {
 	r.async(func() {
 		groups, err := account.service.AvailableGroups(generation.ctx)
 		r.enqueue(func(*ui.Context) {
-			if account.generation != generation || generation.ctx.Err() != nil {
+			if account.generation != generation || generation.ctx.Err() != nil || !account.state.SignedIn() {
 				return
 			}
 			account.state.GroupsLoading = false
@@ -486,8 +560,7 @@ func (r *Runtime) selectCheapGroup(groupID *int64) {
 		account.state.Stage == cheapauthui.SyncingGateway {
 		return
 	}
-	if sameGroupID(account.state.SelectedGroupID, groupID) {
-		account.state.GroupError = ""
+	if sameGroupID(account.state.SelectedGroupID, groupID) && account.state.GroupError == "" {
 		return
 	}
 	generation := account.generation
@@ -495,42 +568,18 @@ func (r *Runtime) selectCheapGroup(groupID *int64) {
 	account.state.SwitchingGroup = true
 	account.state.GroupError = ""
 	r.async(func() {
-		gateway, err := account.service.GatewayForGroup(generation.ctx, target)
-		var modelCount int
-		if err == nil && generation.ctx.Err() == nil {
-			modelCount, err = r.saveCheapGateway(generation.ctx, account, generation, gateway)
-		}
-		if err == nil && generation.ctx.Err() == nil {
-			err = account.service.SetGroup(generation.ctx, target)
-		}
-		var disableErr error
-		if err != nil && cheapAuthRejected(err) && generation.ctx.Err() == nil {
-			account.effects.Lock()
-			if generation.ctx.Err() == nil {
-				err = errors.Join(err, account.service.Invalidate())
-				disableErr = r.disableCheapGateway(account, generation)
-			}
-			account.effects.Unlock()
-		}
+		modelCount, err := r.bindCheapGroup(account, generation, target)
 		r.enqueue(func(c *ui.Context) {
 			if account.generation != generation || generation.ctx.Err() != nil {
 				return
 			}
 			account.state.SwitchingGroup = false
 			if err != nil {
-				if cheapAuthRejected(err) {
-					account.state.Stage, account.state.Failure = cheapauthui.SignedOut, cheapAuthError(err)
-					if disableErr != nil {
-						account.state.Failure += "；CheapRouter provider 未能停用，请在模型设置中关闭"
-					}
-					account.state.Account, account.state.ModelCount = core.User{}, 0
-					account.state.Groups, account.state.SelectedGroupID = nil, nil
-					account.state.GroupsError, account.state.GroupError = "", ""
-					return
-				}
-				// Rollback: keep current SelectedGroupID, ModelCount, Stage, and
-				// active provider unchanged; surface an explicit error.
+				// Keep the last confirmed selection and show the failure (or
+				// an unconfirmed write). An account API rejection is not
+				// evidence that the previously bound model key has stopped working.
 				account.state.GroupError = "切换分组失败：" + cheapAuthError(err)
+				kit.Toast(c, kit.Failed, account.state.GroupError)
 				return
 			}
 			account.state.SelectedGroupID = target
@@ -538,6 +587,9 @@ func (r *Runtime) selectCheapGroup(groupID *int64) {
 			account.state.GroupError = ""
 			account.state.Stage = cheapauthui.Ready
 			account.state.Failure = ""
+			// Refresh projected models and provider settings immediately so the
+			// composer model selector reflects the newly bound group's catalog.
+			r.project()
 			kit.Toast(c, kit.Done, "已切换分组并刷新模型")
 		})
 	})

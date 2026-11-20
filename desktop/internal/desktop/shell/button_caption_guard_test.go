@@ -93,13 +93,14 @@ func TestShellButtonCaptionsAppearOnce(t *testing.T) {
 			}
 		}
 
-		// Signed-in popover buttons (including retry-groups on error).
+		// Signed-in popover buttons (including retry-groups in level-2 submenu on error).
 		state.Stage = cheapauthui.Ready
 		state.Account = core.User{Email: "guard@example.test", Username: "Guard", PlanName: "Pro", Balance: 5}
 		state.GroupsError = "加载失败"
 		state.RefreshGroups = func() {}
+		a.accountGroupsOpen = true
 		tt.Frame()
-		for _, label := range []string{"账号详情", "退出登录"} {
+		for _, label := range []string{"账号详情", "退出登录", "重试加载分组"} {
 			if got := countText(tt.Texts(), label); got != 2 {
 				t.Fatalf("signed-in popover button %q appeared %d times (want 2): %q", label, got, tt.Texts())
 			}

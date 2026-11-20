@@ -53,6 +53,18 @@ func Popover(c *ui.Context, anchor ui.Element, open *bool, content func()) ui.El
 	})
 }
 
+// BarePopover is Popover without a single Floating chrome on the outer panel,
+// for multi-surface popovers (such as a menu with a side-attached submenu)
+// that paint Floating on each surface individually while sharing one overlay
+// lifecycle and click-outside dismiss boundary.
+func BarePopover(c *ui.Context, anchor ui.Element, open *bool, content func()) ui.Element {
+	return ui.PopoverBase(c, anchor, open, func(panel ui.Element) {
+		Anchored(panel, anchor, PopoverLayer)
+		panel.Transition(popup)
+		layer(c, open, content)
+	})
+}
+
 // Snapped makes a Popover's panel take the place and the size the layout
 // gives it at once, a change on its way too, and leave as it does: for a
 // page of it that needs its room in the frame it shows, where a panel
