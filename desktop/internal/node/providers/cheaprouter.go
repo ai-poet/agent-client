@@ -85,6 +85,11 @@ func CheapRouterProvider(gateway cheapauth.Gateway) (protocol.ConversationProvid
 		model.Context, model.Output = window, output
 		model.Tools = true
 		model.CompactionTokens = nil
+		if ladder, def, ok := CheapRouterReasoningLadder(platform, id); ok {
+			model.Reasoning = true
+			model.Efforts = ladder
+			model.DefaultEffort = def
+		}
 		indexByID[key] = len(provider.Models)
 		provider.Models = append(provider.Models, model)
 	}

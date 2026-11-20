@@ -10,14 +10,21 @@ import (
 
 // CompleteChannelModel adds the media capabilities of the specific channel.
 func CompleteChannelModel(provider protocol.ConversationProvider, model protocol.ConversationModel, reference *protocol.ConversationCatalogModel) protocol.ConversationModel {
-	model = CompleteModel(model, reference, provider.Api)
+	completed := CompleteModel(model, reference, provider.Api)
+	if provider.ID == CheapRouterProviderID && !model.CustomCapabilities {
+		// CheapRouterProvider sets its Rust-aligned reasoning ladder per model;
+		// keep that decision intact while still enriching vision/tools/generates.
+		completed.Reasoning = model.Reasoning
+		completed.Efforts = model.Efforts
+		completed.DefaultEffort = model.DefaultEffort
+	}
 	// OpenAI's Responses channel also offers a hosted image generation tool.
 	official := provider.Authentication == protocol.AuthenticationChatGptOAuth ||
 		provider.Authentication == protocol.AuthenticationApiKey && strings.TrimRight(provider.Endpoint, "/") == "https://api.openai.com/v1"
-	if !model.CustomCapabilities && official && provider.Api == protocol.ConversationModelApiResponses && model.Tools && model.Vision && len(model.Generates) == 0 {
-		model.Generates = []protocol.MediaGeneration{protocol.MediaGenerationImageTool}
+	if !completed.CustomCapabilities && official && provider.Api == protocol.ConversationModelApiResponses && completed.Tools && completed.Vision && len(completed.Generates) == 0 {
+		completed.Generates = []protocol.MediaGeneration{protocol.MediaGenerationImageTool}
 	}
-	return model
+	return completed
 }
 
 // CompleteModel resolves automatic metadata without replacing configured limits,

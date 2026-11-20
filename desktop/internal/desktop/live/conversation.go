@@ -460,11 +460,18 @@ func (r *Runtime) applyComposer(c *composer.State, config protocol.SessionConfig
 	for k, v := range config.Features {
 		c.Features[k] = v
 	}
+	c.Effort = 0
 	for _, m := range r.models() {
 		if m.ID == c.Model {
+			if !m.Reasoning {
+				break
+			}
 			if i := slices.Index(m.Efforts, effortName(config.Effort)); i >= 0 {
 				c.Effort = float64(i)
+			} else if i := slices.Index(m.Efforts, m.DefaultEffort); i >= 0 {
+				c.Effort = float64(i)
 			}
+			break
 		}
 	}
 }
@@ -485,12 +492,20 @@ func (r *Runtime) composerConfig(id string, comp *composer.State, m composer.Mes
 			config.Provider = p.ID
 			config.Model = model.ID
 			config.Credential = p.Credential
-			config.Effort = parseEffort(m.Effort)
+			if !model.Reasoning {
+				config.Effort = protocol.Effort{Kind: "default"}
+			} else {
+				config.Effort = parseEffort(m.Effort)
+				if m.Effort == "" || m.Effort == "composer_effort_unavailable" {
+					config.Effort = model.DefaultEffort
+				} else if len(model.Efforts) > 0 && !slices.ContainsFunc(model.Efforts, func(allowed protocol.Effort) bool {
+					return effortName(allowed) == effortName(config.Effort)
+				}) {
+					config.Effort = model.DefaultEffort
+				}
+			}
 			config.Mode = []protocol.WorkMode{"code", "plan", "flagship"}[min(max(int(m.Mode), 0), 2)]
 			config.Permission = []protocol.Permission{"ask", "project", "full"}[min(max(int(m.Permission), 0), 2)]
-			if m.Effort == "" || m.Effort == "composer_effort_unavailable" {
-				config.Effort = model.DefaultEffort
-			}
 			config.Features = map[string]string{}
 			if model.Capabilities != nil {
 				for _, f := range model.Capabilities.Features {

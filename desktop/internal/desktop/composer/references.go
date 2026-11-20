@@ -259,7 +259,8 @@ func (s *State) choose(c *ui.Context, ctx *Context, actions Actions, r Reference
 		}
 		s.replace("")
 	case ModelCommand:
-		s.Model, s.Effort = r.Insert, float64(defaultEffort(modelOf(ctx, r.Insert)))
+		next := modelOf(ctx, r.Insert)
+		s.Model, s.Effort = r.Insert, float64(s.carried(next, s.Chosen(ctx.Models)))
 		s.replace("")
 	case EffortCommand:
 		if i := slices.Index(efforts(s.Chosen(ctx.Models)), r.Insert); i >= 0 {
