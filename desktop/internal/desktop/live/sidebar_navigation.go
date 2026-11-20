@@ -69,7 +69,7 @@ func (r *Runtime) openProjectOverviewAt(project *viewmodel.Project, selectedPath
 	actions := shell.ProjectActions{
 		NewSession: func(current *viewmodel.Project) {
 			if current.Offline {
-				root.newDraft(current)
+				root.App.Sidebar.NewSession(current)
 				if selectedPath != "" {
 					root.App.Composer(root.App.Sidebar.Selected).Worktree = selectedPath
 				}
@@ -84,7 +84,7 @@ func (r *Runtime) openProjectOverviewAt(project *viewmodel.Project, selectedPath
 				root.enqueue(func(c *ui.Context) { kit.Toast(c, kit.Failed, i18n.T(c, "unavailable")) })
 				return
 			}
-			root.newDraft(current)
+			root.App.Sidebar.NewSession(current)
 			if selectedPath != "" {
 				root.App.Composer(root.App.Sidebar.Selected).Worktree = selectedPath
 			}

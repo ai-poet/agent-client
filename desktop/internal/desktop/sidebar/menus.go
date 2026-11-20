@@ -183,6 +183,10 @@ func (s *State) confirmDelete(c *ui.Context, cv *preview.Conversation) {
 func (s *State) ProjectActions(c *ui.Context, m *kit.Menu, pr *preview.Project) {
 	t := func(key string) string { return i18n.T(c, key) }
 	worktrees := func(action string) { s.worktrees(c, pr, action, "") }
+	if m.Item(t("workspace_new_session")).Icon(icons.Plus).Chosen() {
+		s.newIn(pr)
+	}
+	m.Separator()
 	if m.Item(t("project_edit")).Icon(icons.Settings2).Disabled(pr.Offline).Chosen() {
 		s.OpenEditor(pr)
 	}
