@@ -35,6 +35,25 @@ func TestBundledProviderCatalogSurvivesFailedRefresh(t *testing.T) {
 			if !slices.ContainsFunc(efforts, func(effort protocol.Effort) bool { return effort.Kind == "max" }) {
 				return fmt.Errorf("bundled reasoning choices are unavailable: %+v", efforts)
 			}
+			page, err = readProviderCatalog(ctx, db, protocol.ConversationCatalogQuery{
+				Channel: &protocol.ConversationCatalogChannel{Endpoint: "https://custom.invalid/v1", Authentication: protocol.AuthenticationApiKey},
+				IDs:     []string{"gpt-6.1-sol"},
+				Limit:   1,
+			})
+			if err != nil {
+				return err
+			}
+			if len(page.Models) != 1 || !slices.Contains(page.Models[0].Inputs, "image") {
+				return fmt.Errorf("bundled channel lookup did not recover the GPT-6.1 Sol image input")
+			}
+			if _, err = readProviderCatalog(ctx, db, protocol.ConversationCatalogQuery{
+				Provider: new("openai"),
+				Channel:  &protocol.ConversationCatalogChannel{Endpoint: "https://custom.invalid/v1", Authentication: protocol.AuthenticationApiKey},
+				IDs:      []string{"gpt-6.1-sol"},
+				Limit:    1,
+			}); !providerFixtureFault(err, protocol.ErrorCodeInvalidRequest) {
+				return fmt.Errorf("expected invalid_request when both provider and channel are set, got %v", err)
+			}
 			for _, channel := range []struct {
 				endpoint string
 				vision   bool
@@ -283,6 +302,18 @@ func TestProviderVisionUsesChannelOrCanonicalModel(t *testing.T) {
 				t.Fatal(err)
 			}
 			err := storage.Node.Read(ctx, func(db *sql.Conn) error {
+				page, err := readProviderCatalog(ctx, db, protocol.ConversationCatalogQuery{
+					Channel: &protocol.ConversationCatalogChannel{Endpoint: provider.Endpoint, Authentication: provider.Authentication},
+					IDs:     []string{row.model},
+					Limit:   1,
+				})
+				if err != nil {
+					return err
+				}
+				catalogVision := row.want && !row.manual && (row.nativeVision == nil || !*row.nativeVision) || row.manual && row.endpoint == "https://custom.invalid/v1" || row.nativeVision != nil && !*row.nativeVision && row.endpoint == "https://custom.invalid/v1"
+				if len(page.Models) != 1 || slices.Contains(page.Models[0].Inputs, "image") != catalogVision {
+					return fmt.Errorf("channel catalog lookup = %+v, want vision %v", page, catalogVision)
+				}
 				captured, err := captureTurnProvider(ctx, db, provider, row.model)
 				if err != nil {
 					return err

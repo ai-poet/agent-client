@@ -36,3 +36,43 @@ func TestModelCatalogBundledStatus(t *testing.T) {
 		t.Fatal("a downloaded catalog added an unnecessary bundled field")
 	}
 }
+
+func TestConversationCatalogQueryChannelWireCompatibility(t *testing.T) {
+	legacy := DefaultConversationCatalogQuery()
+	legacy.Provider = new("openai")
+	legacy.IDs = []string{"gpt-5"}
+	legacy.Limit = 10
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"channel"`) {
+		t.Fatalf("legacy query unexpectedly serialized channel: %s", raw)
+	}
+	var decoded ConversationCatalogQuery
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Channel != nil || decoded.Provider == nil || *decoded.Provider != "openai" {
+		t.Fatalf("legacy query decode mismatch: %+v", decoded)
+	}
+
+	channelQuery := DefaultConversationCatalogQuery()
+	channelQuery.Channel = &ConversationCatalogChannel{Endpoint: "https://gateway.example/v1", Authentication: AuthenticationApiKey}
+	channelQuery.IDs = []string{"fixture-vision"}
+	channelQuery.Limit = 100
+	cmd := Command{Kind: "read_model_catalog", Data: channelQuery}
+	raw, err = json.Marshal(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decodedCmd Command
+	if err := json.Unmarshal(raw, &decodedCmd); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := decodedCmd.Data.(*ConversationCatalogQuery)
+	if !ok || got.Provider != nil || got.Channel == nil ||
+		got.Channel.Endpoint != "https://gateway.example/v1" || got.Channel.Authentication != AuthenticationApiKey {
+		t.Fatalf("channel query roundtrip mismatch: %+v", decodedCmd)
+	}
+}

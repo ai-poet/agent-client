@@ -3,6 +3,7 @@ package live
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -26,11 +27,18 @@ func TestProviderDiscoveryCatalogFailureRetainsModels(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			snapshot := protocol.DefaultSnapshot()
 			snapshot.Node = protocol.NodeID{1}
+			provider := protocol.DefaultConversationProvider()
+			provider.ID, provider.Api = protocol.ProviderID{1}, protocol.ConversationModelApiResponses
+			provider.Endpoint, provider.Authentication = "https://gateway.example/v1", protocol.AuthenticationApiKey
 			transport := &conversationTestTransport{snapshot: snapshot}
 			reads := 0
 			transport.handle = func(request protocol.Request) (link.Response, bool) {
 				if request.Command.Kind == "read_model_catalog" {
 					reads++
+					query, ok := detail[protocol.ConversationCatalogQuery](request.Command.Data)
+					if !ok || query.Provider != nil || query.Channel == nil || query.Channel.Endpoint != provider.Endpoint || query.Channel.Authentication != provider.Authentication {
+						t.Errorf("discovery queried a protocol namespace instead of its channel: %+v", query)
+					}
 					return link.Response{Fault: &protocol.Fault{Code: test.code, Message: "fixture catalog unavailable"}}, true
 				}
 				return link.Response{}, false
@@ -40,9 +48,6 @@ func TestProviderDiscoveryCatalogFailureRetainsModels(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer controller.Close()
-			provider := protocol.DefaultConversationProvider()
-			provider.ID, provider.Api = protocol.ProviderID{1}, protocol.ConversationModelApiResponses
-			provider.Endpoint, provider.Authentication = "https://gateway.example/v1", protocol.AuthenticationApiKey
 			previous := map[string]protocol.ConversationModel{"existing": {ID: "existing", Context: 200000, Output: 32000}}
 			r := &Runtime{ctx: t.Context(), controller: controller, providerModels: map[string]providerDiscovery{provider.ID.String(): {models: previous}}}
 			var shown string
@@ -112,6 +117,65 @@ func TestOAuthDiscoveryAcceptsNativeModelsWithoutPublicMetadata(t *testing.T) {
 	}
 	if len(received) != 1 || received[0].ID != modelID || !received[0].Vision || received[0].Context != 500000 {
 		t.Fatalf("account catalog model missing: %+v", received)
+	}
+}
+
+func TestProviderDiscoveryUsesChannelCapabilities(t *testing.T) {
+	t.Parallel()
+	const id = "fixture-vision"
+	for _, tc := range []struct {
+		name         string
+		endpoint     string
+		wantImageGen bool
+	}{
+		{name: "custom gateway", endpoint: "https://fixture-gateway.invalid/v1"},
+		{name: "official openai responses", endpoint: "https://api.openai.com/v1", wantImageGen: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot := protocol.DefaultSnapshot()
+			snapshot.Node = protocol.NodeID{1}
+			provider := protocol.DefaultConversationProvider()
+			provider.ID, provider.Api, provider.Authentication = protocol.ProviderID{1}, protocol.ConversationModelApiResponses, protocol.AuthenticationApiKey
+			provider.Endpoint = tc.endpoint
+			transport := &conversationTestTransport{snapshot: snapshot}
+			transport.handle = func(request protocol.Request) (link.Response, bool) {
+				if request.Command.Kind != "read_model_catalog" {
+					return link.Response{}, false
+				}
+				query, ok := detail[protocol.ConversationCatalogQuery](request.Command.Data)
+				if !ok || query.Channel == nil || query.Channel.Endpoint != provider.Endpoint || query.Channel.Authentication != provider.Authentication ||
+					query.Provider != nil || !slices.Equal(query.IDs, []string{id}) {
+					t.Errorf("looked up a model outside the channel: %+v", query)
+				}
+				page := protocol.DefaultConversationCatalogPage()
+				page.Models = []protocol.ConversationCatalogModel{{
+					ID: id, Name: id, Inputs: []string{"text", "image"}, Outputs: []string{"text"}, Tools: new(true), Reasoning: new(true),
+				}}
+				return link.Response{Output: protocol.Output{Kind: "model_catalog", Data: page}}, true
+			}
+			controller := client.New(transport)
+			if err := controller.Start(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			defer controller.Close()
+			r := &Runtime{ctx: t.Context(), controller: controller, providerModels: map[string]providerDiscovery{}}
+			known := map[string]protocol.ConversationModel{id: {ID: id, Context: 128000, Output: 16384}}
+			var received []viewmodel.ChannelModel
+			r.finishDiscovery(provider, 1, []protocol.ConversationDiscoveryModel{{ID: id}}, known, func(models []viewmodel.ChannelModel) {
+				received = models
+			})
+			r.workers.Wait()
+			for _, post := range r.queue {
+				post(nil)
+			}
+			if len(received) != 1 || received[0].ID != id || !received[0].Vision || !received[0].Tools || !received[0].Reasoning || received[0].CustomCapabilities {
+				t.Fatalf("catalog tags = %+v", received)
+			}
+			hasImageTool := slices.Contains(received[0].Generates, viewmodel.GenerateImageTool)
+			if hasImageTool != tc.wantImageGen {
+				t.Fatalf("generates = %+v, want image tool=%v", received[0].Generates, tc.wantImageGen)
+			}
+		})
 	}
 }
 

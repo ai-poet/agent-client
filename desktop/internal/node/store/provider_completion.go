@@ -12,8 +12,8 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
-func metadataCatalogProvider(provider protocol.ConversationProvider) string {
-	switch provider.Authentication {
+func metadataCatalogProvider(endpoint string, authentication protocol.Authentication) string {
+	switch authentication {
 	case protocol.AuthenticationChatGpt, protocol.AuthenticationChatGptOAuth:
 		return "openai"
 	case protocol.AuthenticationClaudeOAuth:
@@ -21,7 +21,7 @@ func metadataCatalogProvider(provider protocol.ConversationProvider) string {
 	case protocol.AuthenticationCopilot:
 		return "github-copilot"
 	}
-	switch strings.TrimRight(provider.Endpoint, "/") {
+	switch strings.TrimRight(endpoint, "/") {
 	case "https://api.openai.com/v1":
 		return "openai"
 	case "https://api.anthropic.com":
@@ -31,18 +31,14 @@ func metadataCatalogProvider(provider protocol.ConversationProvider) string {
 	case "https://api.deepseek.com", "https://api.deepseek.com/v1":
 		return "deepseek"
 	}
-	return providers.BundledCatalogProvider(provider.Endpoint)
+	return providers.BundledCatalogProvider(endpoint)
 }
 
 func fillProviderMetadata(ctx context.Context, db *sql.Conn, provider *protocol.ConversationProvider) error {
-	namespace := metadataCatalogProvider(*provider)
-	var catalogProvider *string
-	if namespace != "" {
-		catalogProvider = &namespace
-	}
+	channel := &protocol.ConversationCatalogChannel{Endpoint: provider.Endpoint, Authentication: provider.Authentication}
 	for i := range provider.Models {
 		var reference *protocol.ConversationCatalogModel
-		query := protocol.ConversationCatalogQuery{Provider: catalogProvider, IDs: []string{provider.Models[i].ID}, Limit: 1}
+		query := protocol.ConversationCatalogQuery{Channel: channel, IDs: []string{provider.Models[i].ID}, Limit: 1}
 		page, err := readProviderCatalog(ctx, db, query)
 		if err != nil {
 			return err
@@ -50,24 +46,7 @@ func fillProviderMetadata(ctx context.Context, db *sql.Conn, provider *protocol.
 		if len(page.Models) > 0 {
 			reference = &page.Models[0]
 		}
-		provider.Models[i] = providers.CompleteModel(provider.Models[i], reference, provider.Api)
-	}
-	if namespace == "" {
-		if err := fillProviderVision(ctx, db, provider, ""); err != nil {
-			return err
-		}
-	}
-	// OpenAI's own Responses channel also hosts image generation as a tool.
-	official := provider.Authentication == protocol.AuthenticationChatGptOAuth ||
-		provider.Authentication == protocol.AuthenticationApiKey && strings.TrimRight(provider.Endpoint, "/") == "https://api.openai.com/v1"
-	if !official || provider.Api != protocol.ConversationModelApiResponses {
-		return nil
-	}
-	for i := range provider.Models {
-		model := &provider.Models[i]
-		if !model.CustomCapabilities && model.Tools && model.Vision && len(model.Generates) == 0 {
-			model.Generates = []protocol.MediaGeneration{protocol.MediaGenerationImageTool}
-		}
+		provider.Models[i] = providers.CompleteChannelModel(*provider, provider.Models[i], reference)
 	}
 	return nil
 }
@@ -129,7 +108,7 @@ func fillProviderVision(ctx context.Context, db *sql.Conn, provider *protocol.Co
 			if err != nil {
 				return err
 			}
-			namespace, bundled, loaded = metadataCatalogProvider(*provider), status.Bundled, true
+			namespace, bundled, loaded = metadataCatalogProvider(provider.Endpoint, provider.Authentication), status.Bundled, true
 		}
 		vision, err := catalogVision(ctx, db, bundled, namespace, entry.ID)
 		if err != nil {

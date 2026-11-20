@@ -8,6 +8,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
+	"github.com/ai-poet/agent-client/desktop/internal/node/providers"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
@@ -26,7 +27,11 @@ func (r *Runtime) finishDiscovery(provider protocol.ConversationProvider, genera
 	r.async(func() {
 		ctx, cancel := context.WithTimeout(r.ctx, 10*time.Second)
 		defer cancel()
-		metadata, err := r.readProviderCatalog(ctx, provider.Api, discovered)
+		ids := make([]string, 0, len(discovered))
+		for _, model := range discovered {
+			ids = append(ids, model.ID)
+		}
+		metadata, err := r.readProviderCatalog(ctx, provider, ids)
 		r.enqueue(func(c *ui.Context) {
 			// An account server owns its model list. The public catalog only
 			// enriches its metadata and may lag or be unavailable.
@@ -52,20 +57,9 @@ func (r *Runtime) finishDiscovery(provider protocol.ConversationProvider, genera
 					if model.DisplayName == nil && catalog.Name != "" {
 						model.DisplayName = new(catalog.Name)
 					}
+					completed := providers.CompleteChannelModel(provider, model, &catalog)
+					model.Vision, model.Tools, model.Reasoning, model.Generates = completed.Vision, completed.Tools, completed.Reasoning, completed.Generates
 					caps := original.Capabilities
-					if caps == nil || caps.Tools == nil {
-						if catalog.Tools != nil {
-							model.Tools = *catalog.Tools
-						}
-					}
-					if caps == nil || caps.Vision == nil {
-						model.Vision = slices.Contains(catalog.Inputs, "image")
-					}
-					if caps == nil || caps.Reasoning == nil {
-						if catalog.Reasoning != nil {
-							model.Reasoning = *catalog.Reasoning
-						}
-					}
 					if caps == nil || caps.Efforts == nil {
 						for _, option := range catalog.Options {
 							if option.Kind == "effort" {
@@ -80,19 +74,6 @@ func (r *Runtime) finishDiscovery(provider protocol.ConversationProvider, genera
 									}
 								}
 							}
-						}
-					}
-					// As the Node completes them on save: an output the catalog
-					// lists is generated, audio only without text.
-					model.Generates = nil
-					for _, output := range catalog.Outputs {
-						switch {
-						case output == "image":
-							model.Generates = append(model.Generates, protocol.MediaGenerationImage)
-						case output == "video":
-							model.Generates = append(model.Generates, protocol.MediaGenerationVideo)
-						case output == "audio" && !slices.Contains(catalog.Outputs, "text"):
-							model.Generates = append(model.Generates, protocol.MediaGenerationSpeech)
 						}
 					}
 					if len(model.Efforts) > 0 && (caps == nil || caps.DefaultEffort == nil) {
@@ -111,27 +92,13 @@ func (r *Runtime) finishDiscovery(provider protocol.ConversationProvider, genera
 	})
 }
 
-func (r *Runtime) readProviderCatalog(ctx context.Context, api protocol.ConversationModelApi, models []protocol.ConversationDiscoveryModel) (map[string]protocol.ConversationCatalogModel, error) {
+func (r *Runtime) readProviderCatalog(ctx context.Context, provider protocol.ConversationProvider, ids []string) (map[string]protocol.ConversationCatalogModel, error) {
 	result := map[string]protocol.ConversationCatalogModel{}
 	remaining := map[string]bool{}
-	for _, model := range models {
-		remaining[model.ID] = true
+	for _, id := range ids {
+		remaining[id] = true
 	}
-	var provider *string
-	switch api {
-	case "responses", "chat_completions":
-		provider = new("openai")
-	case "anthropic":
-		provider = new("anthropic")
-	case "gemini":
-		provider = new("google")
-	case "deepseek":
-		provider = new("deepseek")
-	case "open_code_go":
-		provider = new("opencode-go")
-	case "open_code_zen":
-		provider = new("opencode")
-	}
+	channel := &protocol.ConversationCatalogChannel{Endpoint: provider.Endpoint, Authentication: provider.Authentication}
 	var revision *uint64
 	for range 32 {
 		if len(remaining) == 0 {
@@ -143,7 +110,7 @@ func (r *Runtime) readProviderCatalog(ctx context.Context, api protocol.Conversa
 		}
 		slices.Sort(ids)
 		ids = ids[:min(100, len(ids))]
-		out, err := r.controller.Do(ctx, protocol.Command{Kind: "read_model_catalog", Data: protocol.ConversationCatalogQuery{Provider: provider, IDs: ids, Revision: revision, Limit: 100}})
+		out, err := r.controller.Do(ctx, protocol.Command{Kind: "read_model_catalog", Data: protocol.ConversationCatalogQuery{Channel: channel, IDs: ids, Revision: revision, Limit: 100}})
 		if err != nil {
 			return result, err
 		}

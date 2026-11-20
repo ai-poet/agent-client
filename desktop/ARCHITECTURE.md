@@ -503,7 +503,9 @@ separate from the reviewed model request policies under
 Uploaded pictures reach vision-capable conversation models as native image
 input. Explicit model tags and native discovery take precedence. Automatic
 vision uses the channel's catalog, or the canonical origin when catalog entries
-for an unlisted gateway agree on its identity. When inline image content is
+for an unlisted gateway agree on its identity. Discovery reads model data from
+the Node by channel, matching the capability completion applied on save and turn
+admission. When inline image content is
 omitted, the model is directed to the captured `inspect_image` tool only if that
 turn can use it. Provider listings and snapshots project resolved vision for
 older models without rewriting saved revisions. New vision assignments use the
