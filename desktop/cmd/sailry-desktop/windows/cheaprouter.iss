@@ -10,6 +10,7 @@
 ;   /DAppVersion=<version>  /DArch=<x86_64|aarch64>
 ;   /DStageDir=<dir with CheapRouter.exe and shipped runtime>
 ;   /DOutputDir=<dir>  /DIconFile=<path to .ico>  /DLicenseFile=<path to LICENSE>
+;   /DAppUserModelID=<AppUserModelID matching SetCurrentProcessExplicitAppUserModelID>
 
 #ifndef AppVersion
   #error AppVersion must be defined (ISCC /DAppVersion=...)
@@ -24,10 +25,13 @@
   #define OutputDir "."
 #endif
 #ifndef IconFile
-  #define IconFile "..\..\..\..\resources\windows\AppIcon.ico"
+  #define IconFile "..\..\..\assets\branding\cheaprouter.ico"
 #endif
 #ifndef LicenseFile
   #define LicenseFile "..\..\..\..\LICENSE"
+#endif
+#ifndef AppUserModelID
+  #define AppUserModelID "sh.waku"
 #endif
 
 #if Arch == "aarch64"
@@ -50,7 +54,7 @@ AppUpdatesURL=https://github.com/ai-poet/agent-client/releases
 DefaultDirName={autopf}\CheapRouter
 DefaultGroupName=CheapRouter
 UninstallDisplayName=CheapRouter
-UninstallDisplayIcon={app}\CheapRouter.exe
+UninstallDisplayIcon={app}\CheapRouter.exe,0
 LicenseFile={#LicenseFile}
 OutputDir={#OutputDir}
 OutputBaseFilename=CheapRouter-{#AppVersion}-{#Arch}-Setup
@@ -85,8 +89,8 @@ Type: filesandordirs; Name: "{app}\skills\waku-computer-use"
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\CheapRouter"; Filename: "{app}\CheapRouter.exe"
-Name: "{userdesktop}\CheapRouter"; Filename: "{app}\CheapRouter.exe"; Tasks: desktopicon
+Name: "{group}\CheapRouter"; Filename: "{app}\CheapRouter.exe"; IconFilename: "{app}\CheapRouter.exe"; IconIndex: 0; AppUserModelID: "{#AppUserModelID}"
+Name: "{userdesktop}\CheapRouter"; Filename: "{app}\CheapRouter.exe"; IconFilename: "{app}\CheapRouter.exe"; IconIndex: 0; AppUserModelID: "{#AppUserModelID}"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked

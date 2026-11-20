@@ -93,7 +93,32 @@ test -f "$iss_script" || { echo "missing Inno Setup script: $iss_script" >&2; ex
 
 app_name=$(jq -r .name cmd/sailry-desktop/mygo.json)
 app_slug=$(jq -r .slug cmd/sailry-desktop/mygo.json)
+app_identifier=$(jq -r .identifier cmd/sailry-desktop/mygo.json)
 version=$(jq -r .version cmd/sailry-desktop/mygo.json)
+# MyGo embeds the top-level PNG in the exe; only this script reads windows.icon.
+app_icon_rel=$(jq -r '.icon // ""' cmd/sailry-desktop/mygo.json)
+win_icon_rel=$(jq -r '.windows.icon // ""' cmd/sailry-desktop/mygo.json)
+
+resolve_mygo_path() {
+  local raw="$1"
+  if test -z "$raw"; then
+    return 1
+  fi
+  case "$raw" in
+    /*) printf '%s\n' "$raw" ;;
+    *) printf '%s\n' "cmd/sailry-desktop/$raw" ;;
+  esac
+}
+
+app_icon=$(resolve_mygo_path "$app_icon_rel") || { echo 'mygo.json icon is required' >&2; exit 1; }
+win_icon=$(resolve_mygo_path "$win_icon_rel") || { echo 'mygo.json windows.icon is required' >&2; exit 1; }
+case "$win_icon" in
+  *.[iI][cC][oO]) ;;
+  *) echo 'mygo.json windows.icon must point to an .ico file' >&2; exit 1 ;;
+esac
+test -f "$app_icon" || { echo "missing app icon configured in mygo.json: $app_icon" >&2; exit 1; }
+test -f "$win_icon" || { echo "missing windows.icon configured in mygo.json: $win_icon" >&2; exit 1; }
+
 installer=$out/$app_name-$version-$rust_arch-Setup.exe
 portable=$out/$app_slug-$version-$triple.zip
 mygo_archive=$out/$app_slug-$version-windows-$arch.tar.gz
@@ -125,11 +150,20 @@ fi
 if test "$dry_run" -eq 1; then
   grep -q 'AppId={{7DC6C35B-FA40-4A95-B37A-626BF64556C5}' "$iss_script" ||
     { echo "Inno Setup AppId mismatch in $iss_script" >&2; exit 1; }
+  grep -q '^SetupIconFile=' "$iss_script" ||
+    { echo "missing SetupIconFile in $iss_script" >&2; exit 1; }
+  grep -q '^UninstallDisplayIcon=' "$iss_script" ||
+    { echo "missing UninstallDisplayIcon in $iss_script" >&2; exit 1; }
+  grep -q 'AppUserModelID:' "$iss_script" ||
+    { echo "missing shortcut AppUserModelID in $iss_script" >&2; exit 1; }
   cat <<EOF
 [dry-run] Windows package plan:
   platform          : $platform ($triple, rust_arch=$rust_arch)
   app               : $app_name ($app_slug)
   version           : $version
+  app_user_model_id : $app_identifier
+  app_icon          : $app_icon
+  windows_icon      : $win_icon
   installer_engine  : Inno Setup ($iss_script)
   mygo_feed_url     : $update_feed_manifest
   mygo_public_key   : ${update_public_key:-(unconfigured)}
@@ -290,7 +324,7 @@ fi
 test -f "$portable" || { echo "failed to produce portable archive $portable" >&2; exit 1; }
 
 # 2. First-hop Inno Setup installer (compatible with main's /SILENT /DIR= updater).
-icon_file="../resources/windows/AppIcon.ico"
+icon_file="$win_icon"
 license_file="../LICENSE"
 test -f "$license_file" || license_file="LICENSE"
 "$iscc" \
@@ -300,6 +334,7 @@ test -f "$license_file" || license_file="LICENSE"
   "/DOutputDir=$(to_win_path "$(cd "$out" && pwd)")" \
   "/DIconFile=$(to_win_path "$(cd "$(dirname "$icon_file")" && pwd)/$(basename "$icon_file")")" \
   "/DLicenseFile=$(to_win_path "$(cd "$(dirname "$license_file")" && pwd)/$(basename "$license_file")")" \
+  "/DAppUserModelID=$app_identifier" \
   "$(to_win_path "$(pwd)/$iss_script")"
 test -f "$installer" || { echo "ISCC did not produce $installer" >&2; exit 1; }
 
