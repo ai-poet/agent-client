@@ -1072,8 +1072,12 @@ func TestHeaderClearsTrafficLights(t *testing.T) {
 	}
 	tt.SetTitleBar(ui.TitleBar{})
 	tt.Frame()
-	if b, _ := tt.Access(i18n.In("en", "sidebar_toggle")); b.Bounds.X >= trafficLights {
-		t.Errorf("in full screen the toggle still starts at %v", b.Bounds.X)
+	brandBox, hasBrand := tt.Find(i18n.In("en", "app"))
+	if !hasBrand {
+		t.Fatalf("in full screen the app brand is missing: %q", tt.Texts())
+	}
+	if b, _ := tt.Access(i18n.In("en", "sidebar_toggle")); b.Bounds.X <= brandBox.X+brandBox.W || b.Bounds.X > brandBox.X+brandBox.W+32 {
+		t.Errorf("in full screen the toggle starts at %v, want right after brand %v", b.Bounds.X, brandBox)
 	}
 	t.Run("icon buttons", testIconButtons)
 	t.Run("header split", testHeaderSplit)
