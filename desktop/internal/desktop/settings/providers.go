@@ -845,7 +845,7 @@ func (e *providerEditor) save(m *Model) string {
 		generation := e.generation
 		signIn := e.login() && e.editing == ""
 		id := e.id
-		m.ProviderActions.Save(ProviderDraft{Channel: channel, Key: e.keyUpdate(), ExpectedRevision: e.revision, OAuth: e.oauth}, func(ok bool) {
+		m.ProviderActions.Save(ProviderDraft{Channel: channel, Key: e.keyUpdate(), ExpectedRevision: e.revision, EditorGeneration: generation, OAuth: e.oauth}, func(ok bool) {
 			if e.generation != generation || !e.open {
 				return
 			}
@@ -1222,8 +1222,8 @@ func providerForm(c *ui.Context, m *Model, e *providerEditor) {
 				}
 				if m.Live && m.ProviderActions.Discover != nil {
 					e.probing = true
-					draft := ProviderDraft{Channel: preview.Channel{ID: e.id, API: e.current().API, Endpoint: e.endpoint, Method: e.current().ID, APIVersion: strings.TrimSpace(e.apiVersion)}, Key: e.keyUpdate(), OAuth: e.oauth, ExpectedRevision: e.revision}
 					generation := e.generation
+					draft := ProviderDraft{Channel: preview.Channel{ID: e.id, API: e.current().API, Endpoint: e.endpoint, Method: e.current().ID, APIVersion: strings.TrimSpace(e.apiVersion)}, Key: e.keyUpdate(), OAuth: e.oauth, ExpectedRevision: e.revision, EditorGeneration: generation}
 					m.ProviderActions.Discover(draft, func(models []preview.ChannelModel) {
 						if e.generation != generation || !e.open {
 							return

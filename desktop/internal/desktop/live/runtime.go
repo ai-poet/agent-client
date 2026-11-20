@@ -147,7 +147,7 @@ type Runtime struct {
 	providerPresetsLoading    bool
 	providerPresetsRefresh    bool              // An explicit readProviders request also refreshes built-in presets.
 	providerBrands            map[string]string // brand names by presetBrand, offered or not
-	providerModels            map[string]map[string]protocol.ConversationModel
+	providerModels            map[string]providerDiscovery
 	providerDraftBases        map[string]protocol.ConversationProvider
 	modelCatalogEntered       bool
 	modelCatalogLoading       bool

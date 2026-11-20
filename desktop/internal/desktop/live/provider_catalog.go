@@ -11,7 +11,18 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
-func (r *Runtime) finishDiscovery(provider protocol.ConversationProvider, discovered []protocol.ConversationDiscoveryModel, known map[string]protocol.ConversationModel, done func([]viewmodel.ChannelModel)) {
+// providerDiscovery is what one editor's discovery learned about a channel's
+// models. A save applies it only to the editor generation, saved revision and
+// connection it was read for.
+type providerDiscovery struct {
+	generation, revision uint64
+	endpoint             string
+	authentication       protocol.Authentication
+	api                  protocol.ConversationModelApi
+	models               map[string]protocol.ConversationModel
+}
+
+func (r *Runtime) finishDiscovery(provider protocol.ConversationProvider, generation uint64, discovered []protocol.ConversationDiscoveryModel, known map[string]protocol.ConversationModel, done func([]viewmodel.ChannelModel)) {
 	r.async(func() {
 		ctx, cancel := context.WithTimeout(r.ctx, 10*time.Second)
 		defer cancel()
@@ -91,7 +102,10 @@ func (r *Runtime) finishDiscovery(provider protocol.ConversationProvider, discov
 				known[model.ID] = model
 				models = append(models, channelModel(model))
 			}
-			r.providerModels[provider.ID.String()] = known
+			if key := provider.ID.String(); r.providerModels[key].generation <= generation {
+				r.providerModels[key] = providerDiscovery{generation: generation, revision: provider.Revision,
+					endpoint: provider.Endpoint, authentication: provider.Authentication, api: provider.Api, models: known}
+			}
 			done(models)
 		})
 	})

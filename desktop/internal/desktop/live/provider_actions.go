@@ -144,7 +144,7 @@ func (r *Runtime) discoverModels(d settings.ProviderDraft, done func([]viewmodel
 				known[model.ID] = model
 				models = append(models, channelModel(model))
 			}
-			r.finishDiscovery(draft, result.Models, known, done)
+			r.finishDiscovery(draft, d.EditorGeneration, result.Models, known, done)
 			return
 		}
 		done(models)
