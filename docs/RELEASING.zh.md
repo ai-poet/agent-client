@@ -187,39 +187,84 @@ Windows 安装包由 GitHub Actions 打（本地打需要 Inno Setup，一般没
 
 | Secret | 说明 |
 |---|---|
-| `SPARKLE_PRIVATE_KEY` | 阶段 1 导出的私钥（签 Windows appcast 用同一把）|
+| `SPARKLE_PRIVATE_KEY` | 阶段 1 导出的私钥（签第一跳 macOS `appcast.xml` 与 Windows `appcast-windows-*.xml`）|
+| `MYGO_UPDATE_PRIVATE_KEY` | MyGo 第二跳更新 Ed25519 私钥（签 `mygo/update-<os>-<arch>.json` 中 `.tar.gz` 的 SHA-256 摘要，缺失即失败）|
+| `MYGO_UPDATE_PUBLIC_KEY` | MyGo 第二跳更新 Ed25519 公钥（须与 `MYGO_UPDATE_PRIVATE_KEY` 及 `desktop/cmd/sailry-desktop/mygo.json` 一致，编译期注入二进制）|
 | `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD` | Developer ID 证书 .p12 的 base64 与密码 |
 | `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` | 公证凭据 |
 | `WAKU_SIGNING_IDENTITY` | 同 .env 里那串 |
 | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | 阶段 2 的 token |
+| `R2_ENDPOINT` / `R2_PROVIDER` | 自建 MinIO / 兼容 S3 时配置（如 `https://s3.cheaprouter.cc` / `Minio`）|
 | `R2_BUCKET` | `cheaprouter-releases`（可省，已是默认）|
 | `WINDOWS_CERTIFICATE` / `WINDOWS_CERTIFICATE_PASSWORD` | 可选 Authenticode；没有则包不签名，用户首启有 SmartScreen 提示 |
 
-2. 触发：推 tag `v<版本>`（须与 Cargo.toml 一致），或 Actions → Release →
-   Run workflow（不用 tag，按 Cargo.toml 版本出 draft）。
-3. 工作流产出 Windows x64/arm64 的 `CheapRouter-<v>-<arch>-Setup.exe`、便携
-   zip、签名过的 `appcast-windows-<arch>.xml`，连同 mac 产物挂在一个
-   **draft GitHub release** 上。本 fork 不发 Linux 包，工作流里也没有 Linux
-   构建和 Linux 测试。
-4. 检查 draft 没问题后点 **Publish** → `sync-release.yml` 自动把所有文件同步进
-   R2 —— 这一步完成，两个平台的自动更新才对老用户生效。
+2. 触发：推 tag `v<版本>`（须与 `Cargo.toml` 或 `desktop/cmd/sailry-desktop/mygo.json` 之一唯一匹配），或 Actions → Release → Run workflow（可通过 `runtime` 输入选择 `auto` / `rust` / `mygo`）。
+3. 工作流按 `runtime` 互斥执行（同一 tag 只触发一条链，且已发布 tag 会自动跳过防止重复发布）：
+   - `runtime=rust`（`main`）：保持既有 Rust 构建行为不变，产出 `CheapRouter-<v>-<arch>-Setup.exe`、便携 zip、macOS DMG/zip 与第一跳 appcast。
+   - `runtime=mygo`（`desktop/`）：执行两跳发布链，见下方阶段 6。
+4. 检查 draft 没问题后点 **Publish** → `sync-release.yml` 自动把所有文件同步进 R2（先传不可变归档，再更新短缓存清单指针，任一失败即 job 失败）—— 这一步完成，双端自动更新才对用户生效。
+
+## 阶段 6：`desktop/`（Go/MyGo）两跳热更新发布流程
+
+从 `main`（Rust/GPUI v0.3.x）升级到 `desktop/`（Go/MyGo v0.4.0+）由同一套 CI 流水线完成两跳产物构建与签名：
+
+### 6.1 版本与身份单一真值
+
+- 版本源：`desktop/cmd/sailry-desktop/mygo.json` 的 `.version`（须与 `desktop/internal/link/compatibility.go` 的 `ProductVersion` 及推送的 Git tag 一致，且禁止带 `-` prerelease 后缀）。
+- 身份对齐：`name=CheapRouter`、`slug=cheaprouter`、`identifier=sh.waku`、macOS 数值化 `CFBundleVersion = major*1_000_000 + minor*1_000 + patch`（如 `0.4.0 → 4000 > 3008`）、`macos.infoPlist.SUPublicEDKey` 与 `resources/Info.plist` 一致、Windows Inno Setup `AppId={{7DC6C35B-FA40-4A95-B37A-626BF64556C5}}` 与 `resources/windows/waku.iss` 一致。
+
+### 6.2 双平台构建与封装
+
+- **macOS（`mygo-macos`：arm64 + x86_64）**：
+  - 在 `macos-latest`（arm64）与 `macos-15-intel`（x86_64）分别编译 native 库（iroh / turso / capture）并调用 `desktop/cmd/sailry-desktop/macos/package.sh --require-update-key`；
+  - 经 `mygo build`、补丁 `Info.plist`、`-seal`、代码签名与可选公证/staple 后，同一终态 `CheapRouter.app` 同时产出 DMG、第一跳 Sparkle zip 及第二跳 MyGo `.tar.gz`；
+  - `arm64` 节点调用 `scripts/appcast.ts`（内置 Sparkle 2.9.4 `generate_appcast`）用 `SPARKLE_PRIVATE_KEY` 签发 `appcast.xml`。
+- **Windows（`mygo-windows`：x86_64 + arm64）**：
+  - 在 `windows-latest` 与 `windows-11-arm` 编译 native 库并提取对应架构 MSVC CRT（`desktop/native/windows/crt.ps1 -Arch <amd64|arm64>`）；
+  - 调用 `desktop/cmd/sailry-desktop/windows/package.sh -arch <amd64|arm64> --require-update-key`：使用 `mygo build -skip-installer`（**完全不依赖 NSIS**）与 **Inno Setup**（`desktop/cmd/sailry-desktop/windows/cheaprouter.iss`）封装 `CheapRouter-<v>-<arch>-Setup.exe`、便携 zip 及第二跳 MyGo `.tar.gz`；
+  - Inno Setup 安装器支持 `/SILENT /NORESTART /SP- /DIR=`，安装前自动结束旧 `client-daemon.exe`/`waku.exe`/`waku_js_repl.exe`、清理旧 Rust 文件并拉起 `CheapRouter.exe`。
+- **汇签与 Draft（`mygo-draft-release`）**：
+  - 第一跳：从 `https://s3.cheaprouter.cc/cheaprouter-releases/appcast-windows-<arch>.xml` 拉取历史条目，调用 `scripts/appcast-windows.ts` 用 `SPARKLE_PRIVATE_KEY` 签发 `appcast-windows-x86_64.xml` / `appcast-windows-aarch64.xml`；
+  - 第二跳：调用 `desktop/cmd/mygo-manifest sign` 与 `verify`，用 `MYGO_UPDATE_PRIVATE_KEY` 对 4 个平台 `.tar.gz` 的 SHA-256 摘要做 Ed25519 签名，产出 `update-darwin-arm64.json`、`update-darwin-amd64.json`、`update-windows-amd64.json`、`update-windows-arm64.json`；
+  - 生成 `SHA256SUMS.txt` 并写入 draft GitHub Release。
+
+### 6.3 R2 对象存储路径与缓存策略（`sync-release.yml`）
+
+| R2 路径 | 内容 | Cache-Control |
+|---|---|---|
+| `r2:<bucket>/`（不可变） | `CheapRouter-<v>*.dmg`、`CheapRouter-<v>*.zip`、`CheapRouter-<v>.md`、`CheapRouter-<v>-<arch>-Setup.exe`、`cheaprouter-<v>-<triple>.zip`、`SHA256SUMS.txt` | `public, max-age=31536000, immutable` |
+| `r2:<bucket>/mygo/`（不可变） | `cheaprouter-<v>-darwin-{arm64,amd64}.tar.gz`、`cheaprouter-<v>-windows-{amd64,arm64}.tar.gz`（及后续 `.delta`） | `public, max-age=31536000, immutable` |
+| `r2:<bucket>/`（可变指针） | `appcast.xml`、`appcast-windows-x86_64.xml`、`appcast-windows-aarch64.xml`、`latest-windows.txt` | `public, max-age=300, must-revalidate` |
+| `r2:<bucket>/mygo/`（可变清单） | `update-darwin-arm64.json`、`update-darwin-amd64.json`、`update-windows-amd64.json`、`update-windows-arm64.json` | `public, max-age=300, must-revalidate` |
+
+### 6.4 本地验证与回滚
+
+- Linux/本地打包脚本预检（无需 macOS/Windows 工具）：
+  ```sh
+  cd desktop
+  ./cmd/sailry-desktop/macos/package.sh -arch arm64 --require-update-key --dry-run
+  ./cmd/sailry-desktop/macos/package.sh -arch amd64 --require-update-key --dry-run
+  ./cmd/sailry-desktop/windows/package.sh -arch amd64 --require-update-key --dry-run
+  ./cmd/sailry-desktop/windows/package.sh -arch arm64 --require-update-key --dry-run
+  unset GOROOT && export GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0
+  go test ./cmd/sailry-desktop/ ./internal/update/ ./cmd/mygo-manifest/ -count=1
+  ```
+- **回滚方式**：
+  - 撤回第一跳（停止 `main` 用户继续升到新版本）：重新上传不含问题版本的 `appcast.xml` / `appcast-windows-*.xml`（或通过 `sync-release.yml` 手动指定上一稳定 tag 回写指针）；
+  - 撤回第二跳（停止 Go 用户继续升到新版本）：将 `r2:<bucket>/mygo/update-*.json` 恢复为上一稳定版本的清单（由于 `.tar.gz` 不可变保留在桶中，最长 5 分钟 TTL 后生效）；对已升级用户发紧急修复则直接递增版本号发布（例如 `0.4.1`）。
 
 ## 自动更新是怎么工作的（心智模型）
 
-- **一把 EdDSA 密钥、一个 R2 桶** 服务两个平台。`appcast.xml`（mac）和
-  `appcast-windows-<arch>.xml`（win）是"最新版本指针"，5 分钟缓存；其余文件
-  按版本命名、永久缓存、永不覆盖。
-- mac 由内嵌 Sparkle 完成校验+安装（zip/增量补丁）；Windows 由 `src/updater.rs`
-  自实现同一契约：验签 → 下载 Setup.exe → `/SILENT` 静默重装 → 自动重启。
-  公钥编译期取自 Info.plist，两平台不可能用错钥匙。
-- 撤回版本 = 重新生成不含该版本的 appcast 上传；老文件留桶里不影响。
-- debug 构建永不自更新；测试更新流：装一个旧版正式包 → 菜单检查更新。
+- **两把独立 Ed25519 密钥、一个 R2 桶** 服务两跳更新：
+  - **第一跳（`SPARKLE_PRIVATE_KEY` → `SUPublicEDKey`）**：签原始安装包字节，写入桶根 `appcast.xml`（macOS Sparkle）和 `appcast-windows-<arch>.xml`（Windows Rust updater + Inno Setup `/SILENT /DIR=`）；
+  - **第二跳（`MYGO_UPDATE_PRIVATE_KEY` → `MYGO_UPDATE_PUBLIC_KEY`）**：签 `.tar.gz` 的 SHA-256 摘要，写入 `mygo/update-<os>-<arch>.json`，由 Go 端 `desktop/internal/update` 与 `mygo.Updater` 校验并原子替换。
+- 指针与清单 5 分钟缓存；其余版本化归档永久缓存、永不覆盖，且上传严格先传归档再更新指针。
+- debug 构建永不自更新；测试更新流：装一个旧版正式包 → 菜单或设置页检查更新。
 
 ## 常见坑
 
-- **AppId（`resources/windows/waku.iss`）已铸死为 fork 自己的 GUID，永远不要再改**：
+- **AppId（`resources/windows/waku.iss` 与 `desktop/cmd/sailry-desktop/windows/cheaprouter.iss`）已铸死为 fork 自己的 GUID，永远不要再改**：
   改了 Windows 就认不出旧安装，更新会装出第二份。
-- 版本号只改 `Cargo.toml`；带 `-beta` 后缀的版本会被发布脚本拒绝。
-- `CHANGELOG.md` 没有对应版本小节时发布会失败——先写再发。
-- Windows 的 exe 内部文件名仍是 `waku.exe`（快捷方式显示 CheapRouter），
-  这是有意为之，别改。
+- Rust 发布版本源在 `Cargo.toml`，MyGo 发布版本源在 `desktop/cmd/sailry-desktop/mygo.json`（与 `desktop/internal/link/compatibility.go` 一致）；带 `-beta` 等 prerelease 后缀的版本会被稳定频道发布链拒绝。
+- `CHANGELOG.md` 没有对应版本小节时本地 `bun run release` 会失败——先写再发。
+- Rust 版 Windows exe 内部文件名保持 `waku.exe`，Go/MyGo 版为 `CheapRouter.exe`；Inno Setup 在第一跳升级时会自动结束旧进程并清理 `waku.exe`/`client-daemon.exe`。

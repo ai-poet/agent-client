@@ -168,7 +168,10 @@ curl -fsSL https://s3.cheaprouter.cc/cheaprouter-releases/install-mac.sh | sh
 ```
 
 Windows 从 [最新 Release](../../releases/latest) 下载 `CheapRouter-*-Setup.exe`
-安装（x64 与 arm64 均有）。安装后应用内自动更新。目前不提供 Linux 安装包。
+安装（x64 与 arm64 均有，基于 Inno Setup）。安装后支持应用内自动更新：既有 Rust
+客户端经由 Sparkle / Windows appcast 完成首跳升级，Go/MyGo 桌面端随后通过签名
+MyGo 更新源（`mygo/update-<os>-<arch>.json`）持续自动检查更新。目前不提供 Linux
+安装包。
 
 ## Architecture
 
@@ -238,7 +241,7 @@ Settings → Computer Use). Agent sessions, projects, transcripts, skills,
 usage, diffs, file editing, and the terminal run natively on both.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and checks.
-Release maintainers should also read [RELEASING.md](RELEASING.md).
+Release maintainers should read [docs/RELEASING.zh.md](docs/RELEASING.zh.md) (two-hop Rust + Go/MyGo CI release pipeline, signing keys, Inno Setup packaging, and R2 sync) and [RELEASING.md](RELEASING.md).
 
 ## Upstream
 
