@@ -1043,13 +1043,13 @@ updates_channel: 更新頻道
 updates_channel_experience: 體驗版
 updates_channel_stable: 正式版
 updates_check: 檢查更新
-updates_automatic: 自動檢查
-updates_prereleases: 包含預先發行版
-updates_install: 安裝
-updates_not_configured: 設定更新來源與公鑰後才能檢查更新
-updates_build_unsupported: 目前建置或安裝方式不支援自行更新
-updates_not_found: 找不到更新清單
-updates_save_failed: 無法儲存更新設定
+updates_automatic: Check automatically
+updates_prereleases: Include prereleases
+updates_install: Install
+updates_not_configured: Updates are off until a feed and public key are configured
+updates_build_unsupported: This build or installation cannot update itself
+updates_not_found: The update manifest was not found
+updates_save_failed: Could not save update settings
 updates_version: 版本
 settings_notify_system_description: 接收應用的系統通知
 settings_notify_approval_description: 任務需要確認或授權時提醒你
@@ -1352,6 +1352,8 @@ market_details_version: 版本
 market_details_host: 主機
 market_details_skills: 技能
 market_details_mcp: MCP 服務
+market_details_unsupported: 暫不支援
+notebook_more: 更多儲存格
 market_details_includes: 包含
 connector_tools_empty: 無工具
 plugins_no_skills: 暫無技能

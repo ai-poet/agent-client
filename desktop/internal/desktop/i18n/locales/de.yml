@@ -1043,13 +1043,13 @@ updates_channel: Update-Kanal
 updates_channel_experience: Testversion
 updates_channel_stable: Stabil
 updates_check: Nach Updates suchen
-updates_automatic: Automatisch prüfen
-updates_prereleases: Vorabversionen einbeziehen
-updates_install: Installieren
-updates_not_configured: Updates sind deaktiviert, bis eine Quelle und ein öffentlicher Schlüssel konfiguriert sind
-updates_build_unsupported: Dieser Build oder diese Installation kann sich nicht selbst aktualisieren
-updates_not_found: Das Update-Manifest wurde nicht gefunden
-updates_save_failed: Update-Einstellungen konnten nicht gespeichert werden
+updates_automatic: Check automatically
+updates_prereleases: Include prereleases
+updates_install: Install
+updates_not_configured: Updates are off until a feed and public key are configured
+updates_build_unsupported: This build or installation cannot update itself
+updates_not_found: The update manifest was not found
+updates_save_failed: Could not save update settings
 updates_version: Version
 settings_notify_system_description: Systembenachrichtigungen von der App erhalten
 settings_notify_approval_description: Benachrichtigen, wenn Aufgaben eine Bestätigung oder Autorisierung benötigen
@@ -1352,6 +1352,8 @@ market_details_version: Version
 market_details_host: Host
 market_details_skills: Skills
 market_details_mcp: MCP-Server
+market_details_unsupported: Nicht unterstützt
+notebook_more: Weitere Zellen
 market_details_includes: Enthält
 connector_tools_empty: Keine Werkzeuge
 plugins_no_skills: Keine Fähigkeiten

@@ -1043,13 +1043,13 @@ updates_channel: Canal de atualização
 updates_channel_experience: Experiência
 updates_channel_stable: Estável
 updates_check: Verifique se há atualizações
-updates_automatic: Verificar automaticamente
-updates_prereleases: Incluir pré-lançamentos
-updates_install: Instalar
-updates_not_configured: As atualizações ficam desativadas até que uma fonte e uma chave pública sejam configuradas
-updates_build_unsupported: Esta compilação ou instalação não consegue se atualizar sozinha
-updates_not_found: O manifesto de atualização não foi encontrado
-updates_save_failed: Não foi possível salvar as configurações de atualização
+updates_automatic: Check automatically
+updates_prereleases: Include prereleases
+updates_install: Install
+updates_not_configured: Updates are off until a feed and public key are configured
+updates_build_unsupported: This build or installation cannot update itself
+updates_not_found: The update manifest was not found
+updates_save_failed: Could not save update settings
 updates_version: Versão
 settings_notify_system_description: Receber notificações do sistema a partir da aplicação
 settings_notify_approval_description: Notificar quando as tarefas precisam de confirmação ou autorização
@@ -1352,6 +1352,8 @@ market_details_version: Versão
 market_details_host: Host
 market_details_skills: Skills
 market_details_mcp: Servidores MCP
+market_details_unsupported: Não compatível
+notebook_more: Mais células
 market_details_includes: Inclui
 connector_tools_empty: Sem ferramentas
 plugins_no_skills: Sem habilidades

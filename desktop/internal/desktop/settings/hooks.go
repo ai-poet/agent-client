@@ -24,6 +24,8 @@ type hookEditor struct {
 	script   preview.Hook
 	original preview.Hook
 	timeout  string
+	// removing is the ID of the script whose removal awaits confirmation.
+	removing string
 }
 
 // consent is the enabling dialog: the settings that run once the user agrees.
@@ -121,17 +123,34 @@ func hooks(c *ui.Context, m *Model) {
 						m.hook = hookEditor{open: true, script: x, original: x, timeout: strconv.Itoa(x.TimeoutMS)}
 					})
 					kit.Action(c.Key("remove"), icons.CircleX, i18n.T(c, "hooks_remove"), !writable()).OnClick(func() {
-						s := clone(h.Draft)
-						s.Scripts = slices.Delete(s.Scripts, i, i+1)
-						if len(s.Scripts) == 0 {
-							s.Enabled = false
-						}
-						save(s)
+						m.hook.removing = x.ID
 					})
 				})
 			}
 		})
 	})
+	if i := slices.IndexFunc(h.Draft.Scripts, func(x preview.Hook) bool { return x.ID == m.hook.removing }); writable() && m.hook.removing != "" && i >= 0 {
+		x := h.Draft.Scripts[i]
+		name := x.Name
+		if name == "" {
+			name = x.Command
+		}
+		open := true
+		if confirm(c, "remove-hook", &open, i18n.T(c, "hooks_remove"), name, i18n.T(c, "hooks_remove")) {
+			s := clone(h.Draft)
+			s.Scripts = slices.Delete(s.Scripts, i, i+1)
+			if len(s.Scripts) == 0 {
+				s.Enabled = false
+			}
+			save(s)
+			open = false
+		}
+		if !open {
+			m.hook.removing = ""
+		}
+	} else {
+		m.hook.removing = ""
+	}
 	hookDialog(c, m, save, writable())
 	if writable() {
 		consentDialog(c, m, save)
