@@ -9,7 +9,7 @@
   "out": "../../.runtime/package/out",
   "updates": {
     "url": "https://s3.cheaprouter.cc/cheaprouter-releases/mygo",
-    "publicKey": ""
+    "publicKey": "o2mLrSnSQ59ylkBcA8rNhn3cz78OALnGAq6FbfQglWg="
   },
   "macos": {
     "icon": "../../assets/branding/Sailry.icns",

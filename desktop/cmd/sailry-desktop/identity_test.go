@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"strconv"
@@ -38,8 +40,17 @@ func TestProductIdentityAlignedWithMain(t *testing.T) {
 	if err := json.Unmarshal(raw, &config); err != nil {
 		t.Fatal(err)
 	}
-	if config.Updates == nil || config.Updates.URL != clientupdate.DefaultFeedBaseURL || config.Updates.PublicKey != "" {
-		t.Fatalf("mygo.json updates = %+v, want url=%q and empty compile-time publicKey placeholder", config.Updates, clientupdate.DefaultFeedBaseURL)
+	if config.Updates == nil || config.Updates.URL != clientupdate.DefaultFeedBaseURL {
+		t.Fatalf("mygo.json updates = %+v, want url=%q", config.Updates, clientupdate.DefaultFeedBaseURL)
+	}
+	// The public key is either the build-time placeholder (empty) or a real
+	// base64 Ed25519 key shipped with the release; anything else cannot verify
+	// a manifest.
+	if key := config.Updates.PublicKey; key != "" {
+		decoded, err := base64.StdEncoding.DecodeString(key)
+		if err != nil || len(decoded) != ed25519.PublicKeySize {
+			t.Fatalf("mygo.json updates publicKey = %q, want empty or a base64 Ed25519 key", key)
+		}
 	}
 	if core.MacOSBundleIdentifier != "sh.waku" || config.Identifier != core.MacOSBundleIdentifier {
 		t.Fatalf("mygo.json identifier = %q (constant %q), want %q", config.Identifier, core.MacOSBundleIdentifier, "sh.waku")
