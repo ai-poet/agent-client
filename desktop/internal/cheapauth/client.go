@@ -183,12 +183,28 @@ func (c *Client) Keys(ctx context.Context, accessToken string) (KeyPage, error) 
 	return page, err
 }
 
-// CreateKey mints a gateway key. Only a key, never the account tokens, is
-// handed to the model provider.
+// CreateKey mints an account-level gateway key. Only a key, never the account
+// tokens, is handed to the model provider.
 func (c *Client) CreateKey(ctx context.Context, accessToken, name string) (APIKey, error) {
+	return c.CreateKeyForGroup(ctx, accessToken, name, nil)
+}
+
+// CreateKeyForGroup mints a gateway key optionally bound to groupID.
+func (c *Client) CreateKeyForGroup(ctx context.Context, accessToken, name string, groupID *int64) (APIKey, error) {
 	var key APIKey
-	err := c.do(ctx, http.MethodPost, "/keys", accessToken, map[string]string{"name": name}, &key)
+	payload := map[string]any{"name": name}
+	if groupID != nil {
+		payload["group_id"] = *groupID
+	}
+	err := c.do(ctx, http.MethodPost, "/keys", accessToken, payload, &key)
 	return key, err
+}
+
+// AvailableGroups lists the routing groups this account may switch to.
+func (c *Client) AvailableGroups(ctx context.Context, accessToken string) ([]Group, error) {
+	var groups []Group
+	err := c.do(ctx, http.MethodGet, "/groups/available", accessToken, nil, &groups)
+	return groups, err
 }
 
 func (c *Client) ModelCatalog(ctx context.Context, accessToken string) (ModelCatalog, error) {

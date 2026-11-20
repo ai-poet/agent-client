@@ -92,6 +92,7 @@ type Credentials struct {
 	ExpiresAt    int64  `json:"expires_at"`
 	Endpoint     string `json:"endpoint"`
 	APIKey       string `json:"api_key,omitempty"`
+	GroupID      *int64 `json:"group_id,omitempty"`
 }
 
 func (Credentials) String() string   { return "CheapRouter 凭据（已隐藏）" }
@@ -212,14 +213,53 @@ type KeyPage struct {
 	Total int64    `json:"total"`
 }
 
+// Group is one model routing group returned by GET /api/v1/groups/available.
+type Group struct {
+	ID               int64   `json:"id"`
+	Name             string  `json:"name"`
+	Description      string  `json:"description"`
+	Platform         string  `json:"platform"`
+	RateMultiplier   float64 `json:"rate_multiplier"`
+	Status           string  `json:"status"`
+	Category         string  `json:"category"`
+	SubscriptionType string  `json:"subscription_type"`
+}
+
+// GroupRef identifies the primary group for a catalog entry.
+type GroupRef struct {
+	ID             int64   `json:"id"`
+	Name           string  `json:"name"`
+	RateMultiplier float64 `json:"rate_multiplier"`
+}
+
+// GroupCompanion is an alternate group serving the same catalog model.
+type GroupCompanion struct {
+	Group GroupRef `json:"group"`
+}
+
 // Model is the part of model_catalog needed to configure sailry.
 type Model struct {
-	ID              string `json:"model"`
-	DisplayName     string `json:"display_name"`
-	Platform        string `json:"platform"`
-	BillingMode     string `json:"billing_mode"`
-	ContextWindow   int64  `json:"context_window"`
-	MaxOutputTokens int64  `json:"max_output_tokens,omitempty"`
+	ID              string           `json:"model"`
+	DisplayName     string           `json:"display_name"`
+	Platform        string           `json:"platform"`
+	BillingMode     string           `json:"billing_mode"`
+	ContextWindow   int64            `json:"context_window"`
+	MaxOutputTokens int64            `json:"max_output_tokens,omitempty"`
+	BestGroup       GroupRef         `json:"best_group,omitempty"`
+	OtherGroups     []GroupCompanion `json:"other_groups,omitempty"`
+}
+
+// ServesGroup reports whether this catalog item is offered through groupID.
+func (m Model) ServesGroup(groupID int64) bool {
+	if m.BestGroup.ID == groupID {
+		return true
+	}
+	for _, other := range m.OtherGroups {
+		if other.Group.ID == groupID {
+			return true
+		}
+	}
+	return false
 }
 
 // ModelCatalog accepts the service's additive base_url field. Older gateways
@@ -244,6 +284,7 @@ type Gateway struct {
 	BaseURL string
 	APIKey  string
 	Models  []Model
+	GroupID *int64
 }
 
 func (g Gateway) String() string {

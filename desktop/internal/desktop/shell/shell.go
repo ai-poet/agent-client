@@ -142,9 +142,10 @@ type App struct {
 	OnMode  func(theme.Mode)
 	applied theme.Mode
 
-	Sidebar  *sidebar.State
-	Settings *settings.State
-	Messages *conversation.State
+	Sidebar     *sidebar.State
+	Settings    *settings.State
+	Messages    *conversation.State
+	accountOpen bool
 	// overviews are the session overview popovers by conversation, each
 	// opened by its conversation's own button (conversationActions); band
 	// is the header's main region as the activity strip fits into it
@@ -530,6 +531,7 @@ func (a *App) nav(c *ui.Context, f frame, panel ui.Color) {
 			} else {
 				sidebar.View(c, a.Sidebar)
 			}
+			a.accountFooter(c)
 		})
 	})
 	if f.nav >= 0.999 {

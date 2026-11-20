@@ -682,3 +682,87 @@ func TestGatewayMintsKeyWhenAccountOwnsNone(t *testing.T) {
 		t.Fatalf("minted = %d, key = %q", minted, gateway.APIKey)
 	}
 }
+
+func TestAvailableGroupsAndEnsureKeyForGroup(t *testing.T) {
+	var createdGroupIDs []int64
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "Bearer "+testAccess {
+			writeEnvelope(t, writer, 401, `{"code":401}`)
+			return
+		}
+		switch {
+		case request.URL.Path == "/api/v1/groups/available" && request.Method == http.MethodGet:
+			writeEnvelope(t, writer, 200, `{"code":0,"data":[{"id":1,"name":"Claude Fast","platform":"anthropic","rate_multiplier":0.5,"status":"active"},{"id":2,"name":"OpenAI Sub","platform":"openai","subscription_type":"subscription","status":"active"}]}`)
+		case request.URL.Path == "/api/v1/models/catalog" && request.Method == http.MethodGet:
+			writeEnvelope(t, writer, 200, `{"code":0,"data":{"base_url":"https://gateway.example/v1","items":[`+
+				`{"model":"claude-sonnet-4-6","billing_mode":"token","context_window":200000,"best_group":{"id":1,"name":"Claude Fast"}},`+
+				`{"model":"gpt-5","billing_mode":"token","context_window":128000,"best_group":{"id":2,"name":"OpenAI Sub"}}`+
+				`]}}`)
+		case request.URL.Path == "/api/v1/keys" && request.Method == http.MethodGet:
+			writeEnvelope(t, writer, 200, `{"code":0,"data":{"items":[`+
+				`{"id":10,"key":"sk-group-1-reused","group_id":1,"status":"active"},`+
+				`{"id":11,"key":"sk-group-2-disabled","group_id":2,"status":"disabled"}`+
+				`],"total":2}}`)
+		case request.URL.Path == "/api/v1/keys" && request.Method == http.MethodPost:
+			var body struct {
+				Name    string `json:"name"`
+				GroupID *int64 `json:"group_id"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Errorf("decode create key: %v", err)
+			}
+			if body.GroupID != nil {
+				createdGroupIDs = append(createdGroupIDs, *body.GroupID)
+			}
+			writeEnvelope(t, writer, 200, `{"code":0,"data":{"id":12,"key":"sk-group-2-minted","group_id":2,"status":"active"}}`)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	profile := t.TempDir()
+	service, err := NewService(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.credentials = &Credentials{AccessToken: testAccess, RefreshToken: testRefresh, Endpoint: server.URL, ExpiresAt: time.Now().Add(time.Hour).Unix()}
+	service.client, _ = NewClient(server.URL, server.Client())
+	if err := service.store.Save(*service.credentials); err != nil {
+		t.Fatal(err)
+	}
+
+	groups, err := service.AvailableGroups(t.Context())
+	if err != nil || len(groups) != 2 || groups[0].ID != 1 || groups[1].ID != 2 {
+		t.Fatalf("AvailableGroups = %+v, %v", groups, err)
+	}
+
+	g1 := int64(1)
+	gw1, err := service.GatewayForGroup(t.Context(), &g1)
+	if err != nil {
+		t.Fatalf("GatewayForGroup(1): %v", err)
+	}
+	if gw1.APIKey != "sk-group-1-reused" || len(createdGroupIDs) != 0 || len(gw1.Models) != 1 || gw1.Models[0].ID != "claude-sonnet-4-6" {
+		t.Fatalf("group 1 gateway = key:%q created:%v models:%+v", gw1.APIKey, createdGroupIDs, gw1.Models)
+	}
+
+	g2 := int64(2)
+	gw2, err := service.GatewayForGroup(t.Context(), &g2)
+	if err != nil {
+		t.Fatalf("GatewayForGroup(2): %v", err)
+	}
+	if gw2.APIKey != "sk-group-2-minted" || !slices.Equal(createdGroupIDs, []int64{2}) || len(gw2.Models) != 1 || gw2.Models[0].ID != "gpt-5" {
+		t.Fatalf("group 2 gateway = key:%q created:%v models:%+v", gw2.APIKey, createdGroupIDs, gw2.Models)
+	}
+
+	if err := service.SetGroup(t.Context(), &g2); err != nil {
+		t.Fatalf("SetGroup(2): %v", err)
+	}
+	reopened, err := NewService(profile)
+	if err != nil || reopened.Restore() != nil {
+		t.Fatalf("reopen service: %v", err)
+	}
+	if got := reopened.SelectedGroup(); got == nil || *got != 2 {
+		t.Fatalf("restored group = %v, want 2", got)
+	}
+}

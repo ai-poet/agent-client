@@ -54,8 +54,12 @@ type cheapGateway struct {
 	exchange chan struct{}
 	// catalogBody, when non-empty, overrides the /models/catalog JSON response.
 	catalogBody string
-	calls       []string
-	revoked     []string
+	// groupsBody, when non-empty, overrides the /groups/available JSON response.
+	groupsBody string
+	// failCreateKeyGroup, when non-zero, causes POST /keys for that group_id to return HTTP 500.
+	failCreateKeyGroup int64
+	calls              []string
+	revoked            []string
 }
 
 func newCheapGateway(t *testing.T) *cheapGateway {
@@ -69,14 +73,18 @@ func (g *cheapGateway) serve(writer http.ResponseWriter, request *http.Request) 
 	route := request.Method + " " + strings.TrimPrefix(request.URL.Path, "/api/v1")
 	g.mu.Lock()
 	g.calls = append(g.calls, route)
-	down, rejected, challenge, exchange, catalogBody := g.down, g.rejected, g.challenge, g.exchange, g.catalogBody
+	down, rejected, challenge, exchange, catalogBody, groupsBody, failCreateKeyGroup := g.down, g.rejected, g.challenge, g.exchange, g.catalogBody, g.groupsBody, g.failCreateKeyGroup
 	g.mu.Unlock()
 	if down {
 		panic(http.ErrAbortHandler)
 	}
-	var body map[string]string
+	var body map[string]any
 	if request.Method == http.MethodPost {
 		_ = json.NewDecoder(request.Body).Decode(&body)
+	}
+	bodyStr := func(key string) string {
+		s, _ := body[key].(string)
+		return s
 	}
 	reply := func(status int, payload string) {
 		writer.Header().Set("Content-Type", "application/json")
@@ -93,24 +101,30 @@ func (g *cheapGateway) serve(writer http.ResponseWriter, request *http.Request) 
 		if exchange != nil {
 			<-exchange
 		}
-		if body["code"] != cheapTestCode || challenge == "" || core.PKCEChallenge(body["code_verifier"]) != challenge {
+		if bodyStr("code") != cheapTestCode || challenge == "" || core.PKCEChallenge(bodyStr("code_verifier")) != challenge {
 			reply(http.StatusBadRequest, `{"code":400,"reason":"DESKTOP_LOGIN_CODE_INVALID","message":"invalid code"}`)
 			return
 		}
 		reply(http.StatusOK, session)
 	case "POST /auth/refresh":
-		if rejected || body["refresh_token"] != cheapTestRefresh {
+		if rejected || bodyStr("refresh_token") != cheapTestRefresh {
 			reply(http.StatusUnauthorized, `{"code":401,"reason":"REFRESH_TOKEN_INVALID","message":"invalid refresh token"}`)
 			return
 		}
 		reply(http.StatusOK, session)
 	case "POST /auth/logout":
 		g.mu.Lock()
-		g.revoked = append(g.revoked, body["refresh_token"])
+		g.revoked = append(g.revoked, bodyStr("refresh_token"))
 		g.mu.Unlock()
 		reply(http.StatusOK, `{"code":0,"data":{}}`)
 	case "GET /auth/me":
 		reply(http.StatusOK, `{"code":0,"data":{"id":7,"email":"dev@example.test","username":"Dev","plan":"Pro","balance":12.5}}`)
+	case "GET /groups/available":
+		if groupsBody != "" {
+			reply(http.StatusOK, groupsBody)
+			return
+		}
+		reply(http.StatusOK, `{"code":0,"data":[{"id":1,"name":"Claude 高速组","platform":"anthropic","rate_multiplier":0.5,"status":"active"},{"id":2,"name":"OpenAI 订阅组","platform":"openai","subscription_type":"subscription","status":"active"},{"id":3,"name":"故障测试组","platform":"gemini","status":"active"}]}`)
 	case "GET /models/catalog":
 		if catalogBody != "" {
 			reply(http.StatusOK, catalogBody)
@@ -119,6 +133,16 @@ func (g *cheapGateway) serve(writer http.ResponseWriter, request *http.Request) 
 		reply(http.StatusOK, `{"code":0,"data":{"items":[{"model":"cheap-chat","display_name":"Cheap Chat","context_window":64000},{"model":"cheap-image","billing_mode":"image"}]}}`)
 	case "GET /keys":
 		reply(http.StatusOK, `{"code":0,"data":{"items":[{"id":1,"key":"`+cheapTestKey+`","status":"active"}],"total":1}}`)
+	case "POST /keys":
+		var gid int64
+		if raw, ok := body["group_id"].(float64); ok {
+			gid = int64(raw)
+		}
+		if failCreateKeyGroup != 0 && gid == failCreateKeyGroup {
+			reply(http.StatusInternalServerError, `{"code":500,"message":"group key mint failed"}`)
+			return
+		}
+		reply(http.StatusOK, `{"code":0,"data":{"id":99,"key":"sk-group-2-minted","group_id":2,"status":"active"}}`)
 	default:
 		http.NotFound(writer, request)
 	}
@@ -676,5 +700,63 @@ func TestCheapAuthErrorDistinguishesCauses(t *testing.T) {
 				t.Fatalf("cheapAuthError(%v) = %q, want substring %q", tc.err, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestCheapSidebarAccountAndGroupSwitchEndToEnd(t *testing.T) {
+	gateway := newCheapGateway(t)
+	gateway.failCreateKeyGroup = 3
+	gateway.catalogBody = `{"code":0,"data":{"items":[` +
+		`{"model":"claude-sonnet-4-6","display_name":"Claude Sonnet 4.6","billing_mode":"token","context_window":200000,"best_group":{"id":1,"name":"Claude 高速组"}},` +
+		`{"model":"gpt-5","display_name":"GPT-5","billing_mode":"token","context_window":128000,"best_group":{"id":2,"name":"OpenAI 订阅组"}}` +
+		`]}}`
+	d := openCheapDesktop(t, func(d *cheapDesktop) { d.signedIn(gateway.URL, cheapTestAccess, time.Hour) })
+	d.await("initial sync and groups load", func() bool {
+		return d.account().Stage == cheapauthui.Ready && len(d.account().Groups) == 3
+	})
+	if !d.tester.HasText("dev@example.test") || !d.tester.HasText("Pro") {
+		t.Fatalf("sidebar footer missing signed-in info: %q", d.tester.Texts())
+	}
+
+	// Open bottom-left account popover and switch to group 2 (mints a group-bound key + refreshes provider).
+	d.click("dev@example.test")
+	d.await("popover shows groups", func() bool { return d.tester.HasText("OpenAI 订阅组") })
+	d.click("OpenAI 订阅组")
+	d.await("group 2 switch completes", func() bool {
+		return !d.account().SwitchingGroup && d.account().SelectedGroupID != nil && *d.account().SelectedGroupID == 2
+	})
+	if d.account().GroupError != "" || d.account().Stage != cheapauthui.Ready || d.account().ModelCount != 1 {
+		t.Fatalf("after group 2 switch: stage=%d count=%d err=%q", d.account().Stage, d.account().ModelCount, d.account().GroupError)
+	}
+	provider := d.gateway(true)
+	if len(provider.Models) != 1 || provider.Models[0].ID != "gpt-5" {
+		t.Fatalf("provider models after switching to group 2 = %+v, want [gpt-5]", provider.Models)
+	}
+	key, _ := detail[protocol.Secret](d.do(protocol.Command{Kind: "read_provider_key", Data: protocol.CommandReadProviderKeyPayload{
+		Provider: provider.ID, ExpectedRevision: provider.Revision}}).Data)
+	if key.Expose() != "sk-group-2-minted" {
+		t.Fatalf("provider key after switching to group 2 = %q, want sk-group-2-minted", key.Expose())
+	}
+	if stored := d.stored(); stored == nil || stored.GroupID == nil || *stored.GroupID != 2 {
+		t.Fatalf("stored credentials group_id = %v, want 2", stored)
+	}
+
+	// Attempt to switch to group 3 (POST /keys fails with 500): must report error AND keep group 2 + working provider intact.
+	d.click("故障测试组")
+	d.await("failed group switch settles", func() bool {
+		return !d.account().SwitchingGroup && d.account().GroupError != ""
+	})
+	if !strings.Contains(d.account().GroupError, "切换分组失败") {
+		t.Fatalf("unexpected group switch error: %q", d.account().GroupError)
+	}
+	if d.account().Stage != cheapauthui.Ready || d.account().SelectedGroupID == nil || *d.account().SelectedGroupID != 2 || d.account().ModelCount != 1 {
+		t.Fatalf("failed switch altered working state: stage=%d group=%v count=%d", d.account().Stage, d.account().SelectedGroupID, d.account().ModelCount)
+	}
+	afterFail := d.gateway(true)
+	if afterFail.Revision != provider.Revision || len(afterFail.Models) != 1 || afterFail.Models[0].ID != "gpt-5" {
+		t.Fatalf("failed switch modified active provider: before=%+v after=%+v", provider, afterFail)
+	}
+	if stored := d.stored(); stored == nil || stored.GroupID == nil || *stored.GroupID != 2 {
+		t.Fatalf("failed switch altered persisted group_id: %v", stored)
 	}
 }

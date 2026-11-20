@@ -154,7 +154,7 @@ func (s *Service) adoptLocked() error {
 		s.credentials, s.client = nil, nil
 		return ErrUnauthorized
 	}
-	if *stored == *s.credentials {
+	if credentialsEqual(*stored, *s.credentials) {
 		return nil
 	}
 	client := s.client
@@ -232,16 +232,72 @@ func (s *Service) ReadSetup(ctx context.Context) (User, error, Gateway, error) {
 const CheapRouterKeyName = "CheapRouter desktop"
 
 // Gateway fetches catalog and keys after login. The key is the one accountKey
-// picks among the listed ones, or a newly minted one.
+// picks among the listed ones (honoring any bound group), or a newly minted one.
 func (s *Service) Gateway(ctx context.Context) (Gateway, error) {
 	credentials, client, err := s.session(ctx)
 	if err != nil {
 		return Gateway{}, err
 	}
-	return readGateway(ctx, client, credentials)
+	return readGatewayForGroup(ctx, client, credentials, credentials.GroupID)
+}
+
+// GatewayForGroup fetches a fresh model catalog and ensures an active gateway
+// key for groupID (nil means account default / unbound). Equivalent to legacy
+// ensure_key_for_group semantics: reuses an active key bound to groupID before
+// minting one.
+func (s *Service) GatewayForGroup(ctx context.Context, groupID *int64) (Gateway, error) {
+	credentials, client, err := s.session(ctx)
+	if err != nil {
+		return Gateway{}, err
+	}
+	return readGatewayForGroup(ctx, client, credentials, groupID)
+}
+
+// AvailableGroups returns the routing groups available to the signed-in account.
+func (s *Service) AvailableGroups(ctx context.Context) ([]Group, error) {
+	credentials, client, err := s.session(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return client.AvailableGroups(ctx, credentials.AccessToken)
+}
+
+// SelectedGroup returns a copy of the currently bound group ID, or nil for default.
+func (s *Service) SelectedGroup() *int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.credentials == nil {
+		return nil
+	}
+	return cloneInt64Ptr(s.credentials.GroupID)
+}
+
+// SetGroup persists the bound group ID after a group switch succeeds.
+func (s *Service) SetGroup(ctx context.Context, groupID *int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	credentialLock.Lock()
+	defer credentialLock.Unlock()
+	if err := s.adoptLocked(); err != nil {
+		return err
+	}
+	updated := *s.credentials
+	updated.GroupID = cloneInt64Ptr(groupID)
+	if err := s.store.Save(updated); err != nil {
+		return err
+	}
+	*s.credentials = updated
+	return nil
 }
 
 func readGateway(ctx context.Context, client *Client, credentials Credentials) (Gateway, error) {
+	return readGatewayForGroup(ctx, client, credentials, credentials.GroupID)
+}
+
+func readGatewayForGroup(ctx context.Context, client *Client, credentials Credentials, groupID *int64) (Gateway, error) {
 	token, bridgeKey := credentials.AccessToken, credentials.APIKey
 	catalog, err := client.ModelCatalog(ctx, token)
 	if err != nil {
@@ -251,11 +307,16 @@ func readGateway(ctx context.Context, client *Client, credentials Credentials) (
 	if err != nil {
 		return Gateway{}, err
 	}
-	key := accountKey(keys, bridgeKey)
+	var key string
+	if groupID != nil {
+		key = groupKey(keys, *groupID)
+	} else {
+		key = accountKey(keys, bridgeKey)
+	}
 	if key == "" {
-		// A new account owns no key yet: mint one, as the Rust client does,
-		// instead of failing a sign-in the user cannot fix from here.
-		created, err := client.CreateKey(ctx, token, CheapRouterKeyName)
+		// Reuse failed: mint a key for this group (or account-level if nil),
+		// matching the Rust client's ensure_key_for_group semantics.
+		created, err := client.CreateKeyForGroup(ctx, token, CheapRouterKeyName, groupID)
 		if err != nil {
 			return Gateway{}, err
 		}
@@ -264,11 +325,68 @@ func readGateway(ctx context.Context, client *Client, credentials Credentials) (
 			return Gateway{}, &AuthError{Kind: ErrorResponse, Op: "/keys"}
 		}
 	}
+	models := filterCatalogModelsForGroup(catalog.Items, groupID)
 	baseURL := strings.TrimRight(strings.TrimSpace(catalog.BaseURL), "/")
 	if baseURL == "" {
 		baseURL = client.Endpoint() + "/v1"
 	}
-	return Gateway{BaseURL: baseURL, APIKey: key, Models: catalog.Items}, nil
+	return Gateway{BaseURL: baseURL, APIKey: key, Models: models, GroupID: cloneInt64Ptr(groupID)}, nil
+}
+
+func groupKey(page KeyPage, groupID int64) string {
+	for _, candidate := range page.Items {
+		key := strings.TrimSpace(candidate.Key)
+		if key == "" || candidate.GroupID == nil || *candidate.GroupID != groupID {
+			continue
+		}
+		if candidate.Status != "" && !strings.EqualFold(candidate.Status, "active") && !strings.EqualFold(candidate.Status, "enabled") {
+			continue
+		}
+		return key
+	}
+	return ""
+}
+
+func filterCatalogModelsForGroup(items []Model, groupID *int64) []Model {
+	if groupID == nil || len(items) == 0 {
+		return items
+	}
+	hasGroupMetadata := false
+	matched := make([]Model, 0, len(items))
+	for _, item := range items {
+		if item.BestGroup.ID > 0 || len(item.OtherGroups) > 0 {
+			hasGroupMetadata = true
+		}
+		if item.ServesGroup(*groupID) {
+			matched = append(matched, item)
+		}
+	}
+	// If the catalog carries group bindings and lists models for this group,
+	// narrow to them; otherwise keep the full catalog (some groups map models
+	// dynamically without explicit catalog entries).
+	if hasGroupMetadata && len(matched) > 0 {
+		return matched
+	}
+	return items
+}
+
+func cloneInt64Ptr(v *int64) *int64 {
+	if v == nil {
+		return nil
+	}
+	copied := *v
+	return &copied
+}
+
+func credentialsEqual(a, b Credentials) bool {
+	if a.AccessToken != b.AccessToken || a.RefreshToken != b.RefreshToken ||
+		a.ExpiresAt != b.ExpiresAt || a.Endpoint != b.Endpoint || a.APIKey != b.APIKey {
+		return false
+	}
+	if a.GroupID == nil || b.GroupID == nil {
+		return a.GroupID == b.GroupID
+	}
+	return *a.GroupID == *b.GroupID
 }
 
 // accountKey picks the key the whole catalog is routed with: the bridge's

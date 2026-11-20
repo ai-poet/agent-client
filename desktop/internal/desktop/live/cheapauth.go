@@ -75,6 +75,8 @@ func (r *Runtime) initCheapAuth() {
 	}
 	state.StopSync = r.stopCheapSync
 	state.Logout = r.logoutCheapAuth
+	state.RefreshGroups = r.refreshCheapGroups
+	state.SelectGroup = r.selectCheapGroup
 	if err != nil {
 		state.Failure = cheapAuthError(err)
 		return
@@ -85,6 +87,7 @@ func (r *Runtime) initCheapAuth() {
 	}
 	if service.SignedIn() {
 		state.Endpoint = service.Endpoint()
+		state.SelectedGroupID = service.SelectedGroup()
 		r.startCheapSync(account, account.advance(r.ctx))
 	}
 }
@@ -236,8 +239,13 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 		user, accountErr := account.service.Account(ctx)
 		var gateway core.Gateway
 		var gatewayErr error
+		var groups []core.Group
+		var groupsErr error
 		if !cheapAuthRejected(accountErr) && ctx.Err() == nil {
 			gateway, gatewayErr = account.service.Gateway(ctx)
+			if !cheapAuthRejected(gatewayErr) && ctx.Err() == nil {
+				groups, groupsErr = account.service.AvailableGroups(ctx)
+			}
 		}
 		authErr := accountErr
 		if !cheapAuthRejected(authErr) {
@@ -262,6 +270,7 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 				modelCount, gatewayErr = r.saveCheapGateway(ctx, account, generation, gateway)
 			}
 		}
+		selectedGroup := account.service.SelectedGroup()
 		r.enqueue(func(*ui.Context) {
 			if account.generation != generation || ctx.Err() != nil {
 				return
@@ -274,18 +283,28 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 					account.state.Failure += "；CheapRouter provider 未能停用，请在模型设置中关闭"
 				}
 				account.state.Account, account.state.ModelCount = core.User{}, 0
+				account.state.Groups, account.state.SelectedGroupID = nil, nil
+				account.state.GroupsError, account.state.GroupError = "", ""
 				return
 			}
 			account.state.Account = user
 			if accountErr != nil {
 				account.state.AccountFailure = cheapAuthError(accountErr)
 			}
+			if groupsErr == nil {
+				account.state.Groups = groups
+				account.state.GroupsError = ""
+			} else if len(account.state.Groups) == 0 {
+				account.state.GroupsError = cheapAuthError(groupsErr)
+			}
+			account.state.SelectedGroupID = selectedGroup
 			if gatewayErr != nil {
 				account.state.Stage, account.state.Failure = cheapauthui.GatewayFailed, cheapAuthError(gatewayErr)
 				return
 			}
 			account.state.ModelCount = modelCount
 			account.state.Stage, account.state.Failure = cheapauthui.Ready, ""
+			account.state.GroupError = ""
 		})
 	})
 }
@@ -421,11 +440,122 @@ func (r *Runtime) logoutCheapAuth() {
 			account.state.ModelCount = 0
 			account.state.Pasted = ""
 			account.state.Exchanging = false
+			account.state.Groups = nil
+			account.state.GroupsLoading = false
+			account.state.GroupsError = ""
+			account.state.SelectedGroupID = nil
+			account.state.SwitchingGroup = false
+			account.state.GroupError = ""
 			if disableErr != nil || logoutErr != nil {
 				account.state.Failure = "本地登录已退出；远程撤销或禁用模型网关未完全成功，请检查网络后重试"
 			}
 		})
 	})
+}
+
+func (r *Runtime) refreshCheapGroups() {
+	account := r.cheapAuth
+	if account == nil || account.service == nil || account.generation == nil ||
+		!account.state.SignedIn() || account.state.LoggingOut || account.state.GroupsLoading {
+		return
+	}
+	generation := account.generation
+	account.state.GroupsLoading = true
+	account.state.GroupsError = ""
+	r.async(func() {
+		groups, err := account.service.AvailableGroups(generation.ctx)
+		r.enqueue(func(*ui.Context) {
+			if account.generation != generation || generation.ctx.Err() != nil {
+				return
+			}
+			account.state.GroupsLoading = false
+			if err != nil {
+				account.state.GroupsError = cheapAuthError(err)
+				return
+			}
+			account.state.Groups = groups
+			account.state.GroupsError = ""
+		})
+	})
+}
+
+func (r *Runtime) selectCheapGroup(groupID *int64) {
+	account := r.cheapAuth
+	if account == nil || account.service == nil || account.generation == nil ||
+		!account.state.SignedIn() || account.state.LoggingOut || account.state.SwitchingGroup ||
+		account.state.Stage == cheapauthui.SyncingGateway {
+		return
+	}
+	if sameGroupID(account.state.SelectedGroupID, groupID) {
+		account.state.GroupError = ""
+		return
+	}
+	generation := account.generation
+	target := copyGroupID(groupID)
+	account.state.SwitchingGroup = true
+	account.state.GroupError = ""
+	r.async(func() {
+		gateway, err := account.service.GatewayForGroup(generation.ctx, target)
+		var modelCount int
+		if err == nil && generation.ctx.Err() == nil {
+			modelCount, err = r.saveCheapGateway(generation.ctx, account, generation, gateway)
+		}
+		if err == nil && generation.ctx.Err() == nil {
+			err = account.service.SetGroup(generation.ctx, target)
+		}
+		var disableErr error
+		if err != nil && cheapAuthRejected(err) && generation.ctx.Err() == nil {
+			account.effects.Lock()
+			if generation.ctx.Err() == nil {
+				err = errors.Join(err, account.service.Invalidate())
+				disableErr = r.disableCheapGateway(account, generation)
+			}
+			account.effects.Unlock()
+		}
+		r.enqueue(func(c *ui.Context) {
+			if account.generation != generation || generation.ctx.Err() != nil {
+				return
+			}
+			account.state.SwitchingGroup = false
+			if err != nil {
+				if cheapAuthRejected(err) {
+					account.state.Stage, account.state.Failure = cheapauthui.SignedOut, cheapAuthError(err)
+					if disableErr != nil {
+						account.state.Failure += "；CheapRouter provider 未能停用，请在模型设置中关闭"
+					}
+					account.state.Account, account.state.ModelCount = core.User{}, 0
+					account.state.Groups, account.state.SelectedGroupID = nil, nil
+					account.state.GroupsError, account.state.GroupError = "", ""
+					return
+				}
+				// Rollback: keep current SelectedGroupID, ModelCount, Stage, and
+				// active provider unchanged; surface an explicit error.
+				account.state.GroupError = "切换分组失败：" + cheapAuthError(err)
+				return
+			}
+			account.state.SelectedGroupID = target
+			account.state.ModelCount = modelCount
+			account.state.GroupError = ""
+			account.state.Stage = cheapauthui.Ready
+			account.state.Failure = ""
+			kit.Toast(c, kit.Done, "已切换分组并刷新模型")
+		})
+	})
+}
+
+func sameGroupID(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func copyGroupID(v *int64) *int64 {
+	if v == nil {
+		return nil
+	}
+	copied := *v
+	return &copied
 }
 
 func (r *Runtime) disableCheapGateway(account *cheapAuthRuntime, generation *cheapAuthGeneration) error {

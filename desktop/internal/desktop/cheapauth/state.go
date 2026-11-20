@@ -33,6 +33,13 @@ type State struct {
 	Account                core.User
 	ModelCount             int
 
+	Groups          []core.Group
+	GroupsLoading   bool
+	GroupsError     string
+	SelectedGroupID *int64
+	SwitchingGroup  bool
+	GroupError      string
+
 	Start          func(manual bool)
 	SubmitPaste    func()
 	Cancel         func()
@@ -40,6 +47,8 @@ type State struct {
 	Retry          func()
 	RetryMigration func()
 	Logout         func()
+	RefreshGroups  func()
+	SelectGroup    func(groupID *int64)
 }
 
 func NewState() *State { return &State{Endpoint: core.PrimaryEndpoint} }
@@ -50,4 +59,18 @@ func (s *State) SignedIn() bool {
 }
 func (s *State) Busy() bool {
 	return s != nil && (s.Stage == Starting || s.Stage == SyncingGateway)
+}
+
+// ActiveGroupName returns the display name of the selected routing group, or
+// empty when using the account default.
+func (s *State) ActiveGroupName() string {
+	if s == nil || s.SelectedGroupID == nil {
+		return ""
+	}
+	for _, g := range s.Groups {
+		if g.ID == *s.SelectedGroupID && g.Name != "" {
+			return g.Name
+		}
+	}
+	return ""
 }

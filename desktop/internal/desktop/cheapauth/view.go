@@ -188,6 +188,9 @@ func content(c *ui.Context, state *State) {
 				kit.Row(c, "plan", "当前套餐", "", func() { ui.Text(c, state.Account.PlanDisplay()).FontSize(14) })
 				kit.Row(c, "balance", "账户余额", "", func() { ui.Textf(c, "$%.2f", state.Account.Balance).FontSize(14) })
 			}
+			if groupName := state.ActiveGroupName(); groupName != "" {
+				kit.Row(c, "group", "当前分组", "", func() { ui.Text(c, groupName).FontSize(14) })
+			}
 			kit.Row(c, "models", "可用聊天模型", "", func() { ui.Text(c, fmt.Sprintf("%d 个", state.ModelCount)).FontSize(14) })
 			kit.Row(c, "endpoint", "服务入口", "", func() { ui.Text(c, state.Endpoint).FontSize(13).Selectable() })
 			kit.DangerBusy(c.Key("logout"), "退出登录", state.LoggingOut).FillWidth().OnClick(func() {
