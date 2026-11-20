@@ -433,11 +433,10 @@ const (
 	settingsPermission
 )
 
-// settingsButton is a round settings button whose popover holds the model
-// controls over the mode and permission, each a row opening its page, and
-// below the icon width the project and the worktree (composer/compact.rs:
-// the model settings, then the composer's and the context's controls as
-// menu rows).
+// settingsButton is a round settings button whose popover holds mode and
+// permission, each a row opening its page, the packages' composer controls,
+// and below the icon width the project, host and worktree. Model controls
+// stay directly on the toolbar's model chip at every width.
 func (s *State) settingsButton(c *ui.Context, ctx *Context, actions Actions) {
 	p := theme.Of(c)
 	narrow := s.width > 0 && s.width < iconWidth
@@ -445,7 +444,8 @@ func (s *State) settingsButton(c *ui.Context, ctx *Context, actions Actions) {
 	hint := i18n.T(c, "composer_settings") + " · " + modeLabel + " · " + i18n.T(c, Permissions[s.Permission].label)
 	b := kit.IconButton(c.Key("settings"), icons.Settings2, hint, 32, s.settings).Radius(16).Disabled(ctx.Readonly)
 	b.HasPopup(ui.PopupDialog).Expanded(s.settings).OnClick(func() {
-		s.settings, s.page, s.layer = !s.settings, settingsMain, layerMain
+		s.picker = false
+		s.settings, s.page = !s.settings, settingsMain
 	})
 	panel := kit.Popover(c, b, &s.settings, func() {
 		// row_text: a 16 icon, the label, and a 16 chevron, 8 apart, in a
@@ -494,23 +494,10 @@ func (s *State) settingsButton(c *ui.Context, ctx *Context, actions Actions) {
 				func(i int) { s.Permission = Permission(i) })
 		default:
 			pm := Permissions[s.Permission]
-			if len(ctx.Models) == 0 {
-				// model_settings without a model: Select model, to the settings.
-				kit.Ghost(c.Key("select-model"), i18n.T(c, "composer_select_model"), false).FillWidth().Height(32).
-					Disabled(ctx.SelectModel == nil).
-					OnClick(func() { ctx.SelectModel() })
-			} else {
-				s.controls(c, ctx, actions)
-			}
-			// The model picker and the team list are pages of their own:
-			// the menu's other rows wait under them until Back.
-			if len(ctx.Models) > 0 && s.layer != layerMain {
-				return
-			}
 			row("mode-page", modeIcon, modeLabel, p.Foreground, settingsMode)
 			row("permission-page", pm.icon, i18n.T(c, pm.label), permissionColor(p, s.Permission), settingsPermission)
 			s.renderPluginControls(c, "composer", ControlMenu)
-			if narrow {
+			if narrow && !ctx.Docked {
 				s.projectButton(c, ctx, actions, menuForm)
 				s.hostButton(c, ctx, menuForm)
 				s.worktreeMenu(c, ctx, actions, menuForm)
@@ -518,15 +505,11 @@ func (s *State) settingsButton(c *ui.Context, ctx *Context, actions Actions) {
 		}
 	})
 	if panel != (ui.Element{}) {
-		// As wide as the controls, which the model picker widens.
 		width := float32(panelWidth + 16)
-		if s.page == settingsMain && len(ctx.Models) > 0 {
-			width = s.popoverWidth(c, 8)
+		if w, _ := c.Size(); w > 0 {
+			width = min(width, max(160, w-2*windowInset))
 		}
 		panel.AttachTo(b, ui.AnchorTopStart, ui.AnchorBottomStart).Margin(0, 0, 8, 0).Padding(8).Width(width).Gap(4)
-		if s.page == settingsMain {
-			s.sizePopover(panel)
-		}
 	}
 }
 

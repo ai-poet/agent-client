@@ -31,11 +31,14 @@ var Efforts = []string{"minimal", "low", "medium", "high", "xhigh"}
 const Width = theme.ContentWidth
 
 // Widths under which the toolbar folds: below compactWidth mode, permission
-// and the model go into the settings popover; below iconWidth the context
-// bar's project and worktree go there too.
+// and plugin composer controls go into the settings popover while the model
+// chip stays visible in compact form; below iconWidth the context bar's
+// project and worktree go there too and the model chip tightens further;
+// below tightWidth the model chip keeps only the model short name and caret.
 const (
 	compactWidth = 680
 	iconWidth    = 440
+	tightWidth   = 320
 )
 
 // State is the composer's part of the app state: the draft and the
@@ -119,9 +122,9 @@ func New(model string) *State {
 // the composer: New session over the draft already shown asks for it.
 func (s *State) Focus() { s.focus = true }
 
-// OpenModels is the ModelControls shortcut: it opens the model controls, in
-// the compact settings popover when the toolbar is folded, or the Node's model
-// settings while no model is offered. A read-only composer does nothing.
+// OpenModels is the ModelControls shortcut: it opens the model controls from
+// the model chip at any width, or the Node's model settings while no model is
+// offered. A read-only composer does nothing.
 func (s *State) OpenModels(ctx *Context) {
 	switch {
 	case ctx.Readonly || ctx.Child:
@@ -129,9 +132,8 @@ func (s *State) OpenModels(ctx *Context) {
 		if ctx.SelectModel != nil {
 			ctx.SelectModel()
 		}
-	case s.width > 0 && s.width < compactWidth:
-		s.settings, s.page, s.layer = true, settingsMain, layerMain
 	default:
+		s.settings = false
 		s.picker, s.layer = true, layerMain
 	}
 }
@@ -429,11 +431,14 @@ func (s *State) input(c *ui.Context, ctx *Context, actions Actions, submit func(
 // toolbar is attach, then the settings popover when compact, mode and
 // permission, and the packages' start-aligned controls; at the end, which
 // wraps under them when it does not fit, the packages' end-aligned controls,
-// the rings, the model chip unless compact, dictation, and send or stop
-// (hidden while dictating, unless a reply runs). Compact, the packages'
-// controls are rows of the settings popover. Everything is 4 apart.
+// the rings, the model chip (compact below compactWidth, never hidden), and
+// send or stop. Compact, the packages' composer controls are rows of the
+// settings popover. Everything is 4 apart.
 func (s *State) toolbar(c *ui.Context, ctx *Context, actions Actions, submit func() bool) {
 	compact := s.width > 0 && s.width < compactWidth
+	if !compact {
+		s.settings = false
+	}
 	ui.Row(c.Key("toolbar")).FillWidth().MinWidth(0).MinHeight(32).Gap(4).Wrap().AlignItems(ui.Center).Children(func() {
 		ui.Row(c.Key("start")).Gap(4).Wrap().AlignItems(ui.Center).Children(func() {
 			kit.IconButton(c.Key("attach"), icons.Plus, i18n.T(c, "composer_attachment"), 32, false).Radius(16).
@@ -458,9 +463,7 @@ func (s *State) toolbar(c *ui.Context, ctx *Context, actions Actions, submit fun
 			if s.Indicator != nil {
 				s.Indicator(c)
 			}
-			if !compact {
-				s.modelChip(c, ctx, actions)
-			}
+			s.modelChip(c, ctx, actions)
 			s.sendButton(c, ctx, submit, actions.Stop)
 		})
 	})
@@ -472,7 +475,7 @@ func (s *State) toolbar(c *ui.Context, ctx *Context, actions Actions, submit fun
 func (s *State) sendButton(c *ui.Context, ctx *Context, submit func() bool, stop func()) {
 	v := theme.Of(c).Variant
 	if s.Running {
-		b := kit.PrimaryLook(c, ui.ButtonBase(c.Key("stop")), i18n.T(c, "chat_stop"), ctx.Readonly).Disabled(ctx.Readonly).Size(32, 32).PaddingX(0).Radius(16)
+		b := kit.PrimaryLook(c, ui.ButtonBase(c.Key("stop")), i18n.T(c, "chat_stop"), ctx.Readonly).Disabled(ctx.Readonly).Size(32, 32).Shrink(0).PaddingX(0).Radius(16)
 		if v != nil {
 			kit.Fill(c, b, v.Composer.Stop, false)
 		}
@@ -481,7 +484,7 @@ func (s *State) sendButton(c *ui.Context, ctx *Context, submit func() bool, stop
 		return
 	}
 	blocked := !s.deliverable(ctx)
-	b := kit.PrimaryLook(c, ui.ButtonBase(c.Key("send")), i18n.T(c, "send"), blocked).Size(32, 32).PaddingX(0).Radius(16)
+	b := kit.PrimaryLook(c, ui.ButtonBase(c.Key("send")), i18n.T(c, "send"), blocked).Size(32, 32).Shrink(0).PaddingX(0).Radius(16)
 	if v != nil {
 		kit.Fill(c, b, v.Composer.Send, blocked)
 	}
@@ -532,7 +535,7 @@ func (s *State) contextBar(c *ui.Context, ctx *Context, actions Actions) {
 // is in the conversation.
 func (s *State) Escape(actions Actions) bool {
 	switch {
-	case s.Searching:
+	case s.Searching || s.picker || s.settings:
 		return false
 	case s.queue.editing != "":
 		s.queue.editing = ""
@@ -546,7 +549,7 @@ func (s *State) Escape(actions Actions) bool {
 
 // Escapes reports whether Escape would do something now.
 func (s *State) Escapes() bool {
-	// The picker takes Escape in the draft; a window shortcut claiming it
-	// would come first.
-	return !s.Searching && !s.ref.shown && (s.queue.editing != "" || s.Running)
+	// The picker and open popovers take Escape before the conversation's
+	// window shortcut can claim it.
+	return !s.Searching && !s.ref.shown && !s.picker && !s.settings && (s.queue.editing != "" || s.Running)
 }
