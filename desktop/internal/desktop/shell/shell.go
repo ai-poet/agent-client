@@ -191,6 +191,7 @@ type App struct {
 	// The panes that take the focus: the main column, where the
 	// conversation or a page shows, and the right panel (pane).
 	mainPane, panelPane ui.Handle
+	focusPanel          bool
 	sent                []string // the native menu's commands (Do)
 	modal               bool     // a modal dialog of Kit's showed in the last frame
 	fileSaveEnabled     bool
@@ -578,6 +579,18 @@ func (a *App) details(c *ui.Context, f frame, fill ui.Color) {
 			}
 			a.closeTab(c)
 		})
+		if a.focusPanel {
+			a.focusPanel = false
+			a.panelPane.Focus(c)
+		}
+		// Use the window fallback, so a focused control or open menu takes
+		// Escape before it can collapse the Git panel.
+		if a.Page == ConversationPage && a.PanelOpen && a.Panel.Active.Kind == panel.Changes &&
+			!a.dialog() && !a.more && !a.activity && !a.installsOpen && !a.accountOpen && !kit.TipsHidden(c) &&
+			c.Shortcut(0, ui.KeyEscape) && !c.ShortcutRepeated() {
+			a.PanelOpen = false
+			a.mainPane.Focus(c)
+		}
 		col.Children(func() {
 			if a.extensionDetails() {
 				settings.DetailsPanel(c, a.Settings)
@@ -639,8 +652,7 @@ func resize(c *ui.Context, key, label string, dir float32, width *float32, reset
 }
 
 // togglePanel opens or closes the right panel (⌘⌥B, the header button);
-// opened without a tab it shows the launcher. It is the right column's only
-// close control.
+// opened without a tab it shows the launcher.
 func (a *App) togglePanel() {
 	if a.extensionDetails() {
 		// The details show for a selected item: folding them deselects it.
@@ -990,12 +1002,29 @@ func (x *actions) Stop() {
 	preview.Stop(x.cv)
 }
 
-// The activity strip: a file of the Git badge opens its diff; a plugin's
-// action, stopping a command and opening a port would reach the host, so
-// the preview says so.
+// The activity strip: the Git badge opens the right Git diff panel directly on
+// the active file; a plugin's action, stopping a command and opening a port
+// would reach the host, so the preview says so.
 func (x *actions) OpenChange(path string) {
-	x.a.openPanel(panel.Changes)
-	x.a.Panel.Show(panel.Tab{Kind: panel.Changes, ID: path})
+	x.a.OpenChange(x.a.project(), path)
+}
+
+// OpenChange opens the selected conversation's Git panel and reveals path,
+// falling back to the first change when the entry did not name a file.
+func (a *App) OpenChange(pr *panel.Project, path string) {
+	if pr == nil {
+		return
+	}
+	a.MountPanel()
+	a.Navigate(ConversationPage)
+	a.PanelOpen = true
+	a.Panel.Sync(pr)
+	if path == "" && len(pr.Data.Changes) > 0 {
+		path = pr.Data.Changes[0].Path
+	}
+	a.Panel.Show(panel.Tab{Kind: panel.Changes, ID: path})
+	pr.RevealChange(path)
+	a.focusPanel = true
 }
 
 // Badge in the demo is a button of the goal's panel, which pauses, resumes
@@ -1234,16 +1263,12 @@ func (x *actions) Undo(turn, path string) {
 	}, "workspace_restore_confirm")
 }
 
-// Review in the demo opens the file's diff, or the changes, in the panel.
+// Review opens the file's diff, or the changes, in the right Git diff panel.
 func (x *actions) Review(_, path string) {
-	if !x.a.Demo() {
-		x.notice()
+	if x.blocked() {
 		return
 	}
-	x.a.openPanel(panel.Changes)
-	if path != "" {
-		x.a.Panel.Show(panel.Tab{Kind: panel.Changes, ID: path})
-	}
+	x.OpenChange(path)
 }
 
 // ImageAction is the image viewer's Copy, Save or Open, which would write

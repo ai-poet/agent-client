@@ -333,13 +333,13 @@ func activity(d *Data, c *Conversation, repo composer.Repository) composer.Activ
 	a := composer.Activity{Badges: c.Badges, Commands: c.Commands, Connected: c.Session.Connection == conversation.Connected}
 	if repo.Kind == composer.Git && d.ProjectOf(c.ID) != nil {
 		ch := &composer.Changes{Files: len(d.Workspace.Changes)}
+		if ch.Files > 0 {
+			// The preview's changes are in the order they were made last.
+			ch.LatestPath = d.Workspace.Changes[0].Path
+		}
 		for _, f := range d.Workspace.Changes {
 			ch.Added += f.Added
 			ch.Removed += f.Removed
-			// The preview's changes are in the order they were made last.
-			if len(ch.Recent) < composer.RecentChanges {
-				ch.Recent = append(ch.Recent, composer.ChangedFile{Path: f.Path, Status: f.Status, Added: f.Added, Removed: f.Removed})
-			}
 		}
 		a.Changes = ch
 	}

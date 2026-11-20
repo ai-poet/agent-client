@@ -1,17 +1,16 @@
 package live
 
 import (
-	"cmp"
 	"encoding/json"
-	"slices"
 	"strings"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/panel"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/shell"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 func (r *Runtime) draftWorkspaceSession(id string) (protocol.Session, bool) {
@@ -64,30 +63,17 @@ func workspaceChanges(status protocol.GitStatus) *composer.Changes {
 		return nil
 	}
 	value := &composer.Changes{Files: len(status.Entries)}
-	entries := append([]protocol.GitEntry(nil), status.Entries...)
-	slices.SortStableFunc(entries, func(a, b protocol.GitEntry) int {
-		var am, bm uint64
-		if a.ModifiedMs != nil {
-			am = *a.ModifiedMs
-		}
-		if b.ModifiedMs != nil {
-			bm = *b.ModifiedMs
-		}
-		return cmp.Or(cmp.Compare(bm, am), cmp.Compare(a.Path, b.Path))
-	})
-	for _, entry := range entries {
+	var latest uint64
+	for _, entry := range status.Entries {
 		value.Added += int(entry.Diff.Additions)
 		value.Removed += int(entry.Diff.Deletions)
-	}
-	for _, entry := range entries[:min(len(entries), composer.RecentChanges)] {
-		status := workspaceChange(entry.Unstaged)
-		if status == "" {
-			status = workspaceChange(entry.Staged)
+		var modified uint64
+		if entry.ModifiedMs != nil {
+			modified = *entry.ModifiedMs
 		}
-		if entry.Untracked {
-			status = "A"
+		if value.LatestPath == "" || modified > latest || modified == latest && entry.Path < value.LatestPath {
+			value.LatestPath, latest = entry.Path, modified
 		}
-		value.Recent = append(value.Recent, composer.ChangedFile{Path: entry.Path, Status: status, Added: int(entry.Diff.Additions), Removed: int(entry.Diff.Deletions)})
 	}
 	return value
 }
@@ -247,6 +233,9 @@ type workspaceTurnReview struct {
 func (r *Runtime) openWorkspaceChange(x *conversationActions, relative string) {
 	session, ok := r.session(x.cv.ID)
 	if !ok {
+		session, ok = r.draftWorkspaceSession(x.cv.ID)
+	}
+	if !ok {
 		return
 	}
 	r.App.Sidebar.Selected = x.cv.ID
@@ -259,9 +248,7 @@ func (r *Runtime) openWorkspaceChange(x *conversationActions, relative string) {
 	p.reviewTarget = nil
 	p.reviewTurns = map[string]protocol.TurnID{}
 	p.projectStatus(p.status)
-	p.panel.DiffOpen(relative, "all")
-	r.App.PanelOpen = true
-	r.App.Panel.Show(panel.Tab{Kind: panel.Changes, ID: relative})
+	r.App.OpenChange(p.panel, relative)
 }
 func (r *Runtime) reviewWorkspaceTurn(x *conversationActions, turn, path string) {
 	session, ok := r.session(x.cv.ID)
@@ -281,7 +268,8 @@ func (r *Runtime) reviewWorkspaceTurn(x *conversationActions, turn, path string)
 	p.reviewTarget = &workspaceTurnReview{turn: id, path: path}
 	p.read("review-turn/"+turn, protocol.Command{Kind: "read_turn_diff", Data: protocol.CommandReadTurnDiffPayload{Session: session.ID, Turn: id}}, func(c *ui.Context, out protocol.Output) {
 		value, ok := detail[protocol.ConversationCheckpointTurnDiff](out.Data)
-		if !ok || p.session != session.ID || p.reviewTarget == nil || p.reviewTarget.turn != id {
+		if !ok || r.App.Sidebar.Selected != x.cv.ID || r.App.Page != shell.ConversationPage ||
+			p.session != session.ID || p.reviewTarget == nil || p.reviewTarget.turn != id {
 			return
 		}
 		changes := workspaceTurnFiles(value)
@@ -298,13 +286,7 @@ func (r *Runtime) reviewWorkspaceTurn(x *conversationActions, turn, path string)
 		if target == "" {
 			target = ":changes"
 		}
-		if target != ":changes" {
-			p.panel.DiffOpen(target, "all")
-		} else {
-			p.panel.Git.Show(target)
-		}
-		r.App.PanelOpen = true
-		r.App.Panel.Show(panel.Tab{Kind: panel.Changes, ID: target})
+		r.App.OpenChange(p.panel, target)
 	})
 }
 func workspaceTurnFiles(value protocol.ConversationCheckpointTurnDiff) []viewmodel.FileChange {

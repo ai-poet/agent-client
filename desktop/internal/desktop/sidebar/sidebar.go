@@ -395,28 +395,45 @@ func (s *State) limited(c *ui.Context, key string, list []*preview.Conversation,
 func (s *State) project(c *ui.Context, pr *preview.Project) {
 	p := theme.Of(c)
 	ui.Column(c.Key(pr.Host + "/" + pr.ID)).Gap(rowGap).Children(func() {
-		parts := ui.CollapsibleBase(c, s.opened("project/"+pr.ID))
-		hovered := parts.Trigger.Hovered()
-		parts.Trigger.Label(pr.Name).Height(rowHeight).PaddingX(8).Gap(8).Radius(p.Radius).TextColor(p.SidebarForeground).
-			Cursor(ui.CursorPointer).ContextMenu(func(m *ui.Menu) { s.projectMenu(c, m, pr) }).Children(func() {
-			kit.ProjectGlyph(c, pr.Icon, pr.Color, 14).Label(i18n.T(c, "project_icon_"+appearanceIcon(pr.Icon)))
-			kit.Level(c, ui.Text(c, pr.Name).FontSize(14).SingleLine().Grow(1).Shrink(1), 14, pr.Name)
-			if pr.Offline {
-				badge := ui.Text(c, i18n.T(c, "resource_offline")).FontSize(12).TextColor(p.MutedForeground)
-				label := i18n.T(c, "resource_offline_action")
-				if !pr.LastSyncedAt.IsZero() {
-					label = i18n.T(c, "resource_last_synced", "time", pr.LastSyncedAt.Format(time.RFC3339))
+		var parts ui.CollapsibleParts
+		row := ui.Row(c.Key("header")).Height(rowHeight).Radius(p.Radius).AlignItems(ui.Center).
+			ContextMenu(func(m *ui.Menu) { s.projectMenu(c, m, pr) })
+		hovered := row.Hovered() || row.FocusWithin()
+		if hovered {
+			row.Background(p.SidebarItem(false, true))
+		}
+		row.Children(func() {
+			parts = ui.CollapsibleBase(c, s.opened("project/"+pr.ID))
+			triggerEnd := float32(8)
+			if hovered {
+				triggerEnd = 4
+			}
+			parts.Trigger.Label(pr.Name).Grow(1).Shrink(1).MinWidth(0).Height(rowHeight).PaddingStart(8).PaddingEnd(triggerEnd).Gap(8).
+				Radius(p.Radius).TextColor(p.SidebarForeground).Cursor(ui.CursorPointer).
+				ContextMenu(func(m *ui.Menu) { s.projectMenu(c, m, pr) }).Children(func() {
+				kit.ProjectGlyph(c, pr.Icon, pr.Color, 14).Label(i18n.T(c, "project_icon_"+appearanceIcon(pr.Icon)))
+				kit.Level(c, ui.Text(c, pr.Name).FontSize(14).SingleLine().Grow(1).Shrink(1), 14, pr.Name)
+				if pr.Offline {
+					badge := ui.Text(c, i18n.T(c, "resource_offline")).FontSize(12).TextColor(p.MutedForeground)
+					label := i18n.T(c, "resource_offline_action")
+					if !pr.LastSyncedAt.IsZero() {
+						label = i18n.T(c, "resource_last_synced", "time", pr.LastSyncedAt.Format(time.RFC3339))
+					}
+					kit.Tooltip(c, badge, label)
 				}
-				kit.Tooltip(c, badge, label)
-			}
-			label := i18n.T(c, "workspace_collapse")
-			if !*s.opened("project/" + pr.ID) {
-				label = i18n.T(c, "workspace_expand")
-			}
-			chevron := ui.Icon(c, icons.ChevronDown).FontSize(14).TextColor(p.MutedForeground).Label(label).
-				Rotate(-90 * (1 - parts.Progress()))
-			if !hovered {
-				chevron.Opacity(0)
+				label := i18n.T(c, "workspace_collapse")
+				if !*s.opened("project/" + pr.ID) {
+					label = i18n.T(c, "workspace_expand")
+				}
+				chevron := ui.Icon(c, icons.ChevronDown).FontSize(14).TextColor(p.MutedForeground).Label(label).
+					Rotate(-90 * (1 - parts.Progress()))
+				if !hovered {
+					chevron.Opacity(0)
+				}
+			})
+			if hovered {
+				kit.IconButton(c.Key("new"), icons.Plus, i18n.T(c, "workspace_new_session"), 20, false).
+					TextColor(p.MutedForeground).MarginEnd(4).OnClick(func() { s.newIn(pr) })
 			}
 		})
 		parts.Panel(func() {
@@ -781,9 +798,13 @@ func (s *State) NewChat() {
 // newIn opens an empty conversation in a project, in memory only: its
 // unsent one when it has one, otherwise a new one.
 func (s *State) newIn(pr *preview.Project) {
+	if pr == nil {
+		s.NewChat()
+		return
+	}
 	s.asked = true
+	s.Reveal(pr.ID)
 	if cv := s.unsentIn(pr.Conversations); cv != nil {
-		*s.opened("project/" + pr.ID) = true
 		s.show(cv.ID)
 		return
 	}
@@ -795,7 +816,6 @@ func (s *State) newIn(pr *preview.Project) {
 	s.created++
 	cv := &preview.Conversation{ID: fmt.Sprintf("%s/new-%d", pr.ID, s.created), Updated: preview.Now, Created: 10000 + s.created}
 	pr.Conversations = append([]*preview.Conversation{cv}, pr.Conversations...)
-	*s.opened("project/" + pr.ID) = true
 	s.Selected = cv.ID
 }
 

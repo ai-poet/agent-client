@@ -3,9 +3,9 @@ package panel
 import (
 	"slices"
 
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/preview"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
-	"github.com/ai-poet/agent-client/desktop/internal/desktop/preview"
 )
 
 // Project is a project's Files and Git state. Its two hosts, the
@@ -87,6 +87,8 @@ type GitView struct {
 	nav           changeNav
 	expanded      map[string]*bool // the list's groups and folders, by row
 	current       string           // the row of the list's cursor
+	reveal        string           // the selected row to scroll to once
+	focusSwitcher string           // the diff whose switcher takes focus after a choice
 	view          int              // 0 Changes, 1 History
 	commitID      string           // the commit chosen in the history
 	folded        map[string]bool  // All changes' files closed
