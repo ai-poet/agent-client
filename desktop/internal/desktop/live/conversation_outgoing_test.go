@@ -57,7 +57,7 @@ func TestOutgoingMessageProjection(t *testing.T) {
 	comp.Draft = "Typed after sending"
 	file.Name, image.Name = "changed.txt", "changed.png"
 	r.projectOutgoing(cv, protocol.ConversationPage{})
-	if len(cv.Turns) != 1 || cv.Turns[0].User != message.Text || cv.Running() || !cv.Turns[0].Reply.Notice ||
+	if len(cv.Turns) != 1 || cv.Turns[0].User != message.Text || cv.Running() || !cv.Turns[0].InputOnly ||
 		len(cv.Turns[0].Files) != 1 || cv.Turns[0].Files[0].Path != "note.txt" ||
 		len(cv.Turns[0].Images) != 1 || cv.Turns[0].Images[0].Name != "picture.png" {
 		t.Fatalf("captured input changed or invented assistant work: %+v", cv.Turns)
