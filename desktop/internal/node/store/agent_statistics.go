@@ -191,7 +191,9 @@ func agentStatisticsBudget(ctx context.Context, db *sql.Conn, session protocol.S
 		if allowed {
 			resolved, estimated := model.ResolvedModel(model.Binding{Provider: *selected, Config: session.Config})
 			budget := AgentCompactionBudget(resolved, percent)
-			budget.ContextEstimated = estimated
+			if budget != nil {
+				budget.ContextEstimated = estimated
+			}
 			return budget, nil
 		}
 	}

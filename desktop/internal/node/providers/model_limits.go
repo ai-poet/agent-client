@@ -27,6 +27,63 @@ type catalogLimits struct {
 
 func modelLeaf(id string) string { return id[strings.LastIndexByte(id, '/')+1:] }
 
+func maxLimits(a, b ModelLimits) ModelLimits {
+	return ModelLimits{Context: max(a.Context, b.Context), Output: max(a.Output, b.Output)}
+}
+
+func modelNameVariants(id string) []string {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if id == "" {
+		return nil
+	}
+	if _, bare, ok := strings.Cut(id, "::"); ok {
+		id = strings.TrimSpace(bare)
+	}
+	id = strings.TrimPrefix(id, "models/")
+	leaf := modelLeaf(id)
+	seen := map[string]bool{}
+	var out []string
+	add := func(v string) {
+		if v != "" && !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	add(id)
+	add(leaf)
+	if normalized := strings.ReplaceAll(leaf, ".", "-"); normalized != leaf {
+		add(normalized)
+	}
+	if stripped := stripDateSuffix(leaf); stripped != leaf {
+		add(stripped)
+		if normalized := strings.ReplaceAll(stripped, ".", "-"); normalized != stripped {
+			add(normalized)
+		}
+	}
+	return out
+}
+
+func stripDateSuffix(name string) string {
+	for at := len(name) - 9; at >= 0; at-- {
+		if strings.HasPrefix(name[at:], "-20") && at+9 == len(name) && isAllDigits(name[at+1:]) {
+			return name[:at]
+		}
+	}
+	return name
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func indexCatalogLimits(entries []CatalogEntry) catalogLimits {
 	index := catalogLimits{map[string]map[string]ModelLimits{}, map[string]ModelLimits{}}
 	for _, entry := range entries {
@@ -41,14 +98,13 @@ func indexCatalogLimits(entries []CatalogEntry) catalogLimits {
 			limits.Context = 0
 		}
 		limits.Output = min(limits.Output, MaxModelOutput)
-		id := strings.ToLower(entry.ID)
+		id := strings.ToLower(strings.TrimSpace(entry.ID))
 		if index.suppliers[entry.Provider] == nil {
 			index.suppliers[entry.Provider] = map[string]ModelLimits{}
 		}
-		index.suppliers[entry.Provider][id] = limits
-		for _, name := range []string{id, modelLeaf(id)} {
-			previous := index.names[name]
-			index.names[name] = ModelLimits{Context: max(previous.Context, limits.Context), Output: max(previous.Output, limits.Output)}
+		index.suppliers[entry.Provider][id] = maxLimits(index.suppliers[entry.Provider][id], limits)
+		for _, name := range modelNameVariants(id) {
+			index.names[name] = maxLimits(index.names[name], limits)
 		}
 	}
 	return index
@@ -62,26 +118,64 @@ var bundledLimits = sync.OnceValue(func() catalogLimits {
 	return indexCatalogLimits(catalog.Entries)
 })
 
-// CatalogModelLimits uses the models.dev snapshot, separate from the pinned
-// request-policy catalog. Prefer an identified supplier, then the largest
-// declaration for the same exact ID or bare name across suppliers.
-func CatalogModelLimits(api protocol.ConversationModelApi, id string) ModelLimits {
-	var supplier string
+func supplierForPlatform(platform string) string {
+	switch strings.ToLower(strings.TrimSpace(platform)) {
+	case "anthropic", "claude":
+		return "anthropic"
+	case "openai", "codex", "chatgpt":
+		return "openai"
+	case "gemini", "google", "google-ai", "google_ai", "google-ai-studio", "vertex", "vertex-ai":
+		return "google"
+	case "grok", "xai", "x-ai":
+		return "xai"
+	case "deepseek":
+		return "deepseek"
+	case "zhipu", "glm", "bigmodel", "zai":
+		return "zhipu"
+	case "kimi", "moonshot":
+		return "moonshotai"
+	case "minimax":
+		return "minimax"
+	case "qwen", "alibaba", "dashscope":
+		return "alibaba"
+	}
+	return ""
+}
+
+func supplierForAPI(api protocol.ConversationModelApi) string {
 	switch api {
 	case protocol.ConversationModelApiResponses, protocol.ConversationModelApiChatCompletions:
-		supplier = "openai"
+		return "openai"
 	case protocol.ConversationModelApiAnthropic:
-		supplier = "anthropic"
+		return "anthropic"
 	case protocol.ConversationModelApiGemini:
-		supplier = "google"
+		return "google"
 	case protocol.ConversationModelApiAzureAi, protocol.ConversationModelApiAzureOpenAi:
-		supplier = "azure"
+		return "azure"
 	case protocol.ConversationModelApiDeepSeek:
-		supplier = "deepseek"
+		return "deepseek"
 	case protocol.ConversationModelApiOpenCodeGo:
-		supplier = "opencode-go"
+		return "opencode-go"
 	case protocol.ConversationModelApiOpenCodeZen:
-		supplier = "opencode"
+		return "opencode"
+	}
+	return ""
+}
+
+// CatalogModelLimits uses the models.dev snapshot, separate from the pinned
+// request-policy catalog. Same-name entries across suppliers take the maximum,
+// and only contexts >= MinCatalogContext (8192) are accepted.
+func CatalogModelLimits(api protocol.ConversationModelApi, id string) ModelLimits {
+	return CatalogModelLimitsForPlatform(api, "", id)
+}
+
+// CatalogModelLimitsForPlatform resolves limits from the models.dev snapshot
+// using platform when known (e.g. multi-vendor gateways) and taking the
+// maximum across same-name entries.
+func CatalogModelLimitsForPlatform(api protocol.ConversationModelApi, platform, id string) ModelLimits {
+	supplier := supplierForPlatform(platform)
+	if supplier == "" {
+		supplier = supplierForAPI(api)
 	}
 	return bundledLimits().lookup(supplier, id)
 }
@@ -89,21 +183,60 @@ func CatalogModelLimits(api protocol.ConversationModelApi, id string) ModelLimit
 func (index catalogLimits) lookup(supplier, id string) ModelLimits {
 	id = strings.ToLower(strings.TrimSpace(id))
 	var resolved ModelLimits
-	fill := func(candidate ModelLimits) {
-		if resolved.Context == 0 {
-			resolved.Context = candidate.Context
+	merge := func(candidate ModelLimits) {
+		if candidate.Context < MinCatalogContext {
+			candidate.Context = 0
 		}
-		if resolved.Output == 0 {
-			resolved.Output = candidate.Output
-		}
+		candidate.Output = min(candidate.Output, MaxModelOutput)
+		resolved = maxLimits(resolved, candidate)
 	}
 	if owner, bare, ok := strings.Cut(id, "/"); ok {
-		fill(index.suppliers[owner][bare])
+		merge(index.suppliers[owner][bare])
 	}
-	fill(index.suppliers[supplier][id])
-	fill(index.names[id])
-	fill(index.names[modelLeaf(id)])
+	if supplier != "" {
+		merge(index.suppliers[supplier][id])
+		merge(index.suppliers[supplier][modelLeaf(id)])
+	}
+	for _, variant := range modelNameVariants(id) {
+		merge(index.names[variant])
+	}
 	return resolved
+}
+
+// ResolveModelLimits is the single source of truth for context and output
+// limits shared by compaction thresholds, UI displays and request parameters.
+// Priority: catalog/declared (>= 8192) -> models.dev registry (max by name, >= 8192)
+// -> probed result (>= 8192). Never substitutes 128k for 0 or small values;
+// returns estimated=true when no credible context >= 8192 is available.
+func ResolveModelLimits(api protocol.ConversationModelApi, model protocol.ConversationModel, probed ModelLimits) (limits ModelLimits, estimated bool) {
+	if model.Context >= MinCatalogContext {
+		limits.Context = min(model.Context, MaxModelOutput)
+	}
+	if model.Output > 0 {
+		limits.Output = min(model.Output, MaxModelOutput)
+	}
+	if limits.Context == 0 || limits.Output == 0 {
+		registered := CatalogModelLimitsForPlatform(api, model.Platform, model.ID)
+		if limits.Context == 0 && registered.Context >= MinCatalogContext {
+			limits.Context = registered.Context
+		}
+		if limits.Output == 0 && registered.Output > 0 {
+			limits.Output = registered.Output
+		}
+	}
+	if limits.Context == 0 && probed.Context >= MinCatalogContext {
+		limits.Context = min(probed.Context, MaxModelOutput)
+	}
+	if limits.Output == 0 && probed.Output > 0 {
+		limits.Output = min(probed.Output, MaxModelOutput)
+	}
+	estimated = limits.Context < MinCatalogContext
+	if estimated {
+		limits.Context = 0
+	} else {
+		limits.Output = min(limits.Output, limits.Context, MaxModelOutput)
+	}
+	return limits, estimated
 }
 
 // ApplyDiscoveredLimits keeps missing or implausible server declarations

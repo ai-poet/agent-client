@@ -52,31 +52,18 @@ func ContextLimit(binding Binding) uint32 {
 	return selected.Context
 }
 
-// ResolvedModel is shared by execution and statistics. It never probes:
-// provider declarations > models.dev > cached probe > internal estimate.
+// ResolvedModel is shared by execution, compaction and statistics. It never
+// probes: declared/catalog (>=8192) > models.dev (same-name max >=8192) >
+// cached probe (>=8192) > internal estimate (with estimated=true).
 func ResolvedModel(binding Binding) (selected protocol.ConversationModel, estimated bool) {
 	selected = protocol.DefaultConversationModel()
 	selected.ID = binding.Config.Model
 	if listed := metadata(binding); listed != nil {
 		selected = *listed
 	}
-	if selected.Context == 0 || selected.Output == 0 {
-		registered := providers.CatalogModelLimits(binding.Provider.Api, selected.ID)
-		probed, _ := reportedContext(contextKey(binding))
-		if selected.Context == 0 {
-			selected.Context = registered.Context
-			if selected.Context == 0 {
-				selected.Context = probed.Context
-			}
-		}
-		if selected.Output == 0 {
-			selected.Output = registered.Output
-			if selected.Output == 0 {
-				selected.Output = probed.Output
-			}
-		}
-	}
-	estimated = selected.Context == 0
+	probed, _ := reportedContext(contextKey(binding))
+	limits, estimated := providers.ResolveModelLimits(binding.Provider.Api, selected, probed)
+	selected.Context, selected.Output = limits.Context, limits.Output
 	if estimated {
 		selected.Context = estimatedContext(selected.ID)
 	}
@@ -122,13 +109,17 @@ func rememberContext(key modelLimitKey, limits providers.ModelLimits, life time.
 }
 
 // discoverContext asks an OpenAI-compatible server for the window it allocated
-// to a model whose window is not declared or registered. The answer, or its
-// absence, is cached; a cancelled turn keeps nothing.
+// to a model whose window is not declared (>=8192) or registered (>=8192). The
+// answer, or its absence, is cached; a cancelled turn keeps nothing.
 func discoverContext(ctx context.Context, binding Binding, config transportConfig) {
-	if listed := metadata(binding); listed != nil && listed.Context > 0 {
-		return
+	platform := ""
+	if listed := metadata(binding); listed != nil {
+		platform = listed.Platform
+		if listed.Context >= providers.MinCatalogContext {
+			return
+		}
 	}
-	if known := providers.CatalogModelLimits(binding.Provider.Api, binding.Config.Model); known.Context > 0 {
+	if known := providers.CatalogModelLimitsForPlatform(binding.Provider.Api, platform, binding.Config.Model); known.Context >= providers.MinCatalogContext {
 		return
 	}
 	key := contextKey(binding)
@@ -211,20 +202,24 @@ func allocatedContext(ctx context.Context, config transportConfig, name string) 
 		var window uint32
 		for _, candidate := range []uint32{found.Meta.Context, found.Context, found.ContextTokens, found.ContextLength} {
 			if candidate >= providers.MinCatalogContext {
-				window = candidate
-				break
+				window = max(window, min(candidate, providers.MaxModelOutput))
 			}
 		}
-		output := found.Output
-		if output == 0 {
-			output = found.Completion
-		}
+		output := max(found.Output, found.Completion)
 		return providers.ModelLimits{Context: window, Output: min(output, providers.MaxModelOutput)}
 	}
+	var merged providers.ModelLimits
+	matched := false
 	for _, found := range body.Data {
-		if found.ID == name {
-			return limits(found), nil
+		if strings.EqualFold(strings.TrimSpace(found.ID), strings.TrimSpace(name)) {
+			candidate := limits(found)
+			merged.Context = max(merged.Context, candidate.Context)
+			merged.Output = max(merged.Output, candidate.Output)
+			matched = true
 		}
+	}
+	if matched {
+		return merged, nil
 	}
 	// Retain the single-loaded-model alias for servers exposing n_ctx.
 	if len(body.Data) == 1 {

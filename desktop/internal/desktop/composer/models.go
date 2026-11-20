@@ -866,7 +866,7 @@ func (s *State) modelRow(c *ui.Context, m, chosen Model, vendor, source string) 
 			detail = append(detail, label)
 		}
 	}
-	if m.ContextWindow > 0 {
+	if m.ContextWindow >= 8192 {
 		count := strconv.FormatUint(uint64(m.ContextWindow), 10)
 		if m.ContextWindow >= 1000 {
 			key, value := "provider_tokens_k", float64(m.ContextWindow)/1000
@@ -876,6 +876,8 @@ func (s *State) modelRow(c *ui.Context, m, chosen Model, vendor, source string) 
 			count = i18n.T(c, key, "count", strconv.FormatFloat(value, 'f', -1, 64))
 		}
 		detail = append(detail, count)
+	} else if m.ContextUnknown {
+		detail = append(detail, i18n.T(c, "meter_limit_unknown"))
 	}
 	subtitle := strings.Join(detail, " · ")
 	if m.Reasoning {

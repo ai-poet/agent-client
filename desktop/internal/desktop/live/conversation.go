@@ -108,7 +108,8 @@ func (r *Runtime) projectModels() {
 				name = *m.DisplayName
 			}
 			key := modelKey(p.ID, m.ID)
-			v := composer.Model{ID: key, Name: name, Provider: p.Name, Reasoning: m.Reasoning, Family: composerModelVendor(p, m), ContextWindow: m.Context, DefaultEffort: effortName(m.DefaultEffort), Score: r.measuredScore(key, m.DefaultEffort)}
+			limits, contextEstimated := nodeproviders.ResolveModelLimits(p.Api, m, nodeproviders.ModelLimits{})
+			v := composer.Model{ID: key, Name: name, Provider: p.Name, Reasoning: m.Reasoning, Family: composerModelVendor(p, m), ContextWindow: limits.Context, ContextUnknown: contextEstimated, DefaultEffort: effortName(m.DefaultEffort), Score: r.measuredScore(key, m.DefaultEffort)}
 			for _, e := range m.Efforts {
 				v.Efforts = append(v.Efforts, effortName(e))
 			}

@@ -96,6 +96,7 @@ type PluginMode struct {
 type Model struct {
 	ID, Name, Provider string
 	ContextWindow      uint32
+	ContextUnknown     bool
 	// Reasoning makes it take an effort: Efforts, or the package's
 	// default levels when nil.
 	Reasoning     bool

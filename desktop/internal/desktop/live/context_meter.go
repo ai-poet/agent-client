@@ -10,6 +10,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
+	nodeproviders "github.com/ai-poet/agent-client/desktop/internal/node/providers"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 	"github.com/egoist/mygo/ui"
 )
@@ -43,7 +44,8 @@ func (r *Runtime) projectContextMeter(cv *viewmodel.Conversation, comp *composer
 		}
 		for _, model := range provider.Models {
 			if model.ID == config.Model {
-				limit = model.Context
+				resolved, _ := nodeproviders.ResolveModelLimits(provider.Api, model, nodeproviders.ModelLimits{})
+				limit = resolved.Context
 			}
 		}
 	}
@@ -72,7 +74,10 @@ func (r *Runtime) projectContextMeter(cv *viewmodel.Conversation, comp *composer
 // another model, its occupancy no longer applies and the meter shows the
 // selected model's window unmeasured.
 func contextStats(s *protocol.ConversationStatistics, model string, limit uint32, compacting bool) *conversation.ContextStats {
-	d := &conversation.ContextStats{Model: model, Limit: uint64(limit), Compacting: compacting}
+	if limit < nodeproviders.MinCatalogContext {
+		limit = 0
+	}
+	d := &conversation.ContextStats{Model: model, Limit: uint64(limit), LimitEstimated: model != "" && limit == 0, Compacting: compacting}
 	if s == nil {
 		return d
 	}
@@ -80,6 +85,7 @@ func contextStats(s *protocol.ConversationStatistics, model string, limit uint32
 	if d.Model == "" && s.ContextModel != nil {
 		d.Model = *s.ContextModel
 	}
+	d.LimitEstimated = d.Limit == 0 && (d.Model != "" || s.Budget != nil && s.Budget.ContextEstimated)
 	if b := s.Budget; b != nil && !b.ContextEstimated && b.Model == d.Model && uint64(b.ContextLimit) == d.Limit {
 		d.Threshold, d.Reserve = b.TriggerTokens, uint64(b.OutputReserve)
 	}
@@ -146,8 +152,11 @@ func contextReading(s *protocol.ConversationStatistics, model string, fallback u
 	if model == "" && s.ContextModel != nil {
 		model = *s.ContextModel
 	}
+	if fallback < nodeproviders.MinCatalogContext {
+		fallback = 0
+	}
 	budget := s.Budget
-	hasBudget := budget != nil && budget.Model == model && budget.ContextLimit > 0
+	hasBudget := budget != nil && budget.Model == model && budget.ContextLimit >= nodeproviders.MinCatalogContext
 	current := uint64(fallback)
 	if hasBudget {
 		current = 0
@@ -159,7 +168,7 @@ func contextReading(s *protocol.ConversationStatistics, model string, fallback u
 		return nil, current, false
 	}
 	var captured uint64
-	if s.ContextLimit != nil {
+	if s.ContextLimit != nil && *s.ContextLimit >= nodeproviders.MinCatalogContext {
 		captured = uint64(*s.ContextLimit)
 	}
 	if s.ContextTokens != nil {

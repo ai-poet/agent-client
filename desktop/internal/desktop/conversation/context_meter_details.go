@@ -191,6 +191,8 @@ func contextOccupancy(c *ui.Context, s *ContextMeterState, d *ContextStats) {
 			ui.Text(c, tokenLabel(d.Tokens, d.Estimated)).FontSize(26).FontWeight(500).FontFeatures("tnum").SingleLine()
 			if d.Limit > 0 {
 				ui.Text(c, "/ "+Count(int(d.Limit))).FontSize(13).TextColor(p.MutedForeground).Margin(0, 0, 4, 0).SingleLine()
+			} else if d.LimitEstimated {
+				ui.Text(c, "/ "+i18n.T(c, "meter_limit_unknown")).FontSize(13).TextColor(p.MutedForeground).Margin(0, 0, 4, 0).SingleLine()
 			}
 			ui.Box(c).Grow(1)
 			if v := d.percent(); v >= 0 {
