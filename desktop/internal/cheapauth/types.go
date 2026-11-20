@@ -214,11 +214,12 @@ type KeyPage struct {
 
 // Model is the part of model_catalog needed to configure sailry.
 type Model struct {
-	ID            string `json:"model"`
-	DisplayName   string `json:"display_name"`
-	Platform      string `json:"platform"`
-	BillingMode   string `json:"billing_mode"`
-	ContextWindow uint32 `json:"context_window"`
+	ID              string `json:"model"`
+	DisplayName     string `json:"display_name"`
+	Platform        string `json:"platform"`
+	BillingMode     string `json:"billing_mode"`
+	ContextWindow   int64  `json:"context_window"`
+	MaxOutputTokens int64  `json:"max_output_tokens,omitempty"`
 }
 
 // ModelCatalog accepts the service's additive base_url field. Older gateways

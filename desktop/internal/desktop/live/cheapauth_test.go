@@ -52,8 +52,10 @@ type cheapGateway struct {
 	challenge string
 	// exchange, when set, holds the code exchange until it is closed.
 	exchange chan struct{}
-	calls    []string
-	revoked  []string
+	// catalogBody, when non-empty, overrides the /models/catalog JSON response.
+	catalogBody string
+	calls       []string
+	revoked     []string
 }
 
 func newCheapGateway(t *testing.T) *cheapGateway {
@@ -67,7 +69,7 @@ func (g *cheapGateway) serve(writer http.ResponseWriter, request *http.Request) 
 	route := request.Method + " " + strings.TrimPrefix(request.URL.Path, "/api/v1")
 	g.mu.Lock()
 	g.calls = append(g.calls, route)
-	down, rejected, challenge, exchange := g.down, g.rejected, g.challenge, g.exchange
+	down, rejected, challenge, exchange, catalogBody := g.down, g.rejected, g.challenge, g.exchange, g.catalogBody
 	g.mu.Unlock()
 	if down {
 		panic(http.ErrAbortHandler)
@@ -110,6 +112,10 @@ func (g *cheapGateway) serve(writer http.ResponseWriter, request *http.Request) 
 	case "GET /auth/me":
 		reply(http.StatusOK, `{"code":0,"data":{"id":7,"email":"dev@example.test","username":"Dev","plan":"Pro","balance":12.5}}`)
 	case "GET /models/catalog":
+		if catalogBody != "" {
+			reply(http.StatusOK, catalogBody)
+			return
+		}
 		reply(http.StatusOK, `{"code":0,"data":{"items":[{"model":"cheap-chat","display_name":"Cheap Chat","context_window":64000},{"model":"cheap-image","billing_mode":"image"}]}}`)
 	case "GET /keys":
 		reply(http.StatusOK, `{"code":0,"data":{"items":[{"id":1,"key":"`+cheapTestKey+`","status":"active"}],"total":1}}`)
@@ -614,4 +620,61 @@ func TestCheapGatewayWriteSurvivesRevisionRace(t *testing.T) {
 	}
 	d.await("the disabled provider", stored(false, saved.Revision+4))
 	d.untouched("after the raced writes")
+}
+
+func TestCheapGatewaySavesMultiOfferAndMissingContextCatalog(t *testing.T) {
+	gateway := newCheapGateway(t)
+	gateway.catalogBody = `{"code":0,"data":{"items":[` +
+		`{"model":"claude-sonnet-4-6","display_name":"Claude Sonnet 4.6","billing_mode":"token","context_window":0},` +
+		`{"model":"claude-sonnet-4-6","display_name":"Claude Sonnet 4.6","billing_mode":"token","context_window":200000},` +
+		`{"model":"gpt-5","billing_mode":"token"},` +
+		`{"model":"gpt-image-1","billing_mode":"image","context_window":0}` +
+		`]}}`
+	d := openCheapDesktop(t, func(d *cheapDesktop) { d.signedIn(gateway.URL, cheapTestAccess, time.Hour) })
+	d.await("the multi-offer catalog sync to succeed", func() bool { return d.account().Stage == cheapauthui.Ready })
+	if d.account().Failure != "" || d.account().ModelCount != 2 {
+		t.Fatalf("account = stage:%d count:%d failure:%q", d.account().Stage, d.account().ModelCount, d.account().Failure)
+	}
+	provider := d.gateway(true)
+	if len(provider.Models) != 2 || provider.Models[0].ID != "claude-sonnet-4-6" || provider.Models[0].Context != 200000 ||
+		provider.Models[1].ID != "gpt-5" || provider.Models[1].Context != 128000 {
+		t.Fatalf("saved provider models = %+v", provider.Models)
+	}
+}
+
+func TestCheapAuthErrorDistinguishesCauses(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "missing key",
+			err:  &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "CheapRouter gateway key is empty"},
+			want: "账号没有可用的模型网关密钥",
+		},
+		{
+			name: "no chat models",
+			err:  &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "CheapRouter model catalog has no chat models"},
+			want: "账号下没有可用的聊天模型",
+		},
+		{
+			name: "invalid parameters",
+			err:  &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "model configuration is invalid or unsupported"},
+			want: "CheapRouter 模型网关配置参数无效（model configuration is invalid or unsupported）",
+		},
+		{
+			name: "save failure",
+			err:  &cheapProviderSaveError{err: errors.New("disk full")},
+			want: "保存 CheapRouter 模型网关配置失败，请重试（disk full）",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := cheapAuthError(tc.err)
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("cheapAuthError(%v) = %q, want substring %q", tc.err, got, tc.want)
+			}
+		})
+	}
 }

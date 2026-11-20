@@ -1,11 +1,19 @@
 package providers
 
 import (
-	"errors"
+	"encoding/json"
 	"strings"
 
 	"github.com/ai-poet/agent-client/desktop/internal/cheapauth"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+)
+
+const (
+	defaultCheapRouterContext uint32 = 128000
+	defaultCheapRouterOutput  uint32 = 16384
+	maxCheapRouterTokens      uint32 = 2147483647
+	maxCheapRouterModelIDLen         = 256
+	maxCheapRouterConfigBytes        = 64 * 1024
 )
 
 // CheapRouterProviderID is stable across sign-ins and endpoint switches, so
@@ -30,28 +38,102 @@ func CheapRouterProvider(gateway cheapauth.Gateway) (protocol.ConversationProvid
 	provider.Authentication = protocol.AuthenticationApiKey
 	provider.Endpoint = baseURL
 	provider.Enabled = true
+
+	indexByID := make(map[string]int, len(gateway.Models))
+	explicitContext := make(map[string]bool, len(gateway.Models))
 	for _, item := range gateway.Models {
 		id := strings.TrimSpace(item.ID)
-		if id == "" || item.BillingMode != "" && item.BillingMode != "token" {
+		if id == "" || len(id) > maxCheapRouterModelIDLen {
 			continue
 		}
+		mode := strings.ToLower(strings.TrimSpace(item.BillingMode))
+		if mode != "" && mode != "token" {
+			continue
+		}
+		name := strings.TrimSpace(item.DisplayName)
+		ctxWindow, hasCtx := normalizeCheapRouterContext(item.ContextWindow)
+		if idx, exists := indexByID[id]; exists {
+			existing := &provider.Models[idx]
+			if existing.DisplayName == nil && name != "" && name != id {
+				display := name
+				existing.DisplayName = &display
+			}
+			if hasCtx && (!explicitContext[id] || ctxWindow > existing.Context) {
+				existing.Context = ctxWindow
+				explicitContext[id] = true
+				existing.Output = normalizeCheapRouterOutput(item.MaxOutputTokens, existing.Context, existing.Output)
+			} else if item.MaxOutputTokens > 0 {
+				existing.Output = normalizeCheapRouterOutput(item.MaxOutputTokens, existing.Context, existing.Output)
+			}
+			continue
+		}
+
 		model := protocol.DefaultConversationModel()
 		model.ID = id
-		if name := strings.TrimSpace(item.DisplayName); name != "" {
-			model.DisplayName = &name
+		if name != "" && name != id {
+			display := name
+			model.DisplayName = &display
 		}
-		model.Context = item.ContextWindow
-		if model.Context == 0 {
-			model.Context = 128000
-		}
-		model.Output = min(uint32(16384), model.Context)
+		model.Context = ctxWindow
+		model.Output = normalizeCheapRouterOutput(item.MaxOutputTokens, model.Context, 0)
 		model.Tools = true
+		model.CompactionTokens = nil
+		indexByID[id] = len(provider.Models)
+		explicitContext[id] = hasCtx
 		provider.Models = append(provider.Models, model)
 	}
 	if len(provider.Models) == 0 {
-		return provider, nil, errors.New("CheapRouter model catalog has no chat models")
+		return provider, nil, invalid("CheapRouter model catalog has no chat models")
 	}
 	provider.DefaultModel = provider.Models[0].ID
+	fitCheapRouterConfigBudget(&provider)
+	if err := ValidateConfiguration(provider); err != nil {
+		return provider, nil, err
+	}
 	secret := protocol.NewSecret(gateway.APIKey)
 	return provider, &secret, nil
+}
+
+func normalizeCheapRouterContext(raw int64) (uint32, bool) {
+	if raw <= 0 {
+		return defaultCheapRouterContext, false
+	}
+	if raw > int64(maxCheapRouterTokens) {
+		return maxCheapRouterTokens, true
+	}
+	return uint32(raw), true
+}
+
+func normalizeCheapRouterOutput(raw int64, contextWindow uint32, fallback uint32) uint32 {
+	var target uint32
+	switch {
+	case raw > int64(maxCheapRouterTokens):
+		target = maxCheapRouterTokens
+	case raw > 0:
+		target = uint32(raw)
+	case fallback > 0:
+		target = fallback
+	default:
+		target = defaultCheapRouterOutput
+	}
+	if target > contextWindow {
+		target = contextWindow
+	}
+	if target == 0 {
+		target = 1
+	}
+	return target
+}
+
+func fitCheapRouterConfigBudget(provider *protocol.ConversationProvider) {
+	raw, err := json.Marshal(provider)
+	if err != nil || len(raw) <= maxCheapRouterConfigBytes {
+		return
+	}
+	for len(provider.Models) > 1 {
+		provider.Models = provider.Models[:len(provider.Models)-1]
+		if raw, err := json.Marshal(provider); err == nil && len(raw) <= maxCheapRouterConfigBytes {
+			return
+		}
+	}
 }

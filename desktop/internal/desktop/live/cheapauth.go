@@ -322,7 +322,14 @@ func (r *Runtime) saveCheapGateway(ctx context.Context, account *cheapAuthRuntim
 		}
 		return &protocol.CommandSaveProviderPayload{Provider: provider, ExpectedRevision: provider.Revision, Secret: secret}
 	})
-	return len(provider.Models), err
+	if err != nil {
+		var fault *protocol.Fault
+		if !errors.Is(err, context.Canceled) && (!errors.As(err, &fault) || fault.Code != protocol.ErrorCodeInvalidRequest) {
+			return 0, &cheapProviderSaveError{err: err}
+		}
+		return 0, err
+	}
+	return len(provider.Models), nil
 }
 
 // updateCheapProvider writes next's answer over the stored CheapRouter
@@ -439,6 +446,13 @@ func (r *Runtime) disableCheapGateway(account *cheapAuthRuntime, generation *che
 	})
 }
 
+type cheapProviderSaveError struct {
+	err error
+}
+
+func (e *cheapProviderSaveError) Error() string { return e.err.Error() }
+func (e *cheapProviderSaveError) Unwrap() error { return e.err }
+
 // cheapAuthError turns the sync failure into what the user can act on. A
 // protocol fault carries the cause as an English message, so the common ones
 // get their own sentence rather than one catch-all line that hides which step
@@ -447,6 +461,10 @@ func cheapAuthError(err error) string {
 	var auth *core.AuthError
 	if errors.As(err, &auth) {
 		return auth.Error()
+	}
+	var saveErr *cheapProviderSaveError
+	if errors.As(err, &saveErr) {
+		return "保存 CheapRouter 模型网关配置失败，请重试（" + saveErr.err.Error() + "）"
 	}
 	var fault *protocol.Fault
 	if errors.As(err, &fault) {
@@ -457,6 +475,8 @@ func cheapAuthError(err error) string {
 			return "账号下没有可用的聊天模型，请确认套餐或模型分组已开通"
 		case strings.Contains(fault.Message, "provider endpoint"):
 			return "模型网关地址不可用，请稍后重试或切换服务入口"
+		case fault.Code == protocol.ErrorCodeInvalidRequest:
+			return "CheapRouter 模型网关配置参数无效（" + fault.Message + "）"
 		}
 	}
 	return "配置 CheapRouter 模型网关失败，请检查网络后重试（" + err.Error() + "）"
