@@ -50,8 +50,12 @@ type cheapProviderWrite struct {
 }
 
 type cheapGroupBinding struct {
-	previous *int64
-	target   *int64
+	lane          string
+	previous      *core.LaneBinding
+	target        *core.LaneBinding
+	legacyPrev    *int64
+	legacyTarget  *int64
+	legacyMode    bool
 }
 
 func (a *cheapAuthRuntime) advance(parent context.Context) *cheapAuthGeneration {
@@ -83,6 +87,7 @@ func (r *Runtime) initCheapAuth() {
 	state.Logout = r.logoutCheapAuth
 	state.RefreshGroups = r.refreshCheapGroups
 	state.SelectGroup = r.selectCheapGroup
+	state.SelectLaneGroup = r.selectCheapLaneGroup
 	if err != nil {
 		state.Failure = cheapAuthError(err)
 		return
@@ -94,6 +99,7 @@ func (r *Runtime) initCheapAuth() {
 	if service.SignedIn() {
 		state.Endpoint = service.Endpoint()
 		state.SelectedGroupID = service.SelectedGroup()
+		state.LaneBindings = service.LaneBindings()
 		r.startCheapSync(account, account.advance(r.ctx))
 	}
 }
@@ -255,16 +261,20 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 		var groups []core.Group
 		var groupsErr error
 		if !cheapAuthRejected(accountErr) && ctx.Err() == nil {
-			if gatewayErr == nil {
-				gateway, gatewayErr = account.service.Gateway(ctx)
-			}
-			if !cheapAuthRejected(gatewayErr) && ctx.Err() == nil {
-				groups, groupsErr = account.service.AvailableGroups(ctx)
+			groups, groupsErr = account.service.AvailableGroups(ctx)
+			if !cheapAuthRejected(groupsErr) && ctx.Err() == nil && gatewayErr == nil {
+				gateway, gatewayErr = account.service.GatewayWithGroups(ctx, groups)
+				if gatewayErr == nil && len(groups) > 0 {
+					_ = account.service.MigrateLegacyGroup(ctx, groups, gateway.Catalog)
+				}
 			}
 		}
 		authErr := accountErr
 		if !cheapAuthRejected(authErr) {
 			authErr = gatewayErr
+		}
+		if !cheapAuthRejected(authErr) {
+			authErr = groupsErr
 		}
 
 		var modelCount int
@@ -286,6 +296,7 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 			}
 		}
 		selectedGroup := account.service.SelectedGroup()
+		laneBindings := account.service.LaneBindings()
 		r.enqueue(func(*ui.Context) {
 			if account.generation != generation || ctx.Err() != nil {
 				return
@@ -298,8 +309,9 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 					account.state.Failure += "；CheapRouter provider 未能停用，请在模型设置中关闭"
 				}
 				account.state.Account, account.state.ModelCount = core.User{}, 0
-				account.state.Groups, account.state.SelectedGroupID = nil, nil
-				account.state.GroupsLoading = false
+				account.state.Groups, account.state.Catalog = nil, nil
+				account.state.SelectedGroupID, account.state.LaneBindings = nil, nil
+				account.state.GroupsLoading, account.state.SwitchingLane = false, ""
 				account.state.GroupsError, account.state.GroupError = "", ""
 				return
 			}
@@ -313,7 +325,11 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 			} else if len(account.state.Groups) == 0 {
 				account.state.GroupsError = cheapAuthError(groupsErr)
 			}
+			if len(gateway.Catalog) > 0 {
+				account.state.Catalog = gateway.Catalog
+			}
 			account.state.SelectedGroupID = selectedGroup
+			account.state.LaneBindings = laneBindings
 			if gatewayErr != nil {
 				account.state.Stage, account.state.Failure = cheapauthui.GatewayFailed, cheapAuthError(gatewayErr)
 				return
@@ -446,10 +462,64 @@ func (r *Runtime) resolveCheapProvider(ctx context.Context, account *cheapAuthRu
 }
 
 func restoreCheapGroup(ctx context.Context, account *cheapAuthRuntime, binding *cheapGroupBinding) error {
-	if !account.service.SignedIn() || !sameGroupID(account.service.SelectedGroup(), binding.target) {
+	if !account.service.SignedIn() || binding == nil {
 		return nil
 	}
-	return account.service.SetGroup(ctx, binding.previous)
+	if binding.legacyMode {
+		if !sameGroupID(account.service.SelectedGroup(), binding.legacyTarget) {
+			return nil
+		}
+		return account.service.SetGroup(ctx, binding.legacyPrev)
+	}
+	current := account.service.LaneBindingFor(binding.lane)
+	if !sameLaneBinding(current, binding.target) {
+		return nil
+	}
+	return account.service.SetLaneBinding(ctx, binding.lane, binding.previous)
+}
+
+func sameLaneBinding(a, b *core.LaneBinding) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.GroupID == b.GroupID && a.APIKey == b.APIKey
+}
+
+func (r *Runtime) bindCheapLaneGroup(account *cheapAuthRuntime, generation *cheapAuthGeneration, lane string, targetGroup *int64, groups []core.Group) (int, []core.Model, map[string]int64, error) {
+	account.effects.Lock()
+	defer account.effects.Unlock()
+	ctx := generation.ctx
+	if account.pending != nil {
+		if _, err := r.resolveCheapProvider(ctx, account); err != nil {
+			return 0, nil, nil, err
+		}
+	}
+	gateway, targetBinding, err := account.service.GatewayForLaneChange(ctx, lane, targetGroup, groups)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	provider, secret, err := providers.CheapRouterProvider(gateway)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	previous := account.service.LaneBindingFor(lane)
+	binding := &cheapGroupBinding{lane: lane, previous: previous, target: targetBinding}
+	// Persist first: a local write failure must never replace the working Node
+	// route. If Node rejects the change, restore only this lane's prior binding.
+	if err := account.service.SetLaneBinding(ctx, lane, targetBinding); err != nil {
+		return 0, nil, nil, err
+	}
+	if err := r.saveCheapProvider(ctx, account, generation, provider, secret); err != nil {
+		if account.pending != nil {
+			account.pending.binding = binding
+			return 0, nil, nil, err
+		}
+		if faultCode(err) == protocol.ErrorCodeOutcomeUnknown {
+			return 0, nil, nil, err // No confirmed result: don't claim rollback.
+		}
+		return 0, nil, nil, errors.Join(err, restoreCheapGroup(r.ctx, account, binding))
+	}
+	return len(provider.Models), gateway.Catalog, account.service.LaneBindings(), nil
 }
 
 func (r *Runtime) bindCheapGroup(account *cheapAuthRuntime, generation *cheapAuthGeneration, target *int64) (int, error) {
@@ -469,10 +539,7 @@ func (r *Runtime) bindCheapGroup(account *cheapAuthRuntime, generation *cheapAut
 	if err != nil {
 		return 0, err
 	}
-	binding := &cheapGroupBinding{previous: account.service.SelectedGroup(), target: target}
-	// Persist first: a local write failure must never replace the working Node
-	// route. If Node rejects the change, restore the old preference. Effects
-	// keeps logout from overtaking either write or its rollback.
+	binding := &cheapGroupBinding{legacyPrev: account.service.SelectedGroup(), legacyTarget: target, legacyMode: true}
 	if err := account.service.SetGroup(ctx, target); err != nil {
 		return 0, err
 	}
@@ -515,10 +582,13 @@ func (r *Runtime) logoutCheapAuth() {
 			account.state.Pasted = ""
 			account.state.Exchanging = false
 			account.state.Groups = nil
+			account.state.Catalog = nil
 			account.state.GroupsLoading = false
 			account.state.GroupsError = ""
 			account.state.SelectedGroupID = nil
+			account.state.LaneBindings = nil
 			account.state.SwitchingGroup = false
+			account.state.SwitchingLane = ""
 			account.state.GroupError = ""
 			if disableErr != nil || logoutErr != nil {
 				account.state.Failure = "本地登录已退出；远程撤销或禁用模型网关未完全成功，请检查网络后重试"
@@ -549,6 +619,55 @@ func (r *Runtime) refreshCheapGroups() {
 			}
 			account.state.Groups = groups
 			account.state.GroupsError = ""
+		})
+	})
+}
+
+func (r *Runtime) selectCheapLaneGroup(lane string, groupID *int64) {
+	account := r.cheapAuth
+	if account == nil || account.service == nil || account.generation == nil ||
+		!account.state.SignedIn() || account.state.LoggingOut || account.state.SwitchingGroup ||
+		account.state.Stage == cheapauthui.SyncingGateway {
+		return
+	}
+	if sameGroupID(account.state.BoundGroupID(lane), groupID) && account.state.GroupError == "" {
+		return
+	}
+	generation := account.generation
+	target := copyGroupID(groupID)
+	groups := append([]core.Group(nil), account.state.Groups...)
+	account.state.SwitchingGroup = true
+	account.state.SwitchingLane = lane
+	account.state.GroupError = ""
+	r.async(func() {
+		modelCount, catalog, bindings, err := r.bindCheapLaneGroup(account, generation, lane, target, groups)
+		r.enqueue(func(c *ui.Context) {
+			if account.generation != generation || generation.ctx.Err() != nil {
+				return
+			}
+			account.state.SwitchingGroup = false
+			account.state.SwitchingLane = ""
+			if err != nil {
+				account.state.GroupError = "切换分组失败：" + cheapAuthError(err)
+				kit.Toast(c, kit.Failed, account.state.GroupError)
+				return
+			}
+			account.state.LaneBindings = bindings
+			account.state.SelectedGroupID = nil
+			if len(catalog) > 0 {
+				account.state.Catalog = catalog
+			}
+			account.state.ModelCount = modelCount
+			account.state.GroupError = ""
+			account.state.Stage = cheapauthui.Ready
+			account.state.Failure = ""
+			r.project()
+			label := core.LaneDisplayName(lane)
+			if target == nil {
+				kit.Toast(c, kit.Done, "已取消 "+label+" 分组绑定")
+			} else {
+				kit.Toast(c, kit.Done, "已更新 "+label+" 分组并刷新模型")
+			}
 		})
 	})
 }

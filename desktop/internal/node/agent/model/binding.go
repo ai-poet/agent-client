@@ -238,7 +238,21 @@ func transportBinding(binding Binding) (transportConfig, error) {
 	// Account authentication replaces this User-Agent with its own client identity.
 	config := transportConfig{Model: binding.Config.Model, Endpoint: u.String(), Headers: map[string]string{"User-Agent": "Sailry/" + link.ProductVersion}, Query: map[string]string{}, JSON: map[string]any{}, Remove: []string{"tool_choice"}, RemoveHeaders: []string{"Authorization", "X-Api-Key", "X-Goog-Api-Key", "Api-Key"}}
 	if binding.Secret != nil {
-		config.Key = binding.Secret.Expose()
+		raw := binding.Secret.Expose()
+		if provider.ID == providers.CheapRouterProviderID {
+			platform := ""
+			if listed := metadata(binding); listed != nil {
+				platform = listed.Platform
+			}
+			key, protection := providers.ResolveCheapRouterKey(raw, binding.Config.Model, platform)
+			if key == "" {
+				return config, &Failure{Kind: NotConfigured, Message: "CheapRouter gateway key is not bound for this model"}
+			}
+			config.Key = key
+			config.Protection = append(config.Protection, protection...)
+		} else {
+			config.Key = raw
+		}
 	}
 	var account *providers.AccountGrant
 	if provider.Authentication != protocol.AuthenticationApiKey {

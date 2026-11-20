@@ -144,9 +144,9 @@ type App struct {
 
 	Sidebar           *sidebar.State
 	Settings          *settings.State
-	Messages          *conversation.State
-	accountOpen       bool
-	accountGroupsOpen bool
+	Messages         *conversation.State
+	accountOpen      bool
+	accountGroupLane string
 	// overviews are the session overview popovers by conversation, each
 	// opened by its conversation's own button (conversationActions); band
 	// is the header's main region as the activity strip fits into it

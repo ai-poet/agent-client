@@ -26,8 +26,9 @@ func CheapRouterProvider(gateway cheapauth.Gateway) (protocol.ConversationProvid
 	if _, err := Endpoint(baseURL); err != nil {
 		return provider, nil, err
 	}
-	if strings.TrimSpace(gateway.APIKey) == "" {
-		return provider, nil, invalid("CheapRouter gateway key is empty")
+	secret, err := EncodeCheapRouterSecret(gateway)
+	if err != nil {
+		return provider, nil, err
 	}
 	provider.ID = CheapRouterProviderID
 	provider.Name = "CheapRouter"
@@ -99,8 +100,7 @@ func CheapRouterProvider(gateway cheapauth.Gateway) (protocol.ConversationProvid
 	if err := ValidateConfiguration(provider); err != nil {
 		return provider, nil, err
 	}
-	secret := protocol.NewSecret(gateway.APIKey)
-	return provider, &secret, nil
+	return provider, secret, nil
 }
 
 func fitCheapRouterConfigBudget(provider *protocol.ConversationProvider) {

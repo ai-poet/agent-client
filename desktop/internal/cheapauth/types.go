@@ -84,15 +84,23 @@ var (
 	ErrUnauthorized     = &AuthError{Kind: ErrorUnauthorized}
 )
 
+// LaneBinding records one routing lane's selected CheapRouter group and its
+// ensured gateway key. It stays inside Credentials and is never exposed to UI.
+type LaneBinding struct {
+	GroupID int64  `json:"group_id"`
+	APIKey  string `json:"api_key,omitempty"`
+}
+
 // Credentials is serialized only by Store. String and GoString prevent an
 // accidental fmt/slog field dump from exposing either token.
 type Credentials struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresAt    int64  `json:"expires_at"`
-	Endpoint     string `json:"endpoint"`
-	APIKey       string `json:"api_key,omitempty"`
-	GroupID      *int64 `json:"group_id,omitempty"`
+	AccessToken  string                 `json:"access_token"`
+	RefreshToken string                 `json:"refresh_token"`
+	ExpiresAt    int64                  `json:"expires_at"`
+	Endpoint     string                 `json:"endpoint"`
+	APIKey       string                 `json:"api_key,omitempty"`
+	GroupID      *int64                 `json:"group_id,omitempty"`
+	LaneBindings map[string]LaneBinding `json:"lane_bindings,omitempty"`
 }
 
 func (Credentials) String() string   { return "CheapRouter 凭据（已隐藏）" }
@@ -242,6 +250,7 @@ type Model struct {
 	ID              string           `json:"model"`
 	DisplayName     string           `json:"display_name"`
 	Platform        string           `json:"platform"`
+	Provider        string           `json:"provider,omitempty"`
 	BillingMode     string           `json:"billing_mode"`
 	ContextWindow   int64            `json:"context_window"`
 	MaxOutputTokens int64            `json:"max_output_tokens,omitempty"`
@@ -278,13 +287,17 @@ type UsageStats struct {
 	TotalCost         float64 `json:"total_cost"`
 }
 
-// Gateway is the complete model-provider handoff. Its APIKey must only be
-// passed to sailry's protected credential field, never written to logs.
+// Gateway is the complete model-provider handoff. Its APIKey and LaneKeys must
+// only be passed to sailry's protected credential field, never written to logs.
 type Gateway struct {
-	BaseURL string
-	APIKey  string
-	Models  []Model
-	GroupID *int64
+	BaseURL      string
+	APIKey       string
+	LaneKeys     map[string]string
+	ModelLanes   map[string]string
+	Models       []Model
+	Catalog      []Model
+	GroupID      *int64
+	LaneBindings map[string]int64
 }
 
 func (g Gateway) String() string {
