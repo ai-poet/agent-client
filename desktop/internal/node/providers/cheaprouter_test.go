@@ -15,9 +15,9 @@ func TestCheapRouterProviderDeduplicatesAndNormalizesCatalog(t *testing.T) {
 		BaseURL: "https://cheaprouter.cc/v1/",
 		APIKey:  "sk-test-key",
 		Models: []cheapauth.Model{
-			{ID: "claude-sonnet-4-6", DisplayName: "", BillingMode: "token", ContextWindow: 0},
-			{ID: "claude-sonnet-4-6", DisplayName: "Claude Sonnet 4.6", BillingMode: "token", ContextWindow: 200000, MaxOutputTokens: 32768},
-			{ID: "claude-sonnet-4-6", DisplayName: "Ignored Duplicate", BillingMode: "token", ContextWindow: 64000},
+			{ID: "claude-sonnet-4-6", BillingMode: "token", ContextWindow: 8192, MaxOutputTokens: 32768},
+			{ID: "claude-sonnet-4-6", DisplayName: "Claude Sonnet 4.6", BillingMode: "token", ContextWindow: 200000},
+			{ID: "claude-sonnet-4-6", DisplayName: "Ignored Duplicate", BillingMode: "token", ContextWindow: 64000, MaxOutputTokens: 2048},
 			{ID: "gpt-image-1", DisplayName: "Image Gen", BillingMode: "image", ContextWindow: 0},
 			{ID: "tts-1", DisplayName: "Audio", BillingMode: "per_request", ContextWindow: 0},
 			{ID: "small-ctx-model", BillingMode: "", ContextWindow: 4096},
@@ -50,17 +50,17 @@ func TestCheapRouterProviderDeduplicatesAndNormalizesCatalog(t *testing.T) {
 	}
 
 	small := provider.Models[1]
-	if small.ID != "small-ctx-model" || small.Context != 4096 || small.Output != 4096 {
+	if small.ID != "small-ctx-model" || small.Context != 0 || small.Output != 0 {
 		t.Fatalf("small context model = %+v", small)
 	}
 
 	overflow := provider.Models[2]
-	if overflow.ID != "overflow-model" || overflow.Context != maxCheapRouterTokens || overflow.Output != maxCheapRouterTokens {
+	if overflow.ID != "overflow-model" || overflow.Context != MaxModelOutput || overflow.Output != MaxModelOutput {
 		t.Fatalf("overflow model = %+v", overflow)
 	}
 
 	negative := provider.Models[3]
-	if negative.ID != "negative-model" || negative.Context != defaultCheapRouterContext || negative.Output != defaultCheapRouterOutput {
+	if negative.ID != "negative-model" || negative.Context != 0 || negative.Output != 0 {
 		t.Fatalf("negative model = %+v", negative)
 	}
 }

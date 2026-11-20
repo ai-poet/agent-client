@@ -105,15 +105,9 @@ func projectTranscript(state client.ConversationState, language string) ([]conve
 		if statistics.Generation != nil && statistics.Generation.ElapsedUs > 0 {
 			u.Speed = float64(statistics.Generation.OutputTokens) * 1_000_000 / float64(statistics.Generation.ElapsedUs)
 		}
-		context, limit := statistics.ContextTokens, statistics.ContextLimit
-		if context == nil {
-			context = statistics.ContextEstimate
-			if statistics.Budget != nil {
-				limit = &statistics.Budget.ContextLimit
-			}
-		}
-		if context != nil && limit != nil && *limit > 0 {
-			u.Context = float64(*context) / float64(*limit)
+		context, limit, _ := contextReading(statistics, "", 0)
+		if context != nil && limit > 0 {
+			u.Context = float64(*context) / float64(limit)
 		}
 		session.Usage = u
 	}

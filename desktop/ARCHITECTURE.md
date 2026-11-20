@@ -250,6 +250,13 @@ OAuth channel discovers the signed-in account's model list using the Node's
 reviewed Codex catalog version unless the channel specifies an override. The
 public model catalog can supplement the account's metadata.
 
+Token limits are resolved on the Node. Saved provider declarations take
+precedence; an absent field can come from the shipped models.dev snapshot or,
+on supported routes, a cached model discovery result. Machine-discovered
+windows below 8,192 tokens do not establish a capacity. An unknown context
+uses an internal budget estimate, but the conversation meter does not display
+it as a known denominator. Recorded measurements retain their captured limit.
+
 Sign-in and renewal run on the controller. Execution hosts receive static keys
 and the current runtime credentials needed for their captured operations, with
 the original account identity, generation and real expiry. Refresh tokens, OAuth

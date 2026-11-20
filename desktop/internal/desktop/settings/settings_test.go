@@ -884,11 +884,15 @@ func TestProviderEditor(t *testing.T) {
 		}
 	})
 	t.Run("context_limits", func(t *testing.T) {
-		for _, value := range []string{"", "0", "-1", "4295095296", "not a limit"} {
+		for _, value := range []string{"0", "-1", "4295095296", "not a limit"} {
 			editor := providerEditor{name: "Provider", keySet: true, models: []modelDraft{{id: "model", context: value}}}
 			if got := editor.Check(); got != "provider_limits_invalid" {
 				t.Fatalf("context %q: %q", value, got)
 			}
+		}
+		editor := providerEditor{name: "Provider", keySet: true, models: []modelDraft{{id: "model"}}}
+		if got := editor.Check(); got != "" {
+			t.Fatalf("unspecified context: %q", got)
 		}
 	})
 }

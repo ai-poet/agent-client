@@ -72,3 +72,23 @@ func TestContextStatsModelChanged(t *testing.T) {
 		t.Errorf("without statistics: %+v", empty)
 	}
 }
+
+func TestContextEstimateUsesKnownCompactionBudget(t *testing.T) {
+	s := meterStatistics()
+	s.ContextTokens, s.ContextLimit = nil, nil
+	s.ContextEstimate = pointer(uint64(20_000))
+	d := contextStats(s, "sonnet", 0, false)
+	if !d.Estimated || d.Limit != 1_000_000 || d.Threshold != 800_000 || d.Reserve != 128_000 {
+		t.Fatalf("estimate did not use the compaction budget: %+v", d)
+	}
+	s.Budget.ContextEstimated = true
+	d = contextStats(s, "sonnet", 0, false)
+	if d.Tokens == nil || *d.Tokens != 20_000 || d.Limit != 0 || d.Threshold != 0 {
+		t.Fatalf("estimated capacity was presented as known: %+v", d)
+	}
+	s.ContextTokens = pointer(uint64(30_000))
+	d = contextStats(s, "sonnet", 0, false)
+	if d.Tokens == nil || *d.Tokens != 30_000 || d.Estimated || d.Limit != 0 {
+		t.Fatalf("measured usage converted the estimated capacity into a fact: %+v", d)
+	}
+}

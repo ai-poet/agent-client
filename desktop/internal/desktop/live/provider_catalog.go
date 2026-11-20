@@ -5,11 +5,11 @@ import (
 	"slices"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
 	"github.com/ai-poet/agent-client/desktop/internal/node/providers"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 // providerDiscovery is what one editor's discovery learned about a channel's
@@ -48,12 +48,14 @@ func (r *Runtime) finishDiscovery(provider protocol.ConversationProvider, genera
 			for _, original := range discovered {
 				model := known[original.ID]
 				if catalog, ok := metadata[original.ID]; ok {
-					if original.Context == nil && catalog.Context != nil {
-						model.Context = *catalog.Context
+					limits := protocol.ConversationDiscoveryModel{}
+					if model.Context == 0 {
+						limits.Context = catalog.Context
 					}
-					if original.Output == nil && catalog.Output != nil {
-						model.Output = *catalog.Output
+					if model.Output == 0 {
+						limits.Output = catalog.Output
 					}
+					providers.ApplyDiscoveredLimits(&model, limits)
 					if model.DisplayName == nil && catalog.Name != "" {
 						model.DisplayName = new(catalog.Name)
 					}

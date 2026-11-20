@@ -15,7 +15,7 @@ import (
 
 func TestAgentStatistics(t *testing.T) {
 	t.Parallel()
-	for _, scenario := range []string{"membership_and_pricing", "unmetered_resets_context", "explicit_reset_estimates_growth", "summary_resets_context", "captured_budget", "observation_snapshots"} {
+	for _, scenario := range []string{"membership_and_pricing", "unmetered_resets_context", "explicit_reset_estimates_growth", "summary_resets_context", "captured_budget", "resolved_observation", "observation_snapshots"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			storage, node, session, turn, now := agentHistoryFixture(t, protocol.WorkModeCode)
@@ -33,6 +33,12 @@ func TestAgentStatistics(t *testing.T) {
 				record := canonical.NewRecord(turn, "message", &message, now)
 				record.Provenance.Author = "assistant"
 				record.Metadata.Execution = &canonical.Execution{Timing: &canonical.Timing{ElapsedUs: ptr(uint64(10)), FirstTokenUs: ptr(uint64(4))}}
+				if scenario == "resolved_observation" {
+					request := protocol.DefaultConversationObservationRequest()
+					request.ID, request.Turn, request.Model = "resolved-request", turn, "fixture"
+					request.ContextLimit = ptr(uint32(200000))
+					record.Metadata.Execution.Observation = &request
+				}
 				appendRecord := func(record canonical.Record) error {
 					_, _, err := AppendCanonical(ctx, db, session.ID, record)
 					return err
@@ -121,6 +127,10 @@ func TestAgentStatistics(t *testing.T) {
 					summary := result.Observations
 					if summary.Calls != 1 || summary.ModelUs != 30 || summary.OutputUs != 22 || summary.OutputTokens != 39 || summary.OutputSamples != 2 || len(summary.Recent) != 1 || len(summary.Recent[0].Attempts) != 1 || summary.Recent[0].Attempts[0].Index != 2 || summary.Recent[0].TurnIndex == nil || *summary.Recent[0].TurnIndex != 1 || summary.Latency.ElapsedUs == nil || *summary.Latency.ElapsedUs != 15 || len(summary.Composition) != 1 || *summary.Composition[0].Items != 2 {
 						t.Fatalf("attempt aggregates = %#v", summary)
+					}
+				case "resolved_observation":
+					if result.ContextTokens == nil || *result.ContextTokens != 120 || result.ContextLimit == nil || *result.ContextLimit != 200000 {
+						t.Fatalf("resolved window lost to the stored provider metadata: %+v", result)
 					}
 				default:
 					if result.ContextTokens == nil || *result.ContextTokens != 120 || result.ContextLimit == nil || *result.ContextLimit != 32000 || result.FirstTokenUs == nil || *result.FirstTokenUs != 4 {

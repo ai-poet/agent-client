@@ -170,13 +170,14 @@ func (value ConversationCompactionFailure) MarshalJSON() ([]byte, error) {
 }
 
 type ConversationCompactionBudget struct {
-	Model         string `json:"model"`
-	ContextLimit  uint32 `json:"context_limit"`
-	TriggerTokens uint64 `json:"trigger_tokens"`
-	OutputReserve uint32 `json:"output_reserve"`
-	RecentTokens  uint64 `json:"recent_tokens"`
-	SummaryInput  uint64 `json:"summary_input"`
-	SummaryOutput uint32 `json:"summary_output"`
+	Model            string `json:"model"`
+	ContextLimit     uint32 `json:"context_limit"`
+	ContextEstimated bool   `json:"context_estimated,omitempty"`
+	TriggerTokens    uint64 `json:"trigger_tokens"`
+	OutputReserve    uint32 `json:"output_reserve"`
+	RecentTokens     uint64 `json:"recent_tokens"`
+	SummaryInput     uint64 `json:"summary_input"`
+	SummaryOutput    uint32 `json:"summary_output"`
 }
 
 func DefaultConversationCompactionBudget() ConversationCompactionBudget {

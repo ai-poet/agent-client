@@ -19,16 +19,10 @@ import (
 )
 
 func capturedModel(binding model.Binding) protocol.ConversationModel {
-	for _, candidate := range binding.Provider.Models {
-		if candidate.ID == binding.Config.Model {
-			return candidate
-		}
-	}
-	// An unlisted model declares no capabilities; only its window is known.
-	selected := protocol.DefaultConversationModel()
-	selected.ID, selected.Context = binding.Config.Model, model.ContextLimit(binding)
+	selected, _ := model.ResolvedModel(binding)
 	return selected
 }
+
 func contextTokens(records []canonical.Record) uint64 {
 	start := 0
 	for i, record := range records {
@@ -68,7 +62,7 @@ func shouldCompact(binding model.Binding, state store.AgentState, percent uint8)
 	if last == nil || last.Role == canonical.Assistant {
 		return false
 	}
-	selected := capturedModel(binding)
+	selected, _ := model.ResolvedModel(binding)
 	limit := uint64(selected.Context)
 	budget := store.AgentCompactionBudget(selected, percent)
 	if budget == nil || budget.TriggerTokens == 0 || budget.TriggerTokens >= limit {
@@ -139,7 +133,7 @@ func (r *Runtime) compactionFailure(x *execution, binding model.Binding, earlier
 	return record
 }
 func (r *Runtime) compact(x *execution, binding model.Binding, state store.AgentState, manual bool) error {
-	selected := capturedModel(binding)
+	selected, _ := model.ResolvedModel(binding)
 	keepRecent := true
 	if last := lastMessage(state.Records); last != nil && last.Error != nil && last.Error.Code != nil && *last.Error.Code == "context_overflow" {
 		keepRecent = false
@@ -163,7 +157,7 @@ func (r *Runtime) compact(x *execution, binding model.Binding, state store.Agent
 		return err
 	}
 	summaryBinding := model.Summary(binding)
-	output := model.OutputLimit(summaryBinding, true)
+	output := int64(model.SummaryOutputLimit(selected))
 	requestText := handoff.Request
 	if manual && strings.TrimSpace(x.inv.Message.Text) != "" {
 		requestText += "\n\nUser focus for the handoff:\n" + x.inv.Message.Text

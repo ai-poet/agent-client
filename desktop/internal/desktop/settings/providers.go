@@ -653,7 +653,7 @@ func (e *providerEditor) seed() {
 		return
 	}
 	for _, id := range e.current().Models {
-		d := draftsOf([]preview.ChannelModel{{ID: id, Name: id, Context: 128000, Vision: true, Tools: true}})[0]
+		d := draftsOf([]preview.ChannelModel{{ID: id, Name: id, Vision: true, Tools: true}})[0]
 		d.seeded = true
 		e.models = append(e.models, d)
 	}
@@ -748,8 +748,10 @@ func (e *providerEditor) Check() string {
 			return "provider_model_duplicate"
 		}
 		seen[id] = true
-		if n, err := strconv.ParseUint(d.context, 10, 32); err != nil || n == 0 || n < uint64(d.model.Output) {
-			return "provider_limits_invalid"
+		if limit := strings.TrimSpace(d.context); limit != "" {
+			if n, err := strconv.ParseUint(limit, 10, 32); err != nil || n == 0 || n < uint64(d.model.Output) {
+				return "provider_limits_invalid"
+			}
 		}
 		// The efforts are edited in place: each named, none twice.
 		named := map[string]bool{}
@@ -809,7 +811,7 @@ func (e *providerEditor) save(m *Model) string {
 		if x.Name == "" || x.Name == d.model.ID {
 			x.Name = x.ID
 		}
-		x.Context, _ = strconv.Atoi(d.context)
+		x.Context, _ = strconv.Atoi(strings.TrimSpace(d.context))
 		x.Efforts = nil
 		for _, effort := range d.efforts {
 			x.Efforts = append(x.Efforts, strings.TrimSpace(effort))

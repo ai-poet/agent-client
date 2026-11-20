@@ -246,8 +246,9 @@ func (value ConversationProvider) MarshalJSON() ([]byte, error) {
 }
 
 type ConversationModel struct {
-	ID               string                             `json:"id"`
-	DisplayName      *string                            `json:"display_name,omitempty"`
+	ID          string  `json:"id"`
+	DisplayName *string `json:"display_name,omitempty"`
+	// Zero limits are unspecified and resolved by the Node.
 	Context          uint32                             `json:"context"`
 	Output           uint32                             `json:"output"`
 	CompactionTokens *uint32                            `json:"compaction_tokens,omitempty"`

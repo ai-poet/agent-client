@@ -32,8 +32,9 @@ const agentContextObservationQuery = `SELECT h.sequence,
  CASE WHEN json_extract(e.body,'$.kind')!='compaction' AND json_extract(e.body,'$.usage.input')>=0
   AND json_extract(e.body,'$.usage.output')>=0 AND json_type(e.body,'$.metadata.execution.timing.first_token_us')='integer'
   AND json_extract(e.body,'$.metadata.execution.timing.first_token_us')>=0 THEN json_extract(e.body,'$.metadata.execution.timing.first_token_us') END,
- (SELECT json_extract(model.value,'$.context') FROM json_each(r.provider,'$.models') model
-  WHERE json_extract(model.value,'$.id')=json_extract(revision.config,'$.model') LIMIT 1),
+ coalesce(json_extract(e.body,'$.metadata.execution.observation.context_limit'),
+  (SELECT json_extract(model.value,'$.context') FROM json_each(r.provider,'$.models') model
+   WHERE json_extract(model.value,'$.id')=json_extract(revision.config,'$.model') LIMIT 1)),
  coalesce(json_extract(e.body,'$.kind')='compaction',0),json_extract(revision.config,'$.model'),json_extract(e.body,'$.created'),
  CASE WHEN json_extract(e.body,'$.kind')!='compaction' AND json_type(e.body,'$.metadata.execution.context_tokens')='integer' AND json_extract(e.body,'$.metadata.execution.context_tokens')>=0
   THEN json_extract(e.body,'$.metadata.execution.context_tokens') END
