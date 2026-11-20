@@ -26,6 +26,7 @@ jobs:
       - name: Resolve release tag
         id: release
         run: |
+          set -euo pipefail
           tag="${{ github.event.release.tag_name || inputs.tag }}"
           if [ -z "$tag" ]; then
             echo "::error::No release tag provided"
@@ -33,15 +34,16 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-      - name: Install rclone
+      - name: Install rclone and jq
         run: |
           sudo apt-get update
-          sudo apt-get install --yes rclone
+          sudo apt-get install --yes rclone jq
 
       - name: Download release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           mkdir -p assets
           gh release download "${{ steps.release.outputs.tag }}" \
             --dir assets \
@@ -51,6 +53,29 @@ jobs:
             exit 1
           fi
           ls -lah assets
+
+      - name: Verify MyGo manifest and archive pairing
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          manifests=(assets/update-*.json)
+          if [ "${#manifests[@]}" -eq 0 ]; then
+            echo "No MyGo manifests in this release; skipping MyGo pairing check."
+            exit 0
+          fi
+          for manifest in "${manifests[@]}"; do
+            url=$(jq -r '.url // ""' "$manifest")
+            sig=$(jq -r '.signature // ""' "$manifest")
+            if [ -z "$url" ] || [ -z "$sig" ]; then
+              echo "::error::Incomplete MyGo manifest: $manifest"
+              exit 1
+            fi
+            archive_name="${url##*/}"
+            if [ ! -f "assets/${archive_name}" ]; then
+              echo "::error::MyGo manifest ${manifest} references missing archive ${archive_name}"
+              exit 1
+            fi
+          done
 
       - name: Upload assets to R2
         env:
@@ -66,23 +91,55 @@ jobs:
           RCLONE_CONFIG_R2_TYPE: s3
           RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
         run: |
+          set -euo pipefail
+          if [ -z "$R2_ACCESS_KEY_ID" ] || [ -z "$R2_SECRET_ACCESS_KEY" ]; then
+            echo "::error::R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY secrets are required"
+            exit 1
+          fi
+          if [ -z "$R2_ENDPOINT" ] && [ -z "$R2_ACCOUNT_ID" ]; then
+            echo "::error::Either R2_ENDPOINT or R2_ACCOUNT_ID secret is required"
+            exit 1
+          fi
+
           bucket="${R2_BUCKET:-cheaprouter-releases}"
           export RCLONE_CONFIG_R2_PROVIDER="${R2_PROVIDER:-Cloudflare}"
           export RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
           export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
           export RCLONE_CONFIG_R2_ENDPOINT="${R2_ENDPOINT:-https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com}"
           destination="r2:${bucket}"
+          mygo_destination="${destination}/mygo"
           immutable="Cache-Control: public, max-age=31536000, immutable"
           fresh="Cache-Control: public, max-age=300, must-revalidate"
 
+          # 1. Upload immutable first-hop assets to bucket root before updating pointers.
           rclone copy assets "$destination" \
             --s3-no-check-bucket \
             --exclude appcast.xml \
             --exclude latest-windows.txt \
             --exclude 'appcast-windows-*.xml' \
+            --exclude 'update-*.json' \
+            --exclude 'cheaprouter-*-darwin-*.tar.gz' \
+            --exclude 'cheaprouter-*-windows-*.tar.gz' \
+            --exclude 'cheaprouter-*-to-*.delta' \
             --header-upload "$immutable" \
             --progress
 
+          # 2. Upload immutable second-hop MyGo archives/deltas under mygo/ before manifests.
+          shopt -s nullglob
+          mygo_archives=(
+            assets/cheaprouter-*-darwin-*.tar.gz
+            assets/cheaprouter-*-windows-*.tar.gz
+            assets/cheaprouter-*-to-*.delta
+          )
+          for archive in "${mygo_archives[@]}"; do
+            name=$(basename "$archive")
+            rclone copyto "$archive" "${mygo_destination}/${name}" \
+              --s3-no-check-bucket \
+              --header-upload "$immutable" \
+              --progress
+          done
+
+          # 3. Upload mutable first-hop feeds and version pointers with short cache TTL.
           for pointer in appcast.xml appcast-windows-x86_64.xml \
             appcast-windows-aarch64.xml latest-windows.txt; do
             if [ -f "assets/$pointer" ]; then
@@ -92,3 +149,25 @@ jobs:
                 --progress
             fi
           done
+
+          # 4. Upload mutable second-hop MyGo manifests under mygo/ with short cache TTL.
+          mygo_manifests=(assets/update-*.json)
+          for manifest in "${mygo_manifests[@]}"; do
+            name=$(basename "$manifest")
+            rclone copyto "$manifest" "${mygo_destination}/${name}" \
+              --s3-no-check-bucket \
+              --header-upload "$fresh" \
+              --progress
+          done
+
+          # 5. Confirm remote manifests are visible after upload.
+          if [ "${#mygo_manifests[@]}" -gt 0 ]; then
+            remote_mygo=$(rclone lsf "${mygo_destination}" --s3-no-check-bucket)
+            for manifest in "${mygo_manifests[@]}"; do
+              name=$(basename "$manifest")
+              if ! printf '%s\n' "$remote_mygo" | grep -qx "$name"; then
+                echo "::error::Uploaded MyGo manifest ${name} missing from ${mygo_destination}"
+                exit 1
+              fi
+            done
+          fi
