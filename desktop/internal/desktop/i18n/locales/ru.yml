@@ -664,6 +664,7 @@ location_create: Новое рабочее дерево
 git_no_matches: Нет соответствий
 composer_model_settings: Модель и усилия
 composer_model_empty: Нет соответствующих доступных моделей
+composer_models_recent: Недавние модели
 composer_effort_reset: Сбросить
 composer_feature_description: Может стоить дороже
 composer_feature_off: Выкл.

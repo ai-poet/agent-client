@@ -17,7 +17,8 @@ type Context struct {
 	// on another Node only that Node's own, since a member's choice is not
 	// forwarded with the local Node's provider as the lead's is.
 	MemberModels []Model
-	Families     []Family // the model picker's rail, in order
+	Families     []Family // optional vendor presentation overrides
+	RecentModels []string // available or historical model IDs, most recent first
 	Teams        []Team
 	// Interactions are the approvals and question the run waits on.
 	Interactions Interactions
@@ -94,6 +95,7 @@ type PluginMode struct {
 // Model is a model the picker offers, as the backend lists it.
 type Model struct {
 	ID, Name, Provider string
+	ContextWindow      uint32
 	// Reasoning makes it take an effort: Efforts, or the package's
 	// default levels when nil.
 	Reasoning     bool
@@ -108,8 +110,7 @@ type Model struct {
 	Features []Feature
 }
 
-// Family is a group of providers on the model picker's rail: a cloud,
-// a local runtime, a gateway (settings::ModelCategory).
+// Family describes a model vendor in the picker's left column.
 type Family struct {
 	ID    string
 	Label string // i18n key
@@ -298,8 +299,6 @@ type Attachment struct {
 
 // MaxAttachments is how many files a message carries (chat_attachment_limit).
 const MaxAttachments = 8
-
-
 
 // Message is what Send and Queue take: the draft's text, its files, the
 // references chipped into it, and the choices it runs with.

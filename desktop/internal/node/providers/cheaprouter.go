@@ -51,9 +51,16 @@ func CheapRouterProvider(gateway cheapauth.Gateway) (protocol.ConversationProvid
 			continue
 		}
 		name := strings.TrimSpace(item.DisplayName)
+		platform := strings.TrimSpace(item.Platform)
+		if len(platform) > 64 {
+			platform = ""
+		}
 		ctxWindow, hasCtx := normalizeCheapRouterContext(item.ContextWindow)
 		if idx, exists := indexByID[id]; exists {
 			existing := &provider.Models[idx]
+			if existing.Platform == "" {
+				existing.Platform = platform
+			}
 			if existing.DisplayName == nil && name != "" && name != id {
 				display := name
 				existing.DisplayName = &display
@@ -70,6 +77,7 @@ func CheapRouterProvider(gateway cheapauth.Gateway) (protocol.ConversationProvid
 
 		model := protocol.DefaultConversationModel()
 		model.ID = id
+		model.Platform = platform
 		if name != "" && name != id {
 			display := name
 			model.DisplayName = &display

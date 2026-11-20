@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preview"
+	"github.com/egoist/mygo/ui"
 )
 
 // composerPicker opens the model picker of a composer in a window width
@@ -64,17 +64,6 @@ func demoPicker(t *testing.T, prepare func(models []composer.Model)) *ui.Tester 
 	pressButton(t, tt, preview.DemoModel) // the controls' model, which opens the picker
 	rest(tt)
 	return tt
-}
-
-// groupHeader is the picker's group named by its provider: the disclosure
-// that folds its models.
-func groupHeader(t *testing.T, tt *ui.Tester, provider string) ui.AccessInfo {
-	t.Helper()
-	header, ok := tt.AccessByRole(ui.RoleDisclosure, provider)
-	if !ok {
-		t.Fatalf("no group named %q: %q", provider, tt.Texts())
-	}
-	return header
 }
 
 // railTile is the rail's button named name: Back or a family's tile.
@@ -377,7 +366,7 @@ func composerModels(t *testing.T) {
 	// model has it, else the model's default.
 	t.Run("pointer on another model", func(t *testing.T) {
 		tt, comp, _ := modelPickerAt(t, 960, nil)
-		pressButton(t, tt, zh("provider_gemini"))
+		pressButton(t, tt, "Google")
 		rest(tt)
 		// The pointer is on the rail: the column is still the chosen model's.
 		if names, checked := effortNames(tt); !slices.Equal(names, composer.Efforts) || checked != "medium" {
@@ -453,16 +442,9 @@ func composerModels(t *testing.T) {
 		key(ui.KeyUp)
 		key(ui.KeyUp)
 		column("with the focus on Claude Opus 5.5", composer.Efforts)
-		key(ui.KeyUp) // the group's name
-		key(ui.KeyEnter)
-		if _, ok := tt.AccessByRole(ui.RoleButton, "Claude Sonnet 5.5"); ok {
-			t.Fatalf("Enter on the group's name left its models shown: %q", tt.Texts())
-		}
-		key(ui.KeyEnter)
-		if row := modelRow(t, tt, "Claude Sonnet 5.5").Bounds; row != sonnet {
-			t.Fatalf("the row is %v after the group opened again, it was %v", row, sonnet)
-		}
-		column("with a row brought under the pointer", composer.Efforts)
+		key(ui.KeyUp)
+		key(ui.KeyUp)
+		column("with the focus back on Claude Opus 5.5", composer.Efforts)
 		tt.Move(x+2, y)
 		tt.Frame()
 		column("after a move on that row", short)
@@ -632,150 +614,67 @@ func composerModels(t *testing.T) {
 		}
 	})
 
-	// A group's name folds and unfolds its models, by the keys and by a
-	// click, and tells assistive technology which: with one provider too,
-	// where the list opened its first group again in the frame after.
-	t.Run("group folds", func(t *testing.T) {
-		tt := demoPicker(t, nil)
-		models := []string{preview.DemoModel, "DeepSeek V4.1", "DeepSeek V4.1 Flash"}
-		state := func(when string, open bool) {
+	// Even under one gateway, vendor and search filters follow the catalog.
+	t.Run("vendors search and recent", func(t *testing.T) {
+		tt, comp, _ := modelPickerAt(t, 960, func(_ *composer.State, ctx *composer.Context) {
+			ctx.Models = slices.Clone(ctx.Models)
+			for i := range ctx.Models {
+				ctx.Models[i].Provider = "CheapRouter"
+				ctx.Models[i].ContextWindow = 200000
+			}
+			ctx.RecentModels = []string{"gpt-5.2", "removed-model", "claude-opus-5-5"}
+			ctx.Models = append(ctx.Models, composer.Model{
+				ID: "deepseek-v4", Name: "DeepSeek V4", Provider: "CheapRouter", Family: "deepseek",
+			})
+		})
+		listed := func(name string, want bool) {
 			t.Helper()
-			shown := 0
-			for _, name := range models {
-				if _, ok := tt.AccessByRole(ui.RoleButton, name); ok {
-					shown++
-				}
-			}
-			want := 0
-			if open {
-				want = len(models)
-			}
-			if header := groupHeader(t, tt, preview.DemoProvider); header.Expanded != open || shown != want {
-				t.Fatalf("%s the group is expanded %v with %d model rows, want expanded %v with %d: %q", when, header.Expanded, shown, open, want, tt.Texts())
+			if _, ok := tt.AccessByRole(ui.RoleButton, name); ok != want {
+				t.Fatalf("model %q shown=%v, want %v: %q", name, ok, want, tt.Texts())
 			}
 		}
-		state("as the picker opens", true)
-		// Up from the chosen model's row is the group's name.
-		tt.Key(0, ui.KeyUp)
+		for _, vendor := range []string{zh("provider_anthropic"), zh("provider_openai"), "Google", zh("provider_deepseek")} {
+			railTile(t, tt, vendor)
+		}
+		vendor, row := railTile(t, tt, zh("provider_anthropic")), modelRow(t, tt, "Claude Opus 5.5")
+		if !vendor.Checked || vendor.Bounds.X+vendor.Bounds.W >= row.Bounds.X ||
+			!row.Checked || !strings.Contains(row.Description, zh("provider_tokens_k", "count", "200")) {
+			t.Fatalf("expected a selected vendor on the left and model with context window on the right: %+v, %+v", vendor, row)
+		}
+		listed("GPT-5.2", false)
+		shot(t, tt, "composer-model-vendors-zh")
+		clickRest(tt, railTile(t, tt, zh("provider_deepseek")))
+		listed("DeepSeek V4", true)
+		listed("Claude Opus 5.5", false)
+		if comp.Model != "claude-opus-5-5" || comp.Effort != 2 {
+			t.Fatalf("browsing another vendor changed model/effort: %q at %v", comp.Model, comp.Effort)
+		}
+		clickRest(tt, railTile(t, tt, zh("composer_models_recent")))
+		first, second := modelRow(t, tt, "GPT-5.2"), modelRow(t, tt, "Claude Opus 5.5")
+		if first.Bounds.Y >= second.Bounds.Y || !second.Checked {
+			t.Fatalf("recent choices lost order or current selection: %+v, %+v", first, second)
+		}
+		shot(t, tt, "composer-model-recent-zh")
+		box, ok := tt.Find(zh("search"))
+		if !ok {
+			t.Fatalf("missing search field: %q", tt.Texts())
+		}
+		tt.ClickAt(box.X+box.W/2, box.Y+box.H/2)
 		tt.Frame()
-		if role, name := focusOf(tt); role != ui.RoleDisclosure || name != preview.DemoProvider {
-			t.Fatalf("Up from the first model is on %q (role %v), want the group's name", name, role)
-		}
-		tt.Key(0, ui.KeySpace)
+		tt.Type("google pro")
 		rest(tt)
-		state("after Space on the group's name", false)
-		if role, name := focusOf(tt); role != ui.RoleDisclosure || name != preview.DemoProvider {
-			t.Errorf("the folded group left the focus on %q (role %v)", name, role)
+		listed("Gemini 3 Pro", true)
+		listed("GPT-5.2", false)
+		listed("DeepSeek V4", false)
+		if _, ok := tt.AccessByRole(ui.RoleButton, zh("provider_deepseek")); ok {
+			t.Fatalf("search retained a non-matching vendor: %q", tt.Texts())
 		}
+		shot(t, tt, "composer-model-search-zh")
 		tt.Key(0, ui.KeyEnter)
 		rest(tt)
-		state("after Enter on the group's name", true)
-		clickRest(tt, groupHeader(t, tt, preview.DemoProvider))
-		state("after a click on the group's name", false)
-		// The fold holds while the picker shows.
-		tt.Advance(time.Second)
-		tt.Frame()
-		state("a second after the click", false)
-		clickRest(tt, groupHeader(t, tt, preview.DemoProvider))
-		state("after a second click", true)
-	})
-
-	// The rail is Back and a tile for each family, 32 square, 4 apart, 6
-	// from the rail's sides: no capability filters and no line under the
-	// families (AGENTS.md, Removed UI).
-	t.Run("rail", func(t *testing.T) {
-		tt := demoPicker(t, nil)
-		tt.Move(2, 2)
-		rest(tt)
-		panels, _ := popups(tt)
-		if len(panels) != 1 {
-			t.Fatalf("%d popovers, want the one panel", len(panels))
+		if comp.Model != "gemini-3-pro" || comp.Effort != 1 {
+			t.Fatalf("cross-vendor search chose %q at effort %v, want Gemini at high", comp.Model, comp.Effort)
 		}
-		panel := panels[0].Bounds
-		name := zh("provider_deepseek")
-		back, tile := railTile(t, tt, zh("composer_model_settings")), railTile(t, tt, name)
-		for _, b := range []ui.AccessInfo{back, tile} {
-			if b.Bounds.W != 32 || b.Bounds.H != 32 {
-				t.Errorf("the rail's %q is %v, want 32 square", b.Name, b.Bounds)
-			}
-		}
-		if !near(tile.Bounds.X, back.Bounds.X) || !near(tile.Bounds.Y, back.Bounds.Y+32+4) {
-			t.Errorf("the family's tile is %v under Back %v, want 4 below it", tile.Bounds, back.Bounds)
-		}
-		if !tile.Checked || tile.Description != name {
-			t.Errorf("the chosen family's tile is selected %v with the tooltip %q, want it selected and named %q", tile.Checked, tile.Description, name)
-		}
-		// The popover's padding and edge, then 6; and 6, the gap, the line
-		// and the gap before the models.
-		row := modelRow(t, tt, preview.DemoModel)
-		if left, right := tile.Bounds.X-panel.X, row.Bounds.X-(tile.Bounds.X+tile.Bounds.W); !near(left, 12+1+6) || !near(right, 6+8+1+8) {
-			t.Errorf("the tile is %v from the panel's side and %v before the models, want 19 and 23: tile %v, panel %v, row %v", left, right, tile.Bounds, panel, row.Bounds)
-		}
-		buttons := 0
-		for _, e := range tt.AccessAll() {
-			if e.Role != ui.RoleButton || !inside(e.Bounds, panel) {
-				continue
-			}
-			if e.Name == zh("provider_cap_vision") || e.Name == zh("provider_cap_image") {
-				t.Errorf("the rail has a capability filter %q", e.Name)
-			}
-			if e.Bounds.X+e.Bounds.W <= tile.Bounds.X+tile.Bounds.W+0.5 {
-				buttons++
-			}
-		}
-		if buttons != 2 {
-			t.Errorf("the rail has %d buttons, want Back and the one family", buttons)
-		}
-		// Nothing is drawn under the last tile: the rail's fill alone.
-		p := probe{t, tt}
-		x, under := tile.Bounds.X+16, tile.Bounds.Y+32
-		ground := p.at(x, under+1)
-		for y := under + 1; y < under+16; y += 0.5 {
-			if got := p.at(x, y); !same(got, ground) {
-				t.Errorf("the rail draws %v at %v under its last tile, its fill is %v: want no line", got, y-under, ground)
-				break
-			}
-		}
-	})
-
-	// A family's tile shows that family's groups alone and is the selected
-	// one; a group folded stays folded while the rail is on another family,
-	// and a family not yet shown opens its first group.
-	t.Run("family filter", func(t *testing.T) {
-		tt, _, _ := modelPickerAt(t, 960, nil)
-		listed := func(when string, want map[string]bool) {
-			t.Helper()
-			for name, shown := range want {
-				if _, ok := tt.AccessByRole(ui.RoleButton, name); ok != shown {
-					t.Fatalf("%s the model %q is shown %v, want %v: %q", when, name, ok, shown, tt.Texts())
-				}
-			}
-		}
-		selected := func(when, want string) {
-			t.Helper()
-			for _, key := range []string{"provider_anthropic", "provider_openai", "provider_gemini", "provider_other"} {
-				if tile := railTile(t, tt, zh(key)); tile.Checked != (key == want) {
-					t.Errorf("%s the tile %q is selected %v", when, tile.Name, tile.Checked)
-				}
-			}
-		}
-		listed("as the picker opens", map[string]bool{"Claude Opus 5.5": true, "Claude Haiku 5.5": true, "GPT-5.2": false, "Gemini 3 Pro": false, "Qwen3 Coder": false})
-		selected("as the picker opens", "provider_anthropic")
-		clickRest(tt, railTile(t, tt, zh("provider_openai")))
-		listed("on OpenAI", map[string]bool{"Claude Opus 5.5": false, "Claude Haiku 5.5": false, "GPT-5.2": true, "Gemini 3 Pro": false})
-		selected("on OpenAI", "provider_openai")
-		clickRest(tt, groupHeader(t, tt, "OpenAI"))
-		listed("with OpenAI folded", map[string]bool{"GPT-5.2": false})
-		clickRest(tt, railTile(t, tt, zh("provider_anthropic")))
-		listed("back on Anthropic", map[string]bool{"Claude Opus 5.5": true, "Claude Sonnet 5.5": true, "GPT-5.2": false})
-		clickRest(tt, railTile(t, tt, zh("provider_openai")))
-		listed("back on OpenAI", map[string]bool{"Claude Opus 5.5": false, "GPT-5.2": false})
-		if header := groupHeader(t, tt, "OpenAI"); header.Expanded {
-			t.Errorf("the folded group is expanded after the rail came back to its family")
-		}
-		clickRest(tt, railTile(t, tt, zh("provider_gemini")))
-		listed("on Gemini", map[string]bool{"Gemini 3 Pro": true, "GPT-5.2": false})
-		selected("on Gemini", "provider_gemini")
 	})
 
 	// What is chosen is told by its fill alone, one neutral gray on the

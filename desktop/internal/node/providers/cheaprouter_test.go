@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
 	"strings"
@@ -16,8 +17,8 @@ func TestCheapRouterProviderDeduplicatesAndNormalizesCatalog(t *testing.T) {
 		APIKey:  "sk-test-key",
 		Models: []cheapauth.Model{
 			{ID: "claude-sonnet-4-6", DisplayName: "", BillingMode: "token", ContextWindow: 0},
-			{ID: "claude-sonnet-4-6", DisplayName: "Claude Sonnet 4.6", BillingMode: "token", ContextWindow: 200000, MaxOutputTokens: 32768},
-			{ID: "claude-sonnet-4-6", DisplayName: "Ignored Duplicate", BillingMode: "token", ContextWindow: 64000},
+			{ID: "claude-sonnet-4-6", DisplayName: "Claude Sonnet 4.6", Platform: "anthropic", BillingMode: "token", ContextWindow: 200000, MaxOutputTokens: 32768},
+			{ID: "claude-sonnet-4-6", DisplayName: "Ignored Duplicate", Platform: "composite", BillingMode: "token", ContextWindow: 64000},
 			{ID: "gpt-image-1", DisplayName: "Image Gen", BillingMode: "image", ContextWindow: 0},
 			{ID: "tts-1", DisplayName: "Audio", BillingMode: "per_request", ContextWindow: 0},
 			{ID: "small-ctx-model", BillingMode: "", ContextWindow: 4096},
@@ -45,8 +46,19 @@ func TestCheapRouterProviderDeduplicatesAndNormalizesCatalog(t *testing.T) {
 
 	first := provider.Models[0]
 	if first.ID != "claude-sonnet-4-6" || first.DisplayName == nil || *first.DisplayName != "Claude Sonnet 4.6" ||
-		first.Context != 200000 || first.Output != 32768 || !first.Tools {
+		first.Platform != "anthropic" || first.Context != 200000 || first.Output != 32768 || !first.Tools {
 		t.Fatalf("merged duplicate model = %+v", first)
+	}
+	raw, err := json.Marshal(provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved protocol.ConversationProvider
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.Models) != len(provider.Models) || saved.Models[0].Platform != first.Platform || saved.Models[1].Platform != "" {
+		t.Fatalf("catalog platform lost in provider JSON: %+v", saved.Models)
 	}
 
 	small := provider.Models[1]

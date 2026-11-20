@@ -56,6 +56,7 @@ type Surfaces struct {
 }
 type Composer struct {
 	Model      *Model              `json:"model"`
+	Recent     []RecentModel       `json:"recent,omitempty"`
 	Mode       protocol.WorkMode   `json:"mode"`
 	Permission protocol.Permission `json:"permission"`
 	// Team is the team the last message was sent with, "" for one model:
@@ -63,6 +64,22 @@ type Composer struct {
 	// with one model.
 	Team string `json:"team,omitempty"`
 }
+type RecentModel struct {
+	Source   protocol.NodeID     `json:"source"`
+	Provider protocol.ProviderID `json:"provider"`
+	Model    string              `json:"model"`
+}
+
+// RecentModels includes the last model saved by profiles from before the
+// recent list was introduced.
+func (c *Composer) RecentModels() []RecentModel {
+	if len(c.Recent) > 0 || c.Model == nil {
+		return c.Recent
+	}
+	m := c.Model
+	return []RecentModel{{Source: m.Source, Provider: m.Provider, Model: m.Model}}
+}
+
 type Model struct {
 	Source   protocol.NodeID     `json:"source"`
 	Provider protocol.ProviderID `json:"provider"`

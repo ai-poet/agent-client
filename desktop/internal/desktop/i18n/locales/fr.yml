@@ -664,6 +664,7 @@ location_create: Nouvel arbre de travail
 git_no_matches: Pas de matchs
 composer_model_settings: Modèle et effort
 composer_model_empty: Aucun modèle correspondant disponible
+composer_models_recent: Modèles récents
 composer_effort_reset: Réinitialiser
 composer_feature_description: Peut coûter plus
 composer_feature_off: Désactivé

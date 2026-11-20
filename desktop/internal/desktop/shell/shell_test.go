@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
@@ -19,6 +18,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preview"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/settings"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
 )
 
 // opaque keeps the software shader interpreter out of every headless frame:
@@ -362,11 +362,11 @@ func TestModelPickerAndEffort(t *testing.T) {
 	if !tt.HasText(i18n.In("en", "composer_effort_unavailable")) {
 		t.Errorf("no default effort for a model without reasoning: %q", tt.Texts())
 	}
-	// The list's rail names each family by its brand's mark.
+	// The vendor column names each vendor alongside its brand mark.
 	clickButton(t, tt, "Claude Haiku 5.5")
-	for _, family := range []string{"provider_anthropic", "provider_openai", "provider_gemini"} {
-		if _, ok := tt.AccessByRole(ui.RoleButton, i18n.In("en", family)); !ok {
-			t.Errorf("the rail lacks %q", family)
+	for _, vendor := range []string{i18n.In("en", "provider_anthropic"), i18n.In("en", "provider_openai"), "Google"} {
+		if _, ok := tt.AccessByRole(ui.RoleButton, vendor); !ok {
+			t.Errorf("the vendor column lacks %q", vendor)
 		}
 	}
 	for _, id := range []string{"anthropic", "openai", "gemini"} {

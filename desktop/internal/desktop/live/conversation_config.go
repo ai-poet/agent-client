@@ -34,25 +34,30 @@ func (r *Runtime) defaultComposer(c *composer.State) {
 			}
 		}
 	}
+	var candidates []composer.Model
 	for _, p := range r.composerProviders() {
 		if !p.Enabled || len(p.Models) == 0 || !r.draftProviderUsable(p.ID) {
 			continue
 		}
-		model := p.Models[0]
-		if i := slices.IndexFunc(p.Models, func(m protocol.ConversationModel) bool { return m.ID == p.DefaultModel }); i >= 0 {
-			model = p.Models[i]
-		}
-		c.Model = modelKey(p.ID, model.ID)
-		c.Effort = 0
-		for _, display := range r.models() {
-			if display.ID == c.Model {
-				if i := slices.Index(display.Efforts, effortName(model.DefaultEffort)); i >= 0 {
-					c.Effort = float64(i)
-				}
-				break
+		for _, m := range p.Models {
+			display := composer.Model{ID: modelKey(p.ID, m.ID)}
+			if m.DisplayName != nil {
+				display.Name = *m.DisplayName
 			}
+			candidates = append(candidates, display)
 		}
+	}
+	if len(candidates) == 0 {
 		return
+	}
+	c.Model, c.Effort = composer.DefaultModel(candidates).ID, 0
+	for _, display := range r.models() {
+		if display.ID == c.Model {
+			if i := slices.Index(display.Efforts, display.DefaultEffort); i >= 0 {
+				c.Effort = float64(i)
+			}
+			break
+		}
 	}
 }
 

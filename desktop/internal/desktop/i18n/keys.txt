@@ -682,6 +682,7 @@ location_create
 git_no_matches
 composer_model_settings
 composer_model_empty
+composer_models_recent
 composer_effort_reset
 composer_feature_description
 composer_feature_off

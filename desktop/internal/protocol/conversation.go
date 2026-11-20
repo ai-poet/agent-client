@@ -248,6 +248,7 @@ func (value ConversationProvider) MarshalJSON() ([]byte, error) {
 type ConversationModel struct {
 	ID               string                             `json:"id"`
 	DisplayName      *string                            `json:"display_name,omitempty"`
+	Platform         string                             `json:"platform,omitempty"` // Catalog vendor, independent of the request API.
 	Context          uint32                             `json:"context"`
 	Output           uint32                             `json:"output"`
 	CompactionTokens *uint32                            `json:"compaction_tokens,omitempty"`

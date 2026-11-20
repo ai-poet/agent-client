@@ -664,6 +664,7 @@ location_create: New worktree
 git_no_matches: No matches
 composer_model_settings: Model and effort
 composer_model_empty: No matching available models
+composer_models_recent: Recent models
 composer_effort_reset: Reset to default
 composer_feature_description: May cost more
 composer_feature_off: "Off"

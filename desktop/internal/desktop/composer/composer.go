@@ -15,12 +15,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
 )
 
 // Efforts are the default reasoning levels the picker steps through, for a
@@ -85,21 +85,17 @@ type State struct {
 	References              []Reference // chipped into the draft
 	recovery                draftRecovery
 
-	view   kit.Viewer[*Attachment] // the image viewer over the draft's pictures
-	picker bool                    // the model controls are open
-	layer  layer
-	member string // the team member whose model the controls set
-	family string // the picker's rail choice, "" for all
-	// open is the picker's groups by provider: true for one that shows its
-	// models, false for one the user folded, no entry for one not yet
-	// touched. It is kept while the picker's page shows, across the rail's
-	// families, and starts anew as the page opens.
-	open     map[string]bool
-	efforts  effortState // the model picker's effort column
-	settings bool        // the compact settings popover
-	stats    bool        // the compact usage popover
-	page     settingsPage
-	width    float32 // the toolbar's width last frame
+	view       kit.Viewer[*Attachment] // the image viewer over the draft's pictures
+	picker     bool                    // the model controls are open
+	layer      layer
+	member     string // the team member whose model the controls set
+	family     string // the vendor or recent list open in the picker
+	modelQuery string
+	efforts    effortState // the model picker's effort column
+	settings   bool        // the compact settings popover
+	stats      bool        // the compact usage popover
+	page       settingsPage
+	width      float32 // the toolbar's width last frame
 
 	menus         map[string]string // this composer's menu IDs (menuID)
 	projectPicker bool
@@ -151,7 +147,7 @@ func (s *State) inFrame(c *ui.Context, fn func(*ui.Context)) {
 	c.Invalidate()
 }
 
-// Chosen returns the model chosen, the first one when the ID is unknown.
+// Chosen returns the selected model or the catalog's preferred default.
 func (s *State) Chosen(models []Model) Model {
 	for _, m := range models {
 		if m.ID == s.Model {
@@ -161,7 +157,7 @@ func (s *State) Chosen(models []Model) Model {
 	if len(models) == 0 {
 		return Model{}
 	}
-	return models[0]
+	return DefaultModel(models)
 }
 
 // EffortName is the effort shown for the chosen model.

@@ -18,6 +18,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/shell"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/desktop/internal/link"
+	nodeproviders "github.com/ai-poet/agent-client/desktop/internal/node/providers"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 	"github.com/egoist/mygo/ui"
 )
@@ -106,7 +107,8 @@ func (r *Runtime) projectModels() {
 			if m.DisplayName != nil {
 				name = *m.DisplayName
 			}
-			v := composer.Model{ID: modelKey(p.ID, m.ID), Name: name, Provider: p.Name, Reasoning: m.Reasoning, Family: modelFamily(p.Api), DefaultEffort: effortName(m.DefaultEffort), Score: r.measuredScore(modelKey(p.ID, m.ID), m.DefaultEffort)}
+			key := modelKey(p.ID, m.ID)
+			v := composer.Model{ID: key, Name: name, Provider: p.Name, Reasoning: m.Reasoning, Family: composerModelVendor(p, m), ContextWindow: m.Context, DefaultEffort: effortName(m.DefaultEffort), Score: r.measuredScore(key, m.DefaultEffort)}
 			for _, e := range m.Efforts {
 				v.Efforts = append(v.Efforts, effortName(e))
 			}
@@ -310,17 +312,21 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 		}
 	}
 	ctx.Models = r.offeredModels(cv.ID, ctx.Models)
+	// A group switch may remove a draft's model. Do not rewrite an admitted
+	// conversation or a captured draft submission.
+	if provider, _, _ := strings.Cut(comp.Model, "/"); provider == nodeproviders.CheapRouterProviderID.String() &&
+		unsentDraft(cv) && !r.draftSubmitted(cv) && r.controller.Connected() &&
+		!slices.ContainsFunc(ctx.Models, func(m composer.Model) bool { return m.ID == comp.Model }) {
+		comp.Model, comp.Features = "", map[string]string{}
+		r.defaultComposer(comp)
+	}
 	r.nameModelSources(c, cv.ID, ctx.Models)
 	ctx.MemberModels = r.memberModels(ctx.Models)
+	ctx.RecentModels = r.recentComposerModels(ctx.Models)
 	for i := range ctx.Models {
 		model := &ctx.Models[i]
 		if model.ID == comp.Model && model.Reasoning {
 			model.Score = r.measuredScore(model.ID, parseEffort(comp.EffortName(nil, *model)))
-		}
-	}
-	for _, family := range []composer.Family{{ID: "anthropic", Label: "provider_anthropic", Icon: icons.Brand("anthropic")}, {ID: "openai", Label: "provider_openai", Icon: icons.Brand("openai")}, {ID: "gemini", Label: "provider_gemini", Icon: icons.Brand("gemini")}, {ID: "other", Label: "provider_other", Icon: icons.Settings2}} {
-		if slices.ContainsFunc(ctx.Models, func(m composer.Model) bool { return m.Family == family.ID }) {
-			ctx.Families = append(ctx.Families, family)
 		}
 	}
 	if unsentDraft(cv) {
@@ -487,7 +493,37 @@ func (r *Runtime) rememberConfig(config protocol.SessionConfig, team string) {
 	if r.forwards(config.Provider) {
 		source = r.parent.controller.Target()
 	}
-	r.Preferences.Data.Composer = &preferences.Composer{Mode: config.Mode, Permission: config.Permission, Team: team, Model: &preferences.Model{Source: source, Provider: config.Provider, Model: config.Model, Effort: config.Effort, Features: config.Features}}
+	selected := preferences.RecentModel{Source: source, Provider: config.Provider, Model: config.Model}
+	recent := []preferences.RecentModel{selected}
+	if saved := r.Preferences.Data.Composer; saved != nil {
+		for _, choice := range saved.RecentModels() {
+			if len(recent) == 8 {
+				break
+			}
+			if !slices.Contains(recent, choice) {
+				recent = append(recent, choice)
+			}
+		}
+	}
+	r.Preferences.Data.Composer = &preferences.Composer{Mode: config.Mode, Permission: config.Permission, Team: team, Recent: recent, Model: &preferences.Model{Source: source, Provider: config.Provider, Model: config.Model, Effort: config.Effort, Features: config.Features}}
+}
+
+func (r *Runtime) recentComposerModels(models []composer.Model) []string {
+	saved := r.Preferences.Data.Composer
+	if saved == nil {
+		return nil
+	}
+	var ids []string
+	for _, choice := range saved.RecentModels() {
+		if choice.Source != r.controller.Target() && !(r.forwards(choice.Provider) && choice.Source == r.parent.controller.Target()) {
+			continue
+		}
+		id := modelKey(choice.Provider, choice.Model)
+		if !slices.Contains(ids, id) && slices.ContainsFunc(models, func(m composer.Model) bool { return m.ID == id }) {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func (r *Runtime) references(cv *viewmodel.Conversation, comp *composer.State) ([]composer.Reference, []composer.Reference) {
