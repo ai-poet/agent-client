@@ -431,8 +431,11 @@ func ringFolds(t *testing.T) {
 		if r.Bounds.X < 0 || r.Bounds.X+r.Bounds.W > float32(width) {
 			t.Errorf("%d: ring %v leaves the toolbar", width, r.Bounds)
 		}
-		if _, ok := tt.Access(i18n.In("en", "composer_model_settings") + ": " + comp.Chosen(preview.Load().Models).Name); ok {
-			t.Errorf("%d: the model chip shows in the compact toolbar", width)
+		chip, ok := tt.AccessByRole(ui.RoleButton, i18n.In("en", "composer_model_settings")+": "+comp.Chosen(preview.Load().Models).Name)
+		if !ok {
+			t.Errorf("%d: the model chip is hidden in the compact toolbar: %q", width, tt.Texts())
+		} else if chip.Disabled || chip.Bounds.W <= 0 || chip.Bounds.X < 0 || chip.Bounds.X+chip.Bounds.W > float32(width) {
+			t.Errorf("%d: the compact model chip is invalid or out of bounds: %+v", width, chip)
 		}
 		_, bar := tt.AccessByRole(ui.RoleMenuButton, project)
 		if want := width >= 520; bar != want {

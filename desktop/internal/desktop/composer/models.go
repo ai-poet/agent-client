@@ -23,26 +23,34 @@ import (
 
 // Chip widths.
 const (
-	chipWidth   = 260
-	narrowChip  = 140
-	panelWidth  = 296
-	panelHeight = 320
-	member      = 24
-	teamRow     = 40
+	chipWidth        = 260
+	compactChip      = 192
+	narrowChip       = 140
+	tightChipMax     = 128
+	tightChipMin     = 88
+	tightChipReserve = 148
+	panelWidth       = 296
+	panelHeight      = 320
+	member           = 24
+	teamRow          = 40
 )
 
 // The model picker's columns: the rail, the list and the efforts, a hairline
 // in a gap of 8 on each side between them. The list is what the page has
-// beside the others: listWidth where the window has room for it.
+// beside the others: listWidth where the window has room for it. Below
+// compactPickerMin the vendor rail shrinks to icons alone so the model list
+// keeps room to read and select models even at narrow widths.
 const (
-	railTile    = 32
-	railIcon    = 18
-	railPad     = 6
-	railWidth   = 136
-	listWidth   = 236
-	effortWidth = 132
-	columnGap   = 8
-	pickerWidth = railWidth + listWidth + effortWidth + 2*(2*columnGap+1)
+	railTile         = 32
+	railIcon         = 18
+	railPad          = 6
+	railWidth        = 136
+	compactRailWidth = railTile + 2*railPad
+	compactPickerMin = 420
+	listWidth        = 236
+	effortWidth      = 132
+	columnGap        = 8
+	pickerWidth      = railWidth + listWidth + effortWidth + 2*(2*columnGap+1)
 	// pickerReserve is what the picker's page leaves of the window's height:
 	// the composer under the popover, the popover's own edges and the rows
 	// the compact settings popover has under the page.
@@ -134,24 +142,82 @@ func Badge(name string) string {
 	return string(b)
 }
 
+// modelDisplayName returns the user-facing model label, falling back to its ID.
+func modelDisplayName(m Model) string {
+	if name := strings.TrimSpace(m.Name); name != "" {
+		return name
+	}
+	return strings.TrimSpace(m.ID)
+}
+
+// shortModelName removes any leading vendor or provider namespace prefix so
+// narrow chips keep the model identifier legible.
+func shortModelName(m Model) string {
+	name := modelDisplayName(m)
+	if i := strings.LastIndex(name, "/"); i >= 0 && i+1 < len(name) {
+		name = name[i+1:]
+	}
+	if _, bare, ok := strings.Cut(name, "::"); ok && bare != "" {
+		name = bare
+	}
+	return name
+}
+
+// modelChipWidth returns the maximum chip width for the measured toolbar width.
+func modelChipWidth(toolbarWidth float32) float32 {
+	switch {
+	case toolbarWidth <= 0 || toolbarWidth >= compactWidth:
+		return chipWidth
+	case toolbarWidth >= iconWidth:
+		return compactChip
+	case toolbarWidth >= tightWidth:
+		return narrowChip
+	default:
+		return min(tightChipMax, max(tightChipMin, toolbarWidth-tightChipReserve))
+	}
+}
+
 // modelChip is model_menu: the round chip that opens the model controls
-// above it, right-aligned (Anchor::BottomRight, bottom_2, p_3).
+// above it, right-aligned (Anchor::BottomRight, bottom_2, p_3). It stays
+// visible at every toolbar width, tightening its presentation as the composer
+// narrows.
 func (s *State) modelChip(c *ui.Context, ctx *Context, actions Actions) {
 	p := theme.Of(c)
 	m := s.Chosen(ctx.Models)
+	compact := s.width > 0 && s.width < compactWidth
 	narrow := s.width > 0 && s.width < iconWidth
-	width := float32(chipWidth)
-	if narrow {
-		width = narrowChip
+	tight := s.width > 0 && s.width < tightWidth
+	width := modelChipWidth(s.width)
+	padX, gap := float32(10), float32(8)
+	if tight {
+		padX, gap = 8, 4
+	} else if compact {
+		padX, gap = 8, 6
+	}
+	textSize := float32(14)
+	if tight {
+		textSize = 13
 	}
 	if len(ctx.Models) == 0 {
 		// model_label without a configuration: the chip reads Select model
 		// and opens the Node's model settings.
 		label := i18n.T(c, "composer_select_model")
-		kit.GhostLook(c, ui.ButtonBase(c.Key("model")), false).Label(label).Height(32).PaddingX(10).Gap(8).Radius(16).
-			MaxWidth(width).MinWidth(0).Shrink(1).Disabled(ctx.Readonly || ctx.SelectModel == nil).
-			Children(func() { ui.Text(c, label).FontSize(14).LineHeight(20.0 / 14).SingleLine().Shrink(1).MinWidth(0) }).
-			OnClick(func() { ctx.SelectModel() })
+		chip := kit.GhostLook(c, ui.ButtonBase(c.Key("model")), false).Label(label).Height(32).PaddingX(padX).Gap(gap).Radius(16).
+			MaxWidth(width).MinWidth(0).Shrink(1).Disabled(ctx.Readonly || ctx.SelectModel == nil)
+		if compact {
+			kit.Tooltip(c, chip, label)
+		}
+		chip.Children(func() {
+			ui.Text(c, label).FontSize(textSize).LineHeight(20.0 / textSize).SingleLine().Shrink(1).MinWidth(0)
+			if compact {
+				ui.Icon(c, icons.ChevronDown).FontSize(12).Shrink(0).TextColor(p.MutedForeground)
+			}
+		}).OnClick(func() {
+			s.settings = false
+			if ctx.SelectModel != nil {
+				ctx.SelectModel()
+			}
+		})
 		return
 	}
 	team := s.team(ctx)
@@ -159,11 +225,16 @@ func (s *State) modelChip(c *ui.Context, ctx *Context, actions Actions) {
 	if len(efforts(m)) > 0 {
 		effort = s.EffortName(c, m)
 	}
-	lead := m.Name
+	displayName := modelDisplayName(m)
+	shownName := displayName
+	if narrow {
+		shownName = shortModelName(m)
+	}
+	lead := displayName
 	if effort != "" {
 		lead += " · " + effort
 	}
-	label := i18n.T(c, "composer_model_settings") + ": " + m.Name
+	label := i18n.T(c, "composer_model_settings") + ": " + displayName
 	if team != nil {
 		label = i18n.T(c, "composer_model_settings") + ": " + team.Name + " · " + lead
 	}
@@ -171,10 +242,16 @@ func (s *State) modelChip(c *ui.Context, ctx *Context, actions Actions) {
 	for _, f := range append(fast, other...) {
 		label += " · " + f.label
 	}
-	chip := kit.GhostLook(c, ui.ButtonBase(c.Key("model")), s.picker).Label(label).Height(32).PaddingX(10).Gap(8).Radius(16).
+	chip := kit.GhostLook(c, ui.ButtonBase(c.Key("model")), s.picker).Label(label).Height(32).PaddingX(padX).Gap(gap).Radius(16).
 		MaxWidth(width).MinWidth(0).Shrink(1).Disabled(ctx.Readonly)
 	if team != nil {
 		kit.Tooltip(c, chip, lead)
+	} else if compact {
+		tip := lead
+		if m.Provider != "" {
+			tip = m.Provider + " · " + lead
+		}
+		kit.Tooltip(c, chip, tip)
 	}
 	badge := func(f featureBadge) {
 		if f.icon != nil {
@@ -184,18 +261,26 @@ func (s *State) modelChip(c *ui.Context, ctx *Context, actions Actions) {
 		}
 	}
 	chip.HasPopup(ui.PopupDialog).Expanded(s.picker).Children(func() {
-		if team == nil && !narrow {
+		if team == nil && !compact {
 			kit.Tooltip(c, kit.Tag(c, Badge(m.Provider)).Shrink(0), m.Provider)
 		}
-		for _, f := range fast {
-			badge(f)
+		if !tight {
+			for _, f := range fast {
+				badge(f)
+			}
 		}
 		if team != nil {
-			teamAvatar(c, *team, 20)
-			ui.Text(c, team.Name).FontSize(14).SingleLine().Shrink(1).MinWidth(0)
+			if !tight {
+				avatarSize := float32(20)
+				if compact {
+					avatarSize = 18
+				}
+				teamAvatar(c, *team, avatarSize)
+			}
+			ui.Text(c, team.Name).FontSize(textSize).SingleLine().Shrink(1).MinWidth(0)
 		} else {
-			ui.Text(c, m.Name).FontSize(14).SingleLine().Shrink(1).MinWidth(0)
-			if effort != "" {
+			ui.Text(c, shownName).FontSize(textSize).SingleLine().Shrink(1).MinWidth(0)
+			if effort != "" && !tight {
 				if narrow {
 					kit.Tooltip(c, ui.Icon(c, icons.Brain).FontSize(16).Shrink(0).TextColor(p.MutedForeground), effort)
 				} else {
@@ -203,12 +288,20 @@ func (s *State) modelChip(c *ui.Context, ctx *Context, actions Actions) {
 				}
 			}
 		}
-		for _, f := range other {
-			if !narrow || f.icon != nil {
-				badge(f)
+		if !tight {
+			for _, f := range other {
+				if !compact || f.icon != nil {
+					badge(f)
+				}
 			}
 		}
-	}).OnClick(func() { s.picker, s.layer = !s.picker, layerMain })
+		if compact {
+			ui.Icon(c, icons.ChevronDown).FontSize(12).Shrink(0).TextColor(p.MutedForeground)
+		}
+	}).OnClick(func() {
+		s.settings = false
+		s.picker, s.layer = !s.picker, layerMain
+	})
 	panel := kit.Popover(c, chip, &s.picker, func() { s.controls(c, ctx, actions) })
 	if panel != (ui.Element{}) {
 		panel.AttachTo(chip, ui.AnchorTopEnd, ui.AnchorBottomEnd).Margin(0, 0, 8, 0).Padding(12).Width(s.popoverWidth(c, 12))
@@ -233,12 +326,20 @@ func (s *State) sizePopover(panel ui.Element) {
 // for the three columns the rail and the efforts keep their widths and the
 // list between them gives up its own.
 func (s *State) popoverWidth(c *ui.Context, pad float32) float32 {
+	w, _ := c.Size()
+	limit := w - 2*windowInset
 	width := panelWidth + 2*pad
+	if w > 0 && limit > 0 {
+		width = min(width, limit)
+	}
 	if s.layer != layerModels {
 		return width
 	}
-	w, _ := c.Size()
-	return max(width, min(pickerWidth+2*(pad+1), w-2*windowInset))
+	target := pickerWidth + 2*(pad+1)
+	if w > 0 && limit > 0 {
+		target = min(target, limit)
+	}
+	return max(width, target)
 }
 
 // featureBadge is a chosen feature on the chip: Fast's bolt, an option's
@@ -294,7 +395,11 @@ func (s *State) controls(c *ui.Context, ctx *Context, actions Actions) {
 		// as the popover does (sizePopover).
 		body.FillWidth().MinWidth(0)
 	} else {
-		body.Width(panelWidth).Transition(ui.ElementTransition{Height: true, Duration: 200e6})
+		bodyW := float32(panelWidth)
+		if w, _ := c.Size(); w > 0 {
+			bodyW = min(bodyW, max(160, w-2*windowInset-24))
+		}
+		body.Width(bodyW).Transition(ui.ElementTransition{Height: true, Duration: 200e6})
 	}
 	body.Children(func() {
 		switch s.layer {
@@ -344,8 +449,9 @@ func (s *State) mainPanel(c *ui.Context, ctx *Context) {
 				})
 			})
 		})
-		kit.GhostLook(c, ui.ButtonBase(c.Key("choose")).Label(m.Name), false).Height(28).PaddingX(8).Gap(4).Radius(14).MaxWidth(panelWidth).Children(func() {
-			ui.Text(c, m.Name).FontSize(14).SingleLine().Shrink(1).MinWidth(0)
+		modelName := modelDisplayName(m)
+		kit.GhostLook(c, ui.ButtonBase(c.Key("choose")).Label(modelName), false).Height(28).PaddingX(8).Gap(4).Radius(14).MaxWidth(panelWidth).Children(func() {
+			ui.Text(c, modelName).FontSize(14).SingleLine().Shrink(1).MinWidth(0)
 			ui.Icon(c, icons.ChevronRight).FontSize(12).TextColor(p.MutedForeground)
 		}).OnClick(func() {
 			s.layer, s.family, s.modelQuery = layerModels, vendorID(m), ""
@@ -641,18 +747,30 @@ func (s *State) modelPicker(c *ui.Context, ctx *Context) {
 	line := func(key string) {
 		ui.Box(c.Key(key)).Width(1).Shrink(0).Background(p.Border)
 	}
+	windowW, _ := c.Size()
+	compactRail := windowW > 0 && windowW < compactPickerMin
+	vendorsW := float32(railWidth)
+	if compactRail {
+		vendorsW = compactRailWidth
+	}
 	picker := ui.Row(c.Key("model-picker")).FillWidth().Grow(1).MinHeight(0).Gap(columnGap).AlignItems(ui.Stretch)
 	picker.Children(func() {
-		ui.Scroll(c.Key("vendors")).Width(railWidth).Shrink(0).Padding(railPad).Gap(4).Radius(p.Radius2xl()).Background(p.Secondary).
+		ui.Scroll(c.Key("vendors")).Width(vendorsW).Shrink(0).Padding(railPad).Gap(4).Radius(p.Radius2xl()).Background(p.Secondary).
 			FocusGroup(ui.Vertical).
 			Children(func() {
 				kit.IconButton(c.Key("back"), icons.ArrowLeft, i18n.T(c, "composer_model_settings"), railTile, false).Radius(p.RadiusLg).
 					OnClick(func() { s.layer = layerMain })
 				vendorRow := func(id, label string, mark *ui.SVG) {
 					selected := query == "" && s.family == id
-					b := ui.ButtonBase(c.Key("vendor-" + id)).Label(label).FillWidth().Height(railTile).Shrink(0).
-						Radius(p.RadiusLg).PaddingX(8).Gap(6).AlignItems(ui.Center).
+					b := ui.ButtonBase(c.Key("vendor-" + id)).Label(label).Height(railTile).Shrink(0).
+						Radius(p.RadiusLg).AlignItems(ui.Center).
 						Cursor(ui.CursorPointer).AccessSelected(selected).TextColor(p.MutedForeground)
+					if compactRail {
+						b.Size(railTile, railTile).Center()
+						kit.Tooltip(c, b, label)
+					} else {
+						b.FillWidth().PaddingX(8).Gap(6)
+					}
 					switch {
 					case selected || b.Pressed():
 						b.Background(p.Selected()).TextColor(p.Foreground)
@@ -661,7 +779,9 @@ func (s *State) modelPicker(c *ui.Context, ctx *Context) {
 					}
 					b.Children(func() {
 						ui.Icon(c, mark).FontSize(railIcon).Shrink(0)
-						ui.Text(c, label).FontSize(13).SingleLine().MinWidth(0).Shrink(1)
+						if !compactRail {
+							ui.Text(c, label).FontSize(13).SingleLine().MinWidth(0).Shrink(1)
+						}
 					}).OnClick(func() {
 						s.family, s.modelQuery = id, ""
 						*e = effortState{}
