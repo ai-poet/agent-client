@@ -260,6 +260,38 @@ func TestTerminalTakeoverRecoversOriginalLease(t *testing.T) {
 	t.Run("a released unknown does not create a new lease", func(t *testing.T) {
 		testTerminalTakeoverRecovery(t, true)
 	})
+	t.Run("falls back to claim_terminal on an older Node", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			root, source := terminalTabsFixture(t)
+			info := terminalTabsTestInfo(1, protocol.WorktreeID{1}, "running")
+			other, self := protocol.NodeID{9}, root.controller.Target()
+			info.Owner, info.Revision = &other, 3
+			granted := info
+			granted.Owner, granted.Revision = &self, 4
+			source.respond = func(request protocol.Request) link.Response {
+				switch request.Command.Kind {
+				case "takeover_terminal":
+					return link.Response{Fault: &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "invalid command"}}
+				case "claim_terminal":
+					return link.Response{Output: protocol.Output{Kind: "terminal", Data: granted}}
+				}
+				return link.Response{Fault: &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest}}
+			}
+			connection := terminalConnFixture(t, root, info)
+			id := info.ID.String()
+			state := &liveTerminal{owner: root, conn: connection}
+			root.packages.terminals[id] = state
+			root.claimLiveTerminal(id, state)
+			synctest.Wait()
+			runTerminalCallbacks(root)
+			if len(source.sent("takeover_terminal")) != 1 || len(source.sent("claim_terminal")) != 1 {
+				t.Fatalf("expected fallback from takeover_terminal to claim_terminal: takeover=%d claim=%d", len(source.sent("takeover_terminal")), len(source.sent("claim_terminal")))
+			}
+			if !connection.controlling() || connection.current().Revision != 4 || state.claimRequest != nil {
+				t.Fatalf("fallback claim did not establish control: controlling=%v info=%+v", connection.controlling(), connection.current())
+			}
+		})
+	})
 }
 
 func testTerminalTakeoverRecovery(t *testing.T, unknown bool) {

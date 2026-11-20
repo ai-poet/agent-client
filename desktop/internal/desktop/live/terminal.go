@@ -272,6 +272,7 @@ func (r *Runtime) claimLiveTerminal(id string, state *liveTerminal) {
 		controller := state.owner.controller
 		var output protocol.Output
 		var err error
+		fallback := false
 		if recovering {
 			var resolution client.Resolution
 			if resolution, err = controller.Resolve(connection.ctx, *request); err == nil {
@@ -281,11 +282,22 @@ func (r *Runtime) claimLiveTerminal(id string, state *liveTerminal) {
 			}
 		} else {
 			output, err = controller.Settle(connection.ctx, *request)
+			if faultCode(err) == protocol.ErrorCodeInvalidRequest {
+				// Older or upstream Nodes do not recognize takeover_terminal; fall back to claim_terminal.
+				fallback = true
+				output, err = controller.Do(connection.ctx, protocol.Command{Kind: "claim_terminal", Data: protocol.CommandClaimTerminalPayload{
+					Terminal: info.ID, ExpectedRevision: info.Revision,
+				}})
+			}
 		}
 		claimed, valid := detail[protocol.TerminalInfo](output.Data)
 		if err == nil {
+			validRevision := claimed.Revision == expected+1
+			if fallback {
+				validRevision = claimed.Revision >= expected
+			}
 			if output.Kind != "terminal" || !valid || claimed.ID != info.ID || claimed.Owner == nil || *claimed.Owner != connection.self ||
-				claimed.Revision != expected+1 || claimed.Status.Kind != "running" {
+				!validRevision || claimed.Status.Kind != "running" {
 				err = pluginNativeFault(protocol.ErrorCodeInternal, "terminal takeover returned an unexpected lease")
 			} else if !connection.claimed(claimed) {
 				err = pluginNativeFault(protocol.ErrorCodeRevisionConflict, "terminal ownership changed")
