@@ -27,6 +27,8 @@ market_paste_link: "Instalar por link"
 market_kind: Tipo de mercado
 
 market_skills_failed: "Não foi possível carregar o catálogo de habilidades"
+market_skill_catalog_invalid_response: "Resposta inválida do catálogo"
+market_skill_catalog_timeout: "A solicitação do catálogo excedeu o tempo limite"
 market_themes_failed: "Não foi possível carregar os temas"
 market_no_themes: "Nenhum tema correspondente"
 market_load_more: Carregar mais

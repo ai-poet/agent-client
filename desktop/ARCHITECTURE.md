@@ -693,6 +693,8 @@ remote UI code. Bundled installation also honors withdrawals in the embedded
 catalog, including offline fallback and default initialization.
 Desktop Market browses only the official plugin catalog. Node retains the
 third-party catalog protocol for older clients and the agent's plugin tools.
+The Skills tab loads one page per source in each round. Desktop follows each
+source's cursor independently and preserves results when another source fails.
 
 Installations keep exact content provenance separately from their ongoing update
 source and pinned preference. Official updates continue following the official

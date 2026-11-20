@@ -1378,6 +1378,11 @@ market_theme_current: In use
 market_details_source_official: Official catalog
 market_details_source_community: Community
 skills_no_matches: No matching skills
+market_load_more: Load more
+market_page_filter: Filter applies to loaded results
+market_skills_failed: Could not load the skill catalog
+market_skill_catalog_invalid_response: Invalid catalog response
+market_skill_catalog_timeout: Catalog request timed out
 market_theme_apply: Apply
 market_no_themes: No matching themes
 market_theme_builtin: Built-in

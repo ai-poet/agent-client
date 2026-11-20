@@ -27,6 +27,8 @@ market_paste_link: "Установить по ссылке"
 market_kind: Тип каталога
 
 market_skills_failed: "Не удалось загрузить каталог навыков"
+market_skill_catalog_invalid_response: "Недопустимый ответ каталога"
+market_skill_catalog_timeout: "Время ожидания ответа каталога истекло"
 market_themes_failed: "Не удалось загрузить темы"
 market_no_themes: "Подходящих тем нет"
 market_load_more: Загрузить ещё

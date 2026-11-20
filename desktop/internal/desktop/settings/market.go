@@ -9,6 +9,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preview"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
+	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
 // The Market page (settings/market*, market/*): Plugins, Skills and
@@ -82,6 +83,8 @@ func MarketPage(c *ui.Context, s *State) {
 			})
 			marketFilters(c, m)
 			switch {
+			case m.Live && m.MarketKind == 1:
+				marketSkills(c, s)
 			case m.MarketLoad.Loading:
 				marketSkeleton(c)
 			case m.MarketKind == 0:
@@ -218,16 +221,71 @@ func marketPlugins(c *ui.Context, s *State) {
 	})
 }
 
+type SkillMarketState struct {
+	Loading, More, PageFilter bool
+	Issues                    []SkillMarketIssue
+}
+
+type SkillMarketIssue struct {
+	Source protocol.PluginSkillcatalogSource
+	Reason string // i18n key
+}
+
 func marketSkills(c *ui.Context, s *State) {
 	m := s.Model
-	var shown []*preview.Skill
-	for i := range m.MarketSkills {
-		if x := &m.MarketSkills[i]; marketMatch(m.MarketQuery, x.Name+" "+x.Description) {
-			shown = append(shown, x)
+	status := m.SkillMarket
+	if status.Loading && len(m.MarketSkills) == 0 && len(status.Issues) == 0 {
+		marketSkeleton(c)
+		return
+	}
+	if len(status.Issues) != 0 || status.PageFilter {
+		ui.Column(c.Key("skill-catalog-status")).Gap(8).Children(func() {
+			for _, issue := range status.Issues {
+				label := i18n.T(c, "market_details_source_official")
+				switch issue.Source {
+				case protocol.PluginSkillcatalogSourceSkillsSh:
+					label = "skills.sh"
+				case protocol.PluginSkillcatalogSourceSkillhub:
+					label = "Skillhub"
+				}
+				ui.Text(c.Key(issue.Source), label+": "+i18n.T(c, issue.Reason)).FontSize(14).TextColor(theme.Of(c).MutedForeground)
+			}
+			if status.PageFilter {
+				ui.Text(c, "skills.sh: "+i18n.T(c, "market_page_filter")).FontSize(14).TextColor(theme.Of(c).MutedForeground)
+			}
+			if len(status.Issues) != 0 && m.PackageActions != nil && m.PackageActions.RetryMarket != nil {
+				label := i18n.T(c, "settings_retry")
+				kit.SecondaryBusy(c.Key("retry-skills"), label, false).Height(32).
+					Disabled(status.Loading).OnClick(m.PackageActions.RetryMarket)
+			}
+		})
+	}
+	marketSkillCards(c, s)
+	if status.Loading {
+		ui.Row(c.Key("loading-skills")).Height(32).Center().Children(func() {
+			kit.Loader(c, 16).Label(i18n.T(c, "plugins_loading"))
+		})
+	} else if status.More && m.PackageActions != nil && m.PackageActions.MoreSkills != nil {
+		label := i18n.T(c, "market_load_more")
+		kit.SecondaryBusy(c.Key("more-skills"), label, false).Height(32).OnClick(m.PackageActions.MoreSkills)
+	}
+}
+
+func marketSkillCards(c *ui.Context, s *State) {
+	m := s.Model
+	shown := m.MarketSkills
+	if !m.Live {
+		shown = nil
+		for _, skill := range m.MarketSkills {
+			if marketMatch(m.MarketQuery, skill.Name+" "+skill.Description) {
+				shown = append(shown, skill)
+			}
 		}
 	}
 	if len(shown) == 0 {
-		kit.Result(c, kit.ResultProps{Icon: icons.Bot, Title: i18n.T(c, "skills_no_matches"), Card: true})
+		if !m.SkillMarket.Loading && len(m.SkillMarket.Issues) == 0 {
+			kit.Result(c, kit.ResultProps{Icon: icons.Bot, Title: i18n.T(c, "skills_no_matches"), Card: true})
+		}
 		return
 	}
 	kit.Grid(c, func() {

@@ -1378,6 +1378,11 @@ market_theme_current: 사용 중
 market_details_source_official: 공식 카탈로그
 market_details_source_community: 커뮤니티
 skills_no_matches: 일치하는 스킬이 없음
+market_load_more: 더 불러오기
+market_page_filter: 불러온 결과만 필터링
+market_skills_failed: 스킬 카탈로그를 불러올 수 없습니다
+market_skill_catalog_invalid_response: 카탈로그 응답 형식이 잘못되었습니다
+market_skill_catalog_timeout: 카탈로그 요청 시간이 초과되었습니다
 market_theme_apply: 적용
 market_no_themes: 일치하는 테마가 없습니다
 market_theme_builtin: 기본 제공

@@ -241,7 +241,8 @@ type Model struct {
 	MarketInstalled bool
 	// MarketLoad is the catalog's load: the cards' skeleton shows while
 	// it runs, from the market's first frame.
-	MarketLoad preview.Fetch
+	MarketLoad  preview.Fetch
+	SkillMarket SkillMarketState
 	// pageScroll is where the section's page is scrolled, of scrolled.
 	pageScroll    ui.ScrollState
 	scrolled      Section

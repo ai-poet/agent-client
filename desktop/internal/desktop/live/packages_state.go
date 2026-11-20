@@ -35,6 +35,7 @@ type packageState struct {
 	catalogInfos       map[string]protocol.PluginInfo
 	catalogWaiters     map[string][]func()
 	skillCatalog       map[string]protocol.PluginSkillcatalogEntry
+	skillMarket        *skillMarketSearch
 	updateChecks       map[string]string
 	documents          map[string]string
 	marketKey          string
@@ -161,12 +162,23 @@ func (r *Runtime) initB8Packages() {
 		},
 		RetryMarket: func() {
 			if owner := r.packageOwner(); owner != nil {
-				owner.packages.marketKey = ""
 				root := r.localRuntime()
+				if root.App.Settings.MarketKind == 1 {
+					owner.searchSkillMarket(root.App.Settings.MarketQuery)
+					owner.loadSkillMarket(true)
+					return
+				}
+				owner.packages.marketKey = ""
 				if root.App.Settings.MarketKind == 2 {
 					root.packages.themeRead = false
 				}
 				r.searchPackageMarket(root.App.Settings.MarketKind, root.App.Settings.MarketQuery)
+			}
+		},
+		MoreSkills: func() {
+			if owner := r.packageOwner(); owner != nil && owner.App.Settings.MarketKind == 1 {
+				owner.searchSkillMarket(owner.App.Settings.MarketQuery)
+				owner.loadSkillMarket(false)
 			}
 		},
 		MarketPlugin: func(id string) {
@@ -249,8 +261,9 @@ func (r *Runtime) packagesFrame(c *ui.Context) {
 		root.packages.selectedNode = node
 		r.App.Settings.Python, r.App.Settings.PythonVersion = owner.packages.pythonDraft, owner.packages.pythonVersion
 		r.App.Settings.PythonPreparing = owner.packages.preparations
-		root.App.Settings.MarketPlugins, root.App.Settings.MarketSkills = nil, nil
+		root.App.Settings.MarketPlugins = nil
 		owner.packages.marketKey = ""
+		owner.resetSkillMarket()
 		root.App.Settings.CloseDetails()
 		root.App.Settings.ClosePackageConfiguration()
 	}

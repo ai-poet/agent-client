@@ -2,7 +2,6 @@ package live
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
@@ -25,8 +24,12 @@ func (r *Runtime) searchPackageMarket(kind int, query string) {
 	if owner == nil {
 		return
 	}
+	if kind == 1 {
+		owner.searchSkillMarket(query)
+		return
+	}
 	state := owner.packages
-	key := fmt.Sprintf("%d/%s", kind, query)
+	key := "plugins/" + query
 	if key == state.marketKey {
 		return
 	}
@@ -36,51 +39,23 @@ func (r *Runtime) searchPackageMarket(kind int, query string) {
 	r.App.Settings.MarketLoad.Loading = true
 	owner.async(func() {
 		var entries []protocol.PluginCatalogEntry
-		var skillEntries []protocol.PluginSkillcatalogEntry
 		var err error
 		unavailable := false
-		if kind == 0 {
-			for page := uint32(1); ; page++ {
-				var out protocol.Output
-				out, err = owner.controller.Do(owner.ctx, protocol.Command{Kind: "search_plugin_catalog", Data: protocol.CommandSearchPluginCatalogPayload{Source: protocol.PluginCatalogSourceOfficial, Query: query, Page: page}})
-				if err != nil {
-					break
-				}
-				value, valid := detail[protocol.PluginCatalogPage](out.Data)
-				if !valid || out.Kind != "plugin_catalog" {
-					err = errors.New("unexpected plugin catalog response")
-					break
-				}
-				entries = append(entries, value.Entries...)
-				unavailable = unavailable || value.Unavailable
-				if value.Page >= value.Pages {
-					break
-				}
+		for page := uint32(1); ; page++ {
+			var out protocol.Output
+			out, err = owner.controller.Do(owner.ctx, protocol.Command{Kind: "search_plugin_catalog", Data: protocol.CommandSearchPluginCatalogPayload{Source: protocol.PluginCatalogSourceOfficial, Query: query, Page: page}})
+			if err != nil {
+				break
 			}
-		} else {
-			for _, catalogSource := range []protocol.PluginSkillcatalogSource{protocol.PluginSkillcatalogSourceOfficial, protocol.PluginSkillcatalogSourceSkillsSh, protocol.PluginSkillcatalogSourceSkillhub} {
-				page := uint32(1)
-				for {
-					var out protocol.Output
-					out, err = owner.controller.Do(owner.ctx, protocol.Command{Kind: "search_skill_catalog", Data: protocol.CommandSearchSkillCatalogPayload{Source: catalogSource, Query: query, Page: page}})
-					if err != nil {
-						break
-					}
-					value, valid := detail[protocol.PluginSkillcatalogPage](out.Data)
-					if !valid || out.Kind != "skill_catalog" {
-						err = errors.New("unexpected skill catalog response")
-						break
-					}
-					skillEntries = append(skillEntries, value.Entries...)
-					unavailable = unavailable || value.Unavailable
-					if value.Next == nil || *value.Next <= page {
-						break
-					}
-					page = *value.Next
-				}
-				if err != nil {
-					break
-				}
+			value, valid := detail[protocol.PluginCatalogPage](out.Data)
+			if !valid || out.Kind != "plugin_catalog" {
+				err = errors.New("unexpected plugin catalog response")
+				break
+			}
+			entries = append(entries, value.Entries...)
+			unavailable = unavailable || value.Unavailable
+			if value.Page >= value.Pages {
+				break
 			}
 		}
 		owner.enqueue(func(c *ui.Context) {
@@ -99,37 +74,14 @@ func (r *Runtime) searchPackageMarket(kind int, query string) {
 			if unavailable {
 				kit.Toast(c, kit.Failed, i18n.T(c, "unavailable"))
 			}
-			if kind == 0 {
-				m.MarketPlugins = nil
-				for _, entry := range entries {
-					state.catalog[entry.ID] = entry
-					row := catalogPackageView(entry, owner.packageLocale())
-					row.Host = owner.packageHostLabel()
-					m.MarketPlugins = append(m.MarketPlugins, row)
-				}
-				owner.projectPackages()
-			} else {
-				m.MarketSkills = nil
-				for _, entry := range skillEntries {
-					state.skillCatalog[entry.ID] = entry
-					row := viewmodel.Skill{ID: entry.ID, Name: entry.Name, Description: stringValue(entry.Description), Origin: entry.Origin, Content: state.documents[entry.ID]}
-					if entry.DisplayName != nil {
-						row.Name = *entry.DisplayName
-					}
-					if title := entry.DisplayLocales[i18n.Match(owner.packageLocale())]; title != "" {
-						row.Name = title
-					}
-					if text := entry.DescriptionLocales[i18n.Match(owner.packageLocale())]; text != "" {
-						row.Description = text
-					}
-					if entry.Package != nil {
-						row.Package = *entry.Package
-					}
-					m.MarketSkills = append(m.MarketSkills, row)
-				}
-				owner.projectSkillMarket()
-				owner.readMarketSkillUpdates()
+			m.MarketPlugins = nil
+			for _, entry := range entries {
+				state.catalog[entry.ID] = entry
+				row := catalogPackageView(entry, owner.packageLocale())
+				row.Host = owner.packageHostLabel()
+				m.MarketPlugins = append(m.MarketPlugins, row)
 			}
+			owner.projectPackages()
 		})
 	})
 }

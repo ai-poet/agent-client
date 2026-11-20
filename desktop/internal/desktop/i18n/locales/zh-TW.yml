@@ -1378,6 +1378,11 @@ market_theme_current: 使用中
 market_details_source_official: 官方目錄
 market_details_source_community: 社群
 skills_no_matches: 沒有匹配的技能
+market_load_more: 載入更多
+market_page_filter: 僅篩選已載入內容
+market_skills_failed: 無法載入技能目錄
+market_skill_catalog_invalid_response: 技能目錄回應格式無效
+market_skill_catalog_timeout: 技能目錄請求逾時
 market_theme_apply: 套用
 market_no_themes: 沒有符合的主題
 market_theme_builtin: 內建

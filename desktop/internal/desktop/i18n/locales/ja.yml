@@ -1378,6 +1378,11 @@ market_theme_current: 使用中
 market_details_source_official: 公式カタログ
 market_details_source_community: コミュニティ
 skills_no_matches: マッチングスキルなし
+market_load_more: さらに読み込む
+market_page_filter: 読み込み済みの結果のみ絞り込み
+market_skills_failed: スキルカタログを読み込めませんでした
+market_skill_catalog_invalid_response: カタログの応答が無効です
+market_skill_catalog_timeout: カタログのリクエストがタイムアウトしました
 market_theme_apply: 適用
 market_no_themes: 一致するテーマがありません
 market_theme_builtin: 内蔵

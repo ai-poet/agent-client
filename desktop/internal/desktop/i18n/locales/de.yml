@@ -1378,6 +1378,11 @@ market_theme_current: Aktiv
 market_details_source_official: Offizieller Katalog
 market_details_source_community: Community
 skills_no_matches: Keine passenden Fähigkeiten
+market_load_more: Mehr laden
+market_page_filter: Nur geladene Ergebnisse werden gefiltert
+market_skills_failed: Skill-Katalog konnte nicht geladen werden
+market_skill_catalog_invalid_response: Ungültige Katalogantwort
+market_skill_catalog_timeout: Zeitüberschreitung bei der Kataloganfrage
 market_theme_apply: Anwenden
 market_no_themes: Keine passenden Designs
 market_theme_builtin: Integriert

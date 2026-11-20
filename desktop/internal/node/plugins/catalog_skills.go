@@ -170,24 +170,22 @@ func (manager *Manager) SkillCatalog(ctx context.Context, source protocol.Plugin
 		}
 		err = manager.catalogJSON(ctx, endpoint, &response)
 		if err == nil {
+			if response.Skills == nil {
+				return result, packageFault("missing skills.sh results")
+			}
 			for _, skill := range response.Skills {
-				if skill.Source == "" || !registrySegment(skill.ID) || strings.TrimSpace(skill.Name) == "" {
-					return result, packageFault("invalid skills.sh entry")
+				parts := strings.Split(skill.Source, "/")
+				// A feed can include IDs that cannot be selected by
+				// DiscoverRepositorySkills. Reject the row, not the page.
+				if len(parts) != 2 || !registrySegment(parts[0]) || !registrySegment(parts[1]) ||
+					!registrySegment(skill.ID) || strings.TrimSpace(skill.Name) == "" {
+					continue
 				}
 				entry := protocol.DefaultPluginSkillcatalogEntry()
 				entry.ID, entry.Name, entry.DisplayName, entry.Description, entry.Origin = skill.Source+"/"+skill.ID, skill.ID, &skill.Name, skill.Description, skill.Source
-				parts := strings.Split(skill.Source, "/")
-				safe := true
-				for _, part := range parts {
-					safe = safe && registrySegment(part)
-				}
-				if safe {
-					endpoint := "https://skills.sh/" + skill.Source + "/" + skill.ID
-					entry.Url = &endpoint
-					if len(parts) == 2 {
-						entry.Source = &protocol.PluginSkillcatalogInstallSource{Kind: "git", Data: protocol.PluginSkillsSource{Repository: endpoint}}
-					}
-				}
+				endpoint := "https://skills.sh/" + skill.Source + "/" + skill.ID
+				entry.Url = &endpoint
+				entry.Source = &protocol.PluginSkillcatalogInstallSource{Kind: "git", Data: protocol.PluginSkillsSource{Repository: endpoint}}
 				if !searching && query != "" && !strings.Contains(strings.ToLower(entry.ID+" "+skill.Name), strings.ToLower(query)) {
 					continue
 				}
@@ -210,8 +208,8 @@ func (manager *Manager) SkillCatalog(ctx context.Context, source protocol.Plugin
 			parameters.Set("keyword", query)
 		}
 		var response struct {
-			Code int64 `json:"code"`
-			Data struct {
+			Code *int64 `json:"code"`
+			Data *struct {
 				Skills []struct {
 					Icon        *string `json:"iconUrl"`
 					Slug        string  `json:"slug"`
@@ -228,17 +226,20 @@ func (manager *Manager) SkillCatalog(ctx context.Context, source protocol.Plugin
 		}
 		err = manager.catalogJSON(ctx, manager.registryEndpoint()+"/api/skills?"+parameters.Encode(), &response)
 		if err == nil {
-			if response.Code != 0 {
+			if response.Code == nil {
+				return result, packageFault("missing Skillhub catalog status")
+			}
+			if *response.Code != 0 {
 				err = &protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "Skillhub catalog is unavailable"}
 				break
 			}
+			if response.Data == nil {
+				return result, packageFault("missing Skillhub catalog results")
+			}
 			for _, skill := range response.Data.Skills {
 				source := protocol.PluginSkillsRegistrySource{Namespace: &skill.Namespace.Handle, Slug: skill.Slug, Version: skill.Version}
-				if err := ValidateRegistrySource(source); err != nil {
-					return result, err
-				}
-				if strings.TrimSpace(skill.Name) == "" {
-					return result, packageFault("invalid Skillhub name")
+				if ValidateRegistrySource(source) != nil || strings.TrimSpace(skill.Name) == "" {
+					continue
 				}
 				entry := protocol.DefaultPluginSkillcatalogEntry()
 				entry.ID, entry.Name, entry.DisplayName, entry.Description, entry.Origin = skill.Namespace.Handle+"/"+skill.Slug, skill.Slug, &skill.Name, skill.Description, skill.Namespace.Handle
