@@ -13,11 +13,11 @@ import (
 func TagSpec(kind core.GroupTagKind) (kit.Tone, *ui.SVG) {
 	switch kind {
 	case core.GroupTagSubscription:
-		return kit.TonePrimary, icons.Crown
+		return kit.Info, icons.Crown
 	case core.GroupTagWelfare:
-		return kit.ToneWarning, icons.Zap
+		return kit.Caution, icons.Zap
 	default:
-		return kit.ToneNeutral, icons.Shield
+		return kit.Neutral, icons.Shield
 	}
 }
 
@@ -26,15 +26,15 @@ func TagSpec(kind core.GroupTagKind) (kit.Tone, *ui.SVG) {
 func HealthSpec(health core.GroupHealth) (kit.Tone, *ui.SVG) {
 	switch health {
 	case core.GroupHealthUp:
-		return kit.ToneSuccess, icons.CircleCheck
+		return kit.Positive, icons.CircleCheck
 	case core.GroupHealthDegraded:
-		return kit.ToneWarning, icons.TriangleAlert
+		return kit.Caution, icons.TriangleAlert
 	case core.GroupHealthDown:
-		return kit.ToneDanger, icons.CircleX
+		return kit.Negative, icons.CircleX
 	case core.GroupHealthUnknown:
-		return kit.ToneNeutral, icons.CircleQuestion
+		return kit.Neutral, icons.CircleQuestion
 	default:
-		return kit.ToneNeutral, nil
+		return kit.Neutral, nil
 	}
 }
 
@@ -60,7 +60,7 @@ func GroupStatusBadge(c *ui.Context, status core.GroupStatusView, compact bool) 
 // StatusUnknownBadge renders a compact "状态未知" degradation notice with an
 // optional tooltip carrying the underlying fetch failure.
 func StatusUnknownBadge(c *ui.Context, tip string, compact bool) ui.Element {
-	el := kit.StatusPill(c, "状态未知", icons.CircleQuestion, kit.ToneNeutral, compact)
+	el := kit.StatusPill(c, "状态未知", icons.CircleQuestion, kit.Neutral, compact)
 	if tip != "" {
 		kit.Tooltip(c, el, tip)
 	}

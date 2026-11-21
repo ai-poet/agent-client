@@ -321,7 +321,7 @@ func accountGroupRow(c *ui.Context, p *theme.Palette, key string, desc core.Grou
 			})
 			GroupStatusBadge(c, desc.Status, false)
 			if selected {
-				kit.StatusPill(c, "使用中", icons.Check, kit.TonePrimary, false)
+				kit.StatusPill(c, "使用中", icons.Check, kit.Info, false)
 			}
 		})
 	}).OnClick(onClick)
