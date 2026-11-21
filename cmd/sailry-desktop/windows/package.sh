@@ -324,7 +324,9 @@ test -f "$portable" || { echo "failed to produce portable archive $portable" >&2
 # 2. First-hop Inno Setup installer (compatible with legacy /SILENT /DIR= updater).
 icon_file="$win_icon"
 license_file="LICENSE"
-"$iscc" \
+# Git Bash (MSYS) rewrites leading-slash arguments into paths, which turns
+# /DAppVersion=... into a stray non-switch argument. Keep them verbatim.
+MSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1 "$iscc" \
   "/DAppVersion=$version" \
   "/DArch=$rust_arch" \
   "/DStageDir=$(to_win_path "$app_stage")" \
