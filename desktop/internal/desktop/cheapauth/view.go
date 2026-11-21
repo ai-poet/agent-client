@@ -6,6 +6,7 @@ import (
 
 	core "github.com/ai-poet/agent-client/desktop/internal/cheapauth"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
 	"github.com/egoist/mygo/ui"
@@ -188,23 +189,13 @@ func content(c *ui.Context, state *State) {
 				kit.Row(c, "plan", "当前套餐", "", func() { ui.Text(c, state.Account.PlanDisplay()).FontSize(14) })
 				kit.Row(c, "balance", "账户余额", "", func() { ui.Textf(c, "$%.2f", state.Account.Balance).FontSize(14) })
 			}
-			if lanes := state.Lanes(); len(lanes) > 0 {
-				var summary []string
-				for _, lane := range lanes {
-					if name := state.BoundGroupName(lane); name != "" {
-						summary = append(summary, core.LaneDisplayName(lane)+": "+name)
-					}
-				}
-				label := "未绑定（自动）"
-				if len(summary) > 0 {
-					label = strings.Join(summary, " · ")
-				}
-				kit.Row(c, "group", "分组绑定", "", func() { ui.Text(c, label).FontSize(14) })
+			kit.Row(c, "models", "可用聊天模型", "", func() { ui.Text(c, fmt.Sprintf("%d 个", state.ModelCount)).FontSize(14) })
+			kit.Row(c, "endpoint", "服务入口", "", func() { ui.Text(c, state.Endpoint).FontSize(13).Selectable() })
+			if lanes := state.Lanes(); len(lanes) > 0 || state.GroupsLoading || state.GroupsError != "" {
+				accountGroupsSection(c, p, state, lanes)
 			} else if groupName := state.ActiveGroupName(); groupName != "" {
 				kit.Row(c, "group", "当前分组", "", func() { ui.Text(c, groupName).FontSize(14) })
 			}
-			kit.Row(c, "models", "可用聊天模型", "", func() { ui.Text(c, fmt.Sprintf("%d 个", state.ModelCount)).FontSize(14) })
-			kit.Row(c, "endpoint", "服务入口", "", func() { ui.Text(c, state.Endpoint).FontSize(13).Selectable() })
 			kit.DangerBusy(c.Key("logout"), "退出登录", state.LoggingOut).FillWidth().OnClick(func() {
 				if state.Logout != nil {
 					state.Logout()
@@ -212,4 +203,126 @@ func content(c *ui.Context, state *State) {
 			})
 		})
 	}
+}
+
+func accountGroupsSection(c *ui.Context, p *theme.Palette, state *State, lanes []string) {
+	disabled := state.SwitchingGroup || state.LoggingOut || state.Stage == SyncingGateway || (state.SelectLaneGroup == nil && state.SelectGroup == nil)
+	ui.Box(c).FillWidth().Height(1).Background(p.Border)
+	ui.Column(c.Key("account-groups")).FillWidth().Gap(10).Children(func() {
+		ui.Row(c.Key("account-groups-header")).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
+			ui.Text(c, "模型分组").FontSize(14).FontWeight(600).TextColor(p.Foreground)
+			if state.GroupStatusFailed() {
+				StatusUnknownBadge(c, state.GroupStatusError, false)
+			}
+			ui.Spacer(c)
+			if state.RefreshGroups != nil {
+				kit.IconButton(c.Key("account-refresh-groups"), icons.Reload, "刷新分组", 28, false).
+					Disabled(state.GroupsLoading || state.SwitchingGroup || state.LoggingOut).
+					OnClick(state.RefreshGroups)
+			}
+		})
+
+		if state.GroupsLoading && len(lanes) == 0 {
+			ui.Row(c.Key("account-groups-loading")).Gap(6).AlignItems(ui.Center).Children(func() {
+				kit.Busy(c)
+				ui.Text(c, "正在加载可用分组…").FontSize(13).TextColor(p.MutedForeground)
+			})
+		}
+		if state.GroupsError != "" {
+			ui.Text(c, state.GroupsError).FontSize(12).TextColor(p.Danger)
+		}
+		if state.SwitchingGroup {
+			ui.Row(c.Key("account-groups-switching")).Gap(6).AlignItems(ui.Center).Children(func() {
+				kit.Busy(c)
+				text := "正在切换分组并刷新模型…"
+				if state.SwitchingLane != "" {
+					text = "正在更新 " + core.LaneDisplayName(state.SwitchingLane) + " 分组并刷新模型…"
+				}
+				ui.Text(c, text).FontSize(12).TextColor(p.MutedForeground)
+			})
+		}
+		if state.GroupError != "" {
+			ui.Column(c.Key("account-group-error")).FillWidth().Padding(8).Radius(p.Radius).
+				Background(p.Danger.Alpha(0.12)).Border(1, p.Danger.Alpha(0.35)).Children(func() {
+				ui.Text(c, state.GroupError).FontSize(12).TextColor(p.Danger)
+			})
+		}
+
+		for _, l := range lanes {
+			lane := l
+			laneLabel := core.LaneDisplayName(lane)
+			boundID := state.BoundGroupID(lane)
+			sections := state.GroupSectionsForLane(lane)
+			choose := func(groupID *int64) {
+				if state.SelectLaneGroup != nil {
+					state.SelectLaneGroup(lane, groupID)
+				} else if state.SelectGroup != nil {
+					state.SelectGroup(groupID)
+				}
+			}
+			ui.Column(c.Key("account-lane-" + lane)).FillWidth().Gap(6).Children(func() {
+				ui.Row(c.Key("account-lane-header-" + lane)).FillWidth().AlignItems(ui.Center).Gap(6).Children(func() {
+					ui.Icon(c, icons.Network).FontSize(13).Shrink(0).TextColor(p.MutedForeground)
+					ui.Text(c, laneLabel).FontSize(13).FontWeight(600).SingleLine().TextColor(p.Foreground)
+					ui.Spacer(c)
+					if boundID == nil {
+						ui.Text(c, "未绑定（自动）").FontSize(12).SingleLine().TextColor(p.MutedForeground)
+					} else if !disabled {
+						kit.Ghost(c.Key("account-unbind-"+lane), "自动（未绑定）", false).Height(24).PaddingX(8).OnClick(func() {
+							choose(nil)
+						})
+					}
+				})
+				for _, sec := range sections {
+					section := sec
+					GroupSectionHeader(c, fmt.Sprintf("account-section-%s-%d", lane, section.Tier), section.Tier)
+					for _, g := range section.Groups {
+						group := g
+						selected := boundID != nil && *boundID == group.ID
+						desc := state.DescribeGroup(group)
+						accountGroupRow(c, p, fmt.Sprintf("account-group-%s-%d", lane, group.ID), desc, selected, disabled, func() {
+							id := group.ID
+							choose(&id)
+						})
+					}
+				}
+			})
+		}
+	})
+}
+
+func accountGroupRow(c *ui.Context, p *theme.Palette, key string, desc core.GroupPresentation, selected, disabled bool, onClick func()) {
+	name := desc.DisplayName()
+	border := p.Border
+	bg := p.Surface
+	if selected {
+		border = p.Primary
+		bg = p.Primary.Alpha(0.08)
+	}
+	row := ui.ButtonBase(c.Key(key)).Label(name).Description(desc.CompactSummary()).FillWidth().Padding(10, 12).
+		Radius(p.Radius).Border(1, border).Background(bg).Cursor(ui.CursorPointer).
+		Checked(selected).Disabled(disabled)
+	if !selected && row.Hovered() {
+		row.Background(p.Hover)
+	}
+	row.Children(func() {
+		ui.Row(c).FillWidth().Grow(1).Shrink(1).MinWidth(0).AlignItems(ui.Center).Gap(10).Children(func() {
+			ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(4).Children(func() {
+				ui.Row(c).FillWidth().MinWidth(0).AlignItems(ui.Center).Gap(6).Children(func() {
+					ui.Text(c, name).FontSize(13).FontWeight(500).SingleLine().Shrink(1).MinWidth(0).TextColor(p.Foreground)
+					GroupTagsRow(c, desc.Tags, false)
+					if desc.Rate != "" {
+						ui.Text(c, desc.Rate).FontSize(11).SingleLine().Shrink(0).TextColor(p.MutedForeground)
+					}
+				})
+				if summary := strings.TrimSpace(desc.Group.Description); summary != "" {
+					ui.Text(c, summary).FontSize(11).SingleLine().TextColor(p.MutedForeground)
+				}
+			})
+			GroupStatusBadge(c, desc.Status, false)
+			if selected {
+				kit.StatusPill(c, "使用中", icons.Check, kit.TonePrimary, false)
+			}
+		})
+	}).OnClick(onClick)
 }
