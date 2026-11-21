@@ -17,14 +17,16 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/engine"
 	"github.com/ai-poet/agent-client/desktop/internal/node/agent/operations"
 	"github.com/ai-poet/agent-client/desktop/internal/node/files"
+	"github.com/ai-poet/agent-client/desktop/internal/node/process"
 	"github.com/ai-poet/agent-client/desktop/internal/node/store"
 	"github.com/ai-poet/agent-client/desktop/internal/protocol"
 )
 
 type workspaceToolCall struct {
-	request  protocol.Request
-	prepared *files.Prepared
-	approval protocol.ApprovalID
+	request        protocol.Request
+	prepared       *files.Prepared
+	approval       protocol.ApprovalID
+	commandControl *process.ControlTarget
 }
 
 func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation) ([]engine.Tool, error) {
@@ -138,6 +140,19 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 			if current.prepared != nil {
 				changes = &current.prepared.Preview
 			}
+			switch input := current.request.Command.Data.(type) {
+			case *protocol.CommandStopCommandPayload:
+				if input.Session == inv.Session.ID {
+					current.commandControl = node.processes.SandboxedControl(input.Session, input.ID)
+				}
+			case *protocol.CommandWriteCommandPayload:
+				if input.Session == inv.Session.ID {
+					current.commandControl = node.processes.SandboxedControl(input.Session, input.ID)
+				}
+			}
+			if current.commandControl != nil {
+				value.Access = new(protocol.ProcessAccessWorkspace)
+			}
 			return store.ConfigureWorkspaceApproval(ctx, db, inv.Run.Turn, value, declaration.Operation, current.request.Command, changes)
 		}
 		tool.Approved = func(call canonical.ToolRequest, approval protocol.ApprovalID, request protocol.RequestID) {
@@ -183,7 +198,7 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 					return workspaceToolFault(err)
 				}
 			}
-			effect := &workspaceCompletion{}
+			effect := &workspaceCompletion{commandControl: current.commandControl}
 			defer effect.close()
 			output, effectErr := node.workspaceIO(ctx, inv.Caller, request, current.prepared, effect)
 			if !declaration.ReadOnly {
