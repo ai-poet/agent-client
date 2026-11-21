@@ -1,5 +1,0 @@
-**/target
-**/*.proptest-regressions
-.DS_Store
-.idea
-.vscode

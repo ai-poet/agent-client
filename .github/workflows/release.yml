@@ -5,16 +5,6 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
-    inputs:
-      runtime:
-        description: "Release runtime: auto (detect by tag/version), rust (main), or mygo (desktop/)"
-        required: false
-        default: "auto"
-        type: choice
-        options:
-          - auto
-          - rust
-          - mygo
 
 permissions:
   contents: read
@@ -23,16 +13,12 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
   version:
     name: Resolve version
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      runtime: ${{ steps.resolve.outputs.runtime }}
       version: ${{ steps.resolve.outputs.version }}
       tag: ${{ steps.resolve.outputs.tag }}
       build_number: ${{ steps.resolve.outputs.build_number }}
@@ -40,119 +26,65 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Resolve runtime and version
+      - name: Resolve version
         id: resolve
-        env:
-          INPUT_RUNTIME: ${{ inputs.runtime || 'auto' }}
         run: |
           set -euo pipefail
-          cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          mygo_version=""
-          if [ -f desktop/cmd/sailry-desktop/mygo.json ]; then
-            mygo_version=$(jq -r '.version // ""' desktop/cmd/sailry-desktop/mygo.json)
+          if [ ! -f desktop/cmd/sailry-desktop/mygo.json ]; then
+            echo "::error::desktop/cmd/sailry-desktop/mygo.json not found for MyGo release"
+            exit 1
           fi
-
-          runtime="$INPUT_RUNTIME"
-          if [ "$runtime" = "auto" ]; then
-            if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-              tag_ver="${GITHUB_REF_NAME#v}"
-              if [ -n "$mygo_version" ] && [ "$tag_ver" = "$mygo_version" ] && [ "$tag_ver" != "$cargo_version" ]; then
-                runtime="mygo"
-              elif [ -n "$cargo_version" ] && [ "$tag_ver" = "$cargo_version" ] && [ "$tag_ver" != "$mygo_version" ]; then
-                runtime="rust"
-              elif [ "$tag_ver" = "$mygo_version" ] && [ "$tag_ver" = "$cargo_version" ]; then
-                echo "::error::Tag ${GITHUB_REF_NAME} matches both Cargo.toml and desktop/cmd/sailry-desktop/mygo.json; keep versions distinct or dispatch with an explicit runtime"
-                exit 1
-              else
-                echo "::error::Tag ${GITHUB_REF_NAME} matches neither Cargo.toml (${cargo_version:-none}) nor desktop/cmd/sailry-desktop/mygo.json (${mygo_version:-none})"
-                exit 1
-              fi
-            else
-              if [ -z "$mygo_version" ]; then
-                runtime="rust"
-              elif [ "$GITHUB_REF_NAME" = "main" ] && [ "$(printf '%s\n%s\n' "$cargo_version" "$mygo_version" | sort -V | tail -1)" = "$cargo_version" ]; then
-                runtime="rust"
-              else
-                runtime="mygo"
-              fi
+          version=$(jq -r '.version // ""' desktop/cmd/sailry-desktop/mygo.json)
+          if [ -z "$version" ]; then
+            echo "::error::No version found in desktop/cmd/sailry-desktop/mygo.json"
+            exit 1
+          fi
+          case "$version" in
+            *-*)
+              echo "::error::Prerelease version ${version} cannot be published to the stable appcast channel"
+              exit 1
+              ;;
+          esac
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            tag="${GITHUB_REF_NAME#v}"
+            if [ "$tag" != "$version" ]; then
+              echo "::error::Tag ${GITHUB_REF_NAME} does not match desktop/cmd/sailry-desktop/mygo.json version ${version}"
+              exit 1
             fi
           fi
 
-          if [ "$runtime" = "rust" ]; then
-            version="$cargo_version"
-            if [ -z "$version" ]; then
-              echo "::error::No version found in Cargo.toml"
-              exit 1
-            fi
-            if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-              tag="${GITHUB_REF_NAME#v}"
-              if [ "$tag" != "$version" ]; then
-                echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${version}"
-                exit 1
-              fi
-            fi
-            build_number=""
-          elif [ "$runtime" = "mygo" ]; then
-            if [ ! -f desktop/cmd/sailry-desktop/mygo.json ]; then
-              echo "::error::desktop/cmd/sailry-desktop/mygo.json not found for mygo release"
-              exit 1
-            fi
-            version="$mygo_version"
-            if [ -z "$version" ]; then
-              echo "::error::No version found in desktop/cmd/sailry-desktop/mygo.json"
-              exit 1
-            fi
-            case "$version" in
-              *-*)
-                echo "::error::Prerelease version ${version} cannot be published to the stable appcast channel"
-                exit 1
-                ;;
-            esac
-            if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-              tag="${GITHUB_REF_NAME#v}"
-              if [ "$tag" != "$version" ]; then
-                echo "::error::Tag ${GITHUB_REF_NAME} does not match desktop/cmd/sailry-desktop/mygo.json version ${version}"
-                exit 1
-              fi
-            fi
+          app_name=$(jq -r '.name // ""' desktop/cmd/sailry-desktop/mygo.json)
+          app_slug=$(jq -r '.slug // ""' desktop/cmd/sailry-desktop/mygo.json)
+          bundle_id=$(jq -r '.identifier // ""' desktop/cmd/sailry-desktop/mygo.json)
+          plist_build=$(jq -r '.macos.infoPlist.CFBundleVersion // ""' desktop/cmd/sailry-desktop/mygo.json)
+          sparkle_pub=$(jq -r '.macos.infoPlist.SUPublicEDKey // ""' desktop/cmd/sailry-desktop/mygo.json)
+          feed_url=$(jq -r '.updates.url // ""' desktop/cmd/sailry-desktop/mygo.json)
+          link_version=$(sed -n 's/.*ProductVersion[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' desktop/internal/link/compatibility.go | head -1)
 
-            app_name=$(jq -r '.name // ""' desktop/cmd/sailry-desktop/mygo.json)
-            app_slug=$(jq -r '.slug // ""' desktop/cmd/sailry-desktop/mygo.json)
-            bundle_id=$(jq -r '.identifier // ""' desktop/cmd/sailry-desktop/mygo.json)
-            plist_build=$(jq -r '.macos.infoPlist.CFBundleVersion // ""' desktop/cmd/sailry-desktop/mygo.json)
-            sparkle_pub=$(jq -r '.macos.infoPlist.SUPublicEDKey // ""' desktop/cmd/sailry-desktop/mygo.json)
-            feed_url=$(jq -r '.updates.url // ""' desktop/cmd/sailry-desktop/mygo.json)
-            link_version=$(sed -n 's/.*ProductVersion[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' desktop/internal/link/compatibility.go | head -1)
-
-            if [ "$app_name" != "CheapRouter" ] || [ "$app_slug" != "cheaprouter" ] || [ "$bundle_id" != "sh.waku" ]; then
-              echo "::error::Identity mismatch in mygo.json (name=$app_name slug=$app_slug identifier=$bundle_id)"
-              exit 1
-            fi
-            if [ "$link_version" != "$version" ]; then
-              echo "::error::desktop/internal/link/compatibility.go ProductVersion (${link_version}) != mygo.json version (${version})"
-              exit 1
-            fi
-            if [ -z "$sparkle_pub" ] || [ -z "$feed_url" ]; then
-              echo "::error::mygo.json must configure macos.infoPlist.SUPublicEDKey and updates.url"
-              exit 1
-            fi
-
-            IFS=. read -r v_major v_minor v_patch <<< "$version"
-            build_number=$((10#$v_major * 1000000 + 10#$v_minor * 1000 + 10#$v_patch))
-            if [ "$plist_build" != "$build_number" ] || [ "$build_number" -le 3008 ]; then
-              echo "::error::CFBundleVersion (${plist_build}) must equal ${build_number} and exceed main build 3008"
-              exit 1
-            fi
-          else
-            echo "::error::Unsupported runtime: ${runtime}"
+          if [ "$app_name" != "CheapRouter" ] || [ "$app_slug" != "cheaprouter" ] || [ "$bundle_id" != "sh.waku" ]; then
+            echo "::error::Identity mismatch in mygo.json (name=$app_name slug=$app_slug identifier=$bundle_id)"
+            exit 1
+          fi
+          if [ "$link_version" != "$version" ]; then
+            echo "::error::desktop/internal/link/compatibility.go ProductVersion (${link_version}) != mygo.json version (${version})"
+            exit 1
+          fi
+          if [ -z "$sparkle_pub" ] || [ -z "$feed_url" ]; then
+            echo "::error::mygo.json must configure macos.infoPlist.SUPublicEDKey and updates.url"
             exit 1
           fi
 
-          echo "runtime=$runtime" >> "$GITHUB_OUTPUT"
+          IFS=. read -r v_major v_minor v_patch <<< "$version"
+          build_number=$((10#$v_major * 1000000 + 10#$v_minor * 1000 + 10#$v_patch))
+          if [ "$plist_build" != "$build_number" ] || [ "$build_number" -le 3008 ]; then
+            echo "::error::CFBundleVersion (${plist_build}) must equal ${build_number} and exceed legacy build 3008"
+            exit 1
+          fi
+
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
           echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
-          echo "Releasing runtime=$runtime version=$version tag=v$version build_number=${build_number:-n/a}"
+          echo "Releasing MyGo version=$version tag=v$version build_number=$build_number"
 
       # A published release for this version is already the finished product,
       # so rebuilding it would burn 90 minutes and could replace artifacts
@@ -174,291 +106,7 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
-  # Rust (main) release pipeline — preserved unchanged, gated on runtime=rust
-  # ---------------------------------------------------------------------------
-
-  windows-x86_64:
-    name: Windows x86_64
-    needs: version
-    if: needs.version.outputs.published != 'true' && needs.version.outputs.runtime == 'rust'
-    runs-on: windows-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Rust
-        run: |
-          rustup toolchain install 1.96.0 --profile minimal
-          rustup default 1.96.0
-          rustup target add x86_64-pc-windows-msvc
-
-      - uses: oven-sh/setup-bun@v2
-
-      - name: Install Inno Setup
-        run: choco install innosetup --yes --no-progress
-
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: windows-latest-rust-1.96.0-release-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            windows-latest-rust-1.96.0-release-
-
-      # `target/` is restored from the release cache, so the previous
-      # release's bundles are still sitting in `target/release` when this one
-      # starts. Cargo does not own them, so nothing else clears them.
-      - name: Clear stale bundles
-        run: Remove-Item -Force -ErrorAction SilentlyContinue target/release/cheaprouter-*.zip, target/release/CheapRouter-*-Setup.exe
-
-      - name: Bundle
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: bun scripts/bundle-windows.ts
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: windows-x86_64
-          path: |
-            target/release/cheaprouter-${{ needs.version.outputs.version }}-x86_64-pc-windows-msvc.zip
-            target/release/CheapRouter-${{ needs.version.outputs.version }}-x86_64-Setup.exe
-          if-no-files-found: error
-
-  windows-arm64:
-    name: Windows arm64
-    needs: version
-    if: needs.version.outputs.published != 'true' && needs.version.outputs.runtime == 'rust'
-    runs-on: windows-11-arm
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Rust
-        run: |
-          rustup toolchain install 1.96.0 --profile minimal
-          rustup default 1.96.0
-          rustup target add aarch64-pc-windows-msvc
-
-      - uses: oven-sh/setup-bun@v2
-
-      - name: Install Inno Setup
-        run: choco install innosetup --yes --no-progress
-
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: windows-11-arm-rust-1.96.0-release-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            windows-11-arm-rust-1.96.0-release-
-
-      # `target/` is restored from the release cache, so the previous
-      # release's bundles are still sitting in `target/release` when this one
-      # starts. Cargo does not own them, so nothing else clears them.
-      - name: Clear stale bundles
-        run: Remove-Item -Force -ErrorAction SilentlyContinue target/release/cheaprouter-*.zip, target/release/CheapRouter-*-Setup.exe
-
-      - name: Bundle
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: bun scripts/bundle-windows.ts
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: windows-arm64
-          path: |
-            target/release/cheaprouter-${{ needs.version.outputs.version }}-aarch64-pc-windows-msvc.zip
-            target/release/CheapRouter-${{ needs.version.outputs.version }}-aarch64-Setup.exe
-          if-no-files-found: error
-
-  macos:
-    name: macOS
-    needs: version
-    if: needs.version.outputs.published != 'true' && needs.version.outputs.runtime == 'rust'
-    runs-on: macos-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Rust
-        run: |
-          rustup toolchain install 1.96.0 --profile minimal
-          rustup default 1.96.0
-
-      - uses: oven-sh/setup-bun@v2
-
-      - name: Install create-dmg
-        run: brew install create-dmg
-
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: macos-latest-rust-1.96.0-release-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            macos-latest-rust-1.96.0-release-
-
-      - name: Import Apple Developer Certificate
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: |
-          # Fork: no certificate configured -> the Release step builds ad-hoc.
-          if [ -z "$APPLE_CERTIFICATE" ]; then
-            echo "No Apple certificate secret; skipping keychain setup."
-            exit 0
-          fi
-          KEYCHAIN_PASSWORD=$(openssl rand -base64 24)
-          echo $APPLE_CERTIFICATE | base64 --decode > certificate.p12
-          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security set-keychain-settings -t 3600 -u build.keychain
-          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
-          security find-identity -v -p codesigning build.keychain
-          rm certificate.p12
-
-      - name: Store notary credentials
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          if [ -z "$APPLE_ID" ]; then
-            echo "No notary credentials; skipping."
-            exit 0
-          fi
-          xcrun notarytool store-credentials NOTARY \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID"
-
-      - name: Release
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          WAKU_SIGNING_IDENTITY: ${{ secrets.WAKU_SIGNING_IDENTITY }}
-          WAKU_ANALYTICS_ENDPOINT: ${{ secrets.WAKU_ANALYTICS_ENDPOINT }}
-          WAKU_ANALYTICS_WEBSITE_ID: ${{ secrets.WAKU_ANALYTICS_WEBSITE_ID }}
-          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
-        run: |
-          # Fork: without a Developer ID certificate, ship ad-hoc-signed,
-          # unnotarized artifacts (installed via the quarantine-free
-          # install-mac.sh path; Sparkle updates verify our EdDSA key and are
-          # unaffected by notarization).
-          if [ -n "$APPLE_CERTIFICATE" ]; then
-            bun run release --local
-          else
-            echo "::warning::No Apple certificate — building ad-hoc, unnotarized macOS artifacts."
-            unset WAKU_SIGNING_IDENTITY
-            bun run release --local --adhoc
-          fi
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: macos
-          path: |
-            dist/CheapRouter-${{ needs.version.outputs.version }}.dmg
-            dist/CheapRouter-${{ needs.version.outputs.version }}.md
-            dist/CheapRouter-${{ needs.version.outputs.version }}.zip
-            dist/appcast.xml
-          if-no-files-found: error
-
-  draft-release:
-    name: Draft GitHub release
-    needs:
-      [
-        version,
-        windows-x86_64,
-        windows-arm64,
-        macos,
-      ]
-    if: needs.version.outputs.published != 'true' && needs.version.outputs.runtime == 'rust'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: oven-sh/setup-bun@v2
-
-      - uses: actions/download-artifact@v8
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Write the version pointers
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-        run: |
-          # What the website's Windows download resolves "latest" to.
-          # In-app updates read the appcasts instead. No Linux build is
-          # published, so there is no Linux pointer.
-          echo "$VERSION" > artifacts/latest-windows.txt
-
-      # Signed here rather than on the Windows runners: this is the only job
-      # that holds both installers, and the signing key stays in one place.
-      - name: Sign the Windows update feeds
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
-        run: |
-          # Merge into the live feeds so previously published releases keep
-          # their entries; a first run simply starts from nothing.
-          for arch in x86_64 aarch64; do
-            curl -fsSL --max-time 30 \
-              "https://releases.waku.sh/appcast-windows-$arch.xml" \
-              -o "artifacts/appcast-windows-$arch.xml" || true
-          done
-          bun scripts/appcast-windows.ts artifacts "$VERSION"
-
-      - name: Write release notes
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-        run: |
-          bun -e '
-            import { extractReleaseNotes } from "./scripts/changelog.ts";
-            const version = process.env.VERSION;
-            const file = Bun.file("CHANGELOG.md");
-            const notes = (await file.exists())
-              ? extractReleaseNotes(await file.text(), version)
-              : null;
-            await Bun.write(
-              "release-notes.md",
-              `${notes ?? "See CHANGELOG.md for details."}\n`,
-            );
-          '
-
-      - uses: softprops/action-gh-release@v3
-        with:
-          draft: true
-          # A manual run has no tag yet; publishing the draft creates this one
-          # at the commit that was built.
-          tag_name: ${{ needs.version.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          name: ${{ needs.version.outputs.tag }}
-          body_path: release-notes.md
-          fail_on_unmatched_files: true
-          files: |
-            artifacts/*.dmg
-            artifacts/*.md
-            artifacts/*.zip
-            artifacts/*.exe
-            artifacts/appcast.xml
-            artifacts/appcast-windows-*.xml
-            artifacts/latest-windows.txt
-
-  # ---------------------------------------------------------------------------
-  # Go/MyGo (desktop/) two-hop release pipeline — gated on runtime=mygo
+  # Go/MyGo two-hop release pipeline
   # Hop 1: Sparkle appcast.xml (macOS) + Inno Setup appcast-windows-*.xml
   # Hop 2: MyGo manifests (mygo/update-<os>-<arch>.json) + .tar.gz archives
   # ---------------------------------------------------------------------------
@@ -466,7 +114,7 @@ jobs:
   mygo-macos:
     name: MyGo macOS (${{ matrix.arch }})
     needs: version
-    if: needs.version.outputs.published != 'true' && needs.version.outputs.runtime == 'mygo'
+    if: needs.version.outputs.published != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -695,7 +343,7 @@ jobs:
   mygo-windows:
     name: MyGo Windows (${{ matrix.rust_arch }})
     needs: version
-    if: needs.version.outputs.published != 'true' && needs.version.outputs.runtime == 'mygo'
+    if: needs.version.outputs.published != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -797,7 +445,7 @@ jobs:
         mygo-macos,
         mygo-windows,
       ]
-    if: needs.version.outputs.published != 'true' && needs.version.outputs.runtime == 'mygo'
+    if: needs.version.outputs.published != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

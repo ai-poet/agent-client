@@ -5,10 +5,10 @@
 // Usage:
 //   bun scripts/appcast.ts <updates-dir>
 //
-// <updates-dir> holds the packaged archives (e.g. Waku-0.2.0.zip) plus any
+// <updates-dir> holds the packaged archives (e.g. CheapRouter-0.4.0.zip) plus any
 // older archives so Sparkle can build binary deltas. appcast.xml is written
 // into that directory. The private EdDSA key is read from SPARKLE_PRIVATE_KEY
-// when set, otherwise from the login keychain (see RELEASING.md).
+// when set, otherwise from the login keychain (see docs/RELEASING.zh.md).
 //
 // Env overrides:
 //   SPARKLE_BIN                dir containing the Sparkle tools
@@ -19,13 +19,11 @@ import { join, resolve } from "node:path";
 
 const projectRoot = resolve(import.meta.dir, "..");
 
-// Fork: default to our release host; keep in step with
-// SUB2API_RELEASES_BASE_URL (build.rs, crates/sub2api/src/brand.rs).
 export const defaultDownloadUrlPrefix =
   "https://s3.cheaprouter.cc/cheaprouter-releases/";
 
 /** Locate Sparkle's `generate_appcast`: SPARKLE_BIN first, then the pinned
- *  distribution scripts/bundle.sh caches under .waku-cache, then PATH. */
+ *  distribution cached under .waku-cache/sparkle, then PATH. */
 export function findGenerateAppcast(): string | null {
   const fromEnv = process.env.SPARKLE_BIN;
   if (fromEnv) {
@@ -71,8 +69,8 @@ export async function generateAppcast(
   const generator = findGenerateAppcast();
   if (!generator) {
     throw new Error(
-      "generate_appcast not found. Run scripts/bundle.sh once to populate " +
-        ".waku-cache/sparkle, or set SPARKLE_BIN to a Sparkle tools bin/ dir.",
+      "generate_appcast not found. Set SPARKLE_BIN to a Sparkle tools bin/ dir, " +
+        "or populate .waku-cache/sparkle/<version>/bin.",
     );
   }
   console.log(`Using: ${generator}`);
