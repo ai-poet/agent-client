@@ -28,7 +28,7 @@ func (a *App) accountFooter(c *ui.Context) {
 		a.accountGroupLane = ""
 	}
 	width, height := c.Size()
-	panelWidth := max(0, min(288, width-32))
+	panelWidth := max(0, min(304, width-32))
 	primaryText := "登录 CheapRouter"
 	secondaryText := ""
 	if signedIn {
@@ -211,8 +211,13 @@ func (a *App) accountSignedInContent(c *ui.Context, state *cheapauthui.State) {
 		ui.Box(c).FillWidth().Height(1).Background(p.Border)
 
 		ui.Column(c.Key("groups-entry-section")).Gap(4).Children(func() {
-			ui.Row(c.Key("groups-section-header")).AlignItems(ui.Center).Justify(ui.SpaceBetween).PaddingX(4).Children(func() {
-				ui.Text(c, "模型分组").FontSize(12).FontWeight(600).TextColor(p.MutedForeground)
+			ui.Row(c.Key("groups-section-header")).AlignItems(ui.Center).Justify(ui.SpaceBetween).PaddingX(4).Gap(6).Children(func() {
+				ui.Row(c).AlignItems(ui.Center).Gap(6).Children(func() {
+					ui.Text(c, "模型分组").FontSize(12).FontWeight(600).TextColor(p.MutedForeground)
+					if state.GroupStatusFailed() {
+						cheapauthui.StatusUnknownBadge(c, state.GroupStatusError, true)
+					}
+				})
 				if state.RefreshGroups != nil {
 					kit.IconButton(c.Key("refresh-groups"), icons.Reload, "刷新分组", 22, false).
 						Disabled(state.GroupsLoading || state.SwitchingGroup || state.LoggingOut).
@@ -238,14 +243,17 @@ func (a *App) accountSignedInContent(c *ui.Context, state *cheapauthui.State) {
 				for _, l := range lanes {
 					lane := l
 					laneLabel := core.LaneDisplayName(lane)
-					boundName := state.BoundGroupName(lane)
-					if boundName == "" {
-						boundName = "未绑定"
-					}
+					boundGroup, hasBound := state.BoundGroup(lane)
 					open := a.accountGroupLane == lane
-					laneTrigger := ui.ButtonBase(c.Key("lane-menu-" + lane)).Label(laneLabel).FillWidth().Height(32).PaddingX(8).Gap(8).
-						Radius(p.Radius).Cursor(ui.CursorPointer).AlignItems(ui.Center).
+					laneTrigger := ui.ButtonBase(c.Key("lane-menu-" + lane)).Label(laneLabel).FillWidth().Padding(6, 8).
+						Radius(p.Radius).Cursor(ui.CursorPointer).
 						HasPopup(ui.PopupMenu).Expanded(open)
+					if hasBound {
+						desc := state.DescribeGroup(boundGroup)
+						laneTrigger.Description(desc.CompactSummary())
+					} else {
+						laneTrigger.Height(32).AlignItems(ui.Center).Gap(8)
+					}
 					switch {
 					case laneTrigger.Pressed() || open:
 						laneTrigger.Background(p.Active)
@@ -253,11 +261,32 @@ func (a *App) accountSignedInContent(c *ui.Context, state *cheapauthui.State) {
 						laneTrigger.Background(p.Hover)
 					}
 					laneTrigger.Children(func() {
-						ui.Icon(c, icons.Network).FontSize(13).Shrink(0).TextColor(p.MutedForeground)
-						ui.Text(c, laneLabel).FontSize(13).FontWeight(500).SingleLine().Shrink(0).TextColor(p.PopoverForeground)
-						ui.Spacer(c)
-						ui.Text(c, boundName).FontSize(12).SingleLine().Shrink(1).MinWidth(0).TextColor(p.MutedForeground)
-						ui.Icon(c, icons.ChevronRight).FontSize(14).Shrink(0).TextColor(p.MutedForeground)
+						if !hasBound {
+							ui.Icon(c, icons.Network).FontSize(13).Shrink(0).TextColor(p.MutedForeground)
+							ui.Text(c, laneLabel).FontSize(13).FontWeight(500).SingleLine().Shrink(0).TextColor(p.PopoverForeground)
+							ui.Spacer(c)
+							ui.Text(c, "未绑定").FontSize(12).SingleLine().Shrink(1).MinWidth(0).TextColor(p.MutedForeground)
+							ui.Icon(c, icons.ChevronRight).FontSize(14).Shrink(0).TextColor(p.MutedForeground)
+							return
+						}
+						desc := state.DescribeGroup(boundGroup)
+						ui.Column(c).FillWidth().Grow(1).Shrink(1).MinWidth(0).Gap(4).Children(func() {
+							ui.Row(c).FillWidth().MinWidth(0).AlignItems(ui.Center).Gap(8).Children(func() {
+								ui.Icon(c, icons.Network).FontSize(13).Shrink(0).TextColor(p.MutedForeground)
+								ui.Text(c, laneLabel).FontSize(13).FontWeight(500).SingleLine().Shrink(0).TextColor(p.PopoverForeground)
+								ui.Spacer(c)
+								ui.Text(c, desc.DisplayName()).FontSize(12).SingleLine().Shrink(1).MinWidth(0).TextColor(p.PopoverForeground)
+								ui.Icon(c, icons.ChevronRight).FontSize(14).Shrink(0).TextColor(p.MutedForeground)
+							})
+							ui.Row(c).FillWidth().MinWidth(0).AlignItems(ui.Center).Gap(5).PaddingStart(21).Children(func() {
+								cheapauthui.GroupTagsRow(c, desc.Tags, true)
+								if desc.Rate != "" {
+									ui.Text(c, desc.Rate).FontSize(10).SingleLine().Shrink(0).TextColor(p.MutedForeground)
+								}
+								ui.Spacer(c)
+								cheapauthui.GroupStatusBadge(c, desc.Status, true)
+							})
+						})
 					}).OnClick(func() {
 						if a.accountGroupLane == lane {
 							a.accountGroupLane = ""
@@ -308,11 +337,11 @@ func (a *App) accountSignedInContent(c *ui.Context, state *cheapauthui.State) {
 func (a *App) accountLaneSubmenu(c *ui.Context, p *theme.Palette, state *cheapauthui.State, lane string, trigger ui.Element) {
 	disabled := state.SwitchingGroup || state.LoggingOut || state.Stage == cheapauthui.SyncingGateway || (state.SelectLaneGroup == nil && state.SelectGroup == nil)
 	width, height := c.Size()
-	menuHeight := max(0, min(360, height-32))
+	menuHeight := max(0, min(400, height-32))
 	open := a.accountGroupLane == lane
 	laneLabel := core.LaneDisplayName(lane)
 	boundID := state.BoundGroupID(lane)
-	laneGroups := state.GroupsForLane(lane)
+	sections := state.GroupSectionsForLane(lane)
 	choose := func(groupID *int64) {
 		a.accountGroupLane = ""
 		trigger.Focus()
@@ -325,8 +354,13 @@ func (a *App) accountLaneSubmenu(c *ui.Context, p *theme.Palette, state *cheapau
 
 	panel := kit.Popover(c, trigger, &open, func() {
 		ui.Column(c.Key("group-submenu-panel-" + lane)).FillWidth().Shrink(1).Padding(8).Gap(6).Children(func() {
-			ui.Row(c.Key("group-submenu-header-" + lane)).AlignItems(ui.Center).Justify(ui.SpaceBetween).PaddingX(4).Children(func() {
-				ui.Text(c, laneLabel+" 分组").FontSize(12).FontWeight(600).TextColor(p.MutedForeground)
+			ui.Row(c.Key("group-submenu-header-" + lane)).AlignItems(ui.Center).Justify(ui.SpaceBetween).PaddingX(4).Gap(6).Children(func() {
+				ui.Row(c).AlignItems(ui.Center).Gap(6).Children(func() {
+					ui.Text(c, laneLabel+" 分组").FontSize(12).FontWeight(600).TextColor(p.MutedForeground)
+					if state.GroupStatusFailed() {
+						cheapauthui.StatusUnknownBadge(c, state.GroupStatusError, true)
+					}
+				})
 				if state.RefreshGroups != nil {
 					refreshBtn := kit.IconButton(c.Key("refresh-groups-"+lane), icons.Reload, "刷新分组", 22, false).
 						Disabled(state.GroupsLoading || state.SwitchingGroup || state.LoggingOut)
@@ -337,17 +371,21 @@ func (a *App) accountLaneSubmenu(c *ui.Context, p *theme.Palette, state *cheapau
 			ui.Box(c).FillWidth().Height(1).Background(p.Border)
 
 			ui.Scroll(c.Key("groups-list-" + lane)).MaxHeight(max(0, menuHeight-53)).Gap(2).Children(func() {
-				groupRow(c, p, "group-unbound-"+lane, "未绑定（留空）", "", boundID == nil, disabled, func() {
+				unboundGroupRow(c, p, "group-unbound-"+lane, "未绑定（留空）", boundID == nil, disabled, func() {
 					choose(nil)
 				})
-				for _, g := range laneGroups {
-					group := g
-					selected := boundID != nil && *boundID == group.ID
-					meta := formatGroupMeta(group)
-					groupRow(c, p, fmt.Sprintf("group-%s-%d", lane, group.ID), group.Name, meta, selected, disabled, func() {
-						id := group.ID
-						choose(&id)
-					})
+				for _, sec := range sections {
+					section := sec
+					cheapauthui.GroupSectionHeader(c, fmt.Sprintf("group-section-%s-%d", lane, section.Tier), section.Tier)
+					for _, g := range section.Groups {
+						group := g
+						selected := boundID != nil && *boundID == group.ID
+						desc := state.DescribeGroup(group)
+						groupOptionRow(c, p, fmt.Sprintf("group-%s-%d", lane, group.ID), desc, selected, disabled, func() {
+							id := group.ID
+							choose(&id)
+						})
+					}
 				}
 			})
 		})
@@ -358,7 +396,7 @@ func (a *App) accountLaneSubmenu(c *ui.Context, p *theme.Palette, state *cheapau
 	if panel == (ui.Element{}) {
 		return
 	}
-	kit.Snapped(panel).Padding(0).MinWidth(0).Width(max(0, min(272, width-32))).MaxHeight(menuHeight)
+	kit.Snapped(panel).Padding(0).MinWidth(0).Width(max(0, min(304, width-32))).MaxHeight(menuHeight)
 	if width >= 660 {
 		panel.AttachTo(trigger, ui.AnchorRight, ui.AnchorLeft).Margin(0, 0, 0, 16)
 	} else {
@@ -371,7 +409,7 @@ func (a *App) accountLaneSubmenu(c *ui.Context, p *theme.Palette, state *cheapau
 	}
 }
 
-func groupRow(c *ui.Context, p *theme.Palette, key, name, meta string, selected, disabled bool, onClick func()) {
+func unboundGroupRow(c *ui.Context, p *theme.Palette, key, name string, selected, disabled bool, onClick func()) {
 	row := ui.ButtonBase(c.Key(key)).Label(name).FillWidth().Height(32).PaddingX(8).Gap(8).
 		Radius(p.Radius).Cursor(ui.CursorPointer).AlignItems(ui.Center).
 		Checked(selected).Disabled(disabled)
@@ -383,24 +421,38 @@ func groupRow(c *ui.Context, p *theme.Palette, key, name, meta string, selected,
 	}
 	row.Children(func() {
 		ui.Text(c, name).FontSize(13).SingleLine().Grow(1).Shrink(1).MinWidth(0).TextColor(p.PopoverForeground)
-		if meta != "" {
-			ui.Text(c, meta).FontSize(11).SingleLine().MaxWidth(112).Shrink(1).TextColor(p.MutedForeground)
-		}
 		if selected {
 			ui.Icon(c, icons.Check).FontSize(14).Shrink(0).TextColor(p.Primary)
 		}
 	}).OnClick(onClick)
 }
 
-func formatGroupMeta(g core.Group) string {
-	var parts []string
-	if strings.EqualFold(g.SubscriptionType, "subscription") {
-		parts = append(parts, "订阅")
-	} else if g.RateMultiplier > 0 {
-		parts = append(parts, fmt.Sprintf("%gx", g.RateMultiplier))
+func groupOptionRow(c *ui.Context, p *theme.Palette, key string, desc core.GroupPresentation, selected, disabled bool, onClick func()) {
+	name := desc.DisplayName()
+	row := ui.ButtonBase(c.Key(key)).Label(name).Description(desc.CompactSummary()).FillWidth().Padding(6, 8).
+		Radius(p.Radius).Cursor(ui.CursorPointer).
+		Checked(selected).Disabled(disabled)
+	switch {
+	case selected:
+		row.Background(p.Active)
+	case row.Hovered():
+		row.Background(p.Hover)
 	}
-	if platform := strings.TrimSpace(g.Platform); platform != "" {
-		parts = append(parts, platform)
-	}
-	return strings.Join(parts, " · ")
+	row.Children(func() {
+		ui.Column(c).FillWidth().Grow(1).Shrink(1).MinWidth(0).Gap(4).Children(func() {
+			ui.Row(c).FillWidth().MinWidth(0).AlignItems(ui.Center).Gap(6).Children(func() {
+				ui.Text(c, name).FontSize(13).SingleLine().Grow(1).Shrink(1).MinWidth(0).TextColor(p.PopoverForeground)
+				cheapauthui.GroupStatusBadge(c, desc.Status, true)
+				if selected {
+					ui.Icon(c, icons.Check).FontSize(14).Shrink(0).TextColor(p.Primary)
+				}
+			})
+			ui.Row(c).FillWidth().MinWidth(0).AlignItems(ui.Center).Gap(5).Children(func() {
+				cheapauthui.GroupTagsRow(c, desc.Tags, true)
+				if desc.Rate != "" {
+					ui.Text(c, desc.Rate).FontSize(10).SingleLine().Shrink(0).TextColor(p.MutedForeground)
+				}
+			})
+		})
+	}).OnClick(onClick)
 }

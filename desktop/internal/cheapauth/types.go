@@ -101,6 +101,7 @@ type Credentials struct {
 	APIKey       string                 `json:"api_key,omitempty"`
 	GroupID      *int64                 `json:"group_id,omitempty"`
 	LaneBindings map[string]LaneBinding `json:"lane_bindings,omitempty"`
+	ClearedLanes []string               `json:"cleared_lanes,omitempty"`
 	ImageGroups  map[string]int64       `json:"image_groups,omitempty"`
 }
 
@@ -232,6 +233,37 @@ type Group struct {
 	Status           string  `json:"status"`
 	Category         string  `json:"category"`
 	SubscriptionType string  `json:"subscription_type"`
+}
+
+// IsSubscription reports whether the group bills against a subscription.
+func (g Group) IsSubscription() bool {
+	return strings.EqualFold(strings.TrimSpace(g.SubscriptionType), "subscription")
+}
+
+// IsWelfare reports whether the group is a limited-time promo (welfare) lane.
+// Older gateways omit category; empty or non-welfare values are standard lanes.
+func (g Group) IsWelfare() bool {
+	return strings.EqualFold(strings.TrimSpace(g.Category), "welfare")
+}
+
+// GroupStatus is the upstream runtime health of one group returned by
+// GET /api/v1/group-status, normalized from either its flat or nested shape.
+type GroupStatus struct {
+	GroupID         int64    `json:"group_id"`
+	GroupName       string   `json:"group_name,omitempty"`
+	LatestStatus    string   `json:"latest_status,omitempty"`
+	StableStatus    string   `json:"stable_status,omitempty"`
+	LatencyMS       *float64 `json:"latency_ms,omitempty"`
+	Availability24h *float64 `json:"availability_24h,omitempty"`
+	Availability7d  *float64 `json:"availability_7d,omitempty"`
+}
+
+// EffectiveStatus returns the smoothed status, falling back to the latest probe.
+func (s GroupStatus) EffectiveStatus() string {
+	if status := strings.ToLower(strings.TrimSpace(s.StableStatus)); status != "" {
+		return status
+	}
+	return strings.ToLower(strings.TrimSpace(s.LatestStatus))
 }
 
 // GroupRef identifies the primary group for a catalog entry.

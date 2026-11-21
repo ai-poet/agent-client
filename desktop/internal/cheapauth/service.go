@@ -3,7 +3,9 @@ package cheapauth
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -301,6 +303,150 @@ func (s *Service) GatewayForLaneChange(ctx context.Context, lane string, groupID
 	return gateway, target, nil
 }
 
+// AutoBindFailure records a non-fatal per-lane auto-bind failure.
+type AutoBindFailure struct {
+	Lane    string
+	GroupID int64
+	Err     error
+}
+
+// AutoBindResult summarizes one post-sync auto-bind pass over canonical lanes.
+type AutoBindResult struct {
+	Bound    map[string]int64
+	Skipped  []string
+	Failures []AutoBindFailure
+}
+
+// AutoBindUnboundLanes binds each unbound, non-cleared canonical lane to its
+// first routable group using the same key-ensure and lane-binding path as
+// manual switches. Already-bound lanes are untouched, per-lane failures are
+// recorded without aborting other lanes, and the returned Gateway reflects all
+// newly bound lanes when len(result.Bound) > 0.
+func (s *Service) AutoBindUnboundLanes(
+	ctx context.Context,
+	groups []Group,
+	catalog *ModelCatalog,
+	skipLanes map[string]bool,
+) (Gateway, AutoBindResult, error) {
+	result := AutoBindResult{}
+	if len(groups) == 0 {
+		result.Skipped = append(result.Skipped, CanonicalLanes...)
+		return Gateway{}, result, nil
+	}
+	credentials, client, err := s.session(ctx)
+	if err != nil {
+		return Gateway{}, result, err
+	}
+	token := credentials.AccessToken
+	var resolvedCatalog ModelCatalog
+	if catalog != nil {
+		resolvedCatalog = *catalog
+	} else {
+		fetched, err := client.ModelCatalog(ctx, token)
+		if err != nil {
+			return Gateway{}, result, err
+		}
+		resolvedCatalog = fetched
+	}
+
+	if credentials.GroupID != nil && *credentials.GroupID > 0 && len(credentials.LaneBindings) == 0 {
+		_ = s.MigrateLegacyGroup(ctx, groups, resolvedCatalog.Items)
+		if refreshed, _, sessionErr := s.session(ctx); sessionErr == nil {
+			credentials = refreshed
+		}
+	}
+
+	currentBindings := effectiveLaneBindings(credentials, groups, resolvedCatalog.Items)
+	skippedSet := make(map[string]bool, len(credentials.ClearedLanes)+len(skipLanes))
+	for _, lane := range credentials.ClearedLanes {
+		if key := canonicalLaneKey(lane); key != "" {
+			skippedSet[key] = true
+		}
+	}
+	for lane, skip := range skipLanes {
+		if skip {
+			if key := canonicalLaneKey(lane); key != "" {
+				skippedSet[key] = true
+			}
+		}
+	}
+
+	type laneCandidate struct {
+		lane  string
+		group Group
+	}
+	var candidates []laneCandidate
+	for _, lane := range CanonicalLanes {
+		if _, bound := currentBindings[lane]; bound {
+			result.Skipped = append(result.Skipped, lane)
+			continue
+		}
+		if skippedSet[lane] {
+			result.Skipped = append(result.Skipped, lane)
+			continue
+		}
+		group, ok := FirstRoutableGroupForLane(lane, groups, resolvedCatalog.Items)
+		if !ok {
+			slog.Debug("cheaprouter auto-bind skipped lane without routable group", "lane", lane)
+			result.Skipped = append(result.Skipped, lane)
+			continue
+		}
+		candidates = append(candidates, laneCandidate{lane: lane, group: group})
+	}
+	if len(candidates) == 0 {
+		return Gateway{}, result, nil
+	}
+
+	keys, err := client.Keys(ctx, token)
+	if err != nil {
+		return Gateway{}, result, err
+	}
+	for _, cand := range candidates {
+		if ctx.Err() != nil {
+			break
+		}
+		ensured, err := ensureGroupKey(ctx, client, token, &keys, cand.group.ID)
+		if err != nil {
+			slog.Warn("cheaprouter auto-bind key ensure failed", "lane", cand.lane, "group_id", cand.group.ID, "error", err.Error())
+			result.Failures = append(result.Failures, AutoBindFailure{
+				Lane:    cand.lane,
+				GroupID: cand.group.ID,
+				Err:     err,
+			})
+			if errors.Is(err, ErrUnauthorized) || errors.Is(err, ErrRefresh) || ctx.Err() != nil {
+				break
+			}
+			continue
+		}
+		binding := LaneBinding{GroupID: cand.group.ID, APIKey: ensured}
+		if err := s.SetLaneBinding(ctx, cand.lane, &binding); err != nil {
+			slog.Warn("cheaprouter auto-bind persist failed", "lane", cand.lane, "group_id", cand.group.ID, "error", err.Error())
+			result.Failures = append(result.Failures, AutoBindFailure{
+				Lane:    cand.lane,
+				GroupID: cand.group.ID,
+				Err:     err,
+			})
+			if errors.Is(err, ErrUnauthorized) || ctx.Err() != nil {
+				break
+			}
+			continue
+		}
+		if result.Bound == nil {
+			result.Bound = map[string]int64{}
+		}
+		result.Bound[cand.lane] = cand.group.ID
+		currentBindings[cand.lane] = binding
+	}
+	if len(result.Bound) == 0 {
+		return Gateway{}, result, nil
+	}
+	gateway, err := buildGatewayForBindings(ctx, client, token, credentials.APIKey, resolvedCatalog, &keys, currentBindings, groups)
+	if err != nil {
+		return Gateway{}, result, err
+	}
+	return gateway, result, nil
+}
+
 // AvailableGroups returns the routing groups available to the signed-in account.
 func (s *Service) AvailableGroups(ctx context.Context) ([]Group, error) {
 	credentials, client, err := s.session(ctx)
@@ -308,6 +454,15 @@ func (s *Service) AvailableGroups(ctx context.Context) ([]Group, error) {
 		return nil, err
 	}
 	return client.AvailableGroups(ctx, credentials.AccessToken)
+}
+
+// GroupStatuses returns upstream availability and health from GET /group-status.
+func (s *Service) GroupStatuses(ctx context.Context) ([]GroupStatus, error) {
+	credentials, client, err := s.session(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return client.GroupStatuses(ctx, credentials.AccessToken)
 }
 
 // SelectedGroup returns a copy of the legacy single bound group ID, or nil.
@@ -354,8 +509,40 @@ func (s *Service) LaneBindingFor(lane string) *LaneBinding {
 	return nil
 }
 
+// LaneCleared reports whether lane was manually cleared in the current login.
+func (s *Service) LaneCleared(lane string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.credentials == nil || len(s.credentials.ClearedLanes) == 0 {
+		return false
+	}
+	key := canonicalLaneKey(lane)
+	if key == "" {
+		return false
+	}
+	for _, cleared := range s.credentials.ClearedLanes {
+		if canonicalLaneKey(cleared) == key {
+			return true
+		}
+	}
+	return false
+}
+
 // SetLaneBinding atomically updates or clears only the specified lane's binding.
+// Clearing a lane records it in ClearedLanes so post-sync auto-bind will not
+// refill it until the next login.
 func (s *Service) SetLaneBinding(ctx context.Context, lane string, binding *LaneBinding) error {
+	markCleared := binding == nil || binding.GroupID <= 0
+	return s.setLaneBinding(ctx, lane, binding, markCleared)
+}
+
+// RestoreLaneBinding restores a lane's prior binding and manual-clear marker
+// after a failed provider update.
+func (s *Service) RestoreLaneBinding(ctx context.Context, lane string, binding *LaneBinding, cleared bool) error {
+	return s.setLaneBinding(ctx, lane, binding, cleared)
+}
+
+func (s *Service) setLaneBinding(ctx context.Context, lane string, binding *LaneBinding, cleared bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if ctx.Err() != nil {
@@ -377,12 +564,14 @@ func (s *Service) SetLaneBinding(ctx context.Context, lane string, binding *Lane
 			updated.LaneBindings = map[string]LaneBinding{}
 		}
 		updated.LaneBindings[key] = *binding
+		cleared = false
 	} else {
 		delete(updated.LaneBindings, key)
 	}
 	if len(updated.LaneBindings) == 0 {
 		updated.LaneBindings = nil
 	}
+	updated.ClearedLanes = updateClearedLanes(s.credentials.ClearedLanes, key, cleared)
 	// Clear legacy single-group field once per-lane bindings are mutated.
 	updated.GroupID = nil
 	if err := s.store.Save(updated); err != nil {
@@ -390,6 +579,29 @@ func (s *Service) SetLaneBinding(ctx context.Context, lane string, binding *Lane
 	}
 	*s.credentials = updated
 	return nil
+}
+
+func updateClearedLanes(existing []string, lane string, cleared bool) []string {
+	set := make(map[string]bool, len(existing)+1)
+	for _, item := range existing {
+		if key := canonicalLaneKey(item); key != "" {
+			set[key] = true
+		}
+	}
+	if cleared {
+		set[lane] = true
+	} else {
+		delete(set, lane)
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for key := range set {
+		out = append(out, key)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // MigrateLegacyGroup moves a legacy single GroupID binding into its inferred
@@ -807,7 +1019,9 @@ func credentialsEqual(a, b Credentials) bool {
 	if (a.GroupID == nil) != (b.GroupID == nil) || (a.GroupID != nil && *a.GroupID != *b.GroupID) {
 		return false
 	}
-	return maps.Equal(a.LaneBindings, b.LaneBindings) && maps.Equal(a.ImageGroups, b.ImageGroups)
+	return maps.Equal(a.LaneBindings, b.LaneBindings) &&
+		slices.Equal(a.ClearedLanes, b.ClearedLanes) &&
+		maps.Equal(a.ImageGroups, b.ImageGroups)
 }
 
 // accountKey picks the key the whole catalog is routed with: the bridge's
