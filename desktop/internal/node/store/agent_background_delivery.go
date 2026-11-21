@@ -22,7 +22,8 @@ const backgroundChild = `(json_extract(body,'$.follow_up')=1 OR EXISTS(
 	AND json_extract(p.value,'$.index')=d.part AND json_extract(p.value,'$.type')='tool_request'
 	AND json_extract(p.value,'$.name')='spawn_agent' AND json_type(p.value,'$.arguments.background')='true'))`
 
-const backgroundReady = "state='pending' AND (kind='command' AND json_extract(body,'$.follow_up')=1 OR kind='agent' AND " + backgroundChild + ") AND json_extract(body,'$.task.suppressed')=0 AND json_extract(body,'$.task.recovered')=0 AND json_extract(body,'$.task.outcome') IN ('completed','failed','timed_out','unknown','stalled')"
+const backgroundFollowUp = "(kind='command' AND json_extract(body,'$.follow_up')=1 OR kind='agent' AND " + backgroundChild + ")"
+const backgroundReady = "state='pending' AND " + backgroundFollowUp + " AND json_extract(body,'$.task.suppressed')=0 AND json_extract(body,'$.task.recovered')=0 AND json_extract(body,'$.task.outcome') IN ('completed','failed','timed_out','unknown','stalled')"
 const backgroundDeliverable = backgroundReady + " AND delivery IS NULL"
 const backgroundEligible = "session=?1 AND " + backgroundDeliverable
 const backgroundInputEligible = "session=?1 AND state='pending' AND delivery IS NULL AND (kind='command' OR kind='agent' AND " + backgroundChild + " AND (json_extract(body,'$.task.outcome')!='failed' OR json_extract(body,'$.task.recovered')=0))"

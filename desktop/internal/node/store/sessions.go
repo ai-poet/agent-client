@@ -356,6 +356,18 @@ func archiveSession(ctx context.Context, db *sql.Conn, input protocol.CommandSet
 	if err != nil {
 		return protocol.Output{}, nil, err
 	}
+	if input.Archived {
+		if err := ensureSessionIdle(ctx, db, input.Session, "stop the session before archiving it"); err != nil {
+			return protocol.Output{}, nil, err
+		}
+		var background bool
+		if err := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_background WHERE session=?1 AND state='running' AND json_extract(body,'$.task.suppressed')=0 AND "+backgroundFollowUp+")", input.Session.String()).Scan(&background); err != nil {
+			return protocol.Output{}, nil, err
+		}
+		if background {
+			return protocol.Output{}, nil, fault(protocol.ErrorCodeBusy, "stop the session before archiving it")
+		}
+	}
 	state := "active"
 	if input.Archived {
 		state = "archived"
@@ -365,6 +377,17 @@ func archiveSession(ctx context.Context, db *sql.Conn, input protocol.CommandSet
 	}
 	value.Archived = input.Archived
 	return reviseSession(ctx, db, value)
+}
+
+func ensureSessionIdle(ctx context.Context, db *sql.Conn, id protocol.SessionID, message string) error {
+	var busy bool
+	if err := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_runs a JOIN turns t ON t.id=a.turn WHERE t.session=?1 AND json_extract(a.body,'$.status') IN ('queued','running','stopping'))", id.String()).Scan(&busy); err != nil {
+		return err
+	}
+	if busy {
+		return fault(protocol.ErrorCodeBusy, message)
+	}
+	return nil
 }
 
 func setSessionRead(ctx context.Context, db *sql.Conn, input protocol.CommandSetSessionReadPayload) (protocol.Output, []protocol.Event, error) {
@@ -428,12 +451,8 @@ func removeSession(ctx context.Context, db *sql.Conn, id protocol.SessionID, exp
 				private = append(private, provider.ID)
 			}
 		}
-		var busy bool
-		if err := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM agent_runs a JOIN turns t ON t.id=a.turn WHERE t.session=?1 AND json_extract(a.body,'$.status') IN ('queued','running','stopping'))", id.String()).Scan(&busy); err != nil {
+		if err := ensureSessionIdle(ctx, db, id, "stop the session before deleting it"); err != nil {
 			return protocol.Output{}, nil, err
-		}
-		if busy {
-			return protocol.Output{}, nil, fault(protocol.ErrorCodeBusy, "stop the session before deleting it")
 		}
 	}
 	for _, id := range ids {
