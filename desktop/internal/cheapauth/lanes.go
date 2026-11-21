@@ -289,6 +289,27 @@ func GroupsForLane(lane string, groups []Group, catalog []Model) []Group {
 	return matched
 }
 
+// GroupRoutable reports whether group is usable for lane binding (positive ID
+// and active, enabled, or unspecified status).
+func GroupRoutable(group Group) bool {
+	if group.ID <= 0 {
+		return false
+	}
+	status := strings.TrimSpace(group.Status)
+	return status == "" || strings.EqualFold(status, "active") || strings.EqualFold(status, "enabled")
+}
+
+// FirstRoutableGroupForLane returns the first routable group assigned to lane
+// in the directory order returned by /groups/available.
+func FirstRoutableGroupForLane(lane string, groups []Group, catalog []Model) (Group, bool) {
+	for _, g := range GroupsForLane(lane, groups, catalog) {
+		if GroupRoutable(g) {
+			return g, true
+		}
+	}
+	return Group{}, false
+}
+
 // SelectCatalogForBindings builds the union of models covered by all bound
 // lanes and records the winning lane for each model ID (lowercased).
 // When bindings is empty, the full catalog is returned with nil modelLanes so

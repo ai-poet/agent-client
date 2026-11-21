@@ -24,29 +24,30 @@ const (
 // State is UI-thread-only presentation state. It never stores OAuth tokens,
 // the PKCE verifier, or a gateway API key.
 type State struct {
-	Stage          Stage
-	Endpoint       string
-	LoginURL       string
-	Loopback       bool
-	Exchanging     bool
-	LoggingOut     bool
-	Pasted         string
-	Failure        string
+	Stage                  Stage
+	Endpoint               string
+	LoginURL               string
+	Loopback               bool
+	Exchanging             bool
+	LoggingOut             bool
+	Pasted                 string
+	Failure                string
 	AccountFailure         string
 	MigrationFailure       string
 	MigrationFailureDetail string
 	Account                core.User
 	ModelCount             int
 
-	Groups          []core.Group
-	Catalog         []core.Model
-	GroupsLoading   bool
-	GroupsError     string
-	SelectedGroupID *int64
-	LaneBindings    map[string]int64
-	SwitchingGroup  bool
-	SwitchingLane   string
-	GroupError      string
+	Groups           []core.Group
+	Catalog          []core.Model
+	GroupsLoading    bool
+	GroupsError      string
+	SelectedGroupID  *int64
+	LaneBindings     map[string]int64
+	AutoBindFailures map[string]string
+	SwitchingGroup   bool
+	SwitchingLane    string
+	GroupError       string
 
 	Start           func(manual bool)
 	SubmitPaste     func()

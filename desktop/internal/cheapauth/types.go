@@ -101,6 +101,7 @@ type Credentials struct {
 	APIKey       string                 `json:"api_key,omitempty"`
 	GroupID      *int64                 `json:"group_id,omitempty"`
 	LaneBindings map[string]LaneBinding `json:"lane_bindings,omitempty"`
+	ClearedLanes []string               `json:"cleared_lanes,omitempty"`
 }
 
 func (Credentials) String() string   { return "CheapRouter 凭据（已隐藏）" }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -59,6 +61,7 @@ type cheapGateway struct {
 	keysBody   string
 	// failCreateKeyGroup, when non-zero, causes POST /keys for that group_id to return HTTP 500.
 	failCreateKeyGroup int64
+	createdGroups      []int64
 	calls              []string
 	revoked            []string
 }
@@ -144,11 +147,22 @@ func (g *cheapGateway) serve(writer http.ResponseWriter, request *http.Request) 
 		if raw, ok := body["group_id"].(float64); ok {
 			gid = int64(raw)
 		}
+		g.mu.Lock()
+		g.createdGroups = append(g.createdGroups, gid)
+		g.mu.Unlock()
 		if failCreateKeyGroup != 0 && gid == failCreateKeyGroup {
 			reply(http.StatusInternalServerError, `{"code":500,"message":"group key mint failed"}`)
 			return
 		}
-		reply(http.StatusOK, `{"code":0,"data":{"id":99,"key":"sk-group-2-minted","group_id":2,"status":"active"}}`)
+		keyID := int64(99)
+		keyVal := "sk-group-2-minted"
+		respGroup := int64(2)
+		if gid > 0 {
+			keyID = 100 + gid
+			keyVal = fmt.Sprintf("sk-group-%d-minted", gid)
+			respGroup = gid
+		}
+		reply(http.StatusOK, fmt.Sprintf(`{"code":0,"data":{"id":%d,"key":%q,"group_id":%d,"status":"active"}}`, keyID, keyVal, respGroup))
 	default:
 		http.NotFound(writer, request)
 	}
@@ -509,8 +523,9 @@ func TestCheapSignInAddsProviderAndSignOutDisablesOnlyIt(t *testing.T) {
 	}
 	key, _ := detail[protocol.Secret](d.do(protocol.Command{Kind: "read_provider_key", Data: protocol.CommandReadProviderKeyPayload{
 		Provider: provider.ID, ExpectedRevision: provider.Revision}}).Data)
-	if key.Expose() != cheapTestKey {
-		t.Fatal("the provider does not hold the gateway key")
+	resolvedKey, _ := providers.ResolveCheapRouterKey(key.Expose(), "cheap-chat", "")
+	if resolvedKey != cheapTestKey {
+		t.Fatalf("the provider does not resolve the gateway key: got %q", resolvedKey)
 	}
 	d.untouched("after signing in")
 	if stored := d.stored(); stored == nil || stored.RefreshToken != cheapTestRefresh || stored.Endpoint != gateway.URL {
@@ -893,4 +908,189 @@ func TestCheapSidebarAccountAndGroupSwitchEndToEnd(t *testing.T) {
 		t.Fatal("switching to group 1 did not reuse its active key")
 	}
 	d.untouched("after switching CheapRouter groups")
+}
+
+func (d *cheapDesktop) signInWithCode(gateway *cheapGateway) {
+	d.t.Helper()
+	d.accountPage()
+	d.account().Endpoint = gateway.URL
+	beforeOpened := len(d.tester.OpenedURLs())
+	d.click("使用粘贴登录码方式")
+	d.await("the manual sign-in to wait for its code", func() bool {
+		return d.account().Stage == cheapauthui.WaitingForCode && len(d.tester.OpenedURLs()) > beforeOpened
+	})
+	opened := d.tester.OpenedURLs()
+	login, err := url.Parse(opened[len(opened)-1])
+	if err != nil {
+		d.t.Fatal(err)
+	}
+	gateway.set(func() { gateway.challenge = login.Query().Get("code_challenge") })
+	d.account().Pasted = cheapTestCode
+	d.tester.Frame()
+	d.click("完成登录")
+	d.await("the signed-in gateway sync to complete", func() bool {
+		return d.account().Stage == cheapauthui.Ready
+	})
+}
+
+func TestCheapLoginAutoBindsUnboundLanesAndIsolatesFailure(t *testing.T) {
+	gateway := newCheapGateway(t)
+	gateway.failCreateKeyGroup = 31
+	gateway.groupsBody = `{"code":0,"data":[` +
+		`{"id":10,"name":"Claude 停用组","platform":"anthropic","status":"disabled"},` +
+		`{"id":11,"name":"Claude 首选组","platform":"anthropic","status":"active"},` +
+		`{"id":12,"name":"Claude 备选组","platform":"anthropic","status":"active"},` +
+		`{"id":21,"name":"Codex 首选组","platform":"openai","status":"active"},` +
+		`{"id":31,"name":"Gemini 故障组","platform":"gemini","status":"active"},` +
+		`{"id":41,"name":"国模高速组","platform":"openai","status":"active"}` +
+		`]}`
+	gateway.catalogBody = `{"code":0,"data":{"items":[` +
+		`{"model":"claude-sonnet-4-6","display_name":"Claude Sonnet 4.6","billing_mode":"token","context_window":200000,"best_group":{"id":11,"name":"Claude 首选组"}},` +
+		`{"model":"gpt-5","display_name":"GPT-5","billing_mode":"token","context_window":128000,"best_group":{"id":21,"name":"Codex 首选组"}},` +
+		`{"model":"gemini-2.5-pro","display_name":"Gemini 2.5 Pro","billing_mode":"token","context_window":128000,"best_group":{"id":31,"name":"Gemini 故障组"}},` +
+		`{"model":"deepseek-r1","display_name":"DeepSeek R1","billing_mode":"token","context_window":128000,"best_group":{"id":41,"name":"国模高速组"}}` +
+		`]}}`
+	gateway.keysBody = `{"code":0,"data":{"items":[` +
+		`{"id":1,"key":"` + cheapTestKey + `","status":"active"},` +
+		`{"id":11,"key":"sk-group-11-reused","group_id":11,"status":"active"}` +
+		`],"total":2}}`
+
+	d := openCheapDesktop(t, nil)
+	d.signInWithCode(gateway)
+
+	wantBindings := map[string]int64{
+		core.LaneClaude:   11,
+		core.LaneCodex:    21,
+		core.LaneDomestic: 41,
+	}
+	if d.account().Failure != "" {
+		t.Fatalf("partial auto-bind failure blocked login: %q", d.account().Failure)
+	}
+	if !maps.Equal(d.account().LaneBindings, wantBindings) {
+		t.Fatalf("LaneBindings = %v, want %v", d.account().LaneBindings, wantBindings)
+	}
+	if d.account().AutoBindFailures[core.LaneGemini] == "" {
+		t.Fatalf("expected Gemini auto-bind failure recorded in state: %v", d.account().AutoBindFailures)
+	}
+
+	gateway.mu.Lock()
+	created := slices.Clone(gateway.createdGroups)
+	gateway.mu.Unlock()
+	if slices.Contains(created, 11) {
+		t.Fatalf("group 11 active key was minted instead of reused: %v", created)
+	}
+	for _, wantCreated := range []int64{21, 31, 41} {
+		if !slices.Contains(created, wantCreated) {
+			t.Errorf("expected POST /keys for group %d, got %v", wantCreated, created)
+		}
+	}
+
+	provider := d.gateway(true)
+	secret, _ := detail[protocol.Secret](d.do(protocol.Command{
+		Kind: "read_provider_key",
+		Data: protocol.CommandReadProviderKeyPayload{Provider: provider.ID, ExpectedRevision: provider.Revision},
+	}).Data)
+	for modelID, wantKey := range map[string]string{
+		"claude-sonnet-4-6": "sk-group-11-reused",
+		"gpt-5":             "sk-group-21-minted",
+		"deepseek-r1":       "sk-group-41-minted",
+	} {
+		gotKey, _ := providers.ResolveCheapRouterKey(secret.Expose(), modelID, "")
+		if gotKey != wantKey {
+			t.Errorf("ResolveCheapRouterKey(%q) = %q, want %q", modelID, gotKey, wantKey)
+		}
+	}
+	d.await("composer model selector refreshes with auto-bound lane models", func() bool {
+		var hasClaude, hasGPT5, hasDeepSeek bool
+		for _, m := range d.runtime.App.Data.Models {
+			switch {
+			case strings.HasSuffix(m.ID, "/claude-sonnet-4-6"):
+				hasClaude = true
+			case strings.HasSuffix(m.ID, "/gpt-5"):
+				hasGPT5 = true
+			case strings.HasSuffix(m.ID, "/deepseek-r1"):
+				hasDeepSeek = true
+			}
+		}
+		return hasClaude && hasGPT5 && hasDeepSeek
+	})
+}
+
+func TestCheapAutoBindPreservesBindingsAndRespectsManualClearUntilNextLogin(t *testing.T) {
+	gateway := newCheapGateway(t)
+	gateway.groupsBody = `{"code":0,"data":[` +
+		`{"id":11,"name":"Claude 首选组","platform":"anthropic","status":"active"},` +
+		`{"id":12,"name":"Claude 用户自选组","platform":"anthropic","status":"active"},` +
+		`{"id":21,"name":"Codex 首选组","platform":"openai","status":"active"}` +
+		`]}`
+	gateway.catalogBody = `{"code":0,"data":{"items":[` +
+		`{"model":"claude-sonnet-4-6","display_name":"Claude Sonnet 4.6","billing_mode":"token","context_window":200000,"best_group":{"id":11}},` +
+		`{"model":"claude-opus-4-6","display_name":"Claude Opus 4.6","billing_mode":"token","context_window":200000,"best_group":{"id":12}},` +
+		`{"model":"gpt-5","display_name":"GPT-5","billing_mode":"token","context_window":128000,"best_group":{"id":21}}` +
+		`]}}`
+	gateway.keysBody = `{"code":0,"data":{"items":[` +
+		`{"id":1,"key":"` + cheapTestKey + `","status":"active"},` +
+		`{"id":11,"key":"sk-group-11-active","group_id":11,"status":"active"},` +
+		`{"id":12,"key":"sk-group-12-active","group_id":12,"status":"active"},` +
+		`{"id":21,"key":"sk-group-21-active","group_id":21,"status":"active"}` +
+		`],"total":4}}`
+
+	d := openCheapDesktop(t, func(d *cheapDesktop) {
+		store, err := core.NewStore(d.profile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Save(core.Credentials{
+			AccessToken:  cheapTestAccess,
+			RefreshToken: cheapTestRefresh,
+			ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+			Endpoint:     gateway.URL,
+			APIKey:       cheapTestKey,
+			LaneBindings: map[string]core.LaneBinding{
+				core.LaneClaude: {GroupID: 12, APIKey: "sk-group-12-active"},
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	d.await("initial sync preserves Claude and auto-binds Codex", func() bool {
+		return d.account().Stage == cheapauthui.Ready
+	})
+	if got := d.account().LaneBindings; !maps.Equal(got, map[string]int64{core.LaneClaude: 12, core.LaneCodex: 21}) {
+		t.Fatalf("after initial sync LaneBindings = %v, want {anthropic:12 openai:21}", got)
+	}
+
+	// Manually clear Codex in this session.
+	d.account().SelectLaneGroup(core.LaneCodex, nil)
+	d.await("manual Codex unbind completes", func() bool {
+		return !d.account().SwitchingGroup && d.account().BoundGroupID(core.LaneCodex) == nil
+	})
+	if got := d.account().LaneBindings; !maps.Equal(got, map[string]int64{core.LaneClaude: 12}) {
+		t.Fatalf("after manual clear LaneBindings = %v, want {anthropic:12}", got)
+	}
+
+	// Refreshing groups and rendering frames must NOT trigger auto-bind.
+	d.account().RefreshGroups()
+	d.await("group refresh finishes", func() bool { return !d.account().GroupsLoading })
+	d.tester.Frame()
+	if d.account().BoundGroupID(core.LaneCodex) != nil {
+		t.Fatalf("RefreshGroups/render refilled cleared Codex lane: %v", d.account().LaneBindings)
+	}
+
+	// Repeating sync in the same login session must NOT refill manually cleared Codex.
+	d.runtime.startCheapSync(d.runtime.cheapAuth, d.runtime.cheapAuth.generation)
+	d.await("same-session re-sync finishes", func() bool { return d.account().Stage == cheapauthui.Ready })
+	if got := d.account().LaneBindings; !maps.Equal(got, map[string]int64{core.LaneClaude: 12}) {
+		t.Fatalf("same-session re-sync altered bindings: %v, want {anthropic:12}", got)
+	}
+
+	// Logout and next login must auto-bind all unbound lanes (including previously cleared Codex).
+	d.account().Logout()
+	d.await("logout completes", func() bool {
+		return d.account().Stage == cheapauthui.SignedOut && !d.account().LoggingOut
+	})
+	d.signInWithCode(gateway)
+	if got := d.account().LaneBindings; !maps.Equal(got, map[string]int64{core.LaneClaude: 11, core.LaneCodex: 21}) {
+		t.Fatalf("next login LaneBindings = %v, want {anthropic:11 openai:21}", got)
+	}
 }
