@@ -278,6 +278,10 @@ func (model *sdkModel) streamResponses(ctx context.Context, raw []byte, call fan
 		}
 	}
 	if err := stream.Err(); err != nil {
+		var malformed *json.SyntaxError
+		if tail.padded && errors.As(err, &malformed) {
+			err = io.ErrUnexpectedEOF
+		}
 		emitter.fail(err)
 		return
 	}
