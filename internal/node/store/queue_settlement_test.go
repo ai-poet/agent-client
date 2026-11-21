@@ -787,19 +787,33 @@ func TestGuidanceQueue(t *testing.T) {
 					if _, err = command("set_session_config", &protocol.CommandSetSessionConfigPayload{Session: session.ID, ExpectedRevision: current.Revision, Config: config}); err != nil {
 						return err
 					}
-					other, err := send("guide_turn", "Other settings")
+					inherited, err := send("guide_turn", "Guide after settings change")
 					if err != nil {
 						return err
 					}
-					if err = order([]protocol.TurnID{first, other}, &turn, nil); err != nil {
+					other, err := send("queue_turn", "Other settings")
+					if err != nil {
 						return err
 					}
-					if _, item, _ := queueFixtureItem(ctx, db, session.ID, other); !item.Ready {
+					// A previously queued input keeps its different capture and
+					// becomes ready without joining when offered as guidance.
+					if _, err = command("guide_queued_turn", &protocol.CommandGuideQueuedTurnPayload{Turn: other, Recipient: turn, ExpectedRevision: revision(other)}); err != nil {
+						return err
+					}
+					if err = order([]protocol.TurnID{first, inherited, other}, &turn, &turn, nil); err != nil {
+						return err
+					}
+					if _, item, err := queueFixtureItem(ctx, db, session.ID, other); err != nil || item == nil || !item.Ready {
 						return errors.New("input with other settings is not ready to start")
 					}
 					batch, _, err := TakeGuidance(ctx, db, turn)
-					if err != nil || fmt.Sprint(texts(batch)) != "[Same settings]" {
+					if err != nil || fmt.Sprint(texts(batch)) != "[Same settings Guide after settings change]" {
 						return fmt.Errorf("batch = %v: %v", texts(batch), err)
+					}
+					for _, input := range batch {
+						if input.Turn.Config.Permission != current.Config.Permission {
+							return errors.New("direct guidance did not inherit the running turn's permission")
+						}
 					}
 					if _, _, err = FinishTurn(ctx, db, turn, protocol.ConversationStatusCompleted, nil, now); err != nil {
 						return err
@@ -937,7 +951,7 @@ func TestGuidanceQueue(t *testing.T) {
 					if next, _, err := ClaimNext(ctx, db, now); err != nil || next != nil {
 						return fmt.Errorf("a paused queue started input: %v", err)
 					}
-					// A session with waiting input cannot be deleted; archiving keeps the queue.
+					// Archiving and deleting both refuse a session with waiting input.
 					current, err := ReadSession(ctx, db, session.ID)
 					if err != nil {
 						return err
@@ -945,8 +959,8 @@ func TestGuidanceQueue(t *testing.T) {
 					if _, _, err = removeSession(ctx, db, session.ID, current.Revision); !providerFixtureFault(err, protocol.ErrorCodeBusy) {
 						return fmt.Errorf("session with queued input was deleted: %v", err)
 					}
-					if _, _, err = archiveSession(ctx, db, protocol.CommandSetSessionArchivedPayload{Session: session.ID, ExpectedRevision: current.Revision, Archived: true}); err != nil {
-						return err
+					if _, _, err = archiveSession(ctx, db, protocol.CommandSetSessionArchivedPayload{Session: session.ID, ExpectedRevision: current.Revision, Archived: true}); !providerFixtureFault(err, protocol.ErrorCodeBusy) {
+						return fmt.Errorf("session with queued input was archived: %v", err)
 					}
 					if err = order([]protocol.TurnID{held, guided}, nil, nil); err != nil {
 						return err
@@ -981,6 +995,22 @@ func TestGuidanceQueue(t *testing.T) {
 					}
 					if again, _, err := ClaimNext(ctx, db, now); err != nil || again != nil {
 						return fmt.Errorf("compaction started beside the running turn: %v", err)
+					}
+					if _, err = command("remove_queued_turn", &protocol.CommandRemoveQueuedTurnPayload{Turn: compaction, ExpectedRevision: revision(compaction)}); err != nil {
+						return err
+					}
+					if err = queueFixtureInput(ctx, db, session.ID, guided, now); err != nil {
+						return err
+					}
+					if _, _, err = FinishTurn(ctx, db, guided, protocol.ConversationStatusCompleted, nil, now); err != nil {
+						return err
+					}
+					if current, err = ReadSession(ctx, db, session.ID); err != nil {
+						return err
+					}
+					archived, _, err := archiveSession(ctx, db, protocol.CommandSetSessionArchivedPayload{Session: session.ID, ExpectedRevision: current.Revision, Archived: true})
+					if err != nil || !archived.Data.(protocol.Session).Archived {
+						return fmt.Errorf("idle session was not archived: %v", err)
 					}
 				}
 				return nil

@@ -389,17 +389,26 @@ func TestCompactionHandoff(t *testing.T) {
 			status  uint16
 			cause   string
 		}{
-			{"budget", nil, 100, false, 1, protocol.ConversationCompactionStageBudget, protocol.ConversationCompactionReasonNoFittingPrefix, 0, "summary prompt and output exceed the context limit"},
+			{"budget", nil, 8192, false, 1, protocol.ConversationCompactionStageBudget, protocol.ConversationCompactionReasonNoFittingPrefix, 0, "latest user message exceeds the summary context limit"},
 			{"unauthorized", []script{status(401)}, 0, false, 2, protocol.ConversationCompactionStageRequest, protocol.ConversationCompactionReasonAuthorizationFailed, 401, "Summary refused (HTTP 401)"},
 			{"rejected", []script{status(400)}, 0, false, 2, protocol.ConversationCompactionStageRequest, protocol.ConversationCompactionReasonServiceRejected, 400, "Summary refused (HTTP 400)"},
 			{"stopped", []script{status(400)}, 0, true, 1, "", "", 0, ""},
 		} {
 			t.Run(row.name, func(t *testing.T) {
-				f, x, binding, before := compactionFixture(t, &scriptedModel{scripts: row.scripts})
-				before = compactionOverflow(t, f, x)
+				language := &scriptedModel{scripts: row.scripts}
+				f, x, binding, _ := compactionFixture(t, language)
 				if row.context > 0 {
+					// Smaller declared windows are replaced by an estimate. At the
+					// minimum supported window, force a real budget failure with
+					// an indivisible latest user input.
 					binding.Provider.Models[0].Context, binding.Provider.Models[0].Output = row.context, row.context
+					input := x.inv.Message
+					input.Text = strings.Repeat("Input too large to summarize. ", 4000)
+					if err := f.r.save(f.ctx, f.session.ID, inputRecord(x.inv.Run.Turn, input, f.r)); err != nil {
+						t.Fatal(err)
+					}
 				}
+				before := compactionOverflow(t, f, x)
 				if row.stopped {
 					stopped, cancel := context.WithCancel(f.ctx)
 					x.ctx = stopped
@@ -413,6 +422,9 @@ func TestCompactionHandoff(t *testing.T) {
 				}
 				if err := f.r.compact(x, binding, before, false); err == nil {
 					t.Fatal("failed compaction returned no error")
+				}
+				if row.stage == protocol.ConversationCompactionStageBudget && language.count() != 0 {
+					t.Fatal("a compaction rejected for budget reached the model")
 				}
 				added := f.state().Records[len(before.Records):]
 				if len(added) != row.records {
@@ -523,8 +535,8 @@ func TestCompactionHandoff(t *testing.T) {
 				if len(added) != 2 || !strings.Contains(added[1].Message().Content[0].Data.(*canonical.TextContent).Text, "Continue calling tools") {
 					t.Fatal("an earlier summary or reinjected context was carried as user input")
 				}
-			} else if len(added) != 3 || added[2].Message().Role != canonical.User || added[2].Message().Content[0].Data.(*canonical.TextContent).Text != "Original task" || !strings.Contains(added[1].Message().Content[0].Data.(*canonical.TextContent).Text, "Just continue") {
-				t.Fatal("latest automatic input or natural continuation was lost")
+			} else if len(added) != 3 || added[2].Message().Role != canonical.User || added[2].Message().Content[0].Data.(*canonical.TextContent).Text != "Original task" || !strings.Contains(added[1].Message().Content[0].Data.(*canonical.TextContent).Text, "Continue calling tools") {
+				t.Fatal("latest automatic input or active-task continuation was lost")
 			}
 		}
 	})

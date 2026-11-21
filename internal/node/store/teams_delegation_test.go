@@ -530,7 +530,7 @@ func TestBackgroundNoticeEvidence(t *testing.T) {
 			})
 		}
 	})
-	t.Run("collected command settles only unreserved stall evidence", func(t *testing.T) {
+	t.Run("collected command replaces undelivered stall evidence", func(t *testing.T) {
 		for _, row := range []struct {
 			name     string
 			state    protocol.ConversationBackgroundState
@@ -538,7 +538,7 @@ func TestBackgroundNoticeEvidence(t *testing.T) {
 			want     protocol.ConversationBackgroundState
 		}{
 			{"undelivered", protocol.ConversationBackgroundStatePending, false, protocol.ConversationBackgroundStateDismissed},
-			{"reserved", protocol.ConversationBackgroundStatePending, true, protocol.ConversationBackgroundStatePending},
+			{"reserved", protocol.ConversationBackgroundStatePending, true, protocol.ConversationBackgroundStateDismissed},
 			{"delivered", protocol.ConversationBackgroundStateDelivered, true, protocol.ConversationBackgroundStateDelivered},
 		} {
 			t.Run(row.name, func(t *testing.T) {
@@ -547,7 +547,7 @@ func TestBackgroundNoticeEvidence(t *testing.T) {
 				ctx := context.Background()
 				err := storage.Node.Write(ctx, func(db *sql.Conn) error {
 					input := protocol.DefaultCommandRunCommandPayload()
-					input.Turn, input.Command, input.Background = turn, "observed command", true
+					input.Turn, input.Command, input.Background, input.FollowUp = turn, "observed command", true, true
 					request := protocol.NewRequest(node, protocol.Command{Kind: "run_command", Data: &input})
 					if _, err := RegisterCommand(ctx, db, request, now); err != nil {
 						return err
@@ -575,8 +575,22 @@ func TestBackgroundNoticeEvidence(t *testing.T) {
 					if err != nil {
 						return err
 					}
-					if saved.Task.State != row.want || row.reserved && (saved.Task.Revision != revision || saved.Task.Delivery == nil || *saved.Task.Delivery != turn) {
-						return errors.New("command collection changed the wrong stall evidence")
+					if saved == nil || saved.Task.State != row.want {
+						return fmt.Errorf("collected command left unexpected stall evidence: %+v", saved)
+					}
+					if row.state == protocol.ConversationBackgroundStateDelivered {
+						if saved.Task.Revision != revision || saved.Task.Delivery == nil || *saved.Task.Delivery != turn {
+							return errors.New("collection rewrote delivered stall evidence")
+						}
+					} else if saved.Task.Revision != revision+1 || saved.Task.Delivery != nil {
+						return errors.New("superseded stall evidence was not released")
+					}
+					completion, err := readBody[BackgroundRecord](ctx, db, "SELECT body FROM agent_background WHERE id=?1", "command:"+request.ID.String())
+					if err != nil {
+						return err
+					}
+					if completion == nil || completion.Task.State != protocol.ConversationBackgroundStateConsumed || completion.Task.Delivery != nil || completion.Task.Outcome == nil || *completion.Task.Outcome != protocol.ConversationBackgroundOutcomeCompleted {
+						return fmt.Errorf("collected completion left a redundant notice: %+v", completion)
 					}
 					return nil
 				})

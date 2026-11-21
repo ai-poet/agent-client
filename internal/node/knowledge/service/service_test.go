@@ -843,20 +843,35 @@ func TestCollectionLifecycle(t *testing.T) {
 		t.Fatalf("hit = %+v at lines %d to %d", page.Hits[0], start, end)
 	}
 
-	// Selecting an embedding model restarts indexing; it stays keyword
-	// only until the model is installed.
+	// Inspect completed passes directly below. A change in model availability
+	// need not emit progress when the current keyword index is already ready.
+	fixture.service.Close()
+	sweepReady := func() protocol.KnowledgeProgress {
+		t.Helper()
+		fixture.sweep()
+		progress := fixture.collections()[0].Progress
+		if progress.Status != protocol.KnowledgeStatusReady {
+			t.Fatalf("pass did not leave the collection ready: %+v", progress)
+		}
+		return progress
+	}
+
+	// An embedding selection changes the index binding, not the collection's
+	// definition or generation. It stays keyword-only until installation.
 	fixture.selectEmbedding(true)
 	selected := fixture.collections()[0]
-	if selected.Progress.Generation <= ready.Generation || selected.Progress.Status != protocol.KnowledgeStatusPending || selected.Revision != created.Revision+1 {
+	if selected.Progress.Generation != ready.Generation || selected.Progress.Status != protocol.KnowledgeStatusReady || selected.Revision != created.Revision {
 		t.Fatalf("selection change = %+v", selected)
 	}
-	fixture.service.Invalidate()
-	if progress := until(protocol.KnowledgeStatusReady); progress.Model != nil || progress.Chunks != 3 || fixture.embedded() != 0 {
+	if progress := sweepReady(); progress.Model != nil || progress.Chunks != 3 || fixture.embedded() != 0 {
 		t.Fatalf("selected but not installed = %+v, %d texts", progress, fixture.embedded())
+	}
+	if page = fixture.query("向量", nil); page.Mode != protocol.KnowledgeModeKeyword || page.Model != nil || !slices.Equal(names(page.Hits), []string{"vectors.md"}) {
+		t.Fatalf("selected but not installed query = %s %v", page.Mode, names(page.Hits))
 	}
 	fixture.install()
 	fixture.service.Invalidate()
-	embedded := until(protocol.KnowledgeStatusReady)
+	embedded := sweepReady()
 	if embedded.Model == nil || *embedded.Model != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || embedded.Sources != 3 || embedded.Chunks != 3 || fixture.embedded() != 3 {
 		t.Fatalf("embedded = %+v, %d texts", embedded, fixture.embedded())
 	}
@@ -867,8 +882,7 @@ func TestCollectionLifecycle(t *testing.T) {
 
 	// A new file is indexed; the published sources are reused.
 	write(t, filepath.Join(root, "notes", "added.md"), "added 向量 text\n")
-	fixture.service.Refresh()
-	if progress := until(protocol.KnowledgeStatusReady); progress.Sources != 4 || progress.Chunks != 4 || fixture.embedded() != 4 {
+	if progress := sweepReady(); progress.Sources != 4 || progress.Chunks != 4 || fixture.embedded() != 4 {
 		t.Fatalf("added file = %+v, %d texts", progress, fixture.embedded())
 	}
 
@@ -903,7 +917,7 @@ func TestCollectionLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture.service.Invalidate()
-	until(protocol.KnowledgeStatusReady)
+	sweepReady()
 	if count := fixture.embedded(); count != 4 {
 		t.Fatalf("resuming embedded again: %d texts", count)
 	}
@@ -920,7 +934,7 @@ func TestCollectionLifecycle(t *testing.T) {
 		t.Fatalf("query during rebuild = %+v", page)
 	}
 	fixture.service.Invalidate()
-	if progress := until(protocol.KnowledgeStatusReady); progress.Sources != 4 || progress.Chunks != 4 || fixture.embedded() != 8 {
+	if progress := sweepReady(); progress.Sources != 4 || progress.Chunks != 4 || fixture.embedded() != 8 {
 		t.Fatalf("rebuild = %+v, %d texts", progress, fixture.embedded())
 	}
 
@@ -933,7 +947,6 @@ func TestCollectionLifecycle(t *testing.T) {
 	if remaining := fixture.collections(); len(remaining) != 0 {
 		t.Fatalf("collections after delete = %+v", remaining)
 	}
-	fixture.service.Close()
 	fixture.sweep()
 	var sources int
 	if err := fixture.store.Knowledge.Read(ctx, func(db *sql.Conn) error {
