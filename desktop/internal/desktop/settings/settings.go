@@ -7,6 +7,7 @@ import (
 	cheapauthui "github.com/ai-poet/agent-client/desktop/internal/desktop/cheapauth"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/icons"
+	imagestudioui "github.com/ai-poet/agent-client/desktop/internal/desktop/imagestudio"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/preview"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/theme"
@@ -24,6 +25,7 @@ const (
 	Shortcuts    Section = "settings_shortcuts"
 	Providers    Section = "settings_providers"
 	CheapAccount Section = "cheaprouter_account"
+	ImageAPI     Section = "settings_image_api"
 	Connectors   Section = "settings_connectors"
 	Teams        Section = "settings_teams"
 	Plugins      Section = "settings_plugins"
@@ -57,7 +59,7 @@ var Groups = []struct {
 		{Shortcuts, icons.ALargeSmall},
 	}},
 	{"settings_group_ai", []Item{
-		{CheapAccount, icons.CircleUser}, {Providers, icons.Cpu}, {Connectors, icons.Plug}, {Teams, icons.Users}, {Plugins, icons.Gallery},
+		{CheapAccount, icons.CircleUser}, {ImageAPI, icons.FileImage}, {Providers, icons.Cpu}, {Connectors, icons.Plug}, {Teams, icons.Users}, {Plugins, icons.Gallery},
 		{Skills, icons.Bot}, {Knowledge, icons.BookOpen}, {Media, icons.Image},
 	}},
 	{"settings_group_tools", []Item{
@@ -81,6 +83,8 @@ type State struct {
 	*Model
 	// CheapRouter is the live account page; preview windows leave it nil.
 	CheapRouter *cheapauthui.State
+	// ImageAPI is the custom OpenAI-compatible image endpoint settings state.
+	ImageAPI *imagestudioui.SettingsState
 }
 
 // New opens on General, as Workspace does, over the preview's settings.
@@ -130,6 +134,10 @@ func Title(c *ui.Context, s *State) string {
 func Page(c *ui.Context, s *State, d *preview.Data, look Look) {
 	if s.Section == CheapAccount {
 		cheapauthui.Page(c, s.CheapRouter)
+		return
+	}
+	if s.Section == ImageAPI {
+		imagestudioui.SettingsPage(c, s.ImageAPI)
 		return
 	}
 	for _, page := range s.pluginPages {
