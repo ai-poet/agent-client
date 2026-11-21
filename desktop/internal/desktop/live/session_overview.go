@@ -24,15 +24,14 @@ const overviewLimit = 20
 // while the session is not shown so it reopens at once.
 type overviewRead struct {
 	open bool
-	// revision and head are the history the popover was last synced with.
-	revision, head uint64
-	// loaded is false until a read succeeded; groups were read at
-	// loadedRevision when the history's newest sequence was loadedHead.
-	loaded                     bool
-	loadedRevision, loadedHead uint64
-	groups                     []protocol.ConversationAssetsGroup
-	before                     *uint64
-	loading, failed            bool
+	// revision guards pagination; inventory also changes on canonical commits
+	// that do not replace history. Draft and statistics frames affect neither.
+	revision, inventory             uint64
+	loaded                          bool
+	loadedRevision, loadedInventory uint64
+	groups                          []protocol.ConversationAssetsGroup
+	before                          *uint64
+	loading, failed                 bool
 	// refreshing retains the last loaded inventory while history updates
 	// trigger a background read. Initial reads, retries and paging stay visible.
 	refreshing bool
@@ -43,7 +42,7 @@ type overviewRead struct {
 
 // current reports whether the inventory covers the newest history.
 func (o *overviewRead) current() bool {
-	return o.loaded && o.loadedRevision == o.revision && o.loadedHead == o.head
+	return o.loaded && o.loadedRevision == o.revision && o.loadedInventory == o.inventory
 }
 
 // sessionOverview is the header's overview of conversation cv: the running
@@ -82,13 +81,13 @@ func (r *Runtime) sessionOverview(c *ui.Context, cv *viewmodel.Conversation) *co
 					Name: childTitle(page, child, c.Locale()), Status: "chat_running", Running: true, Avatar: childAvatar(r.snapshot().Roles, child)})
 			}
 		}
-		if read.revision != page.Revision || read.head != state.Snapshot.Sequence {
+		if read.revision != page.Revision || read.inventory != state.InventoryVersion {
 			// The history moved: a read under way is for the old one, and
 			// a structural change makes the rows read so far another
 			// history's.
 			read.generation++
 			read.loading, read.failed = false, false
-			read.revision, read.head = page.Revision, state.Snapshot.Sequence
+			read.revision, read.inventory = page.Revision, state.InventoryVersion
 			if read.loaded && read.loadedRevision != read.revision {
 				read.loaded, read.groups, read.before = false, nil, nil
 			}
@@ -174,11 +173,16 @@ func (r *Runtime) sessionOverview(c *ui.Context, cv *viewmodel.Conversation) *co
 // the one shown fails, as the rows would not belong together.
 func (r *Runtime) loadOverview(session protocol.SessionID, read *overviewRead, more bool) {
 	var before *uint64
+	inventory := read.inventory
 	if more {
 		before = read.before
+		// Appending older groups does not refresh the already loaded head.
+		if before != nil {
+			inventory = read.loadedInventory
+		}
 	}
 	read.generation++
-	generation, head := read.generation, read.head
+	generation := read.generation
 	read.refreshing = read.loaded && !more && !read.failed
 	read.loading, read.failed = true, false
 	r.async(func() {
@@ -197,7 +201,10 @@ func (r *Runtime) loadOverview(session protocol.SessionID, read *overviewRead, m
 				read.groups = nil
 			}
 			read.groups = append(read.groups, page.Groups...)
-			read.loaded, read.loadedRevision, read.loadedHead, read.before = true, page.Revision, head, page.NextBefore
+			read.loaded, read.loadedRevision, read.loadedInventory, read.before = true, page.Revision, inventory, page.NextBefore
+			if read.open && read.inventory != inventory {
+				r.loadOverview(session, read, false)
+			}
 		})
 	})
 }
