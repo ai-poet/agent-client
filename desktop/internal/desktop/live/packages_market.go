@@ -298,6 +298,7 @@ func (r *Runtime) updatePackage(id string, finish func()) {
 		finish()
 		if ok {
 			delete(r.packages.updates, name)
+			r.projectPackages()
 		}
 	})
 }
@@ -372,6 +373,7 @@ func (r *Runtime) installOfficialSelection(selection protocol.PluginCatalogSelec
 	r.packageCommand(protocol.Command{Kind: "install_catalog_plugin", Data: protocol.CommandInstallCatalogPluginPayload{Selection: selection, ExpectedRevision: revision, Mode: mode}}, func(_ protocol.Output, ok bool) {
 		if ok {
 			delete(r.packages.updates, selection.Info.Summary.Name)
+			r.projectPackages()
 		}
 		finish()
 	})
