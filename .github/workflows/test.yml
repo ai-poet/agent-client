@@ -18,9 +18,19 @@ jobs:
       fail-fast: false
       matrix:
         # No Linux runner: this fork ships no Linux build.
-        os: [macos-latest, windows-latest]
+        include:
+          - os: macos-latest
+            platform: darwin
+            arch: arm64
+            rust-target: aarch64-apple-darwin
+            turso-library: libturso_sync_sdk_kit.dylib
+          - os: windows-latest
+            platform: windows
+            arch: amd64
+            rust-target: x86_64-pc-windows-msvc
+            turso-library: turso_sync_sdk_kit.dll
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 90
     env:
       CGO_ENABLED: "0"
       GOTOOLCHAIN: go1.27.3
@@ -36,7 +46,45 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
+      - name: Install Rust (native libraries)
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --target ${{ matrix.rust-target }}
+          rustup default 1.98.0
+
+      - name: Cache Cargo dependencies and builds
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .runtime/native/${{ matrix.platform }}-${{ matrix.arch }}/cargo
+            .runtime/native/${{ matrix.platform }}-${{ matrix.arch }}/turso-cargo
+          key: tests-${{ matrix.os }}-${{ matrix.rust-target }}-rust-1.98.0-${{ hashFiles('native/iroh/Cargo.lock', 'native/turso/Cargo.lock') }}
+          restore-keys: |
+            tests-${{ matrix.os }}-${{ matrix.rust-target }}-rust-1.98.0-
+
+      - name: Build native libraries
+        shell: bash
+        env:
+          SAILRY_ARCH: ${{ matrix.arch }}
+        run: |
+          sh native/iroh/build.sh
+          sh native/turso/build.sh
+          sh native/capture/build.sh
+
+      - name: Stage Windows C++ runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          SAILRY_ARCH: ${{ matrix.arch }}
+        run: |
+          $output = Join-Path $PWD ".runtime/native/windows-$env:SAILRY_ARCH"
+          & ./native/windows/crt.ps1 -Arch $env:SAILRY_ARCH -Output $output
+          $output >> $env:GITHUB_PATH
+
       - name: Run desktop tests
+        env:
+          SAILRY_TURSO_LIB: ${{ github.workspace }}/.runtime/native/${{ matrix.platform }}-${{ matrix.arch }}/${{ matrix.turso-library }}
         run: go test ./...
 
       - name: Build desktop shell

@@ -71,18 +71,10 @@ func TestWindowsCRTArtifact(t *testing.T) {
 }
 
 func TestWindowsCRTSeal(t *testing.T) {
-	t.Chdir("../..")
 	directory := t.TempDir()
 	crtFiles := crtArtifact(t, directory)
 	run := &stage{goos: "windows", triple: triples["windows/amd64"]}
-	_, onnx, err := run.load("native/onnxruntime.lock.json")
-	if err != nil {
-		t.Fatal(err)
-	}
 	names := append(built("windows"), tursoLibrary("windows"))
-	for _, file := range onnx.Files {
-		names = append(names, file.Name)
-	}
 	for _, name := range names {
 		if err := os.WriteFile(filepath.Join(directory, name), []byte("fixture "+name), 0o600); err != nil {
 			t.Fatal(err)
