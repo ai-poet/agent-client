@@ -5,8 +5,9 @@
 #
 # Downloads the latest release zip with curl — which, unlike a browser, sets
 # no com.apple.quarantine attribute — so the ad-hoc-signed app opens without
-# Gatekeeper prompts. Later updates arrive in-app via Sparkle, which verifies
-# our EdDSA signature and clears quarantine itself.
+# Gatekeeper prompts. Later updates arrive in-app through the signed
+# CheapRouter update feed (the 0.3.x client used Sparkle for the first hop to
+# this one); the updater verifies the signature and clears quarantine itself.
 set -eu
 
 FEED="https://s3.cheaprouter.cc/cheaprouter-releases/appcast.xml"
@@ -16,7 +17,31 @@ if [ "$(uname -s)" != "Darwin" ]; then
   exit 1
 fi
 
-url=$(curl -fsSL "$FEED" | grep -o 'url="[^"]*\.zip"' | head -1 | cut -d'"' -f2)
+arch=$(uname -m)
+feed=$(curl -fsSL "$FEED") || {
+  echo "Could not fetch $FEED" >&2
+  exit 1
+}
+
+pick() {
+  printf '%s' "$feed" | grep -o "$1" | head -1 | cut -d'"' -f2
+}
+
+case "$arch" in
+  x86_64)
+    url=$(pick 'url="[^"]*-x86_64\.zip"')
+    # Releases before 0.4.0 only shipped an arm64 zip.
+    [ -n "$url" ] || url=$(pick 'url="[^"]*\.zip"')
+    ;;
+  *)
+    # Apple silicon builds carry no architecture suffix in their file name.
+    url=$(printf '%s' "$feed" \
+      | grep -o 'url="[^"]*\.zip"' \
+      | grep -v 'x86_64\.zip' \
+      | head -1 | cut -d'"' -f2)
+    [ -n "$url" ] || url=$(pick 'url="[^"]*\.zip"')
+    ;;
+esac
 if [ -z "$url" ]; then
   echo "Could not resolve the latest release from $FEED" >&2
   exit 1
@@ -37,6 +62,15 @@ if [ -z "$app" ]; then
   exit 1
 fi
 name=$(basename "$app")
+
+binary=$(find "$app/Contents/MacOS" -maxdepth 1 -type f -perm -u+x 2>/dev/null | head -1)
+if [ -n "$binary" ] && command -v lipo >/dev/null 2>&1; then
+  binarchs=$(lipo -archs "$binary" 2>/dev/null || true)
+  case " $binarchs " in
+    *" $arch "*) : ;;
+    *) echo "warning: this build does not include $arch; it may need Rosetta." >&2 ;;
+  esac
+fi
 
 # /Applications is admin-writable; fall back to ~/Applications otherwise.
 destination="/Applications"
