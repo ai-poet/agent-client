@@ -214,11 +214,9 @@ func (s *Service) begin(launch Launch, background bool) (*commandEntry, error) {
 func (s *Service) run(ctx context.Context, entry *commandEntry) {
 	defer s.workers.Done()
 	defer entry.stop()
+	var idle func()
 	if s.options.Working != nil {
-		defer s.options.Working()()
-	}
-	if entry.launch.Release != nil {
-		defer entry.launch.Release()
+		idle = s.options.Working()
 	}
 	run := s.options.Run
 	if run == nil {
@@ -232,6 +230,19 @@ func (s *Service) run(ctx context.Context, entry *commandEntry) {
 		}()
 		return run(ctx, entry.launch, func(kind protocol.ProcessOutputOutputStream, value []byte) { s.append(entry, kind, value) }, entry.input)
 	}()
+	s.mu.Lock()
+	// Once the runner has stopped producing output, choose the final capture
+	// mode before a competing foreground-to-background promotion can enter.
+	entry.settling = true
+	info, background, explicit := entry.info, entry.background, entry.explicit
+	s.mu.Unlock()
+	// Input files and the power hold belong to the native runner's lifetime.
+	if entry.launch.Release != nil {
+		entry.launch.Release()
+	}
+	if idle != nil {
+		idle()
+	}
 	// The runner flags a stream it stopped reading before that stream closed.
 	if completion.Stdout.Truncated {
 		entry.stdout.cut()
@@ -241,17 +252,18 @@ func (s *Service) run(ctx context.Context, entry *commandEntry) {
 	}
 	entry.stdout.finish()
 	entry.stderr.finish()
-	completion.Stdout, completion.Stderr = entry.stdout.snapshot(false), entry.stderr.snapshot(false)
-	s.mu.Lock()
-	entry.settling = true
-	info := entry.info
+	var stdoutBytes, stderrBytes *uint64
+	if background {
+		completion.Stdout, stdoutBytes = entry.stdout.captureDetails(false)
+		completion.Stderr, stderrBytes = entry.stderr.captureDetails(false)
+	} else {
+		completion.Stdout, completion.Stderr = entry.stdout.snapshot(false), entry.stderr.snapshot(false)
+	}
 	if failure == nil {
 		info.Status = protocol.ProcessStatus{Kind: "finished", Data: completion.Outcome}
 	} else {
 		info.Status = protocol.ProcessStatus{Kind: "failed", Data: failure.Error()}
 	}
-	background, explicit := entry.background, entry.explicit
-	s.mu.Unlock()
 	if background && entry.launch.CompletionGate != nil {
 		select {
 		case <-entry.launch.CompletionGate:
@@ -264,8 +276,9 @@ func (s *Service) run(ctx context.Context, entry *commandEntry) {
 		if failure == nil {
 			timing = &elapsed
 		}
-		finished := Finished{Snapshot: protocol.ProcessSnapshot{Info: info, Stdout: completion.Stdout, Stderr: completion.Stderr}, ElapsedMs: timing, Explicit: explicit}
-		if err := s.options.Finished(context.WithoutCancel(s.ctx), finished); err != nil {
+		finished := Finished{Snapshot: protocol.ProcessSnapshot{Info: info, Stdout: completion.Stdout, Stderr: completion.Stderr},
+			ElapsedMs: timing, Explicit: explicit, StdoutBytes: stdoutBytes, StderrBytes: stderrBytes}
+		if err := s.persistFinished(finished); err != nil {
 			failure = &protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown, Message: "command completion could not be recorded; side effects were not replayed: " + err.Error()}
 			info.Status = protocol.ProcessStatus{Kind: "failed", Data: failure.Error()}
 		}
@@ -279,6 +292,24 @@ func (s *Service) run(ctx context.Context, entry *commandEntry) {
 	s.mu.Unlock()
 	if s.options.Changed != nil {
 		s.options.Changed(entry.launch.Worktree)
+	}
+}
+
+func (s *Service) persistFinished(finished Finished) error {
+	ctx := context.WithoutCancel(s.ctx)
+	for {
+		err := s.options.Finished(ctx, finished)
+		var fault *protocol.Fault
+		if !errors.As(err, &fault) || fault.Code != protocol.ErrorCodeBusy && fault.Code != protocol.ErrorCodeUnavailable {
+			return err
+		}
+		// A refused write can repeat for the same completed command. An
+		// uncertain commit is handled by the caller without replaying it.
+		select {
+		case <-s.ctx.Done():
+			return err
+		case <-s.options.After(time.Second):
+		}
 	}
 }
 
@@ -337,6 +368,8 @@ func (s *Service) promoteLocked(entry *commandEntry) {
 	if entry.promoted || entry.background {
 		return
 	}
+	entry.stdout.promote()
+	entry.stderr.promote()
 	entry.background, entry.promoted = true, true
 	close(entry.promotion)
 	s.watchStallLocked(entry)
@@ -365,12 +398,18 @@ func (s *Service) watchStallLocked(entry *commandEntry) {
 				s.mu.Unlock()
 				return
 			}
-			if silent := s.options.Now().Sub(entry.activity); silent < StallWindow {
+			now := s.options.Now()
+			silent := now.Sub(entry.activity)
+			if silent < StallWindow {
 				s.mu.Unlock()
 				wait = StallWindow - silent
 				continue
 			}
-			stalled := Stalled{Snapshot: protocol.ProcessSnapshot{Info: entry.info, Stdout: entry.stdout.snapshot(true), Stderr: entry.stderr.snapshot(true)}, ElapsedMs: uint64(max(s.options.Now().UnixMilli()-int64(entry.info.StartedMs), 0))}
+			stdout, stdoutBytes := entry.stdout.captureDetails(true)
+			stderr, stderrBytes := entry.stderr.captureDetails(true)
+			stalled := Stalled{Snapshot: protocol.ProcessSnapshot{Info: entry.info, Stdout: stdout, Stderr: stderr},
+				ElapsedMs: uint64(max(now.UnixMilli()-int64(entry.info.StartedMs), 0)), SilenceMs: uint64(silent.Milliseconds()),
+				StdoutBytes: stdoutBytes, StderrBytes: stderrBytes}
 			resumed := entry.outputChanged
 			s.mu.Unlock()
 			// The command keeps running whether or not its session hears of the silence.
