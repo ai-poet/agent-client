@@ -61,7 +61,7 @@ export function publicKeyBase64(privateKey: ReturnType<typeof createPrivateKey>)
 
 /** SUPublicEDKey, the one value both platforms have to agree on. */
 export async function appPublicKey(): Promise<string> {
-  const configPath = join(projectRoot, "desktop/cmd/sailry-desktop/mygo.json");
+  const configPath = join(projectRoot, "cmd/sailry-desktop/mygo.json");
   const config = (await Bun.file(configPath).json()) as {
     macos?: { infoPlist?: { SUPublicEDKey?: string } };
   };

@@ -1,0 +1,32 @@
+package node
+
+import (
+	"github.com/ai-poet/agent-client/internal/protocol"
+)
+
+// processSessionEvents stops the commands of removed sessions. The store has
+// already dismissed their evidence in the removing transaction. after runs
+// once those commands have stopped.
+func (node *Node) processSessionEvents(changes []protocol.Event, after func([]protocol.SessionID)) {
+	for _, change := range changes {
+		if change.Kind != "sessions_removed" {
+			continue
+		}
+		removed, valid := dispatchPayload[[]protocol.SessionID](change.Data)
+		if !valid {
+			continue
+		}
+		// Closing waits for each command's completion write, and the command
+		// lock may be held here, so it runs on its own. Node closure stops
+		// every command itself. The removing command is still counted, and
+		// Stop waits for this too.
+		node.work.Add(1)
+		go func() {
+			defer node.work.Done()
+			for _, session := range removed {
+				_, _ = node.processes.CloseSession(node.ctx, session)
+			}
+			after(removed)
+		}()
+	}
+}

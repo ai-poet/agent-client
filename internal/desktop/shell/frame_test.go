@@ -1,0 +1,1645 @@
+package shell
+
+import (
+	"fmt"
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/egoist/mygo/ui"
+	"github.com/ai-poet/agent-client/internal/desktop/conversation"
+	"github.com/ai-poet/agent-client/internal/desktop/i18n"
+	"github.com/ai-poet/agent-client/internal/desktop/kit"
+	"github.com/ai-poet/agent-client/internal/desktop/panel"
+	"github.com/ai-poet/agent-client/internal/desktop/preview"
+	"github.com/ai-poet/agent-client/internal/desktop/settings"
+	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
+)
+
+func TestPanelOpensWithShortcutsAndTabs(t *testing.T) {
+	a, tt := newTester(t)
+	tt.Key(ui.Cmd|ui.Alt, ui.KeyB)
+	tt.Advance(time.Second)
+	tt.Frame()
+	if !a.PanelOpen || !tt.HasText(i18n.In("en", "resource_browser")) {
+		t.Fatalf("⌘⌥B did not open the launcher: %q", tt.Texts())
+	}
+	snapshot(t, tt, "panel-launcher")
+	tt.Key(ui.Cmd, ui.KeyP)
+	tt.Advance(time.Second)
+	tt.Frame()
+	if a.Panel.Active.Kind != panel.Files || !tt.HasText("README.md") {
+		t.Fatalf("⌘P did not show the file tree: %q", tt.Texts())
+	}
+	// The tab shows the project's file beside the tree, passing until its
+	// menu keeps it; choosing another then opens it in its own tab, the
+	// tree staying beside it.
+	if !tt.HasText("A native desktop Agent workspace.") {
+		t.Fatalf("the Files tab does not show the file: %q", tt.Texts())
+	}
+	// keepShown keeps the panel's shown tab from its menu.
+	keepShown := func() {
+		t.Helper()
+		for _, info := range tt.AccessAll() {
+			if b := info.Bounds; info.Role == ui.RoleButton && info.Checked && b.Y+b.H <= HeaderHeight && b.X >= 1280-a.PanelWidth {
+				tt.RightClickAt(b.X+b.W/2, b.Y+b.H/2)
+				tt.Frame()
+				if err := tt.ChooseMenuItem(i18n.In("en", "workspace_tab_keep")); err != nil {
+					t.Fatal(err)
+				}
+				tt.Frame()
+				return
+			}
+		}
+		t.Fatalf("no shown tab in the panel's strip: %q", tt.Texts())
+	}
+	keepShown()
+	clickTree(t, tt, "go.mod")
+	tt.Frame()
+	if len(a.Panel.Tabs) != 2 || a.Panel.Active != (panel.Tab{Kind: panel.Files, ID: "sailry-go/go.mod"}) || !codeHas(tt, "Code editor", "require github.com/egoist/mygo v0.8.3") {
+		t.Fatalf("the file did not show in the Files tab: %v %q", a.Panel.Tabs, tt.Texts())
+	}
+	snapshot(t, tt, "panel-files")
+	keepShown()
+	tt.Key(ui.Ctrl|ui.Shift, ui.KeyG)
+	tt.Frame()
+	keepShown()
+	clickTree(t, tt, "example.md")
+	tt.Frame()
+	if len(a.Panel.Tabs) != 4 || a.Panel.Active != (panel.Tab{Kind: panel.Changes, ID: "docs/example.md"}) ||
+		!codeHas(tt, "New text", "search: command palette") {
+		t.Fatalf("no diff tab: %v %q", a.Panel.Tabs, tt.Texts())
+	}
+	// Choosing a tab shows its item and its kind's side list, whose
+	// selection stays the tree's own, as the files plugin's explorer.
+	// The tabs share the band over the panel with the session status: idle,
+	// the four tabs all show in it.
+	setRuns(a, false)
+	tt.Frame()
+	click(t, tt, "README.md")
+	tt.Frame()
+	if _, ok := tt.AccessByRole(ui.RoleTreeItem, "README.md"); !ok || !tt.HasText("A native desktop Agent workspace.") {
+		t.Fatalf("the README tab does not show beside the tree: %q", tt.Texts())
+	}
+	snapshot(t, tt, "panel-changes")
+	for _, k := range []panel.Kind{panel.History, panel.Documents, panel.Browser, panel.Terminal} {
+		a.Panel.Open(k)
+	}
+	// Two files, two diffs and those four: one flat strip.
+	if len(a.Panel.Tabs) != 8 {
+		t.Fatalf("tabs %v", a.Panel.Tabs)
+	}
+	tt.Frame()
+	if !tt.HasText(i18n.In("en", "workspace_terminal_preview")) {
+		t.Errorf("no terminal placeholder: %q", tt.Texts())
+	}
+	if _, ok := tt.Access(i18n.In("en", "navigation_tabs")); !ok {
+		t.Error("eight tabs show no overflow menu")
+	}
+	// KEY-013: ⌘F from the conversation's input opens the conversation's
+	// find bar.
+	input, found := tt.AccessByRole(ui.RoleTextField, i18n.In("en", "composer"))
+	if !found {
+		t.Fatalf("no composer input: %q", tt.Texts())
+	}
+	tt.ClickAt(input.Bounds.X+input.Bounds.W/2, input.Bounds.Y+input.Bounds.H/2)
+	tt.Frame()
+	tt.Key(ui.Cmd, ui.KeyF)
+	tt.Frame()
+	if !a.Messages.SearchOpen() {
+		t.Fatalf("⌘F outside the terminal opened no conversation find bar: %q", tt.Texts())
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if a.Messages.SearchOpen() {
+		t.Fatal("Escape left the conversation's find bar open")
+	}
+	// ⌘F in the terminal opens its find bar, not the conversation's.
+	// The tab has no toolbar of its own: the shortcut alone opens the bar,
+	// which MyGo closes with Done.
+	click(t, tt, i18n.In("en", "workspace_terminal_preview"))
+	tt.Frame()
+	if tt.HasText("Done") || tt.HasText(i18n.In("en", "terminal_search_placeholder")) {
+		t.Fatalf("the terminal tab shows a find control before ⌘F: %q", tt.Texts())
+	}
+	tt.Key(ui.Cmd, ui.KeyF)
+	tt.Frame()
+	if !tt.HasText("Done") || a.Messages.SearchOpen() {
+		t.Errorf("no terminal find bar, or the conversation's opened: %q", tt.Texts())
+	}
+	snapshot(t, tt, "panel-terminal")
+	// A tab's close button closes it, the shown one and one behind it: the
+	// button floats at the tab's end as the tab is hovered.
+	closeTab := func(title string) {
+		t.Helper()
+		for _, info := range tt.AccessAll() {
+			if info.Role != ui.RoleButton || info.Name != title || info.Bounds.H != 28 || info.Bounds.Y+info.Bounds.H > HeaderHeight || info.Bounds.X < 1280-a.PanelWidth {
+				continue
+			}
+			x, y := info.Bounds.X+info.Bounds.W-14, info.Bounds.Y+info.Bounds.H/2
+			tt.Move(x, y)
+			tt.Frame()
+			tt.ClickAt(x, y)
+			tt.Frame()
+			tt.Frame()
+			return
+		}
+		t.Fatalf("no tab %q in the strip: %q", title, tt.Texts())
+	}
+	terminal := a.Panel.Active
+	closeTab(i18n.In("en", "terminal"))
+	if len(a.Panel.Tabs) != 7 || slices.Contains(a.Panel.Tabs, terminal) || a.Panel.Active != a.Panel.Tabs[0] {
+		t.Fatalf("the close button left the shown tab: %v, active %v", a.Panel.Tabs, a.Panel.Active)
+	}
+	closeTab("go.mod")
+	if len(a.Panel.Tabs) != 6 || slices.Contains(a.Panel.Tabs, panel.Tab{Kind: panel.Files, ID: "sailry-go/go.mod"}) || a.Panel.Active != a.Panel.Tabs[0] {
+		t.Fatalf("the close button left a tab behind the shown one: %v, active %v", a.Panel.Tabs, a.Panel.Active)
+	}
+	// ⌘W in the panel closes the active tab, then the others, then the
+	// panel.
+	for range 10 {
+		tt.Key(ui.Cmd, ui.KeyW)
+		tt.Frame()
+	}
+	if len(a.Panel.Tabs) != 0 || a.PanelOpen {
+		t.Errorf("⌘W left %v, open %v", a.Panel.Tabs, a.PanelOpen)
+	}
+}
+
+// The launcher lists its four resources, Browser, Terminal, Files and Git,
+// centred in the panel, and neither History nor Documents.
+func TestPanelLauncherCentred(t *testing.T) {
+	// The rail names Files and Git too: the launcher's rows are the panel's.
+	row := func(tt *ui.Tester, lang string, r panel.Resource) (ui.AccessInfo, bool) {
+		for _, info := range tt.AccessAll() {
+			if info.Role == ui.RoleButton && info.Name == i18n.In(lang, r.Label) && info.Bounds.X >= 640 {
+				return info, true
+			}
+		}
+		return ui.AccessInfo{}, false
+	}
+	for _, lang := range []string{"en", "zh-CN"} {
+		_, tt := newTester(t)
+		tt.SetLocale(lang)
+		tt.Key(ui.Cmd|ui.Alt, ui.KeyB)
+		tt.Advance(time.Second)
+		tt.Frame()
+		// The launcher has no title: its rows are centred between the header
+		// and the window's bottom edge.
+		for _, r := range panel.Resources[4:] {
+			if _, listed := row(tt, lang, r); listed {
+				t.Fatalf("%s: the launcher lists %s", lang, r.Label)
+			}
+		}
+		head, ok := row(tt, lang, panel.Resources[0])
+		tail, found := row(tt, lang, panel.Resources[3])
+		if !ok || !found || head.Bounds.X < 640 || tail.Bounds.X != head.Bounds.X {
+			t.Fatalf("%s: launcher rows %v %v: %+v %+v", lang, ok, found, head.Bounds, tail.Bounds)
+		}
+		first, last := head.Bounds.Y, tail.Bounds.Y+tail.Bounds.H
+		above, below := first-HeaderHeight, 820-last
+		if above < 80 || above-below > 2 || below-above > 2 {
+			t.Fatalf("%s: the rows are not vertically centred: %v above, %v below", lang, above, below)
+		}
+	}
+	for _, r := range panel.Resources[:4] {
+		a, tt := newTester(t)
+		tt.Key(ui.Cmd|ui.Alt, ui.KeyB)
+		tt.Advance(time.Second)
+		tt.Frame()
+		button, ok := row(tt, "en", r)
+		if !ok {
+			t.Fatalf("the launcher has no %q row", r.Label)
+		}
+		tt.ClickAt(button.Bounds.X+button.Bounds.W/2, button.Bounds.Y+button.Bounds.H/2)
+		tt.Frame()
+		if a.Panel.Active.Kind != r.Kind || a.Page != ConversationPage {
+			t.Errorf("the %q row opened %v on page %v", r.Label, a.Panel.Active, a.Page)
+		}
+	}
+}
+
+// sessionsShown reports whether the session sidebar shows: its New session
+// button and the "+" of its Chats group, in the column beside the rail.
+func sessionsShown(tt *ui.Tester) bool {
+	var button, plus bool
+	for _, info := range tt.AccessAll() {
+		if info.Role != ui.RoleButton || info.Bounds.X < RailWidth || info.Bounds.X >= RailWidth+NavMax {
+			continue
+		}
+		button = button || info.Name == i18n.In("en", "conversation")
+		plus = plus || info.Name == i18n.In("en", "workspace_new_session")
+	}
+	return button && plus
+}
+
+// headerButton finds a button of the header's band by its name, apart from
+// controls of the same name below it.
+func headerButton(tt *ui.Tester, name string) (ui.AccessInfo, bool) {
+	for _, info := range tt.AccessAll() {
+		if b := info.Bounds; info.Role == ui.RoleButton && info.Name == name && b.W > 0 && b.Y+b.H <= HeaderHeight {
+			return info, true
+		}
+	}
+	return ui.AccessInfo{}, false
+}
+
+// Each page owns its side column: the sessions beside the conversation and
+// the host and project pages opened from it, the sections beside Settings,
+// none beside the other pages, whose header has no toggle and where ⌘B
+// leaves the saved choice.
+func testSideColumns(t *testing.T) {
+	a, tt := newTester(t)
+	toggle := i18n.In("en", "sidebar_toggle")
+	pages := []struct {
+		name             string
+		open             func()
+		sessions, column bool
+	}{
+		{"files", func() { a.Navigate(FilesPage) }, false, false},
+		{"conversation", func() { a.Navigate(ConversationPage) }, true, true},
+		{"git", func() { a.Navigate(GitPage) }, false, false},
+		{"host", func() { a.openHost("remote", false) }, true, true},
+		{"activity", func() { a.Navigate(ActivityPage) }, false, false},
+		{"project", func() { a.OpenProject(a.Data.Projects[0], ProjectActions{}) }, true, true},
+		{"market", func() { a.Navigate(MarketPage) }, false, false},
+		{"settings", func() { a.Navigate(SettingsPage) }, false, true},
+		{"notifications", func() { a.Navigate(NotificationsPage) }, false, false},
+	}
+	for _, p := range pages {
+		p.open()
+		// One frame: the destination shows settled, with no motion.
+		tt.Frame()
+		button, shown := headerButton(tt, toggle)
+		if a.HasNavigation() != p.column || shown != p.column || a.NavShown() != p.column {
+			t.Errorf("%s: side column %v, toggle %v, want %v", p.name, a.HasNavigation(), shown, p.column)
+		}
+		if got := sessionsShown(tt); got != p.sessions {
+			t.Errorf("%s: session sidebar shown %v, want %v", p.name, got, p.sessions)
+		}
+		if shown && (button.Bounds.X < RailWidth+NavWidth+11 || button.Bounds.X > RailWidth+NavWidth+13) {
+			t.Errorf("%s: the page starts at %v on its first frame, want past the open column", p.name, button.Bounds.X)
+		}
+		if !a.NavOpen {
+			t.Fatalf("%s: the saved choice closed", p.name)
+		}
+		tt.Key(ui.Cmd, ui.KeyB)
+		settle(tt)
+		if a.NavOpen == p.column {
+			t.Errorf("%s: ⌘B left the choice open %v with a side column %v", p.name, a.NavOpen, p.column)
+		}
+		if p.column {
+			if sessionsShown(tt) || a.NavShown() {
+				t.Errorf("%s: ⌘B kept the column", p.name)
+			}
+			button, _ = headerButton(tt, toggle)
+			tt.ClickAt(button.Bounds.X+button.Bounds.W/2, button.Bounds.Y+button.Bounds.H/2)
+			settle(tt)
+			if !a.NavOpen || sessionsShown(tt) != p.sessions {
+				t.Errorf("%s: the toggle did not bring the column back", p.name)
+			}
+		}
+	}
+	// A closed choice stays closed across a page without a column and its
+	// project menu. Returning to the conversation restores the same choice.
+	a.Navigate(ConversationPage)
+	a.NavOpen = false
+	settle(tt)
+	a.Navigate(FilesPage)
+	tt.Frame()
+	if a.NavOpen || a.Prefs().NavOpen || sessionsShown(tt) {
+		t.Errorf("Files changed the closed choice: %v", a.NavOpen)
+	}
+	a.Navigate(ConversationPage)
+	tt.Frame()
+	// Past the app's name, which a window without traffic lights keeps.
+	name, _ := tt.Find(i18n.In("en", "app"))
+	if button, ok := headerButton(tt, toggle); !ok || a.NavOpen || sessionsShown(tt) || button.Bounds.X > max(RailWidth, name.W+24)+13 {
+		t.Errorf("the conversation came back with open %v, toggle %v", a.NavOpen, button.Bounds)
+	}
+	a.Navigate(FilesPage)
+	tt.Frame()
+	project := a.Data.ProjectOf(a.Sidebar.Selected)
+	if project == nil {
+		t.Fatal("the Files page has no selected project")
+	}
+	selected := a.Sidebar.Selected
+	switcher, ok := tt.Access(i18n.In("en", "projects"))
+	if !ok {
+		t.Fatalf("the Files page has no project menu: %q", tt.Texts())
+	}
+	tt.ClickAt(switcher.Bounds.X+switcher.Bounds.W/2, switcher.Bounds.Y+switcher.Bounds.H/2)
+	tt.Frame()
+	clickItem(t, tt, project.Name)
+	settle(tt)
+	if a.Page != FilesPage || a.Sidebar.Selected != selected || a.NavOpen || sessionsShown(tt) {
+		t.Errorf("the current project choice left page %d, selected %q, open %v", a.Page, a.Sidebar.Selected, a.NavOpen)
+	}
+	a.Navigate(ConversationPage)
+	tt.Frame()
+	button, ok := headerButton(tt, toggle)
+	if !ok || a.NavOpen || sessionsShown(tt) {
+		t.Fatalf("returning from Files changed the closed choice: open %v, toggle %v", a.NavOpen, ok)
+	}
+	tt.ClickAt(button.Bounds.X+button.Bounds.W/2, button.Bounds.Y+button.Bounds.H/2)
+	settle(tt)
+	if !a.NavOpen || !sessionsShown(tt) {
+		t.Error("the conversation's toggle did not restore its side column")
+	}
+	// The saved state is one choice and one width, as before: a page
+	// without a column saves and restores them untouched, and a file from
+	// before pages owned their columns loads.
+	a.NavWidth = 300
+	a.Navigate(MarketPage)
+	tt.Frame()
+	// The window's diff layout is saved with them: the choice above a diff
+	// writes the app's (kit.DiffSplit), and a file without it is unified.
+	a.Hooks.BeforeFrame = func(c *ui.Context) { *kit.DiffSplit(c) = true }
+	tt.Frame()
+	a.Hooks.BeforeFrame = nil
+	dir := t.TempDir()
+	if err := SavePrefs(dir, a.Prefs()); err != nil {
+		t.Fatal(err)
+	}
+	b := New(preview.Load())
+	b.SetPrefs(LoadPrefs(dir))
+	if !b.NavOpen || b.NavWidth != 300 {
+		t.Errorf("the choice did not come back from a page without a column: %+v", b.Prefs())
+	}
+	if !a.DiffSplit || !b.DiffSplit {
+		t.Errorf("the split diff did not come back: chosen %v, restored %v", a.DiffSplit, b.DiffSplit)
+	}
+	if err := os.WriteFile(filepath.Join(dir, PrefsFile), []byte(`{"navWidth":280,"navOpen":false,"panelWidth":420,"panelOpen":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b.SetPrefs(LoadPrefs(dir))
+	if b.NavOpen || b.NavWidth != 280 || !b.PanelOpen || b.PanelWidth != 420 || b.DiffSplit {
+		t.Errorf("an earlier file did not load: %+v", b.Prefs())
+	}
+	bt := ui.NewTesterWith(b.View, 1280, 820, opaque)
+	bt.SetLocale("en")
+	b.Navigate(GitPage)
+	bt.Frame()
+	if _, ok := headerButton(bt, toggle); ok || sessionsShown(bt) {
+		t.Error("the restored app shows a column beside Git")
+	}
+	b.Navigate(ConversationPage)
+	b.toggleNav()
+	settle(bt)
+	if _, ok := headerButton(bt, toggle); !ok || !sessionsShown(bt) {
+		t.Error("the restored app has no sessions beside the conversation")
+	}
+}
+
+func TestSidebarToggleAndPrefs(t *testing.T) {
+	t.Run("side columns", testSideColumns)
+	a, tt := newTester(t)
+	tt.Key(ui.Cmd, ui.KeyB)
+	tt.Advance(time.Second)
+	tt.Frame()
+	if a.NavOpen || tt.HasText("Show more") {
+		t.Fatalf("⌘B did not close the sidebar")
+	}
+	snapshot(t, tt, "sidebar-closed")
+	a.NavWidth, a.PanelOpen = 300, true
+	a.Panel.Open(panel.Changes)
+	a.Sidebar.SetCollapsed([]string{"notes"})
+	dir := t.TempDir()
+	if err := SavePrefs(dir, a.Prefs()); err != nil {
+		t.Fatal(err)
+	}
+	b := New(a.Data)
+	b.SetPrefs(LoadPrefs(dir))
+	if b.NavOpen || b.NavWidth != 300 || !b.PanelOpen || b.Panel.Active.Kind != panel.Changes {
+		t.Errorf("preferences did not come back: %+v", b.Prefs())
+	}
+	if got := b.Sidebar.Collapsed(); len(got) != 1 || got[0] != "notes" {
+		t.Errorf("collapsed projects %v", got)
+	}
+	// A file's preview and a subagent's session are their conversation's:
+	// their tabs are not kept, neither from a file that has them.
+	// A narrow conversation panel stacks a list over its document. Its
+	// handle sets the list's share of the height, the window's as the side
+	// columns' widths are: it is saved, restored, and absent from an
+	// earlier file, which loads the default.
+	t.Run("stacked list", func(t *testing.T) {
+		grip := func(tt *ui.Tester) ui.Rect {
+			t.Helper()
+			for _, e := range tt.AccessAll() {
+				if e.Role == ui.RoleSplitter && e.Bounds.H == 6 && e.Bounds.W > 6 {
+					return e.Bounds
+				}
+			}
+			t.Fatalf("no handle under the list: %q", tt.Texts())
+			return ui.Rect{}
+		}
+		open := func(a *App) *ui.Tester {
+			tt := ui.NewTesterWith(a.View, 900, 820, opaque)
+			tt.SetLocale("en")
+			a.NavOpen = false
+			a.PanelOpen = true
+			a.Panel.Open(panel.Files)
+			still(tt)
+			tt.Frame()
+			return tt
+		}
+		a := New(preview.Load())
+		tt := open(a)
+		before := grip(tt)
+		if a.ListShare != panel.ListShare || a.Prefs().ListShare != panel.ListShare {
+			t.Fatalf("the list starts with share %v, saved %v", a.ListShare, a.Prefs().ListShare)
+		}
+		x, y := before.X+before.W/2, before.Y+before.H/2
+		tt.Press(x, y)
+		tt.Frame()
+		tt.Move(x, y-30)
+		tt.Frame()
+		tt.Move(x, y-60)
+		tt.Frame()
+		tt.Release(x, y-60)
+		tt.Frame()
+		tt.Frame()
+		after := grip(tt)
+		if after.Y != before.Y-60 || a.ListShare >= panel.ListShare {
+			t.Fatalf("dragging up 60 moved the handle from %v to %v, share %v", before.Y, after.Y, a.ListShare)
+		}
+		dir := t.TempDir()
+		if err := SavePrefs(dir, a.Prefs()); err != nil {
+			t.Fatal(err)
+		}
+		b := New(preview.Load())
+		b.SetPrefs(LoadPrefs(dir))
+		if got := grip(open(b)); b.ListShare != a.ListShare || got.Y != after.Y {
+			t.Errorf("the list came back with share %v at %v, want %v at %v", b.ListShare, got.Y, a.ListShare, after.Y)
+		}
+		if err := os.WriteFile(filepath.Join(dir, PrefsFile), []byte(`{"navWidth":280,"navOpen":true}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		d := New(preview.Load())
+		d.SetPrefs(LoadPrefs(dir))
+		if got := grip(open(d)); d.ListShare != panel.ListShare || got.Y != before.Y {
+			t.Errorf("an earlier file gave the list share %v at %v, want %v at %v", d.ListShare, got.Y, panel.ListShare, before.Y)
+		}
+	})
+	t.Run("conversation tabs", func(t *testing.T) {
+		a := New(preview.Load())
+		a.Panel.Open(panel.Changes)
+		a.Panel.ShowChild("child", "Child")
+		a.Panel.ShowArtifact(conversation.File{ID: "file", Path: "notes.md"})
+		p := a.Prefs()
+		if want := []panel.Tab{{Kind: panel.Changes}}; !slices.Equal(p.PanelTabs, want) || p.PanelTab != want[0] {
+			t.Errorf("saved tabs %v active %v, want %v", p.PanelTabs, p.PanelTab, want)
+		}
+		p.PanelTabs = append(p.PanelTabs, panel.Tab{Kind: panel.Artifact, ID: "file"}, panel.Tab{Kind: panel.Subagent, ID: "child"})
+		p.PanelTab = panel.Tab{Kind: panel.Artifact, ID: "file"}
+		b := New(preview.Load())
+		b.SetPrefs(p)
+		if want := []panel.Tab{{Kind: panel.Changes}}; !slices.Equal(b.Panel.Tabs, want) || b.Panel.Active != want[0] {
+			t.Errorf("restored tabs %v active %v, want %v", b.Panel.Tabs, b.Panel.Active, want)
+		}
+	})
+	// The panel is the conversation's: its tabs, the one shown and whether
+	// its column is open leave with the conversation and come back with it,
+	// also after a relaunch and when a draft becomes its session.
+	t.Run("panel per conversation", func(t *testing.T) {
+		a, tt := newTester(t)
+		kinds := func(tabs []panel.Tab) string {
+			var out []string
+			for _, tab := range tabs {
+				out = append(out, string(tab.Kind))
+			}
+			return strings.Join(out, " ")
+		}
+		// Terminal opens another terminal every time; Browser its page.
+		a.openPanel(panel.Terminal)
+		a.openPanel(panel.Terminal)
+		a.openPanel(panel.Browser)
+		a.openPanel(panel.Browser)
+		tt.Frame()
+		first := slices.Clone(a.Panel.Tabs)
+		if got := kinds(first); got != "terminal terminal browser" || !a.PanelOpen || a.Panel.Active != first[2] {
+			t.Fatalf("the first conversation's tabs %q, open %v, active %v", got, a.PanelOpen, a.Panel.Active)
+		}
+		a.PanelWidth = 500
+		// Another conversation never shows them: its panel is closed until
+		// it opens one of its own.
+		a.Sidebar.Selected = themeChat
+		tt.Frame()
+		if a.PanelOpen || len(a.Panel.Tabs) != 0 {
+			t.Fatalf("another conversation shows open %v, tabs %v", a.PanelOpen, a.Panel.Tabs)
+		}
+		a.openPanel(panel.Browser)
+		tt.Frame()
+		second := slices.Clone(a.Panel.Tabs)
+		if kinds(second) != "browser" || slices.Contains(first, second[0]) || !slices.Equal(a.ConversationTabs(preview.Big), first) {
+			t.Fatalf("the second conversation's tabs %v beside %v", second, a.ConversationTabs(preview.Big))
+		}
+		a.PanelWidth = 420
+		// Coming back restores the tabs, the shown one and the column.
+		a.Sidebar.Selected = preview.Big
+		tt.Frame()
+		if !slices.Equal(a.Panel.Tabs, first) || a.Panel.Active != first[2] || !a.PanelOpen || a.PanelWidth != 500 {
+			t.Fatalf("back: tabs %v, active %v, open %v, width %v", a.Panel.Tabs, a.Panel.Active, a.PanelOpen, a.PanelWidth)
+		}
+		if got := a.AllPanelTabs(); len(got) != 4 || !a.HasPanelTab(second[0]) {
+			t.Fatalf("all tabs %v", got)
+		}
+		// A relaunch brings each conversation its own.
+		dir := t.TempDir()
+		if err := SavePrefs(dir, a.Prefs()); err != nil {
+			t.Fatal(err)
+		}
+		saved := LoadPrefs(dir)
+		if saved.PanelOf != preview.Big || !slices.Equal(saved.PanelTabs, first) || !slices.Equal(saved.Panels[themeChat].Tabs, second) {
+			t.Fatalf("saved %+v", saved)
+		}
+		b := New(preview.Load())
+		b.SetPrefs(saved)
+		tb := ui.NewTesterWith(b.View, 1280, 820, opaque)
+		tb.Frame()
+		if b.Sidebar.Selected != preview.Big || !slices.Equal(b.Panel.Tabs, first) || !b.PanelOpen {
+			t.Fatalf("relaunched %q: tabs %v, open %v", b.Sidebar.Selected, b.Panel.Tabs, b.PanelOpen)
+		}
+		b.Sidebar.Selected = themeChat
+		tb.Frame()
+		if !slices.Equal(b.Panel.Tabs, second) || !b.PanelOpen {
+			t.Fatalf("relaunched second: tabs %v, open %v", b.Panel.Tabs, b.PanelOpen)
+		}
+		// A page opened after the relaunch takes no restored page's number.
+		b.Panel.New(panel.Browser)
+		if b.HasPanelTab(b.Panel.Active) && (slices.Contains(first, b.Panel.Active) || slices.Contains(second, b.Panel.Active)) {
+			t.Fatalf("a new page reuses %v", b.Panel.Active)
+		}
+		// A conversation shown first that is not the saved one leaves the
+		// saved tabs to theirs.
+		other := New(preview.Load())
+		other.Sidebar.Selected = themeChat
+		other.SetPrefs(saved)
+		if !slices.Equal(other.Panel.Tabs, nil) || !slices.Equal(other.ConversationTabs(preview.Big), first) {
+			t.Fatalf("the saved tabs went to %q: %v", other.Sidebar.Selected, other.Panel.Tabs)
+		}
+		// A file from before panels were per conversation names none: the
+		// first conversation shown takes its tabs.
+		old := saved
+		old.PanelOf, old.Panels = "", nil
+		legacy := New(preview.Load())
+		legacy.Sidebar.Selected = themeChat
+		legacy.SetPrefs(old)
+		tl := ui.NewTesterWith(legacy.View, 1280, 820, opaque)
+		tl.Frame()
+		if !slices.Equal(legacy.Panel.Tabs, first) || !legacy.PanelOpen || len(legacy.ConversationTabs(preview.Big)) != 0 {
+			t.Fatalf("an old file's tabs %v, open %v", legacy.Panel.Tabs, legacy.PanelOpen)
+		}
+		// A draft that becomes its session keeps its panel, shown or not.
+		a.ReplaceConversationID(themeChat, "session/created")
+		if !slices.Equal(a.ConversationTabs("session/created"), second) || len(a.ConversationTabs(themeChat)) != 0 {
+			t.Fatalf("the created session's tabs %v", a.ConversationTabs("session/created"))
+		}
+		a.ReplaceConversationID(preview.Big, "session/shown")
+		tt.Frame()
+		if !slices.Equal(a.Panel.Tabs, first) || !slices.Equal(a.ConversationTabs("session/shown"), first) {
+			t.Fatalf("the shown session's tabs %v", a.Panel.Tabs)
+		}
+		// A terminal has one tab in the window, and a removed conversation's
+		// panel leaves whole.
+		a.MovePanelTab(second[0], "session/shown")
+		if len(a.ConversationTabs("session/created")) != 0 || !slices.Contains(a.Panel.Tabs, second[0]) {
+			t.Fatalf("moved: %v", a.Panel.Tabs)
+		}
+		a.DropPanelTab(first[0])
+		a.DropPanel("session/shown")
+		if len(a.AllPanelTabs()) != 0 {
+			t.Fatalf("dropped: %v", a.AllPanelTabs())
+		}
+	})
+	// The file is one for the preview and every profile. The preview's rail
+	// comes back from it, merged with the features of now; a profile's rail
+	// is its own preferences', which the file neither replaces nor loses.
+	t.Run("rail", func(t *testing.T) {
+		a := New(preview.Load())
+		a.features = MoveFeature(a.features, "page:git", "page:activity", false)
+		a.unpinned["page:files"] = true
+		saved := a.Prefs()
+		if err := SavePrefs(dir, saved); err != nil {
+			t.Fatal(err)
+		}
+		b := New(preview.Load())
+		b.SetPrefs(LoadPrefs(dir))
+		if !slices.Equal(b.features, a.features) || !b.unpinned["page:files"] {
+			t.Errorf("preview rail %v unpinned %v, want %v", b.features, b.unpinned, a.features)
+		}
+		stale := saved
+		stale.Features = []string{"page:git", "page:gone", "page:conversation"}
+		b = New(preview.Load())
+		b.SetPrefs(stale)
+		if want := []string{"page:conversation", "page:git", "page:gone", "page:activity", "page:files", "page:settings_plugins"}; !slices.Equal(b.features, want) {
+			t.Errorf("stale order merged to %v, want %v", b.features, want)
+		}
+
+		live := NewLive(&viewmodel.Data{Workspace: &viewmodel.Workspace{}})
+		live.SetFeaturePreferences([]string{"page:conversation", "page:files", "page:activity", "page:git", "page:settings_plugins"}, map[string]bool{"page:git": false})
+		order, pins := live.FeaturePreferences()
+		live.SetPrefs(LoadPrefs(dir))
+		if after, afterPins := live.FeaturePreferences(); !slices.Equal(after, order) || !maps.Equal(afterPins, pins) {
+			t.Errorf("the UI state file changed a profile's rail: %v %v, want %v %v", after, afterPins, order, pins)
+		}
+		if p := live.Prefs(); !slices.Equal(p.Features, saved.Features) || !slices.Equal(p.Unpinned, saved.Unpinned) {
+			t.Errorf("a live window rewrote the preview's rail: %v %v, want %v %v", p.Features, p.Unpinned, saved.Features, saved.Unpinned)
+		}
+	})
+}
+
+// TestSearch groups the cases of one behavior; each keeps its own fixture.
+func TestSearch(t *testing.T) {
+	t.Run("SearchOpensConversation", testSearchOpensConversation)
+	t.Run("SearchFolderKeys", testSearchFolderKeys)
+	t.Run("SearchRules", testSearchRules)
+}
+
+func testSearchOpensConversation(t *testing.T) {
+	a, tt := newTester(t)
+	tt.Key(ui.Cmd, ui.KeyK)
+	tt.Frame()
+	tt.Frame()
+	tt.Key(0, ui.KeyEnter) // Chats, the first folder
+	tt.Frame()
+	tt.Type("weeknight")
+	tt.Frame()
+	snapshot(t, tt, "search")
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if a.Sidebar.Selected != "chat/recipe" || a.search.open {
+		t.Errorf("search chose %q, open %v", a.Sidebar.Selected, a.search.open)
+	}
+	// The search opens anew: not in the folder and query it closed with.
+	tt.Key(ui.Cmd, ui.KeyK)
+	tt.Frame()
+	if !a.search.open || a.search.folder != "" || a.search.query != "" {
+		t.Errorf("reopened search: %+v", a.search)
+	}
+}
+
+// A folder of the search has no back row: Backspace on an empty query
+// goes back to the root, and Escape clears the query, then goes back,
+// then closes.
+func testSearchFolderKeys(t *testing.T) {
+	a, tt := newTester(t)
+	tt.Key(ui.Cmd, ui.KeyK)
+	tt.Frame()
+	tt.Frame()
+	tt.Key(0, ui.KeyEnter) // Chats, the first folder
+	tt.Frame()
+	if a.search.folder == "" {
+		t.Fatal("Enter opened no folder")
+	}
+	if tt.HasText(i18n.In("en", "reference_back")) {
+		t.Error("the folder shows a back row")
+	}
+	snapshot(t, tt, "search-folder")
+	// Backspace edits a query and goes back only once it is empty.
+	tt.Type("w")
+	tt.Frame()
+	tt.Key(0, ui.KeyBackspace)
+	tt.Frame()
+	if a.search.query != "" || a.search.folder == "" {
+		t.Fatalf("Backspace on a query left %q in %q", a.search.query, a.search.folder)
+	}
+	tt.Key(0, ui.KeyBackspace)
+	tt.Frame()
+	if a.search.folder != "" || !a.search.open {
+		t.Fatalf("Backspace on an empty query left folder %q, open %v", a.search.folder, a.search.open)
+	}
+	// Escape: the query, then the folder, then the search.
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	tt.Type("w")
+	tt.Frame()
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if a.search.query != "" || a.search.folder == "" || !a.search.open {
+		t.Fatalf("first Escape: query %q, folder %q, open %v", a.search.query, a.search.folder, a.search.open)
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if a.search.folder != "" || !a.search.open {
+		t.Fatalf("second Escape: folder %q, open %v", a.search.folder, a.search.open)
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if a.search.open {
+		t.Error("third Escape left the search open")
+	}
+}
+
+func TestActivityCentreReadsAndOpens(t *testing.T) {
+	a, tt := newTester(t)
+	clickButton(t, tt, i18n.In("en", "notifications"))
+	tt.Frame()
+	snapshot(t, tt, "activity")
+	click(t, tt, "Flaky integration test · "+i18n.In("en", "remote_host_name")+" · "+i18n.In("en", "activity_input")+" · Which database should the test use?")
+	tt.Frame()
+	if a.Sidebar.Selected != "api/tests" {
+		t.Errorf("the notice opened %q", a.Sidebar.Selected)
+	}
+	// A knowledge notice opens the source viewer, which pages.
+	clickButton(t, tt, i18n.In("en", "notifications"))
+	tt.Frame()
+	click(t, tt, "Frame motion · "+i18n.In("en", "local_host_name")+" · "+i18n.In("en", "notifications")+" · docs/shell/frame.md")
+	tt.Frame()
+	if !tt.HasText(i18n.In("en", "knowledge_lines", "start", 12, "end", 30)) {
+		t.Fatalf("no knowledge viewer: %q", tt.Texts())
+	}
+	snapshot(t, tt, "knowledge")
+	click(t, tt, i18n.In("en", "knowledge_next"))
+	tt.Frame()
+	if a.reading.page != 1 {
+		t.Error("Next did not page")
+	}
+	t.Run("live knowledge viewer", testLiveKnowledge)
+	// The notification center's own buttons act in the preview as the bell's.
+	t.Run("center buttons", func(t *testing.T) {
+		a, tt := newTester(t)
+		a.Navigate(NotificationsPage)
+		tt.Frame()
+		total := len(a.Data.Notices)
+		if total == 0 || len(a.noticeIDs(false)) == 0 {
+			t.Fatalf("%d notices, %d unread", total, len(a.noticeIDs(false)))
+		}
+		clickButton(t, tt, i18n.In("en", "notifications_read_all"))
+		tt.Frame()
+		if left := len(a.noticeIDs(false)); left != 0 {
+			t.Fatalf("Mark all as read left %d unread", left)
+		}
+		clickButton(t, tt, i18n.In("en", "notification_delete_read"))
+		tt.Frame()
+		if len(a.Data.Notices) != 0 {
+			t.Errorf("Delete read left %d of %d notices", len(a.Data.Notices), total)
+		}
+	})
+	// The centre is one card of rows: each row's button runs from the
+	// card's edge to its actions, which assistive technology reaches beside
+	// it, and the row fills from edge to edge under the pointer.
+	t.Run("center rows", func(t *testing.T) {
+		a, tt := newTester(t)
+		a.Navigate(NotificationsPage)
+		tt.Frame()
+		en := func(key string, args ...any) string { return i18n.In("en", key, args...) }
+		named := func(name string) (found []ui.AccessInfo) {
+			for _, info := range tt.AccessAll() {
+				if b := info.Bounds; info.Role == ui.RoleButton && info.Name == name && b.W > 0 && b.Y >= HeaderHeight {
+					found = append(found, info)
+				}
+			}
+			return found
+		}
+		row := func(n *preview.Notice) ui.AccessInfo {
+			t.Helper()
+			found := named(n.Title)
+			if len(found) != 1 {
+				t.Fatalf("%d row buttons named %q: %q", len(found), n.Title, tt.Texts())
+			}
+			return found[0]
+		}
+		notices := SortNotices(a.Data.Notices)
+		if len(notices) < 3 || notices[1].Read || notices[1].Kind != preview.NoticeCompleted {
+			t.Fatalf("the preview's notices changed: %d", len(notices))
+		}
+		first, second := notices[0], notices[1]
+		var rows []ui.Rect
+		for _, n := range notices {
+			rows = append(rows, row(n).Bounds)
+		}
+		deletes := named(en("settings_delete"))
+		if len(deletes) != len(notices) {
+			t.Fatalf("%d delete buttons for %d notices", len(deletes), len(notices))
+		}
+		for i, b := range rows {
+			if b.X != rows[0].X {
+				t.Errorf("row %d starts at %v, the first at %v", i, b.X, rows[0].X)
+			}
+			if b.H < kit.RowMinHeight || b.H > 72 {
+				t.Errorf("row %d is %v tall", i, b.H)
+			}
+			// Only a separator lies between two rows of the one card.
+			if i > 0 {
+				if gap := b.Y - (rows[i-1].Y + rows[i-1].H); gap < 0 || gap > 1.5 {
+					t.Errorf("row %d starts %v below row %d", i, gap, i-1)
+				}
+			}
+		}
+		// Each row's Delete is beside its button, within its height, and
+		// all end at one line.
+		end := deletes[0].Bounds.X + deletes[0].Bounds.W
+		for i, d := range deletes {
+			b := d.Bounds
+			if b.X+b.W != end || b.X < rows[i].X+rows[i].W || b.Y < rows[i].Y || b.Y+b.H > rows[i].Y+rows[i].H {
+				t.Errorf("delete %d at %+v is not beside its row's button %+v, ending at %v", i, b, rows[i], end)
+			}
+		}
+		// The second line is the notice's message, and its age ends the
+		// row; its kind and host are not written while it is closed.
+		facts := func() bool {
+			return slices.ContainsFunc(tt.Texts(), func(text string) bool { return strings.HasPrefix(text, en("activity_completed")+" · ") })
+		}
+		if !tt.HasText(second.Message) || !tt.HasText(en("notifications_time_minutes", "count", 5)) || facts() {
+			t.Errorf("no message and age under the second notice: %q", tt.Texts())
+		}
+		// The hover fill reaches both ends of the row, before the glyph and
+		// under the delete button, not only the title.
+		target := rows[1]
+		tt.Move(target.X+target.W/2, 816)
+		tt.Frame()
+		rest := tt.Image()
+		tt.Move(target.X+20, target.Y+target.H/2)
+		tt.Frame()
+		hovered := tt.Image()
+		snapshot(t, tt, "notifications-hover")
+		scale := float32(rest.Bounds().Dx()) / 1280
+		differs := func(r ui.Rect) (n int) {
+			for y := int(r.Y * scale); y < int((r.Y+r.H)*scale); y++ {
+				for x := int(r.X * scale); x < int((r.X+r.W)*scale); x++ {
+					if rest.RGBAAt(x, y) != hovered.RGBAAt(x, y) {
+						n++
+					}
+				}
+			}
+			return n
+		}
+		for name, strip := range map[string]ui.Rect{
+			"start": {X: target.X + 2, Y: target.Y + 4, W: 8, H: 8},
+			"end":   {X: end + 4, Y: target.Y + 4, W: 8, H: 8},
+		} {
+			if differs(strip) == 0 {
+				t.Errorf("the hover fill does not reach the row's %s", name)
+			}
+		}
+		// Inside the next row, past the pixel line the two share.
+		next := rows[2]
+		next.Y, next.H = next.Y+2, next.H-4
+		if n := differs(next); n != 0 {
+			t.Errorf("hovering one row changes %d pixels of the next", n)
+		}
+		// Over an action the row keeps its fill.
+		tt.Move(deletes[1].Bounds.X+deletes[1].Bounds.W/2, deletes[1].Bounds.Y+deletes[1].Bounds.H/2)
+		tt.Frame()
+		hovered = tt.Image()
+		if differs(ui.Rect{X: target.X + 2, Y: target.Y + 4, W: 8, H: 8}) == 0 {
+			t.Error("the row loses its hover fill under the pointer on Delete")
+		}
+		// A click anywhere on the row opens its details and reads it; a
+		// second closes them.
+		tt.ClickAt(target.X+target.W/2, target.Y+target.H/2)
+		tt.Frame()
+		// The open notice's message is in its details alone, its kind and
+		// host on the row's second line.
+		messages := 0
+		for _, text := range tt.Texts() {
+			if text == second.Message {
+				messages++
+			}
+		}
+		if a.noticeDetail != second.ID || !second.Read || !row(second).Expanded || messages != 1 || !facts() || !tt.HasText(en("notification_time")) {
+			t.Fatalf("the row did not open its details: open %v, read %v, texts %q", a.noticeDetail == second.ID, second.Read, tt.Texts())
+		}
+		// A live window projects its notices anew when one is read: the
+		// details stay open over the new value of the same notice.
+		at := slices.Index(a.Data.Notices, second)
+		again := *second
+		a.Data.Notices[at] = &again
+		tt.Frame()
+		if !tt.HasText(en("notification_time")) {
+			t.Fatal("the details closed when the notices were projected again")
+		}
+		a.Data.Notices[at] = second
+		tt.Frame()
+		tt.ClickAt(target.X+target.W/2, target.Y+target.H/2)
+		tt.Frame()
+		if a.noticeDetail != "" || tt.HasText(en("notification_time")) || !tt.HasText(second.Message) || facts() {
+			t.Fatal("a second click left the details open")
+		}
+		// Unread hides what was read.
+		a.noticeTab = 1
+		tt.Frame()
+		if tt.HasText(second.Title) || !tt.HasText(first.Title) {
+			t.Errorf("the Unread filter shows %q", tt.Texts())
+		}
+		a.noticeTab = 0
+		tt.Frame()
+		// The row's own buttons act without opening its details.
+		clickButton(t, tt, en("notification_open_conversation"))
+		tt.Frame()
+		if a.Page != ConversationPage || a.Sidebar.Selected != first.Session || !first.Read || a.noticeDetail != "" {
+			t.Fatalf("Open conversation: page %v, selected %q, read %v", a.Page, a.Sidebar.Selected, first.Read)
+		}
+		a.Navigate(NotificationsPage)
+		tt.Frame()
+		clickButton(t, tt, en("settings_delete"))
+		tt.Frame()
+		if slices.Contains(a.Data.Notices, first) || len(a.Data.Notices) != len(notices)-1 || a.noticeDetail != "" {
+			t.Fatalf("Delete left %d of %d notices, details open %v", len(a.Data.Notices), len(notices), a.noticeDetail != "")
+		}
+	})
+}
+
+// The shell's pure rules: a knowledge link's parts, and a feature's move in
+// the rail's order.
+func TestShellRules(t *testing.T) {
+	t.Run("ParseSource", func(t *testing.T) {
+		if s, ok := ParseSource("sailry-knowledge://docs/frame?revision=3"); !ok || s.Collection != "docs" || s.Chunk != "frame" || s.Revision != "3" {
+			t.Errorf("valid link: %+v %v", s, ok)
+		}
+		for _, bad := range []string{
+			"sailry-knowledge://docs/frame?revision=3&path=x",
+			"sailry-knowledge://docs/frame?revision=3#L9",
+			"sailry-knowledge://docs/frame/more?revision=3",
+			"sailry-knowledge://docs/frame?revision=3&revision=4",
+			"https://docs/frame?revision=3",
+			"sailry-knowledge://user@docs/frame?revision=3",
+			"sailry-knowledge://docs:80/frame?revision=3",
+		} {
+			if _, ok := ParseSource(bad); ok {
+				t.Errorf("%q passed", bad)
+			}
+		}
+	})
+	t.Run("MoveFeature", func(t *testing.T) {
+		order := []string{"page:conversation", "page:activity", "page:files", "page:git", "page:settings_plugins"}
+		got := MoveFeature(order, "page:git", "page:activity", false)
+		if got[1] != "page:git" {
+			t.Errorf("move: %v", got)
+		}
+		if got := MoveFeature(order, "page:activity", "page:settings_plugins", true); got[len(got)-1] != "page:settings_plugins" {
+			t.Errorf("something went after Market: %v", got)
+		}
+		if got := MoveFeature(order, "page:conversation", "page:git", true); got[0] != "page:conversation" {
+			t.Errorf("Conversation moved: %v", got)
+		}
+	})
+	t.Run("LoadingMarks", testLoadingMarks)
+}
+
+func testSearchRules(t *testing.T) {
+	groups := []Group{{Choices: []Choice{{ID: "a", Label: "Alpha"}, {ID: "b", Label: "Beta", Keywords: []string{"billing-api"}}}}, {Heading: "x", Choices: []Choice{{ID: "c", Label: "Gamma"}}}}
+	if got := Filter(groups, "BILL"); len(got) != 1 || len(got[0].Choices) != 1 || got[0].Choices[0].ID != "b" {
+		t.Errorf("keyword match: %+v", got)
+	}
+	if got := Filter(groups, ""); len(got) != 2 {
+		t.Errorf("empty query: %+v", got)
+	}
+}
+
+// TestMoreDragShowsInsertionLine drags Activity over the lower half of
+// Files in More: the line shows in the gap between Files and Git, not at
+// the list's ends, and the drop puts Activity there.
+func TestMoreDragShowsInsertionLine(t *testing.T) {
+	a, tt := newTester(t)
+	// Off the rail, so their names are the popover's rows alone.
+	for _, id := range []string{"page:activity", "page:files", "page:git", "page:settings_plugins"} {
+		a.unpinned[id] = true
+	}
+	a.more = true
+	tt.Frame()
+	tt.Advance(time.Second) // the popover's entrance
+	tt.Frame()
+	row := func(key string) ui.Rect {
+		r, ok := tt.Find(i18n.In("en", key))
+		if !ok {
+			t.Fatalf("no %s row: %q", key, tt.Texts())
+		}
+		return r
+	}
+	activity, files, git, market := row("activity"), row("files"), row("git"), row("market_title")
+	center := func(r ui.Rect) float32 { return r.Y + r.H/2 }
+	gap := func(upper, lower ui.Rect) float32 { return (upper.Y + upper.H + lower.Y) / 2 }
+	x := files.X + 10 // over the row's start, left of the dragged copy
+	dark := func(y float32) bool {
+		img := tt.Image()
+		s := float32(img.Bounds().Dx()) / 1280
+		c := img.RGBAAt(int(x*s), int(y*s))
+		return int(c.R)+int(c.G)+int(c.B) < 3*200
+	}
+	if dark(gap(files, git)) {
+		t.Fatal("a line shows before any drag")
+	}
+	px, py := activity.X+12, center(activity)
+	tt.Press(px, py)
+	tt.Frame()
+	// Down to the lower half of Files, then right, so the copy following
+	// the pointer leaves the row's start uncovered.
+	for _, step := range [][2]float32{{px, py + 8}, {px, center(files) + 10}, {px + 160, center(files) + 10}} {
+		tt.Move(step[0], step[1])
+		tt.Frame()
+	}
+	tt.Frame()
+	snapshot(t, tt, "more-drag")
+	if !dark(gap(files, git)) {
+		t.Error("no line between Files and Git")
+	}
+	if dark(gap(activity, files)) || dark(gap(git, market)) {
+		t.Error("a line shows away from the pointer")
+	}
+	tt.Release(px+160, center(files)+10)
+	tt.Frame()
+	tt.Frame()
+	want := []string{"page:conversation", "page:files", "page:activity", "page:git", "page:settings_plugins"}
+	if !slices.Equal(a.features, want) {
+		t.Errorf("order %v, want %v", a.features, want)
+	}
+}
+
+// Collapsed, the page's header starts past the traffic lights, and goes
+// back to the edge in full screen, where MyGo reports none.
+func TestHeaderClearsTrafficLights(t *testing.T) {
+	a, tt := newTester(t)
+	tt.SetTitleBar(ui.TitleBar{Height: 28, Left: 70})
+	a.NavOpen = false
+	for range 3 {
+		tt.Advance(time.Second)
+		tt.Frame()
+	}
+	b, ok := tt.Access(i18n.In("en", "sidebar_toggle"))
+	if !ok || b.Bounds.X < trafficLights {
+		t.Fatalf("the sidebar toggle starts at %v under the lights", b.Bounds)
+	}
+	// The lights' room is kept once: the header starts one padding past it.
+	if b.Bounds.X != trafficLights+12 {
+		t.Errorf("the sidebar toggle starts at %v, want %v", b.Bounds.X, trafficLights+12)
+	}
+	tt.SetTitleBar(ui.TitleBar{})
+	tt.Frame()
+	brandBox, hasBrand := tt.Find(i18n.In("en", "app"))
+	if !hasBrand {
+		t.Fatalf("in full screen the app brand is missing: %q", tt.Texts())
+	}
+	if b, _ := tt.Access(i18n.In("en", "sidebar_toggle")); b.Bounds.X <= brandBox.X+brandBox.W || b.Bounds.X > brandBox.X+brandBox.W+32 {
+		t.Errorf("in full screen the toggle starts at %v, want right after brand %v", b.Bounds.X, brandBox)
+	}
+	t.Run("icon buttons", testIconButtons)
+	t.Run("header split", testHeaderSplit)
+}
+
+// headerLine reports the band's short divider at x: a one-DIP line there at
+// the band's middle, and none at its top, where a full-height line would be.
+func headerLine(tt *ui.Tester, x float32) float32 {
+	if lineAt(tt, x-2, x+3, HeaderHeight/2-6, HeaderHeight/2+6) == x && lineAt(tt, x-2, x+3, 3, 3) < 0 {
+		return x
+	}
+	return -1
+}
+
+// lineAt finds the one vertical line between from and to that shows on both
+// rows y0 and y1.
+func lineAt(tt *ui.Tester, from, to, y0, y1 float32) float32 {
+	img := tt.Image()
+	scale := float32(img.Bounds().Dx()) / 1280
+	found := float32(-1)
+	for x := from; x < to; x++ {
+		line := true
+		for _, y := range []float32{y0, y1} {
+			at := img.At(int((x+0.5)*scale), int(y*scale))
+			if at == img.At(int((x-2+0.5)*scale), int(y*scale)) || at == img.At(int((x+2+0.5)*scale), int(y*scale)) {
+				line = false
+			}
+		}
+		if line {
+			if found >= 0 {
+				return -1
+			}
+			found = x
+		}
+	}
+	return found
+}
+
+// status is the box of the header's session status: the strip's avatars of
+// the band, from the first to the last.
+func status(tt *ui.Tester) (ui.Rect, bool) {
+	var r ui.Rect
+	for _, info := range tt.AccessAll() {
+		b := info.Bounds
+		if info.Role != ui.RoleButton || b.Y+b.H > HeaderHeight || b.W == 0 {
+			continue
+		}
+		for _, lane := range []string{"activity_waiting", "activity_running", "activity_completed"} {
+			if !strings.Contains(info.Name, " · "+i18n.In("en", lane)) {
+				continue
+			}
+			if r.W == 0 {
+				r = b
+			}
+			end := max(r.X+r.W, b.X+b.W)
+			r.X = min(r.X, b.X)
+			r.W = end - r.X
+		}
+	}
+	return r, r.W > 0
+}
+
+// setRuns leaves every session idle, or the selected one running.
+func setRuns(a *App, running bool) {
+	each := func(list []*preview.Conversation) {
+		for _, cv := range list {
+			cv.Status = preview.Idle
+			if running && cv.ID == a.Sidebar.Selected {
+				cv.Status = preview.Running
+			}
+		}
+	}
+	for _, pr := range a.Data.Projects {
+		each(pr.Conversations)
+	}
+	each(a.Data.Unassigned)
+}
+
+// still shows the frame a change made outside an event settles to: the
+// frame that starts the columns' motion, then the one after it ended.
+func still(tt *ui.Tester) {
+	tt.Frame()
+	settle(tt)
+}
+
+// The header is two regions that meet at the right panel's left edge. The
+// fold toggle alone is fixed at the far right in both states; the session
+// status, then the page's own actions end the main region, left of the
+// split; the band's divider is the column's; the panel's tabs and the
+// details' titles show in the band over the column, which has no strip row,
+// title row or close button of its own; the fold toggle is disabled with
+// nothing to show.
+func testHeaderSplit(t *testing.T) {
+	a, tt := newTester(t)
+	// The band's buttons are told from the transcript's by where they are,
+	// and the transcript scrolls under the band: with the queue tray folded
+	// a message's Copy and Edit rest there. Unfolded, the transcript is
+	// where these checks were written for.
+	unfoldQueue(t, tt)
+	en := func(k string) string { return i18n.In("en", k) }
+	fold := func() ui.AccessInfo {
+		t.Helper()
+		info, ok := headerButton(tt, en("details"))
+		if !ok {
+			t.Fatalf("no fold toggle: %q", tt.Texts())
+		}
+		return info
+	}
+	end := func(r ui.Rect) float32 { return r.X + r.W }
+	// below reports a control named name under the band, right of x.
+	below := func(role ui.Role, name string, x float32) bool {
+		for _, info := range tt.AccessAll() {
+			if b := info.Bounds; info.Role == role && info.Name == name && b.W > 0 && b.Y >= HeaderHeight && b.X >= x {
+				return true
+			}
+		}
+		return false
+	}
+	// The page's own action here is the preview tag, the last of the main
+	// region.
+	tag := func() ui.Rect {
+		t.Helper()
+		r, ok := tt.Find(en("preview"))
+		if !ok || r.Y+r.H > HeaderHeight {
+			t.Fatalf("no preview tag in the band: %v %v", r, ok)
+		}
+		return r
+	}
+	const split = 1280 - PanelWidth
+	for _, inset := range []float32{0, 138} {
+		// MyGo reports the window buttons' room at the right on Windows and
+		// Linux: the cluster ends 12 before it.
+		tt.SetTitleBar(ui.TitleBar{Height: 32, Right: inset})
+		want := 1280 - inset - 12 - HeaderButton
+		if got := HeaderInsets(ui.TitleBar{Right: inset}); got != 12+inset {
+			t.Errorf("inset %v: the header keeps %v clear", inset, got)
+		}
+		for _, running := range []bool{false, true} {
+			setRuns(a, running)
+			for _, open := range []bool{false, true} {
+				a.PanelOpen = open
+				still(tt)
+				name := fmt.Sprintf("inset %v, running %v, open %v", inset, running, open)
+				f := fold()
+				if f.Bounds.X != want || f.Bounds.Y != (HeaderHeight-HeaderButton)/2 || f.Disabled {
+					t.Errorf("%s: the fold toggle is %+v, want x %v", name, f, want)
+				}
+				st, shown := status(tt)
+				if shown != running {
+					t.Fatalf("%s: session status shown %v", name, shown)
+				}
+				// The main region's end: the session status, Find and the
+				// overview, each one gap before the next, then the page's
+				// tag. The status is the main region's in both states, with
+				// no doubled gap where it is absent.
+				find, found := headerButton(tt, en("chat_search"))
+				overview, ok := headerButton(tt, en("chat_assets_title"))
+				if !found || !ok {
+					t.Fatalf("%s: the band lacks Find (%v) or the overview (%v)", name, found, ok)
+				}
+				g := tag()
+				if running && end(st) != find.Bounds.X-ButtonGap {
+					t.Errorf("%s: the session status %v does not end one gap before Find %v", name, st, find.Bounds)
+				}
+				if overview.Bounds.X != end(find.Bounds)+ButtonGap || g.X != end(overview.Bounds)+ButtonGap {
+					t.Errorf("%s: the main region does not end with Find %v, the overview %v and the tag %v", name, find.Bounds, overview.Bounds, g)
+				}
+				line := headerLine(tt, split)
+				if !open {
+					// The far-right cluster is the fold toggle alone, one
+					// gap after the main region: no other button of the
+					// band is right of the region's end.
+					if end(g) != f.Bounds.X-ButtonGap {
+						t.Errorf("%s: the page's actions end at %v, the fold toggle starts at %v", name, end(g), f.Bounds.X)
+					}
+					for _, info := range tt.AccessAll() {
+						if b := info.Bounds; info.Role == ui.RoleButton && b.W > 0 && b.Y >= 0 && b.Y+b.H <= HeaderHeight && b.X >= end(g) && info.Name != en("details") {
+							t.Errorf("%s: %q at %v is beside the fold toggle", name, info.Name, b)
+						}
+					}
+					if line >= 0 {
+						t.Errorf("%s: the closed panel leaves a divider at %v", name, line)
+					}
+					continue
+				}
+				if end(g) != split-12 {
+					t.Errorf("%s: the page's actions end at %v, want 12 before the split at %v", name, end(g), split)
+				}
+				if col := lineAt(tt, split-40, split+40, HeaderHeight+40, 700); line != split || col != split {
+					t.Errorf("%s: the band's divider is at %v, the column's at %v, want %v", name, line, col, split)
+				}
+			}
+		}
+	}
+	tt.SetTitleBar(ui.TitleBar{})
+	setRuns(a, true)
+	// The divider follows the column as it is resized.
+	a.PanelOpen, a.PanelWidth = true, 480
+	still(tt)
+	if line, col := headerLine(tt, 800), lineAt(tt, 700, 900, HeaderHeight+40, 700); line != 800 || col != 800 {
+		t.Errorf("resized: the band's divider is at %v, the column's at %v, want 800", line, col)
+	}
+	a.PanelWidth = PanelWidth
+	still(tt)
+	// The panel's tabs show in the band over the panel: tabs, "+", the fold
+	// toggle, the session status staying in the main region; the column
+	// starts with the tab's content, not a second strip.
+	tt.Key(ui.Cmd, ui.KeyP)
+	still(tt)
+	for _, k := range []panel.Kind{panel.History, panel.Browser, panel.Terminal, panel.Documents} {
+		a.Panel.Open(k)
+	}
+	a.Panel.Show(a.Panel.Tabs[0])
+	still(tt)
+	shot(t, tt, "en-conversation-panel-open")
+	var tabs []ui.Rect
+	names := map[string]bool{}
+	for _, info := range tt.AccessAll() {
+		b := info.Bounds
+		if info.Offscreen || info.Role != ui.RoleButton || b.W == 0 || b.Y+b.H > HeaderHeight || b.X < split || info.Name == en("details") || info.Name == en("close") ||
+			strings.Contains(info.Name, " · ") {
+			continue
+		}
+		tabs = append(tabs, b)
+		names[info.Name] = true
+	}
+	// The tabs that do not fit beside the toggle scroll.
+	if len(tabs) < 2 || len(tabs) > len(a.Panel.Tabs) {
+		t.Fatalf("the band shows %d tabs of %v: %q", len(tabs), a.Panel.Tabs, tt.Texts())
+	}
+	for _, info := range tt.AccessAll() {
+		if b := info.Bounds; !info.Offscreen && info.Role == ui.RoleButton && names[info.Name] && b.W > 0 && b.X >= split && b.Y >= HeaderHeight && b.Y < HeaderHeight+40 {
+			t.Errorf("the tab %q shows in a strip under the band at %v", info.Name, b)
+		}
+	}
+	plus, ok := tt.AccessByRole(ui.RoleMenuButton, en("details"))
+	all, found := tt.AccessByRole(ui.RoleMenuButton, en("navigation_tabs"))
+	st, shown := status(tt)
+	f := fold()
+	if !ok || !found || plus.Bounds.Y+plus.Bounds.H > HeaderHeight || all.Bounds.Y+all.Bounds.H > HeaderHeight {
+		t.Fatalf("the tabs' menus are not in the band: %+v %+v", plus.Bounds, all.Bounds)
+	}
+	if tabs[0].X != split+8 || !(end(tabs[0]) <= all.Bounds.X && end(all.Bounds) <= plus.Bounds.X && end(plus.Bounds) <= f.Bounds.X) {
+		t.Errorf("the band over the panel is not tabs, +, toggle: %v %v %v %v", tabs[0], all.Bounds, plus.Bounds, f.Bounds)
+	}
+	// The session status is the main region's, left of Find, and nothing is
+	// between the "+" and the fold toggle.
+	if find, ok := headerButton(tt, en("chat_search")); !shown || !ok || end(st) != find.Bounds.X-ButtonGap || end(find.Bounds) > split {
+		t.Errorf("the session status %v (shown %v) is not one gap before Find %v in the main region", st, shown, find.Bounds)
+	}
+	for _, info := range tt.AccessAll() {
+		// Scrolled-out tabs retain their layout bounds in the access tree.
+		if b := info.Bounds; !info.Offscreen && b.W > 0 && b.Y+b.H <= HeaderHeight && b.X >= end(plus.Bounds) && b.X < f.Bounds.X && info.Role == ui.RoleButton {
+			t.Errorf("%q at %v is between the tabs' + and the fold toggle", info.Name, b)
+		}
+	}
+	top := float32(820)
+	for _, info := range tt.AccessAll() {
+		if b := info.Bounds; b.W > 0 && b.H > 0 && b.X >= split && b.Y >= HeaderHeight {
+			top = min(top, b.Y)
+		}
+	}
+	if top >= HeaderHeight+40 {
+		t.Errorf("the panel's content starts at %v, under a strip's room", top)
+	}
+	// A tab chosen in the band takes ⌘W, and its close button closes it.
+	n := len(a.Panel.Tabs)
+	tt.ClickAt(tabs[1].X+12, tabs[1].Y+tabs[1].H/2)
+	still(tt)
+	if a.Panel.Active != a.Panel.Tabs[1] {
+		t.Fatalf("the band's tab did not show: %v", a.Panel.Active)
+	}
+	tt.Key(ui.Cmd, ui.KeyW)
+	still(tt)
+	if len(a.Panel.Tabs) != n-1 {
+		t.Errorf("⌘W after choosing a tab in the band left %d of %d tabs", len(a.Panel.Tabs), n)
+	}
+	// The toggle is the panel's close control.
+	clickButton(t, tt, en("details"))
+	still(tt)
+	if a.PanelOpen || headerLine(tt, split) >= 0 {
+		t.Error("the fold toggle did not close the panel")
+	}
+	shot(t, tt, "en-conversation-panel-closed")
+
+	// The host page: its summary column is closed until the toggle opens
+	// it, then the metrics' title shows in the band, none in the column.
+	a.openHost("remote", false)
+	still(tt)
+	if _, shown := tt.Find(en("metrics_title")); shown || a.Metrics {
+		t.Error("the host page opened with its summary column")
+	}
+	clickButton(t, tt, en("details"))
+	still(tt)
+	title, ok := tt.Find(en("metrics_title"))
+	if !ok || title.Y+title.H > HeaderHeight || title.X != split+12 {
+		t.Errorf("the metrics' title is at %v, want in the band at %v", title, split+12)
+	}
+	if f := fold(); f.Disabled {
+		t.Errorf("the host page's toggle is %+v", f)
+	}
+	if headerLine(tt, split) != split {
+		t.Error("the host page's band has no divider at the split")
+	}
+
+	// A page without a right column: the toggle shows disabled.
+	for _, page := range []Page{ActivityPage, NotificationsPage, SettingsPage, MarketPage} {
+		a.Navigate(page)
+		still(tt)
+		if f := fold(); !f.Disabled || f.Bounds.X != 1280-12-HeaderButton {
+			t.Errorf("page %d with nothing to show: the toggle is %+v", page, f)
+		}
+	}
+	// The Market: selecting a card opens its details, titled in the band,
+	// with no title row or close button of their own; the toggle closes
+	// them and is disabled again.
+	card := a.Settings.Packages[0].Name
+	for _, info := range tt.AccessAll() {
+		if b := info.Bounds; info.Role == ui.RoleButton && strings.Contains(info.Name, card) && b.Y >= HeaderHeight && b.W > 100 {
+			tt.ClickAt(b.X+b.W/2, b.Y+b.H/2)
+			break
+		}
+	}
+	still(tt)
+	if a.Settings.Details == nil {
+		t.Fatalf("the card opened no details: %q", tt.Texts())
+	}
+	title, ok = tt.Find(en("market_plugin_details"))
+	if !ok || title.Y+title.H > HeaderHeight || title.X != split+12 {
+		t.Errorf("the details' title is at %v, want in the band at %v", title, split+12)
+	}
+	if below(ui.RoleButton, en("close"), split) {
+		t.Error("the details keep a close button")
+	}
+	if f := fold(); f.Disabled {
+		t.Errorf("with details the toggle is %+v", f)
+	}
+	clickButton(t, tt, en("details"))
+	still(tt)
+	if f := fold(); a.Settings.Details != nil || !f.Disabled {
+		t.Errorf("the toggle left details %v, itself %+v", a.Settings.Details, f)
+	}
+	// The media models' settings have no details: the toggle stays disabled.
+	a.Settings.Open(settings.Media)
+	a.Navigate(SettingsPage)
+	still(tt)
+	if f := fold(); !f.Disabled || f.Bounds.X != 1280-12-HeaderButton {
+		t.Errorf("the media settings: the toggle is %+v", f)
+	}
+	// A tab opened from the band's "+" is recorded as opened
+	// (panel.State.TakeOpened), as one opened any other way.
+	a.Navigate(ConversationPage)
+	a.PanelOpen = true
+	for _, tab := range slices.Clone(a.Panel.Tabs) {
+		if tab.Kind == panel.Browser {
+			a.Panel.Close(tab)
+		}
+	}
+	a.Panel.Show(panel.Tab{Kind: panel.History})
+	still(tt)
+	a.Panel.TakeOpened()
+	plus, ok = tt.AccessByRole(ui.RoleMenuButton, en("details"))
+	if !ok || plus.Bounds.Y+plus.Bounds.H > HeaderHeight {
+		t.Fatalf("no + in the band: %+v", plus)
+	}
+	tt.ClickAt(plus.Bounds.X+plus.Bounds.W/2, plus.Bounds.Y+plus.Bounds.H/2)
+	still(tt)
+	chosen := false
+	for _, info := range tt.AccessAll() {
+		if b := info.Bounds; info.Name == en(panel.ResourceOf(panel.Browser).Label) && b.W > 0 && (info.Role == ui.RoleMenuItem || info.Role == ui.RoleMenuItemCheckBox || info.Role == ui.RoleMenuItemRadio) {
+			tt.ClickAt(b.X+b.W/2, b.Y+b.H/2)
+			chosen = true
+			break
+		}
+	}
+	still(tt)
+	if got := a.Panel.TakeOpened(); !chosen || !slices.Equal(got, []panel.Kind{panel.Browser}) {
+		t.Errorf("the band's + (item found %v) recorded %v as opened, want Browser", chosen, got)
+	}
+	headerFrames(t)
+}
+
+// headerFrames saves the header's states for review, in Chinese and dark.
+func headerFrames(t *testing.T) {
+	if os.Getenv("SAILRY_UI_SHOTS") == "" {
+		return
+	}
+	a := New(preview.Load())
+	tt := ui.NewTesterWith(a.View, 1280, 820, opaque)
+	tt.SetLocale("zh-CN")
+	tt.SetDark(true)
+	a.Mode = theme.System
+	still(tt)
+	shot(t, tt, "conversation-panel-closed")
+	setRuns(a, false)
+	still(tt)
+	shot(t, tt, "conversation-panel-closed-idle")
+	a.PanelOpen = true
+	still(tt)
+	shot(t, tt, "conversation-panel-launcher-idle")
+	setRuns(a, true)
+	tt.Key(ui.Cmd, ui.KeyP)
+	still(tt)
+	for _, k := range []panel.Kind{panel.History, panel.Browser, panel.Terminal} {
+		a.Panel.Open(k)
+	}
+	still(tt)
+	shot(t, tt, "conversation-panel-open")
+	tt.SetTitleBar(ui.TitleBar{Height: 32, Right: 138})
+	still(tt)
+	shot(t, tt, "conversation-panel-open-right-inset")
+	a.PanelOpen = false
+	still(tt)
+	shot(t, tt, "conversation-panel-closed-right-inset")
+	tt.SetTitleBar(ui.TitleBar{})
+	a.PanelOpen = true
+	a.Navigate(MarketPage)
+	still(tt)
+	shot(t, tt, "market-nothing-selected")
+	a.Settings.ShowDetails(settings.DetailPlugin, a.Settings.Packages[0].ID)
+	still(tt)
+	still(tt)
+	shot(t, tt, "market-details")
+	a.Navigate(SettingsPage)
+	a.Settings.Section = settings.Plugins
+	a.Settings.ShowDetails(settings.DetailPlugin, a.Settings.Packages[0].ID)
+	still(tt)
+	still(tt)
+	shot(t, tt, "settings-plugins-details")
+	a.Settings.Open(settings.Media)
+	still(tt)
+	shot(t, tt, "settings-media")
+	a.openHost("remote", false)
+	a.Metrics = true
+	still(tt)
+	shot(t, tt, "host-metrics")
+	a.Navigate(ConversationPage)
+	tt.SetSize(RailWidth+NavWidth+MainMin+PanelMin-40, 820)
+	still(tt)
+	shot(t, tt, "narrow-window")
+}
+
+// The header's icon buttons are one Kit button: 28 square, centred in the
+// band, 8 from their neighbours, with one hover fill; the rail's are 36
+// square, 8 apart. A details toggle that cannot act is disabled.
+func testIconButtons(t *testing.T) {
+	a, tt := newTester(t)
+	toggle, _ := headerButton(tt, i18n.In("en", "sidebar_toggle"))
+	details, _ := headerButton(tt, i18n.In("en", "details"))
+	t.Logf("header buttons: toggle %v, details %v", toggle.Bounds, details.Bounds)
+	for name, b := range map[string]ui.Rect{"toggle": toggle.Bounds, "details": details.Bounds} {
+		if b.W != HeaderButton || b.H != HeaderButton || b.Y != (HeaderHeight-HeaderButton)/2 {
+			t.Errorf("%s is %v, want %v square centred in the %v band", name, b, HeaderButton, HeaderHeight)
+		}
+	}
+	if got := 1280 - (details.Bounds.X + details.Bounds.W); got != 12 {
+		t.Errorf("details ends %v from the edge, want 12", got)
+	}
+	// Their neighbours are one gap away: the title after the toggle, the
+	// preview tag before details.
+	var trail, tag ui.Rect
+	for _, info := range tt.AccessAll() {
+		b := info.Bounds
+		if b.Y+b.H > HeaderHeight || b.W == 0 {
+			continue
+		}
+		if b.X >= toggle.Bounds.X+toggle.Bounds.W && (trail.W == 0 || b.X < trail.X) {
+			trail = b
+		}
+		if end := b.X + b.W; end <= details.Bounds.X && end > tag.X+tag.W {
+			tag = b
+		}
+	}
+	if got := trail.X - (toggle.Bounds.X + toggle.Bounds.W); got != ButtonGap {
+		t.Errorf("the title starts %v after the toggle, want %v", got, ButtonGap)
+	}
+	if got := details.Bounds.X - (tag.X + tag.W); got != ButtonGap {
+		t.Errorf("details starts %v after the preview tag, want %v", got, ButtonGap)
+	}
+	// One hover fill: the same box, and so the same number of pixels, on
+	// each, and nothing outside it.
+	tt.Move(640, 400)
+	tt.Frame()
+	rest := tt.Image()
+	fills := map[string]int{}
+	for name, b := range map[string]ui.Rect{"toggle": toggle.Bounds, "details": details.Bounds} {
+		tt.Move(b.X+b.W/2, b.Y+b.H/2)
+		tt.Frame()
+		hovered := tt.Image()
+		fills[name] = changed(rest, hovered, b)
+		around := ui.Rect{X: b.X - 6, Y: b.Y - 6, W: b.W + 12, H: b.H + 12}
+		if outside := changed(rest, hovered, around) - fills[name]; outside != 0 {
+			t.Errorf("%s: its hover changes %d pixels outside its box", name, outside)
+		}
+		if name == "details" {
+			snapshot(t, tt, "header-hover")
+		}
+	}
+	t.Logf("hover fills: %v", fills)
+	scale := rest.Bounds().Dx() / 1280
+	full := HeaderButton * HeaderButton * scale * scale
+	if fills["toggle"] < full/2 || fills["details"] < full/2 {
+		t.Errorf("hover fills %v do not cover the %d pixel boxes", fills, full)
+	}
+	if d := fills["toggle"] - fills["details"]; d > full/10 || d < -full/10 {
+		t.Errorf("hover fills differ: %v", fills)
+	}
+	tt.Move(640, 400)
+	// The host page's metrics toggle is the same button in the same place.
+	a.openHost("remote", false)
+	settle(tt)
+	if metrics, ok := headerButton(tt, i18n.In("en", "details")); !ok || metrics.Bounds != details.Bounds {
+		t.Errorf("the host page's toggle is %v, want %v", metrics.Bounds, details.Bounds)
+	}
+	a.Navigate(ConversationPage)
+	settle(tt)
+	// The rail: every button 36 square in one column, the pinned features
+	// 8 apart from 8 under the band.
+	var rail []ui.Rect
+	for _, info := range tt.AccessAll() {
+		if b := info.Bounds; info.Role == ui.RoleButton && b.X+b.W <= RailWidth && b.Y >= HeaderHeight {
+			rail = append(rail, b)
+		}
+	}
+	slices.SortFunc(rail, func(x, y ui.Rect) int { return int(x.Y - y.Y) })
+	if len(rail) < 9 {
+		t.Fatalf("the rail has %d buttons: %v", len(rail), rail)
+	}
+	for i, b := range rail {
+		if b.W != RailButton || b.H != RailButton || b.X != (RailWidth-RailButton)/2 {
+			t.Errorf("rail button %d is %v, want %v square in the middle of the rail", i, b, RailButton)
+		}
+	}
+	for i := range 5 {
+		if want := float32(HeaderHeight + 8 + i*(RailButton+ButtonGap)); rail[i].Y != want {
+			t.Errorf("rail button %d is at %v, want %v", i, rail[i].Y, want)
+		}
+	}
+	// Too narrow for the panel beside the conversation, the details toggle
+	// cannot act: it is disabled, not a dimmed button that takes clicks.
+	narrow := New(preview.Load())
+	nt := ui.NewTesterWith(narrow.View, RailWidth+NavWidth+MainMin+PanelMin-40, 820, opaque)
+	nt.SetLocale("en")
+	nt.Frame()
+	info, ok := headerButton(nt, i18n.In("en", "details"))
+	snapshot(t, nt, "details-disabled")
+	if !ok || !info.Disabled {
+		t.Fatalf("the details toggle without room is %+v", info)
+	}
+	nt.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
+	nt.Frame()
+	if narrow.PanelOpen {
+		t.Error("a disabled details toggle opened the panel")
+	}
+	narrow.NavOpen = false
+	settle(nt)
+	if info, _ := headerButton(nt, i18n.In("en", "details")); info.Disabled {
+		t.Error("the details toggle stays disabled with room for the panel")
+	}
+	clickButton(t, nt, i18n.In("en", "details"))
+	settle(nt)
+	if !narrow.PanelOpen {
+		t.Error("the details toggle did not open the panel")
+	}
+}

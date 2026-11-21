@@ -24,9 +24,6 @@ jobs:
     env:
       CGO_ENABLED: "0"
       GOTOOLCHAIN: go1.27.3
-    defaults:
-      run:
-        working-directory: desktop
 
     steps:
       - name: Check out repository
@@ -37,7 +34,7 @@ jobs:
         with:
           go-version: 1.27.3
           cache: true
-          cache-dependency-path: desktop/go.sum
+          cache-dependency-path: go.sum
 
       - name: Run desktop tests
         run: go test ./...

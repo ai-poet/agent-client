@@ -1,0 +1,140 @@
+package shell
+
+import (
+	"testing"
+
+	"github.com/ai-poet/agent-client/internal/desktop/i18n"
+	"github.com/ai-poet/agent-client/internal/desktop/settings"
+	"github.com/egoist/mygo/ui"
+)
+
+// TestUpdaterUnconfigured pins this fork's default: no feed and no public
+// key means no updater, so About says so and the check button takes no press.
+func TestUpdaterUnconfigured(t *testing.T) {
+	a, tt := newTester(t)
+	a.Do("app.about")
+	tt.Frame()
+	tt.Frame()
+	if !tt.HasText(i18n.In("en", "updates_not_configured")) {
+		t.Fatalf("unconfigured updater says nothing: %q", tt.Texts())
+	}
+	info, ok := tt.AccessByRole(ui.RoleButton, i18n.In("en", "updates_check"))
+	if !ok || !info.Disabled {
+		t.Fatalf("check button = %+v, found %v", info, ok)
+	}
+}
+
+// testLiveUpdater shows each state of the real updater on the About page and
+// presses its action: the page only reports the state and calls the action
+// (SABOUT-005, 006, 008, 009).
+func TestUpdaterLiveStates(t *testing.T) {
+	a, tt := newTester(t)
+	calls := map[string]int{}
+	count := func(name string) func() { return func() { calls[name]++ } }
+	a.Settings.UpdateActions = &settings.UpdateActions{Check: count("check"), Download: count("download"), Cancel: count("cancel"), Install: count("install"), Restart: count("restart")}
+	a.Do("app.about")
+	tt.Frame()
+	tt.Frame()
+	u := &a.Settings.Updater
+	show := func(state settings.Updater) {
+		t.Helper()
+		*u = state
+		tt.Frame()
+		tt.Frame()
+	}
+	disabled := func(label string) bool {
+		t.Helper()
+		info, found := tt.AccessByRole(ui.RoleButton, i18n.In("en", label))
+		if !found {
+			t.Fatalf("no %s button: %q", label, tt.Texts())
+		}
+		return info.Disabled
+	}
+	has := func(label string) bool {
+		_, found := tt.AccessByRole(ui.RoleButton, i18n.In("en", label))
+		return found
+	}
+
+	// An update found away from About marks Settings until About shows it.
+	a.Do("app.settings")
+	a.Settings.Open(settings.General)
+	tt.Frame()
+	*u = settings.Updater{State: settings.UpdateAvailable, Version: "0.3.0"}
+	tt.Frame()
+	if !u.Attention() {
+		t.Fatal("no attention away from About")
+	}
+	snapshot(t, tt, "updates-attention")
+	a.Settings.Open(settings.About)
+	tt.Frame()
+	tt.Frame()
+	if u.Attention() {
+		t.Fatal("About did not clear the attention")
+	}
+
+	// Downloading: the bytes copied as a percentage, then Verifying; Cancel
+	// is the action and the channel is locked.
+	show(settings.Updater{State: settings.UpdateDownloading, Version: "0.3.0", Copied: 12 << 20, Total: 48 << 20})
+	if !tt.HasText("12.0 MB / 48.0 MB · 25%") || !tt.HasText(i18n.In("en", "updates_downloading", "version", "0.3.0")) ||
+		tt.HasText(i18n.In("en", "updates_verifying")) || !u.Locked() || has("updates_restart_now") {
+		t.Fatalf("downloading: %q", tt.Texts())
+	}
+	show(settings.Updater{State: settings.UpdateDownloading, Version: "0.3.0", Copied: 48 << 20, Total: 48 << 20, Verifying: true})
+	if !tt.HasText(i18n.In("en", "updates_verifying")) || tt.HasText("100%") {
+		t.Fatalf("verifying: %q", tt.Texts())
+	}
+	clickButton(t, tt, i18n.In("en", "settings_cancel"))
+	tt.Frame()
+	if calls["cancel"] != 1 || len(calls) != 1 {
+		t.Fatalf("Cancel called %v", calls)
+	}
+
+	// Ready: the row states the consequence and Restart now installs at
+	// once; Later folds the row and keeps the action.
+	show(settings.Updater{State: settings.UpdateReady, Version: "0.3.0"})
+	if !tt.HasText(i18n.In("en", "updates_ready_now", "version", "0.3.0")) || !tt.HasText(i18n.In("en", "updates_restart_description")) || !has("updates_later") {
+		t.Fatalf("ready: %q", tt.Texts())
+	}
+	clickButton(t, tt, i18n.In("en", "updates_later"))
+	tt.Frame()
+	if tt.HasText(i18n.In("en", "updates_restart_description")) || has("updates_later") || calls["install"] != 0 {
+		t.Fatalf("Later: %v %q", calls, tt.Texts())
+	}
+	u.Review()
+	tt.Frame()
+	if !tt.HasText(i18n.In("en", "updates_restart_description")) {
+		t.Fatal("Review did not unfold the ready row")
+	}
+	clickButton(t, tt, i18n.In("en", "updates_restart_now"))
+	tt.Frame()
+	tt.Frame()
+	if calls["install"] != 1 || len(calls) != 2 {
+		t.Fatalf("Restart now called %v", calls)
+	}
+
+	// Installing and restarting: a disabled busy button with the state's
+	// text, no other action and a locked channel.
+	for state, text := range map[settings.UpdateState]string{settings.UpdateInstalling: "updates_installing", settings.UpdateRestarting: "updates_restarting"} {
+		show(settings.Updater{State: state, Version: "0.3.0"})
+		if !disabled(text) || !u.Locked() ||
+			has("updates_check") || has("settings_cancel") || has("updates_restart_now") || has("updates_restart") || has("updates_download") {
+			t.Fatalf("state %d: %q", state, tt.Texts())
+		}
+		clickButton(t, tt, i18n.In("en", text))
+		tt.Frame()
+		if calls["install"] != 1 || len(calls) != 2 {
+			t.Fatalf("the disabled Installing button called %v", calls)
+		}
+	}
+
+	// Stopped: Restart is the only action.
+	show(settings.Updater{State: settings.UpdateStopped, Version: "0.3.0"})
+	if !tt.HasText(i18n.In("en", "updates_restart_needed")) || has("updates_check") || has("updates_installing") || has("updates_restart_now") {
+		t.Fatalf("stopped: %q", tt.Texts())
+	}
+	clickButton(t, tt, i18n.In("en", "updates_restart"))
+	tt.Frame()
+	if calls["restart"] != 1 || len(calls) != 3 {
+		t.Fatalf("Restart called %v", calls)
+	}
+}

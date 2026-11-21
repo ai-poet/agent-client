@@ -1,0 +1,107 @@
+//go:build integration
+
+package main
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"os"
+
+	"path/filepath"
+
+	"testing"
+
+	"github.com/ai-poet/agent-client/internal/core"
+	"github.com/ai-poet/agent-client/internal/link/iroh"
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/ai-poet/agent-client/internal/node"
+	"github.com/ai-poet/agent-client/internal/node/computer"
+	"github.com/ai-poet/agent-client/internal/node/mcp"
+	"github.com/ai-poet/agent-client/internal/shipped"
+
+	"github.com/ai-poet/agent-client/internal/speech/capture"
+	"github.com/ai-poet/agent-client/internal/turso"
+)
+
+func TestPackagedColdStartup(t *testing.T) {
+	if os.Getenv("SAILRY_PACKAGE_PROBE") != "1" {
+		t.Skip("set SAILRY_PACKAGE_PROBE=1 and run beside the packaged executable")
+	}
+	profile := filepath.Join(t.TempDir(), "profile")
+	options := node.Options{MCP: &mcp.Options{Open: func(context.Context, mcp.Launch, func(context.Context, *sdk.ElicitRequest) (*sdk.ElicitResult, error)) (*sdk.ClientSession, error) {
+		return nil, errors.New("fixture MCP servers are unavailable")
+	}}}
+	for _, phase := range []string{"first launch", "reopen"} {
+		t.Run(phase, func(t *testing.T) {
+			owner, err := node.StartWithOptions(t.Context(), profile, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := owner.Stop(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// TestPackagedNativeLayout runs the production loaders from inside a
+// packaged application: compile this test with `go test -c -tags
+// integration`, copy the binary beside the packaged executable and run it
+// there with SAILRY_PACKAGE_PROBE=1. No window, device, model or Node opens.
+func TestPackagedNativeLayout(t *testing.T) {
+	if os.Getenv("SAILRY_PACKAGE_PROBE") != "1" {
+		t.Skip("set SAILRY_PACKAGE_PROBE=1 and run beside the packaged executable")
+	}
+	directory, err := shipped.Directory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("native directory: %s", directory)
+	// A probe linked like a release (-X …/internal/core.Default) takes the
+	// packaged-only path: sealed libraries, no SAILRY_IROH_LIB.
+	t.Logf("release build: %v", core.Release())
+	t.Run("Turso FTS", func(t *testing.T) {
+		if core.Release() {
+			t.Setenv("SAILRY_TURSO_LIB", filepath.Join(t.TempDir(), "ignored"))
+		}
+		connector, err := turso.Connector(filepath.Join(t.TempDir(), "probe.turso"), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		db := sql.OpenDB(connector)
+		defer db.Close()
+		ctx := context.Background()
+		for _, statement := range []string{
+			"CREATE TABLE probe (id INTEGER PRIMARY KEY, body TEXT NOT NULL)",
+			"CREATE INDEX probe_fts ON probe USING fts(body) WITH(tokenizer='whitespace')",
+			"INSERT INTO probe(body) VALUES ('packaged native search')",
+		} {
+			if _, err := db.ExecContext(ctx, statement); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var count int
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM probe WHERE fts_match(body, 'native')").Scan(&count); err != nil || count != 1 {
+			t.Fatalf("Turso FTS: count=%d, error=%v", count, err)
+		}
+	})
+	if err := capture.Load(directory, core.Release()); err != nil {
+		t.Errorf("capture: %v", err)
+	}
+	if core.Release() {
+		t.Setenv("SAILRY_IROH_LIB", filepath.Join(t.TempDir(), "ignored"))
+	}
+	if err := iroh.LoadDefault(!core.Release()); err != nil {
+		t.Errorf("iroh: %v", err)
+	}
+	if helper, err := computer.Executable(); err != nil {
+		t.Errorf("computer helper: %v", err)
+	} else {
+		t.Logf("computer helper: %s", helper)
+	}
+	if terminal, err := filepath.Glob(filepath.Join(directory, "*ghostty-vt*")); err != nil || len(terminal) != 1 {
+		t.Errorf("libghostty-vt: %v, %v", terminal, err)
+	}
+}

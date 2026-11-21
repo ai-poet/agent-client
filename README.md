@@ -1,254 +1,208 @@
-# CheapRouter
+本目录派生自 sailry-harness，见 NOTICE。
 
-CheapRouter 把「低价模型网关」和「原生 Agent 工作台」合成了一个桌面应用：
-一端是 Claude / GPT / Grok，以及订阅分组里的 DeepSeek / Kimi / GLM 等模型的
-网关，另一端是用 Rust + [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)
-写的本地编码 agent 工作台，自带一个编译在客户端里的内置 Agent。登录即用，
-模型按当前源站自动拉取，不需要安装或配置任何外部 CLI。
+<p align="center">
+  <img src="assets/readme/hero.svg" width="100%" alt="Sailry: any computer becomes your AI workstation. A desktop and a phone connect to a MacBook, a Linux server and a GPU box over end-to-end encrypted peer-to-peer links.">
+</p>
 
-> **Built on [Waku](https://github.com/egoist/waku)** by egoist, licensed under
-> GPL-3.0-only. This is a modified fork; see [NOTICE.md](NOTICE.md) for the list
-> of changes and [docs/FORK.md](docs/FORK.md) for how it tracks upstream.
-> Please report issues with this build here, not to the upstream project.
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" alt="Apache-2.0 License"></a>
+  <a href="#install"><img src="https://img.shields.io/badge/desktop-macOS%20·%20Windows-lightgrey?style=flat-square" alt="Desktop on macOS and Windows"></a>
+  <a href="#install"><img src="https://img.shields.io/badge/host-macOS%20·%20Linux-lightgrey?style=flat-square" alt="Host on macOS and Linux"></a>
+  <a href="#install"><img src="https://img.shields.io/badge/mobile-Android%20·%20iOS-lightgrey?style=flat-square" alt="Mobile on Android and iOS"></a>
+  <a href="https://github.com/ai-poet/agent-client/stargazers"><img src="https://img.shields.io/github/stars/sailry/sailry-harness?style=flat-square&color=yellow" alt="GitHub Stars"></a>
+  <a href="https://discord.gg/MCDktmDey"><img src="https://img.shields.io/badge/chat-Discord-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord"></a>
+</p>
 
-## 为什么选 CheapRouter
+<p align="center">
+  <a href="README.zh-CN.md">简体中文</a> ·
+  <a href="docs/hosts.md">Hosts</a> ·
+  <a href="docs/models.md">Models</a> ·
+  <a href="docs/projects.md">Projects</a> ·
+  <a href="sdk/plugins.md">Plugin SDK</a>
+</p>
 
-- **内置 Agent，装好就能用。** 引擎直接编译在客户端里，不需要 Node、npm 或任何
-  外部 CLI。网关上能对话的 Claude、GPT、Grok、DeepSeek、Kimi、GLM 等模型都在
-  它的模型选择器里，每个模型自动走对应的接口格式、用提供它的那个分组的密钥，
-  推理强度按模型家族给出可选档位。详见下文 [内置 Agent](#内置-agent)。
-- **源站一切，全局联动。** 底部源站菜单切换后，内置 Agent 的模型请求、模型目录、
-  余额、用量、订阅、公告和充值等业务 API 都使用新源站；旧源站尚未返回的请求不会
-  覆盖新数据。登录和令牌刷新仍固定在完成登录的认证域名，避免认证会话跨节点漂移。
-- **订阅一目了然。** 设置 → CheapRouter 账号列出你的每个有效订阅：剩余天数、日 /
-  周 / 月的已用额度与上限；左下角账号菜单也有一行摘要。订阅里的模型按周期计费，
-  不扣余额，内置 Agent 会让 DeepSeek、Kimi、GLM 这类模型自动走提供它的订阅。
-- **按厂商选模型。** 模型入口位于输入区的一级控件里，打开后直接按厂商分类，
-  只列出当前厂商的可用模型；也可按名称、厂商或自定义接口跨分类搜索，不用再进入
-  服务商二级菜单。
-- **余额、充值、用量原生内置。** 左下角实时余额（每个任务结束自动刷新，低于 $5
-  变黄、$1 变红），原生充值弹窗支持扫码 / Stripe / 兑换码，用量页带模型与分组
-  筛选、分页、逐请求的 token / 缓存 / 费用 / 延迟明细——不用再开网页后台。
-- **模型广场，先比价再干活。** 全部在售模型的官方价与网关价对照（划线价一目了然）、
-  分组倍率与健康度、缓存 / 长上下文 / 阶梯计费标注，一眼挑出最划算的分组。
-- **分组一键切换。** 左下角账号菜单按模型平台选择计费分组，内置 Agent 会立即拿到
-  新的分组密钥；进行中的单次请求保持在原线路，新请求使用新分组。菜单里每个分组旁
-  直接标注倍率（如 ×0.50）、24 小时在线率和降级/故障状态；也可以按平台开启自动
-  故障转移，分组故障时切到健康分组，恢复后自动切回。
-- **画图，文生图和图生图都在一个框里。** 侧栏「搜索」下面点「画图」：只写提示词
-  就出图，拖入、粘贴或选几张图片就在它们的基础上改图。模型、尺寸（每档标好单价）、
-  质量、张数随手选，预计花费和余额就在「生成」旁边；画好的图存进系统「图片」
-  文件夹，也留在图库里随时预览、再改、发到对话。详见下文 [画图](#画图)。
-- **电脑操作。** 在 macOS 和 Windows 上，agent 可以直接操作桌面应用（Windows 在
-  设置 → 电脑操作里一键下载驱动），也能在对话里调用 `generate_image` 生成图片。
-  驱动没装时只是不开放桌面控制，对话照常进行。
-- **公告直达。** 标题栏铃铛实时同步服务公告（限时活动、模型上新、维护通知），
-  未读红点提醒，客户端内直接阅读。
-- **看得清 agent 在做什么。** 翻代码的动作合成一行（如「已探索 · 2 次搜索，3 个
-  文件」），命令合成另一行，每一步都写明在做什么、做完了什么；失败的命令标红，
-  悬停看输出结尾。思考只占一行，中途发的转向消息立刻出现，前后的工作各自折叠、
-  各自计时，「工作了多久」不含等你批准的时间。转录区右上角的状态胶囊随时告诉你
-  目标、当前步骤、计划进度和后台任务。
-- **出错有交代，改错能撤回。** 一轮失败时输入框上方出现错误条：完整报错、一键
-  复制、一键重试（重试不会删文件），不再编一段假回复。每轮的改动卡片可以只撤销
-  这一轮改过的文件——之后又被改过的文件原样保留并列出来，文件夹里的其他东西一概
-  不碰；点卡片上的文件直接看 diff。
-- **批准不打断你。** 多个权限请求排队显示、带计数，按数字键就能作答，Esc 不会
-  误停整个任务；「拒绝并说明」直接告诉 agent 该怎么做。应用在后台时有待你处理的
-  请求会弹系统通知，侧栏也标出等待数。快捷键：⇧⌘M 切换权限模式、⇧⌘P 切换
-  Plan 模式、⌘T 切换推理强度（Windows 用 Ctrl）。
-- **完整的 Agent 工作台。** 多项目、多会话并行，消息排队与中途转向，Git
-  checkpoint 会话级回滚，worktree 隔离，内置终端、diff 与技能库——上游 Waku
-  的全部能力都在。
+Sailry is an open-source AI harness: agent teams that run on your own Mac or Linux machines, next
+to your code and data, driven from the desktop app or your phone on the
+[models you choose](docs/models.md).
 
-## 两步上手
+> [!NOTE]
+> **Early preview.** Sailry changes quickly between releases. Back up important work before
+> agents edit it, and [report issues](https://github.com/ai-poet/agent-client/issues) — your
+> feedback shapes what comes next.
 
-1. **安装并登录。** 从 [最新 Release](../../releases/latest) 下载对应平台安装包，
-   打开应用点「登录」，浏览器里完成注册——回到客户端即可拉取当前源站的模型目录。
-2. **开跑。** 打开一个项目文件夹，输入你想做的事，回车。默认且唯一使用的 Agent
-   就是内置 Agent；余额在左下角，随用随充。
+<p align="center">
+  <img src="assets/readme/workspace.webp" width="100%" alt="Sailry desktop home: hosts, active sessions and projects in the sidebar, and a new conversation with quick starts in the center.">
+</p>
 
-进阶：设置 → 模型接口 统一登记你自己的接口——地址、密钥、接口格式、模型列表，
-以及可测速自动选优的备用域名。内置 Agent 的 Messages、Responses、Chat Completions
-三种接口格式可分别绑定自定义接口；未绑定的格式使用底部当前源站。输入框只展示内置
-Agent 实际支持的 `/` 命令、共享技能和自定义命令，不再发现或透传外部 CLI 命令。
+## How it works
 
-## 内置 Agent
+<p align="center">
+  <img src="assets/readme/architecture.svg" width="100%" alt="The desktop app and the phone control one or more Hosts over peer-to-peer, end-to-end encrypted links with relay fallback. Each Host runs the agent loop and its tools next to your code and data, keeps credentials, and calls the model providers you choose.">
+</p>
 
-内置 Agent 是默认且唯一可启动的 provider。它是编译进客户端的一个完整编码 agent：读写文件、
-执行命令、搜索代码、调用 MCP 工具、启动子 agent。会话记录由应用自己保存，回滚、
-分支、续聊都不依赖任何外部进程。
+- **Any computer becomes a Host.** Install Sailry Host on a laptop, a Linux box in the lab or a
+  rented GPU machine. It runs as a background service, so work keeps going when you close the
+  laptop.
+- **Reach it from anywhere.** No port forwarding, VPN or cloud account.
 
-**模型与接口格式。** 模型选择器列出网关目录里能对话的模型（Gemini 系列目前只接入 Gemini 4 Argon），
-同一个模型只列一次。接口格式由模型家族决定，不需要手动选：
+## Features
 
-| 模型家族 | 接口格式 | 推理强度 |
-|---|---|---|
-| Claude | Anthropic Messages | low 至 max，最新型号另有 ultracode |
-| GPT / o 系列、Grok | OpenAI Responses | low 至 max |
-| DeepSeek、GLM 4.5 及以后、Kimi K3 | OpenAI Chat Completions | low / high / max |
-| Kimi K2、MiniMax | OpenAI Chat Completions | 由模型自己决定（接口不提供档位） |
-| Gemini 4 Argon | Google Gemini（网关 v1beta） | low / medium / high |
+### An agent beyond code
 
-**每个模型走对的分组。** 一个密钥只属于一个分组，而每个分组只提供它支持的那些
-模型。内置 Agent 按模型挑分组：Claude、GPT、Grok 使用账号菜单里为对应模型平台
-绑定的分组；其余模型优先走提供它的有效订阅，没有订阅时走提供它的、倍率最低的
-分组。需要的密钥会自动准备好（优先复用账号里已有的密钥），选择器里走订阅的模型
-会注明订阅名。
+- **Code** — three work modes (Standard; Plan, which plans without running code or writing
+  files; Collaborate, which runs an agent team), multi-file edits, Git and worktrees, terminals
+  and code review.
+- **Browse and operate** — a built-in browser the agent reads, clicks and screenshots; pick page
+  elements straight into the conversation; desktop computer use.
+- **Content and research** — interactive HTML previews, images and video, web search
+  and text knowledge collections.
+- **Keep going** — long-term memory, searchable history, goals that run until they are done,
+  reminders and scheduled tasks.
+- **Connectors** — GitHub, Notion, Slack, Linear, Figma, Google Workspace, Microsoft 365, Feishu,
+  DingTalk, WeCom and [more](https://github.com/sailry/sailry-plugins).
 
-**Claude 路线省钱又听话。** 走 Claude 时按 Claude Code 的方式打提示缓存断点，
-直连 Anthropic 的分组（如 Claude Max）每一步都从缓存读前面的对话，不再整段重付；
-推理强度也按 Claude Code 的方式发送（新一代模型用 adaptive thinking 加 effort，
-老模型仍用思考预算），网关的用量日志里能看到所选档位，Opus 5.5 选任何档位都
-不会报错。
+### Agent teams, one model per seat
 
-**先规划，再动手。** Plan 模式下 agent 只读代码、写计划，计划经你批准后才开始
-修改；它也可以在对话中自己进入 Plan 模式，界面上的模式标签会跟着变。
+Collaborate mode fans work out to parallel subagents, each on its own model — DeepSeek writes the
+code, Claude plans, Codex takes the hard problems — and every step stays visible in the
+conversation, where you approve actions as they run.
 
-**目标模式。** `/goal` 给任务定一个目标，agent 一轮接一轮地做下去，直到它确认
-目标完成；停止当前一轮会暂停目标，每轮的 token 都计入目标。
+### Built-in coding tools
 
-**上下文心里有数。** 所有路线（Claude、GPT、Grok、DeepSeek、Kimi、GLM……）都会
-按设置里的阈值自动压缩上下文，压缩前后的 token 数留在转录里；`/compact` 手动
-压缩，`/context` 看上下文占用，`/cost` 看本次用量。用量面板显示每次请求的输入、
-缓存命中和输出。各家 agent 的待办清单统一显示成 ○ / → / ✓，重新打开任务也还在。
+Coding plugins work the moment you open a project — no language servers, drivers or extensions to
+install. Structured tools return the result the agent needs instead of raw shell output.
 
-**跨平台的命令行。** macOS 上用 bash；Windows 上优先用 Git Bash，没有安装时改用
-PowerShell（有 7 就用 7），工作目录在多次调用之间保持，中文输出不乱码，超时会
-结束整棵进程树。
+- **Code graph** — symbol search, file outlines, callers and callees, change impact and a ranked
+  project map, so agents read the right code instead of searching the whole tree.
 
-**项目指令。** 自动读取项目里的 `AGENTS.md` / `CLAUDE.md`（从全局配置目录到当前
-目录逐级读取），与你在设置里写的系统提示一起生效。
+This desktop variant omits SSH, external database connections, Office/PDF extraction
+and local inference, including dictation. It retains iroh networking, WSL setup,
+online models, text knowledge collections, files, Git and local terminals.
 
-**不设步数上限。** 一条消息可以连续执行任意多步，长任务不会被中途截断；想停的时候
-随时取消。
+### Your phone is the remote control
 
-**可配置项。** 设置 → 内置 Agent：三种接口格式各用哪个接口、系统提示、自动压缩
-与自定义百分比阈值、内置工具开关、MCP 服务器和权限规则。内置 Agent 始终启用。
+Pair the Android or iOS app with your desktop or any Host using a six-digit code. Pick up any
+session, send and queue messages, answer approvals and follow tools as they run. No account and
+no subscription.
 
-内置 Agent 的执行内核移植自 [Sailry](https://github.com/sailry/sailry-harness)，
-现有 Provider、工具、权限和历史适配继续复用 Claurst 层。代码统一位于
-[`crates/agent-core`](crates/agent-core)，其中 `engine` 保留 Sailry 的
-`agent/engine`、`agent/model`、`agent/canonical` 结构；所做的修改逐条记录在
-[NOTICE.md](NOTICE.md)。
+### Native, light and fast
 
-## 画图
+Written in Go and drawn on the GPU with [MyGo](https://github.com/egoist/mygo)'s native UI
+toolkit — no Electron and no bundled browser engine.
+It starts fast, stays responsive in long conversations and leaves your memory to your work.
 
-侧栏「搜索」下面的「画图」打开一个独立页面，和任务并排，不遮住侧栏。
+### Plugins and themes
 
-- **一个输入框，两种画法。** 只写提示词就是文生图；把图片拖到页面上、粘贴截图，
-  或点回形针选文件，就变成图生图（PNG / JPEG / WebP，单张不超过 20 MB）。回车或
-  点「生成」提交。
-- **选项都在手边。** 模型（网关目录里的 gpt-image、Grok 生图模型）、分组（默认
-  自动）、尺寸（每档标出 1K / 2K / 4K 和单价）、质量、一次几张，旁边显示预计花费
-  和余额。
-- **图库。** 最新的在前；生成中的卡片会计时，失败的卡片写明原因（没开生图、没过
-  审核、余额不足……），余额不足时直接给出充值入口。每张图可以预览、用作参考图、
-  改提示词再画、重新生成、发到对话、复制提示词、在文件夹中显示。
-- **存在哪。** 图片在系统「图片」文件夹下的 `CheapRouter/年-月/`，图库记录与参考图
-  在 `~/.cheaprouter/image-studio/`。
-- **不怕长任务。** 网关支持异步生图时，图在网关上排队生成，关掉窗口也不丢，下次
-  打开画图页接着取结果；不支持时自动改用流式请求，不会被代理的超时掐断。
-- **自动找能画的分组。** 生图权限按分组单独开放，遇到没开的分组会自动换下一个，
-  画成功的分组会被记住；agent 在对话里调用 `generate_image` 时也走这个分组。
+- **Open standards** — [agent-plugins](https://agent-plugins.org) packages, standard `SKILL.md`
+  skills and direct MCP servers.
+- **Native plugin UI** — pages, panels and settings written in JavaScript render with the same
+  components as the rest of the app.
+- **Themes** — colors, typography, surfaces and decorations come from one set of tokens, in light
+  and dark. Official themes live in [sailry-themes](https://github.com/sailry/sailry-themes).
+- Browse the official [plugins](https://github.com/sailry/sailry-plugins) or build your own with
+  the Apache-2.0 [SDK](sdk/plugins.md).
 
-## 支持的 agent
+## Privacy
 
-只支持 **内置 Agent**。它直接运行在 `client-daemon` 内，支持云网关和自定义模型接口，
-无需安装任何外部程序。Claude Code、Codex、Grok Build、OpenCode、Pi、Amp、Cursor、
-Fx、Kimi Code 等外部 CLI 不再被检测、配置、导入或启动；已有本地会话镜像仍可查看，
-但不能续跑外部 CLI。
+Sailry sends anonymous error reports (app version, device type and error codes) and anonymous
+feature counts by default. They never include conversations, files, credentials, paths or custom
+names. Turn either off in **Settings › Diagnostics and privacy**, or set `SAILRY_TELEMETRY=off` or
+`DO_NOT_TRACK=1` for the desktop app or a Host.
+
+Sailry downloads public model scores from [ModelDial](third_party_licenses/modeldial.md)
+and model metadata from models.dev without sending user data.
 
 ## Install
 
-macOS 一键安装（推荐，绕开 Gatekeeper 弹窗）：
+[Changelog](CHANGELOG.md) · [Build from source](CONTRIBUTING.md#setup)
 
-```bash
-curl -fsSL https://s3.cheaprouter.cc/cheaprouter-releases/install-mac.sh | sh
-```
+| | Download | Requires |
+| --- | --- | --- |
+| **Desktop** | macOS: [Apple silicon](https://github.com/ai-poet/agent-client/releases/latest/download/Sailry-aarch64-apple-darwin.dmg) · [Intel](https://github.com/ai-poet/agent-client/releases/latest/download/Sailry-x86_64-apple-darwin.dmg)<br>Windows: [x64](https://github.com/ai-poet/agent-client/releases/latest/download/Sailry-x86_64-pc-windows-msvc-setup.exe) | macOS 13+ · Windows 10+ (x64) · Linux planned |
+| **Host** | macOS: [Apple silicon](https://github.com/ai-poet/agent-client/releases/latest/download/sailry-host-aarch64-apple-darwin.tar.gz) · [Intel](https://github.com/ai-poet/agent-client/releases/latest/download/sailry-host-x86_64-apple-darwin.tar.gz)<br>Linux: [x64](https://github.com/ai-poet/agent-client/releases/latest/download/sailry-host-x86_64-unknown-linux-gnu.tar.gz) · [ARM64](https://github.com/ai-poet/agent-client/releases/latest/download/sailry-host-aarch64-unknown-linux-gnu.tar.gz) | macOS 13+ · Linux with glibc 2.34+ · Windows planned |
+| **Mobile** | [Android APK](https://github.com/ai-poet/agent-client/releases/latest/download/Sailry-android-arm64.apk) · [iOS TestFlight](https://testflight.apple.com/join/qaTnVrmQ) (beta) | Android 7.0+ · iOS 15+ |
 
-Windows 从 [最新 Release](../../releases/latest) 下载 `CheapRouter-*-Setup.exe`
-安装（x64 与 arm64 均有，基于 Inno Setup）。安装后支持应用内自动更新：既有 Rust
-客户端经由 Sparkle / Windows appcast 完成首跳升级，Go/MyGo 桌面端随后通过签名
-MyGo 更新源（`mygo/update-<os>-<arch>.json`）持续自动检查更新。目前不提供 Linux
-安装包。
-
-## Architecture
-
-The native desktop is an RPC client of the standalone `client-daemon` process.
-Provider sessions run in [`client-core`](crates/client-core), behind the
-authenticated, versioned WebSocket contract in
-[`client-protocol`](crates/client-protocol). The desktop depends on
-[`client`](crates/client), not on the daemon implementation. The
-daemon owns task SQLite data, uploaded attachments, provider-native session
-forks, and all workspace filesystem and Git operations; paths returned by it
-always refer to the daemon host. The desktop retains only presentation state
-and a disposable preview cache.
-
-The built-in agent (`ProviderKind::Native`) runs inside the daemon rather than
-as a child process: Sailry's execution state machine in
-[`crates/agent-core/engine`](crates/agent-core/engine), with the existing
-provider, tool, permission, and history adapters in `crates/agent-core/query`,
-driven through [`crates/agent-bridge`](crates/agent-bridge) and translated into
-the provider contract by `crates/client-core/src/driver/native.rs`. Its transcript is owned by the
-daemon, which is what makes rewind, branch and resume plain truncations.
-
-All fork functionality lives in [`crates/sub2api`](crates/sub2api) plus a
-handful of view files; see [docs/FORK.md](docs/FORK.md) for the hook-point
-register. Routing is desktop-local: the desktop writes only the built-in agent's
-own settings (with backups in `~/.cheaprouter/takeover.json`), never an external
-CLI's configuration. Business API clients resolve the currently selected gateway
-origin; login, token refresh and logout stay on the credential's authentication
-origin. Switching origin invalidates origin-scoped caches and rejects late
-responses from the previous origin.
-
-The browser client lives at [`apps/web`](apps/web) and uses the generated
-browser transport in [`packages/client`](packages/client). Its
-checked-in types are generated directly from the Rust protocol. Run
-`bun run protocol:generate` after changing a wire type and
-`bun run protocol:check` to verify that generated files are current.
-
-App data lives under `~/.cheaprouter` (projectless task workspaces at
-`~/.cheaprouter/projects/<date>/<slug>`; the Release desktop writes
-`app.json` and daemon settings `settings.json` there, while Debug stays
-isolated at `temp/`). Legacy `~/.waku` directories from older builds are
-renamed in place at startup.
-
-Release apps bundle and sign `client-daemon`. Development keeps the daemon at
-`target/debug/waku-debug-daemon`, allowing provider-only edits to rebuild and
-replace the daemon without relaunching the debug build.
-
-## Development
-
-Development is supported on macOS and Windows and requires
-[Rust 1.96 or newer](https://www.rust-lang.org/tools/install) and
-[Bun](https://bun.sh/). Windows needs the MSVC toolchain; install the native
-build prerequisites listed in [CONTRIBUTING.md](CONTRIBUTING.md) first. The
-customized GPUI workspace is vendored under `vendor/gpui/`, and reusable UI
-components live in `vendor/gpui-kit/` (the `client-ui` crate); no
-separate checkout or submodule initialization is needed. Linux
-still builds from source, but it is not tested in CI and no Linux package is
-published.
+Or install a Host from the terminal:
 
 ```sh
-bun install
-bun run dev
+curl -fsSL https://github.com/ai-poet/agent-client/releases/latest/download/install-host.sh | bash
 ```
 
-The embedded browser remains macOS-only. Computer Use runs on macOS and on
-Windows, where it drives the desktop through `cua-driver` (downloaded from
-Settings → Computer Use). Agent sessions, projects, transcripts, skills,
-usage, diffs, file editing, and the terminal run natively on both.
+## Get started
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and checks.
-Release maintainers should read [docs/RELEASING.zh.md](docs/RELEASING.zh.md) (two-hop Rust + Go/MyGo CI release pipeline, signing keys, Inno Setup packaging, and R2 sync) and [RELEASING.md](RELEASING.md).
+1. [Add a model provider](docs/models.md#add-a-provider) in **Settings → Models** with an
+   API key or a ChatGPT or Claude account.
+2. Add a folder or clone a repository as a project on **Local device** or a connected Host.
+3. Choose **Create session**, pick a model and describe your task.
+4. [Add a Host and pair your devices](docs/hosts.md#install-and-pair) to work from anywhere.
 
-## Upstream
+Guides: [Models](docs/models.md) · [Remote hosts](docs/hosts.md) · [Projects and sessions](docs/projects.md)
 
-This fork exists because of upstream Waku. You can support its development via
-[GitHub Sponsors](https://github.com/sponsors/egoist).
+## 登录与模型网关
+
+CheapRouter 账号登录是可选的，用来快速接入模型网关。未登录、没有网络或网关同步失败时，应用照常进入主界面，本地项目、会话、终端和其他模型 provider 不受影响。登录入口在 **设置 → CheapRouter 账号**；已有功能和其他模型 provider 配置不会被删除或改写。
+
+- 可选择主站 `https://cheaprouter.cc` 或 CDN `https://cdn.cheaprouter.cc`，两者连接同一账号和网关。
+- 浏览器登录使用 PKCE S256 和 `127.0.0.1` 临时端口回跳。浏览器不会把 URL fragment 发给本地服务，因此回跳页会通过本地 POST 将一次性登录码交给应用。无法使用 loopback 时，可直接粘贴登录码或完整回跳链接。
+- OAuth 凭据保存在 profile 下的 `cheaprouter-account.json`，文件权限为 0600。访问令牌会在到期前 120 秒刷新；令牌和 PKCE verifier 不写入日志，也不会出现在错误提示中。
+- 登录后，应用读取 `auth/me`、模型目录和 `keys`，将网关 `base_url` 与所选 API key 写入 sailry 现有的 OpenAI 兼容 provider。模型对话仍走既有的重试、流式响应和凭据保护链路，没有新增协议 wire 类型。
+- 登录成功会显示账号、套餐、余额和可用模型数。退出登录会撤销本地会话并禁用 CheapRouter provider，不影响其他 provider。登录状态被服务端拒绝（续期失败或令牌失效）时同样清除本地凭据并禁用 CheapRouter provider，账号页回到未登录并说明原因。
+
+可用标准库 `httptest` 假服务验证完整鉴权与模型请求，无需真实账号：
+
+```sh
+GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0 go test ./internal/cheapauth/... ./internal/node/providers/... ./internal/node/agent/model/...
+```
+
+## 旧客户端数据迁移
+
+首次启动会只读检测 `~/.cheaprouter`（可用 `SUB2API_DATA_DIR_NAME` 覆盖）中的旧版 CheapRouter 数据；旧 Release 的 daemon 数据库也会从对应平台的 `CheapRouter` 应用支持目录检测。检测到项目或会话时，迁移向导先展示数量，确认后才导入；失败不会阻止新客户端启动，可在向导或 **Settings → General** 重试。
+
+- 迁移前将使用到的源文件原样备份到 profile 的 `migration-backup-<UTC 时间戳>/`，旧目录不会删除或改写。
+- **备份是原样副本**：旧目录里若有凭据文件，备份中会带着它的明文副本（这是「原样复制」的必然结果，不是迁移写入了 token）。确认迁移无误后可删除该目录。
+- 项目、会话和消息按稳定 ID 导入；`migration.json` 防止重复迁移，“重新迁移”只补缺，不覆盖新客户端已有内容。
+- `migration-report.json` 列出无法无损映射的字段。凭据仅保留账号标识和端点，不迁移 token 或 API key，需在新客户端重新登录。
+
+## 前置条件与已知限制
+
+- 构建与测试一律 `GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0`。
+- 涉及本地存储的包（如 `internal/desktop/live`、`internal/node/store` 的部分测试）需要 Turso native 库：先 `sh native/turso/build.sh` 生成 `.runtime/native/<os>-<arch>/libturso_sync_sdk_kit.so`，再用 `SAILRY_TURSO_LIB=<路径>` 跑测试。该脚本要求 **rustup**（`native/turso/rust-toolchain.toml` 钉死 toolchain `1.98.0`），用系统 rustc（如 1.85.x）会因依赖要求更高版本而编译失败；没有 rustup 的机器需要预编译产物。
+- 无网络/无图形环境（CI 容器）下 `internal/desktop/live` 的部分用例会失败，属环境限制。
+- **无 GPU 的机器**（没有 `/dev/dri`）也能跑：MyGo 自动降级到 CPU 渲染，日志会打印 `native UI draws with no GPU`，界面正常但更耗 CPU。
+- **原生 iroh 库**：启动缺少 `libsailry_iroh.so` 时会直接报 `Sailry could not start: native iroh library is unavailable`。除了 `sh native/iroh/build.sh` 现编，也可以把预编译产物放到 `native/iroh` 下并用 `SAILRY_IROH_LIB=<路径>` 指定；CI/分发包必须随包提供它，不能指望首次启动现编。
+
+## Client updates
+
+Application updates are disabled by default. An optional `update.json` in the
+Desktop profile accepts `feed_url` (the full MyGo platform-manifest URL),
+`public_key` (a base64 Ed25519 key), `enabled`, `automatic` and `prereleases`.
+The file must contain both source fields before `enabled` can take effect. Once
+the settings page writes it, its permissions are 0600.
+
+**Settings → About** shows the running version, manual checks, download progress
+and readable failures. Automatic mode performs one quiet check shortly after
+launch. MyGo verifies the signed package before installation; the running build
+must also have MyGo updater support and its matching build-time public key.
+Development builds and package-manager installations can decline self-update.
+This client feature does not generate manifests, sign releases or upload files.
+
+## Community
+
+Join the [Discord](https://discord.gg/MCDktmDey) or add the maintainer on WeChat for the group
+chat. Please use [GitHub Issues](https://github.com/ai-poet/agent-client/issues) for bug reports
+and feature requests, and [SECURITY.md](SECURITY.md) to report vulnerabilities privately.
+Want to contribute? Start with [CONTRIBUTING.md](CONTRIBUTING.md).
+
+<p align="center">
+  <img src="assets/readme/wechat.png" width="200" alt="WeChat QR code for the Sailry community">
+</p>
 
 ## License
 
-Licensed under the [GNU General Public License v3.0 only](LICENSE), the same
-license as upstream Waku. Modifications are recorded in [NOTICE.md](NOTICE.md).
+Sailry is licensed under [Apache-2.0](LICENSE), as are the plugin SDK in [sdk/](sdk/) and the
+official [plugins](https://github.com/sailry/sailry-plugins) and
+[themes](https://github.com/sailry/sailry-themes). The license does not cover the Sailry name or
+logos; see [TRADEMARKS.md](TRADEMARKS.md). Third-party materials keep their own licenses; see
+[NOTICE](NOTICE) and [third-party notices](third_party_licenses/).
+
+[![Contributors](https://contrib.rocks/image?repo=sailry/sailry-harness)](https://github.com/ai-poet/agent-client/graphs/contributors)

@@ -8,16 +8,16 @@
 两把独立 Ed25519 密钥、同一个对象存储桶（`cheaprouter-releases`）共同服务两跳升级：
 
 1. **第一跳（存量 v0.3.x 用户 → Go/MyGo v0.4.0+）**：
-   - 密钥：`SPARKLE_PRIVATE_KEY`（公钥配置于 `desktop/cmd/sailry-desktop/mygo.json` 的 `macos.infoPlist.SUPublicEDKey`）；
+   - 密钥：`SPARKLE_PRIVATE_KEY`（公钥配置于 `cmd/sailry-desktop/mygo.json` 的 `macos.infoPlist.SUPublicEDKey`）；
    - macOS：`scripts/appcast.ts` 签发桶根 `appcast.xml`，指向 `CheapRouter-<v>.zip`；
    - Windows：`scripts/appcast-windows.ts` 签发桶根 `appcast-windows-x86_64.xml` 与 `appcast-windows-aarch64.xml`，指向 Inno Setup 安装器 `CheapRouter-<v>-<arch>-Setup.exe`（支持 `/SILENT /NORESTART /SP- /DIR=` 原地覆盖并清理旧可执行文件）。
 2. **第二跳（Go/MyGo v0.4.0+ → 后续 Go/MyGo 版本）**：
-   - 密钥：`MYGO_UPDATE_PRIVATE_KEY` / `MYGO_UPDATE_PUBLIC_KEY`（公钥配置于 `desktop/cmd/sailry-desktop/mygo.json` 的 `updates.publicKey`，并在打包期注入二进制）；
-   - `desktop/cmd/mygo-manifest sign` 对四端 `.tar.gz` 的 SHA-256 摘要做 Ed25519 签名，产出 `mygo/update-{darwin-arm64,darwin-amd64,windows-amd64,windows-arm64}.json`，由客户端 `internal/update` 与 `mygo.Updater` 校验并原子替换。
+   - 密钥：`MYGO_UPDATE_PRIVATE_KEY` / `MYGO_UPDATE_PUBLIC_KEY`（公钥配置于 `cmd/sailry-desktop/mygo.json` 的 `updates.publicKey`，并在打包期注入二进制）；
+   - `cmd/mygo-manifest sign` 对四端 `.tar.gz` 的 SHA-256 摘要做 Ed25519 签名，产出 `mygo/update-{darwin-arm64,darwin-amd64,windows-amd64,windows-arm64}.json`，由客户端 `internal/update` 与 `mygo.Updater` 校验并原子替换。
 
 ## 2. 版本与身份单一真值
 
-- **版本源**：`desktop/cmd/sailry-desktop/mygo.json` 的 `.version`，必须与 `desktop/internal/link/compatibility.go` 的 `ProductVersion` 及推送的 Git tag `v<version>` 一致，且禁止带 `-` prerelease 后缀。
+- **版本源**：`cmd/sailry-desktop/mygo.json` 的 `.version`，必须与 `internal/link/compatibility.go` 的 `ProductVersion` 及推送的 Git tag `v<version>` 一致，且禁止带 `-` prerelease 后缀。
 - **身份对齐**：
   - `name=CheapRouter`、`slug=cheaprouter`、`identifier=sh.waku`；
   - macOS 数值化 `CFBundleVersion = major*1_000_000 + minor*1_000 + patch`（如 `0.4.0 → 4000 > 3008`）；
@@ -42,11 +42,11 @@
 
 ## 4. 触发与发布步骤
 
-1. 更新 `desktop/cmd/sailry-desktop/mygo.json`（`version` 与 `macos.infoPlist.CFBundleVersion`）、`desktop/internal/link/compatibility.go`（`ProductVersion`）及 `CHANGELOG.md`。
+1. 更新 `cmd/sailry-desktop/mygo.json`（`version` 与 `macos.infoPlist.CFBundleVersion`）、`internal/link/compatibility.go`（`ProductVersion`）及 `CHANGELOG.md`。
 2. 推送版本 tag `v<version>`（或在 Actions → Release 手动触发 `workflow_dispatch`）。
 3. CI 流水线（`.github/workflows/release.yml`）自动完成：
-   - **macOS（`mygo-macos`：arm64 + amd64）**：编译 native 库（iroh / turso / capture），调用 `desktop/cmd/sailry-desktop/macos/package.sh --require-update-key` 产出 `.dmg`、第一跳 `.zip` 与第二跳 `.tar.gz`；`arm64` 节点生成并签名 `appcast.xml`。
-   - **Windows（`mygo-windows`：x86_64 + aarch64）**：编译 native 库并提取对应架构 MSVC CRT（`desktop/native/windows/crt.ps1`），调用 `desktop/cmd/sailry-desktop/windows/package.sh -arch <amd64|arm64> --require-update-key` 使用 `mygo build -skip-installer` 与 Inno Setup（`cheaprouter.iss`）产出 `-Setup.exe`、便携 `.zip` 与第二跳 `.tar.gz`。
+   - **macOS（`mygo-macos`：arm64 + amd64）**：编译 native 库（iroh / turso / capture），调用 `cmd/sailry-desktop/macos/package.sh --require-update-key` 产出 `.dmg`、第一跳 `.zip` 与第二跳 `.tar.gz`；`arm64` 节点生成并签名 `appcast.xml`。
+   - **Windows（`mygo-windows`：x86_64 + aarch64）**：编译 native 库并提取对应架构 MSVC CRT（`native/windows/crt.ps1`），调用 `cmd/sailry-desktop/windows/package.sh -arch <amd64|arm64> --require-update-key` 使用 `mygo build -skip-installer` 与 Inno Setup（`cheaprouter.iss`）产出 `-Setup.exe`、便携 `.zip` 与第二跳 `.tar.gz`。
    - **汇签与 Draft（`mygo-draft-release`）**：签发第一跳 `appcast-windows-*.xml` 与第二跳 `update-*.json`，生成 `SHA256SUMS.txt` 并创建 draft GitHub Release。
 4. 检查 draft 产物无误后点击 **Publish**，`.github/workflows/sync-release.yml` 自动同步到对象存储。
 
@@ -71,7 +71,6 @@
 ### 本地打包预检（支持 Linux）
 
 ```sh
-cd desktop
 ./cmd/sailry-desktop/macos/package.sh -arch arm64 --require-update-key --dry-run
 ./cmd/sailry-desktop/macos/package.sh -arch amd64 --require-update-key --dry-run
 ./cmd/sailry-desktop/windows/package.sh -arch amd64 --require-update-key --dry-run

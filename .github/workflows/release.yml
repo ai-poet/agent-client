@@ -30,13 +30,13 @@ jobs:
         id: resolve
         run: |
           set -euo pipefail
-          if [ ! -f desktop/cmd/sailry-desktop/mygo.json ]; then
-            echo "::error::desktop/cmd/sailry-desktop/mygo.json not found for MyGo release"
+          if [ ! -f cmd/sailry-desktop/mygo.json ]; then
+            echo "::error::cmd/sailry-desktop/mygo.json not found for MyGo release"
             exit 1
           fi
-          version=$(jq -r '.version // ""' desktop/cmd/sailry-desktop/mygo.json)
+          version=$(jq -r '.version // ""' cmd/sailry-desktop/mygo.json)
           if [ -z "$version" ]; then
-            echo "::error::No version found in desktop/cmd/sailry-desktop/mygo.json"
+            echo "::error::No version found in cmd/sailry-desktop/mygo.json"
             exit 1
           fi
           case "$version" in
@@ -48,25 +48,25 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = "push" ]; then
             tag="${GITHUB_REF_NAME#v}"
             if [ "$tag" != "$version" ]; then
-              echo "::error::Tag ${GITHUB_REF_NAME} does not match desktop/cmd/sailry-desktop/mygo.json version ${version}"
+              echo "::error::Tag ${GITHUB_REF_NAME} does not match cmd/sailry-desktop/mygo.json version ${version}"
               exit 1
             fi
           fi
 
-          app_name=$(jq -r '.name // ""' desktop/cmd/sailry-desktop/mygo.json)
-          app_slug=$(jq -r '.slug // ""' desktop/cmd/sailry-desktop/mygo.json)
-          bundle_id=$(jq -r '.identifier // ""' desktop/cmd/sailry-desktop/mygo.json)
-          plist_build=$(jq -r '.macos.infoPlist.CFBundleVersion // ""' desktop/cmd/sailry-desktop/mygo.json)
-          sparkle_pub=$(jq -r '.macos.infoPlist.SUPublicEDKey // ""' desktop/cmd/sailry-desktop/mygo.json)
-          feed_url=$(jq -r '.updates.url // ""' desktop/cmd/sailry-desktop/mygo.json)
-          link_version=$(sed -n 's/.*ProductVersion[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' desktop/internal/link/compatibility.go | head -1)
+          app_name=$(jq -r '.name // ""' cmd/sailry-desktop/mygo.json)
+          app_slug=$(jq -r '.slug // ""' cmd/sailry-desktop/mygo.json)
+          bundle_id=$(jq -r '.identifier // ""' cmd/sailry-desktop/mygo.json)
+          plist_build=$(jq -r '.macos.infoPlist.CFBundleVersion // ""' cmd/sailry-desktop/mygo.json)
+          sparkle_pub=$(jq -r '.macos.infoPlist.SUPublicEDKey // ""' cmd/sailry-desktop/mygo.json)
+          feed_url=$(jq -r '.updates.url // ""' cmd/sailry-desktop/mygo.json)
+          link_version=$(sed -n 's/.*ProductVersion[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' internal/link/compatibility.go | head -1)
 
           if [ "$app_name" != "CheapRouter" ] || [ "$app_slug" != "cheaprouter" ] || [ "$bundle_id" != "sh.waku" ]; then
             echo "::error::Identity mismatch in mygo.json (name=$app_name slug=$app_slug identifier=$bundle_id)"
             exit 1
           fi
           if [ "$link_version" != "$version" ]; then
-            echo "::error::desktop/internal/link/compatibility.go ProductVersion (${link_version}) != mygo.json version (${version})"
+            echo "::error::internal/link/compatibility.go ProductVersion (${link_version}) != mygo.json version (${version})"
             exit 1
           fi
           if [ -z "$sparkle_pub" ] || [ -z "$feed_url" ]; then
@@ -163,7 +163,7 @@ jobs:
         with:
           go-version: 1.27.3
           cache: true
-          cache-dependency-path: desktop/go.sum
+          cache-dependency-path: go.sum
 
       - name: Install Rust (native libraries)
         run: |
@@ -177,14 +177,13 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            desktop/.runtime/native/darwin-${{ matrix.arch }}/cargo
-            desktop/.runtime/native/darwin-${{ matrix.arch }}/turso-cargo
-          key: mygo-macos-${{ matrix.arch }}-rust-1.98.0-${{ hashFiles('desktop/native/iroh/Cargo.lock', 'desktop/native/turso/Cargo.lock') }}
+            .runtime/native/darwin-${{ matrix.arch }}/cargo
+            .runtime/native/darwin-${{ matrix.arch }}/turso-cargo
+          key: mygo-macos-${{ matrix.arch }}-rust-1.98.0-${{ hashFiles('native/iroh/Cargo.lock', 'native/turso/Cargo.lock') }}
           restore-keys: |
             mygo-macos-${{ matrix.arch }}-rust-1.98.0-
 
       - name: Build native libraries
-        working-directory: desktop
         run: |
           sh native/iroh/build.sh
           sh native/turso/build.sh
@@ -235,7 +234,6 @@ jobs:
           echo "APPLE_NOTARY_PROFILE=NOTARY" >> "$GITHUB_ENV"
 
       - name: Package macOS desktop
-        working-directory: desktop
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.WAKU_SIGNING_IDENTITY }}
@@ -264,7 +262,7 @@ jobs:
           TRIPLE: ${{ matrix.triple }}
         run: |
           set -euo pipefail
-          out="desktop/.runtime/package/out/darwin-${ARCH}"
+          out=".runtime/package/out/darwin-${ARCH}"
           mkdir -p dist-mygo
           if [ "$ARCH" = "arm64" ]; then
             cp "$out/CheapRouter-${TRIPLE}.dmg" "dist-mygo/CheapRouter-${VERSION}.dmg"
@@ -298,14 +296,10 @@ jobs:
           bun -e '
             import { extractReleaseNotes } from "./scripts/changelog.ts";
             const version = process.env.VERSION;
-            let notes = null;
-            for (const path of ["CHANGELOG.md", "desktop/CHANGELOG.md"]) {
-              const file = Bun.file(path);
-              if (await file.exists()) {
-                notes = extractReleaseNotes(await file.text(), version);
-                if (notes) break;
-              }
-            }
+            const file = Bun.file("CHANGELOG.md");
+            const notes = (await file.exists())
+              ? extractReleaseNotes(await file.text(), version)
+              : null;
             const body = `${notes ?? "See CHANGELOG.md for details."}\n`;
             await Bun.write(`dist-mygo/CheapRouter-${version}.md`, body);
           '
@@ -377,7 +371,7 @@ jobs:
         with:
           go-version: 1.27.3
           cache: true
-          cache-dependency-path: desktop/go.sum
+          cache-dependency-path: go.sum
 
       - name: Install Rust (native libraries)
         run: |
@@ -393,15 +387,14 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            desktop/.runtime/native/windows-${{ matrix.arch }}/cargo
-            desktop/.runtime/native/windows-${{ matrix.arch }}/turso-cargo
-          key: mygo-windows-${{ matrix.arch }}-rust-1.98.0-${{ hashFiles('desktop/native/iroh/Cargo.lock', 'desktop/native/turso/Cargo.lock') }}
+            .runtime/native/windows-${{ matrix.arch }}/cargo
+            .runtime/native/windows-${{ matrix.arch }}/turso-cargo
+          key: mygo-windows-${{ matrix.arch }}-rust-1.98.0-${{ hashFiles('native/iroh/Cargo.lock', 'native/turso/Cargo.lock') }}
           restore-keys: |
             mygo-windows-${{ matrix.arch }}-rust-1.98.0-
 
       - name: Build native libraries
         shell: bash
-        working-directory: desktop
         env:
           SAILRY_ARCH: ${{ matrix.arch }}
         run: |
@@ -411,13 +404,11 @@ jobs:
 
       - name: Stage Windows C++ runtime
         shell: pwsh
-        working-directory: desktop
         run: |
           pwsh -File native/windows/crt.ps1 -Arch ${{ matrix.arch }} -Output .runtime/native/windows-${{ matrix.arch }}
 
       - name: Package Windows desktop (Inno Setup + zip + MyGo tar.gz)
         shell: bash
-        working-directory: desktop
         env:
           SAILRY_ARCH: ${{ matrix.arch }}
           MYGO_UPDATE_FEED_URL: https://s3.cheaprouter.cc/cheaprouter-releases/mygo
@@ -432,9 +423,9 @@ jobs:
         with:
           name: mygo-windows-${{ matrix.arch }}
           path: |
-            desktop/.runtime/package/out/windows-${{ matrix.arch }}/CheapRouter-${{ needs.version.outputs.version }}-${{ matrix.rust_arch }}-Setup.exe
-            desktop/.runtime/package/out/windows-${{ matrix.arch }}/cheaprouter-${{ needs.version.outputs.version }}-${{ matrix.triple }}.zip
-            desktop/.runtime/package/out/windows-${{ matrix.arch }}/cheaprouter-${{ needs.version.outputs.version }}-windows-${{ matrix.arch }}.tar.gz
+            .runtime/package/out/windows-${{ matrix.arch }}/CheapRouter-${{ needs.version.outputs.version }}-${{ matrix.rust_arch }}-Setup.exe
+            .runtime/package/out/windows-${{ matrix.arch }}/cheaprouter-${{ needs.version.outputs.version }}-${{ matrix.triple }}.zip
+            .runtime/package/out/windows-${{ matrix.arch }}/cheaprouter-${{ needs.version.outputs.version }}-windows-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
 
   mygo-draft-release:
@@ -460,7 +451,7 @@ jobs:
         with:
           go-version: 1.27.3
           cache: true
-          cache-dependency-path: desktop/go.sum
+          cache-dependency-path: go.sum
 
       - name: Verify required signing secrets
         env:
@@ -518,14 +509,10 @@ jobs:
           bun -e '
             import { extractReleaseNotes } from "./scripts/changelog.ts";
             const version = process.env.VERSION;
-            let notes = null;
-            for (const path of ["CHANGELOG.md", "desktop/CHANGELOG.md"]) {
-              const file = Bun.file(path);
-              if (await file.exists()) {
-                notes = extractReleaseNotes(await file.text(), version);
-                if (notes) break;
-              }
-            }
+            const file = Bun.file("CHANGELOG.md");
+            const notes = (await file.exists())
+              ? extractReleaseNotes(await file.text(), version)
+              : null;
             await Bun.write(
               "release-notes.md",
               `${notes ?? "See CHANGELOG.md for details."}\n`,
@@ -568,23 +555,20 @@ jobs:
               "${MYGO_UPDATE_FEED_URL}/update-${target}.json" \
               -o "prev-manifests/update-${target}.json" || true
           done
-          (
-            cd desktop
-            go run ./cmd/mygo-manifest sign \
-              -dir ../artifacts \
-              -out ../artifacts \
-              -prev-dir ../prev-manifests \
-              -version "$VERSION" \
-              -slug cheaprouter \
-              -feed-url "$MYGO_UPDATE_FEED_URL" \
-              -notes-file ../release-notes.md \
-              -targets darwin-arm64,darwin-amd64,windows-amd64,windows-arm64 \
-              -mygo-config cmd/sailry-desktop/mygo.json
-            go run ./cmd/mygo-manifest verify \
-              -dir ../artifacts \
-              -targets darwin-arm64,darwin-amd64,windows-amd64,windows-arm64 \
-              -mygo-config cmd/sailry-desktop/mygo.json
-          )
+          go run ./cmd/mygo-manifest sign \
+            -dir artifacts \
+            -out artifacts \
+            -prev-dir prev-manifests \
+            -version "$VERSION" \
+            -slug cheaprouter \
+            -feed-url "$MYGO_UPDATE_FEED_URL" \
+            -notes-file release-notes.md \
+            -targets darwin-arm64,darwin-amd64,windows-amd64,windows-arm64 \
+            -mygo-config cmd/sailry-desktop/mygo.json
+          go run ./cmd/mygo-manifest verify \
+            -dir artifacts \
+            -targets darwin-arm64,darwin-amd64,windows-amd64,windows-arm64 \
+            -mygo-config cmd/sailry-desktop/mygo.json
 
       - name: Write SHA256SUMS.txt
         run: |

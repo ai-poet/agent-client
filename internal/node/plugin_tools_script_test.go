@@ -1,0 +1,209 @@
+package node
+
+import (
+	"encoding/json"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
+	"github.com/ai-poet/agent-client/internal/node/plugins"
+	"github.com/ai-poet/agent-client/internal/node/store"
+	"github.com/ai-poet/agent-client/internal/protocol"
+)
+
+func TestBeforeModelResultsKeepRecentCompleteResultsOfThisTurn(t *testing.T) {
+	current, earlier := protocol.NewTurnID(), protocol.NewTurnID()
+	result := func(turn protocol.TurnID, id, name, body string) canonical.Record {
+		return canonical.NewRecord(turn, "message", canonical.NewMessage(canonical.User, canonical.Block{Kind: "tool_response", Data: &canonical.ToolResponse{
+			ID: id, Name: name, Result: canonical.Payload{Value: json.RawMessage(body)},
+		}}), time.Time{})
+	}
+	initial := canonical.NewRecord(current, "message", canonical.NewMessage(canonical.User, canonical.Text(0, "Current turn")), time.Time{})
+	initial.Provenance.Author = "user"
+	initial.Metadata.Input = &canonical.Input{Turn: &current}
+	large := `"` + strings.Repeat("x", plugins.ScriptMaxDataBytes/2) + `"`
+	records := []canonical.Record{
+		initial,
+		result(current, "old-large", "memory-read", large),
+		result(current, "first", "memory-read", `"First"`),
+		result(current, "oversized", "memory-read", `"`+strings.Repeat("x", plugins.ScriptMaxDataBytes)+`"`),
+		result(current, "new-large", "memory-read", large),
+		result(earlier, "earlier", "memory-read", `"Earlier turn"`),
+		result(current, "second", "memory-read", `"Second"`),
+		result(current, "other-tool", "private-tool", `"Another package"`),
+	}
+	names := map[string]string{"memory-read": "read"}
+	results, latest := beforeModelResults(records, current, names, "")
+	encoded, err := json.Marshal(map[string]any{"results": results})
+	want := `{"results":[{"name":"read","response":"First"},{"name":"read","response":` + large + `},{"name":"read","response":"Second"}]}`
+	if err != nil || latest != "other-tool" || len(encoded) > plugins.ScriptMaxDataBytes || string(encoded) != want {
+		t.Fatalf("before_model results have %d bytes, %d entries, newest %q, error %v", len(encoded), len(results), latest, err)
+	}
+	if repeated, newest := beforeModelResults(records, current, names, latest); repeated != nil || newest != latest {
+		t.Fatalf("unchanged tool results requested a second evaluation: %d, %q", len(repeated), newest)
+	}
+}
+
+func TestPluginTurnInput(t *testing.T) {
+	delegate, apply, read, write := protocol.ToolOperationDelegateAgent, protocol.ToolOperationApplyRoles, protocol.ToolOperationReadFile, protocol.ToolOperationWriteFile
+	options := json.RawMessage(`{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"depth":{"type":"string","default":"quick"},"strict":{"type":"boolean"}},"required":[],"additionalProperties":false}`)
+	extension := protocol.DefaultPluginExtension()
+	extension.Actions = []protocol.PluginAction{protocol.PluginActionReadConversation, protocol.PluginActionReadMessage}
+	extension.ConversationOptions = &options
+	extension.Tools = []protocol.ToolDeclaration{
+		{Name: "delegate", Handler: &protocol.ToolHandler{Name: "delegate", Operation: &delegate}},
+		{Name: "roster", Handler: &protocol.ToolHandler{Name: "roster", Operation: &apply}},
+		{Name: "report", Handler: &protocol.ToolHandler{Name: "report", Flow: &protocol.ToolFlow{Operations: []protocol.ToolOperation{read, write}}}},
+		{Name: "plain", Handler: &protocol.ToolHandler{Name: "plain"}},
+	}
+	info := protocol.PluginInfo{Summary: protocol.PluginSummary{Name: "review-fixture", Digest: "digest"}, Extension: &extension}
+	provider := protocol.NewProviderID()
+	withTools, withoutTools := protocol.NewRoleID(), protocol.NewRoleID()
+	team := protocol.TeamReference{ID: protocol.NewTeamID(), Revision: 7}
+	invocation := func() *store.AgentInvocation {
+		value := &store.AgentInvocation{Turn: protocol.DefaultQueuedTurn(), Run: protocol.DefaultConversationRun()}
+		value.Turn.Revision = 42
+		value.Turn.Config.Mode, value.Turn.Config.Permission = protocol.WorkModeCode, protocol.PermissionAsk
+		value.Turn.Config.Options = map[string]map[string]json.RawMessage{
+			"review-fixture": {"strict": json.RawMessage("true"), "retired": json.RawMessage(`"x"`)},
+			"other":          {"depth": json.RawMessage(`"deep"`)},
+		}
+		value.Turn.Roles.Team = &team
+		value.Turn.Roles.Providers = []protocol.ConversationProvider{{ID: provider, Models: []protocol.ConversationModel{{ID: "tools", Tools: true}, {ID: "plain"}}}}
+		value.Turn.Roles.Profiles = []protocol.RoleProfile{
+			{ID: withTools, Key: "review", Name: "Review", Description: " ", Instructions: strings.Repeat("字", 1100), ReadOnly: true, Model: &protocol.RoleModel{Provider: provider, Model: "plain"}},
+			{ID: withoutTools, Key: "build", Name: "Build", Description: "Builds the task", Model: &protocol.RoleModel{Provider: provider, Model: "plain"}},
+			{ID: protocol.NewRoleID(), Key: "lead", Name: "Lead"},
+		}
+		value.Turn.Roles.Models = map[protocol.RoleID]protocol.RoleModel{withTools: {Provider: provider, Model: "tools"}}
+		value.Message.Text = strings.Repeat("记", 4096)
+		return value
+	}
+	names := []string{"delegate", "roster", "report", "plain"}
+	build := func(t *testing.T, value *store.AgentInvocation, names []string) map[string]any {
+		t.Helper()
+		input, err := pluginTurnInput(value, info, names, pluginSelectedOperations(info, names))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := json.Marshal(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		return decoded
+	}
+
+	t.Run("selected operations include handler and flow operations", func(t *testing.T) {
+		selected := pluginSelectedOperations(info, names)
+		for _, operation := range []protocol.ToolOperation{delegate, apply, read, write} {
+			if !slices.Contains(selected, operation) {
+				t.Fatalf("%s missing from %v", operation, selected)
+			}
+		}
+		if selected := pluginSelectedOperations(info, []string{"plain"}); len(selected) != 0 {
+			t.Fatalf("unselected operations leaked: %v", selected)
+		}
+	})
+	t.Run("captured roster, team, revision and options", func(t *testing.T) {
+		input := build(t, invocation(), names)
+		roles := input["roles"].([]any)
+		if len(roles) != 3 {
+			t.Fatalf("roles = %v", roles)
+		}
+		first := roles[0].(map[string]any)
+		if first["key"] != "review" || first["name"] != "Review" || first["read_only"] != true || first["tools"] != true ||
+			first["description"] != strings.Repeat("字", 1024) {
+			t.Fatalf("first role = %v", first)
+		}
+		if second := roles[1].(map[string]any); second["description"] != "Builds the task" || second["tools"] != false || second["read_only"] != false {
+			t.Fatalf("second role = %v", second)
+		}
+		if third := roles[2].(map[string]any); third["tools"] != true {
+			t.Fatalf("a role following the lead's model can call tools: %v", third)
+		}
+		if got := input["team"].(map[string]any); got["id"] != team.ID.String() || got["revision"] != "7" {
+			t.Fatalf("team = %v", got)
+		}
+		if input["session_revision"] != "42" || input["automatic"] != false || input["execution"] != string(protocol.ConversationExecutionTeam) || input["resources"] != true {
+			t.Fatalf("input = %v", input)
+		}
+		if got := input["options"].(map[string]any); len(got) != 2 || got["depth"] != "quick" || got["strict"] != true {
+			t.Fatalf("options = %v", got)
+		}
+		message := input["message"].(string)
+		if len(message) != 4095 || !strings.HasPrefix(invocation().Message.Text, message) {
+			t.Fatalf("message has %d bytes", len(message))
+		}
+		if got := input["names"].([]any); len(got) != 4 || got[0] != plugins.ToolAlias("review-fixture", "delegate") {
+			t.Fatalf("names = %v", got)
+		}
+	})
+	t.Run("roster and revision follow the selected operations", func(t *testing.T) {
+		input := build(t, invocation(), []string{"plain", "report"})
+		if len(input["roles"].([]any)) != 0 || input["session_revision"] != nil {
+			t.Fatalf("input = %v", input)
+		}
+	})
+	t.Run("automatic, notice and delegated turns keep the message private", func(t *testing.T) {
+		automatic := invocation()
+		automatic.Run.Continuation = &protocol.ConversationContinuation{}
+		if input := build(t, automatic, names); input["automatic"] != true || input["notice"] != false || input["message"] != nil {
+			t.Fatalf("automatic input = %v %v %v", input["automatic"], input["notice"], input["message"] != nil)
+		}
+		// The goal loop counts a notice turn as automatic and names it apart.
+		notice := invocation()
+		notice.Run.Notice = true
+		if input := build(t, notice, names); input["automatic"] != true || input["notice"] != true || input["message"] != nil {
+			t.Fatalf("notice input = %v %v %v", input["automatic"], input["notice"], input["message"] != nil)
+		}
+		child := invocation()
+		delegation := &protocol.Delegation{}
+		child.Session.Delegation = &delegation
+		if input := build(t, child, names); input["message"] != nil {
+			t.Fatal("delegated input exposed its message")
+		}
+		blank := invocation()
+		blank.Message.Text = " \n\t"
+		if input := build(t, blank, names); input["message"] != nil {
+			t.Fatal("blank message was exposed")
+		}
+	})
+	t.Run("conversation fields need the conversation action", func(t *testing.T) {
+		private := extension
+		private.Actions = nil
+		limited := protocol.PluginInfo{Summary: info.Summary, Extension: &private}
+		input, err := pluginTurnInput(invocation(), limited, names, pluginSelectedOperations(limited, names))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"config", "execution", "team", "models", "message"} {
+			if input[key] != nil {
+				t.Fatalf("%s = %v", key, input[key])
+			}
+		}
+	})
+	t.Run("each captured package retains its own resources in an assistant", func(t *testing.T) {
+		value := invocation()
+		value.Turn.Config.Assistant = &protocol.PluginConversationBinding{Package: plugins.PackageReference(info), ID: "assistant"}
+		if input := build(t, value, names); input["resources"] != true {
+			t.Fatal("the assistant's own package lost its resources")
+		}
+		value.Turn.Config.Assistant.Package.Name = "another"
+		if input := build(t, value, names); input["resources"] != true {
+			t.Fatal("another captured package lost its own resources")
+		}
+	})
+	t.Run("options violating the schema fail the turn", func(t *testing.T) {
+		value := invocation()
+		value.Turn.Config.Options["review-fixture"]["depth"] = json.RawMessage("3")
+		if _, err := pluginTurnInput(value, info, names, pluginSelectedOperations(info, names)); err == nil {
+			t.Fatal("invalid options were accepted")
+		}
+	})
+}
