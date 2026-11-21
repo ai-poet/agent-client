@@ -126,6 +126,7 @@ func (r *Runtime) applyConversationData(data *viewmodel.Data) {
 	if app.Page != shell.ConversationPage || data.Find(app.Sidebar.Selected) != nil {
 		return
 	}
+	defer r.fallBackSelection(app.Sidebar.Selected)
 	for _, peer := range peers {
 		if peer == target {
 			continue
@@ -152,6 +153,7 @@ func (r *Runtime) ensureConversationSelection() {
 	if app.Page != shell.ConversationPage || app.Data.Find(selected) != nil {
 		return
 	}
+	defer r.fallBackSelection(selected)
 	focused := app.FocusedConversation()
 	if focused == "" && selected != "" {
 		// An independent terminal owns the main workspace.
