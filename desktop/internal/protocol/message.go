@@ -4443,6 +4443,8 @@ func (value CommandStopTurnPayload) MarshalJSON() ([]byte, error) {
 	return json.Marshal(encoded)
 }
 
+// CommandRunCommandPayload launches a command. Service marks a background
+// command that keeps running when the user stops its session's turn.
 type CommandRunCommandPayload struct {
 	Turn        TurnID         `json:"turn"`
 	Command     string         `json:"command"`
@@ -4452,6 +4454,7 @@ type CommandRunCommandPayload struct {
 	TimeoutMs   uint64         `json:"timeout_ms"`
 	Background  bool           `json:"background"`
 	FollowUp    bool           `json:"follow_up,omitempty"`
+	Service     bool           `json:"service,omitempty"`
 	Pty         bool           `json:"pty"`
 	Attachments []AttachmentID `json:"attachments"`
 }
@@ -4466,6 +4469,7 @@ func DefaultCommandRunCommandPayload() CommandRunCommandPayload {
 		TimeoutMs:   0,
 		Background:  false,
 		FollowUp:    false,
+		Service:     false,
 		Pty:         false,
 		Attachments: []AttachmentID{},
 	}
@@ -4474,6 +4478,7 @@ func (value *CommandRunCommandPayload) UnmarshalJSON(data []byte) error {
 	type plain CommandRunCommandPayload
 	decoded := plain{}
 	decoded.FollowUp = false
+	decoded.Service = false
 	decoded.Pty = false
 	if err := DecodeObject(data, &decoded, []string{"turn", "command", "access", "cwd", "timeout_ms", "background", "attachments"}, false); err != nil {
 		return err

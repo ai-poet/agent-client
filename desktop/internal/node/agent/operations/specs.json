@@ -1371,6 +1371,11 @@
           "default": false,
           "description": "Continue the conversation automatically when this background command finishes or stalls. Required when you wait for its result; otherwise status and output are only retained."
         },
+        "service": {
+          "type": "boolean",
+          "default": false,
+          "description": "Keep this background command running when the user stops the turn. Use for servers and daemons started for the user."
+        },
         "pty": {
           "type": "boolean",
           "default": false

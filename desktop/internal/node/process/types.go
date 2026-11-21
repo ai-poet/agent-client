@@ -22,6 +22,8 @@ type Launch struct {
 	Pty            bool
 	Background     bool
 	FollowUp       bool // Report background progress for this launch, including after promotion.
+	// Service keeps a background command running through a user stop.
+	Service        bool
 	Scratch        string
 	Inputs         string
 	Environment    map[string]string

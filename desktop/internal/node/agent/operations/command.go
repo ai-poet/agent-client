@@ -141,6 +141,7 @@ func Command(operation protocol.ToolOperation, arguments json.RawMessage, worktr
 			set("access", "workspace")
 		}
 		defaultValue("follow_up", false)
+		defaultValue("service", false)
 		defaultValue("pty", false)
 	case "process.read":
 		set("session", session)
