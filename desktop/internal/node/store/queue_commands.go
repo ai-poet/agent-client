@@ -519,13 +519,27 @@ func recaptureDetachedGuidance(ctx context.Context, db *sql.Conn, turn protocol.
 	}
 	session.Worktree = run.Worktree
 	settings, err := captureTurnSettings(WithCapturedUser(WithUser(ctx, user), origin.ID), db, node, session, run.Kind)
-	if _, unavailable := errors.AsType[*protocol.Fault](err); unavailable {
+	if uncapturableSettings(err) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
 	return saveTurnSettings(ctx, db, turn, settings)
+}
+
+// uncapturableSettings reports a configuration the session cannot run with
+// now. Storage, revision and availability faults are not configuration.
+func uncapturableSettings(err error) bool {
+	failure, ok := errors.AsType[*protocol.Fault](err)
+	if !ok {
+		return false
+	}
+	switch failure.Code {
+	case protocol.ErrorCodeNotConfigured, protocol.ErrorCodeInvalidRequest, protocol.ErrorCodePermissionDenied, protocol.ErrorCodeExpired:
+		return true
+	}
+	return false
 }
 
 func pendingTurns(ctx context.Context, db *sql.Conn, query string, args ...any) ([]protocol.TurnID, error) {
