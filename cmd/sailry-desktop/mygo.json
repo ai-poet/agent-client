@@ -15,9 +15,6 @@
     "icon": "../../assets/branding/Sailry.icns",
     "minimumSystemVersion": "13.0",
     "entitlements": "macos/app.entitlements.plist",
-    "helperEntitlements": {
-      "python/bin/python3.12": "macos/python.entitlements.plist"
-    },
     "infoPlist": {
       "CFBundleVersion": "4000",
       "SUPublicEDKey": "IUd9ZU+OYtZIzWi/MmSrVKXY4cbfrTC3ahtEz52H8ZI=",

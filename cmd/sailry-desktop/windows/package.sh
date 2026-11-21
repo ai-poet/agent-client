@@ -276,7 +276,7 @@ mv "$mygo_config_backup" cmd/sailry-desktop/mygo.json
 mygo_config_backup=""
 test "$build_status" -eq 0
 
-for name in "$app_name.exe" native-seal.json build.json .mygo-update-files; do
+for name in "$app_name.exe" native-seal.json build.json; do
   test -f "$out/$name" || { echo "the package has no $name" >&2; exit 1; }
 done
 
