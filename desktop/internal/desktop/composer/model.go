@@ -1,6 +1,7 @@
 package composer
 
 import (
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -109,6 +110,31 @@ type Model struct {
 	Scores map[string]*Score
 	// Features are its options beyond the effort, as Fast mode.
 	Features []Feature
+	// Group describes the active routing group serving this model (for
+	// CheapRouter), projected from the same metadata as the lane panel and
+	// account page.
+	Group *ModelGroupHint
+}
+
+// GroupTag is one semantic badge projected from a provider's routing group.
+type GroupTag struct {
+	Label string
+	Tone  kit.Tone
+	Icon  *ui.SVG
+}
+
+// ModelGroupHint is the read-only group summary displayed in the model
+// selector and its tooltip.
+type ModelGroupHint struct {
+	Lane        string
+	GroupName   string
+	Tags        []GroupTag
+	Rate        string
+	StatusText  string
+	StatusTone  kit.Tone
+	StatusIcon  *ui.SVG
+	StatusError string
+	Summary     string
 }
 
 // Family describes a model vendor in the picker's left column.
