@@ -65,6 +65,7 @@ func (stream *topicSubscription) Next(ctx context.Context) (protocol.Update, err
 		return operation.Err()
 	}
 	delay := 250 * time.Millisecond
+	wake := stream.client.retried()
 	for {
 		if err := cancelled(); err != nil {
 			return protocol.Update{}, err
@@ -73,6 +74,7 @@ func (stream *topicSubscription) Next(ctx context.Context) (protocol.Update, err
 		current := stream.stream
 		stream.mu.Unlock()
 		if current != nil {
+			wake = stream.client.retried()
 			update, err := current.Next(operation)
 			if err == nil {
 				return update, nil
@@ -97,11 +99,14 @@ func (stream *topicSubscription) Next(ctx context.Context) (protocol.Update, err
 		stream.mu.Lock()
 		changed, fresh := stream.changed, stream.generation != stream.bound
 		stream.mu.Unlock()
+		woken := false
 		if !fresh {
 			timer := time.NewTimer(delay)
 			select {
 			case <-operation.Done():
 			case <-changed:
+			case <-wake:
+				woken = true
 			case <-timer.C:
 			}
 			timer.Stop()
@@ -109,7 +114,13 @@ func (stream *topicSubscription) Next(ctx context.Context) (protocol.Update, err
 		if err := cancelled(); err != nil {
 			return protocol.Update{}, err
 		}
-		delay = min(delay*2, 5*time.Second)
+		if woken {
+			delay = 250 * time.Millisecond
+		} else {
+			delay = min(delay*2, 5*time.Second)
+		}
+
+		wake = stream.client.retried()
 
 		stream.mu.Lock()
 		generation := stream.generation
