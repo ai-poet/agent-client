@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/internal/desktop/picker"
 	"github.com/ai-poet/agent-client/internal/desktop/preview"
 	"github.com/ai-poet/agent-client/internal/desktop/sidebar"
 	"github.com/ai-poet/agent-client/internal/desktop/theme"
 	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
+	"github.com/egoist/mygo/ui"
 )
 
 // TestSidebarSessions groups the cases of one behavior; each keeps its own fixture.
@@ -377,7 +377,7 @@ func testSidebarNewSession(t *testing.T) {
 		t.Fatalf("a second New session stacked a chat: %q among %d", a.Sidebar.Selected, count())
 	}
 	// From another session it is enabled and goes back to the unsent chat.
-	click(t, tt, "Port the neutral theme tokens")
+	clickSidebarRow(t, tt, "Port the neutral theme tokens")
 	settle(tt)
 	if b, plus := disabled(); b || plus || a.Sidebar.Selected == draft {
 		t.Fatalf("over another session New session is disabled %v %v", b, plus)
@@ -397,7 +397,7 @@ func testSidebarNewSession(t *testing.T) {
 			a.Sidebar.Selected = "sailry-go/theme"
 			a.openHost("remote", false)
 			settle(tt)
-			click(t, tt, "Port the neutral theme tokens")
+			clickSidebarRow(t, tt, "Port the neutral theme tokens")
 			settle(tt)
 		}},
 	} {
@@ -478,9 +478,7 @@ func testSidebarNewSession(t *testing.T) {
 func testSidebarMenuPinsAndRenames(t *testing.T) {
 	a, tt := newTester(t)
 	title := "Port the neutral theme tokens"
-	if err := tt.RightClick(title); err != nil {
-		t.Fatal(err)
-	}
+	rightClickSidebarRow(t, tt, title)
 	if err := tt.ChooseMenuItem("Pin session"); err != nil {
 		t.Fatalf("%v: %q", err, tt.Menu())
 	}
@@ -490,9 +488,7 @@ func testSidebarMenuPinsAndRenames(t *testing.T) {
 		t.Fatalf("the pin was not appended: %v %v", cv.Pinned, cv.PinOrder)
 	}
 	// Rename in place: the menu opens an input with the title.
-	if err := tt.RightClick(title); err != nil {
-		t.Fatal(err)
-	}
+	rightClickSidebarRow(t, tt, title)
 	if err := tt.ChooseMenuItem("Rename"); err != nil {
 		t.Fatal(err)
 	}
@@ -968,9 +964,7 @@ func clickField(t *testing.T, tt *ui.Tester, name string) {
 func testSidebarDeleteConfirms(t *testing.T) {
 	a, tt := newTester(t)
 	title := "Port the neutral theme tokens"
-	if err := tt.RightClick(title); err != nil {
-		t.Fatal(err)
-	}
+	rightClickSidebarRow(t, tt, title)
 	if err := tt.ChooseMenuItem(i18n.In("en", "session_delete")); err != nil {
 		t.Fatalf("%v: %q", err, tt.Menu())
 	}
@@ -993,9 +987,7 @@ func testSidebarDeleteConfirms(t *testing.T) {
 	}
 	chat := a.Data.Unassigned[0]
 	name := chat.Title
-	if err := tt.RightClick(name); err != nil {
-		t.Fatal(err)
-	}
+	rightClickSidebarRow(t, tt, name)
 	if err := tt.ChooseMenuItem(i18n.In("en", "session_delete")); err != nil {
 		t.Fatalf("%v: %q", err, tt.Menu())
 	}

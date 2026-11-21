@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
+	"github.com/egoist/mygo/ui"
 )
 
 func conversationLayoutFixture(t *testing.T, width int) (*App, *ui.Tester) {
@@ -176,9 +176,10 @@ func TestConversationScrollViewportBesideActivity(t *testing.T) {
 			}
 			// Reveal the native scrollbar, then page up on its track past the
 			// activity card. This must scroll the transcript, not the card.
-			x, y := right-5, list.Y+24
+			x, y := list.X+list.W-5, list.Y+24
 			tt.Move(x, y)
 			tt.Advance(300 * time.Millisecond)
+			tt.Frame()
 			tt.ClickAt(x, y)
 			tt.Frame()
 			if state.AtEnd() {

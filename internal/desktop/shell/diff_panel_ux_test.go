@@ -2,6 +2,7 @@ package shell
 
 import (
 	"fmt"
+	"path"
 	"testing"
 	"time"
 
@@ -66,9 +67,9 @@ func TestDiffPanelDirectOpenDropdownAndKeyboard(t *testing.T) {
 	if _, open := tt.AccessByRole(ui.RoleMenu, ""); open {
 		t.Fatal("clicking diff entry unexpectedly opened a menu")
 	}
-	row, ok := tt.AccessByRole(ui.RoleTreeItem, "example.md")
+	row, ok := tt.AccessByRole(ui.RoleTreeItem, path.Base(first))
 	if !ok || !row.Selected {
-		t.Fatalf("active diff file row example.md not highlighted: found=%v selected=%v", ok, row.Selected)
+		t.Fatalf("active diff file row %q not highlighted: found=%v selected=%v", first, ok, row.Selected)
 	}
 	shot(t, tt, "diff-panel-opened-zh")
 
@@ -145,15 +146,18 @@ func TestDiffPanelDirectOpenDropdownAndKeyboard(t *testing.T) {
 		if _, ok := tt.AccessByRole(ui.RoleButton, gitLabel); !ok {
 			t.Fatalf("%s: diff entry %q missing", key.name, gitLabel)
 		}
-		// Focus the composer first, then reach the chip with Shift+Tab.
-		if err := tt.Click(i18n.In("zh-CN", "composer")); err != nil {
-			t.Fatalf("%s: focus composer: %v", key.name, err)
+		// Shift+Tab is the editor's mode shortcut. From an empty draft,
+		// plain Tab traverses the controls and wraps back to the chip.
+		editor := i18n.In("zh-CN", "composer")
+		clickField(t, tt, editor)
+		if field, ok := tt.AccessByRole(ui.RoleTextField, editor); !ok || !field.Focused {
+			t.Fatalf("%s: composer did not receive focus", key.name)
 		}
 		reached := false
-		for range 12 {
-			tt.Key(ui.Shift, ui.KeyTab)
+		for range len(tt.AccessAll()) {
+			tt.Key(0, ui.KeyTab)
 			tt.Frame()
-			if tt.Focused(gitLabel) {
+			if button, ok := tt.AccessByRole(ui.RoleButton, gitLabel); ok && button.Focused {
 				reached = true
 				break
 			}

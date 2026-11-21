@@ -6,13 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/internal/desktop/panel"
 	"github.com/ai-poet/agent-client/internal/desktop/panes"
 	"github.com/ai-poet/agent-client/internal/desktop/preview"
 	"github.com/ai-poet/agent-client/internal/desktop/sidebar"
 	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
 )
 
 // visibleSidebarRow scrolls a row into the sidebar's viewport before pointer
@@ -57,6 +57,18 @@ func visibleSidebarRow(t *testing.T, tt *ui.Tester, label string) ui.AccessInfo 
 	return row
 }
 
+func clickSidebarRow(t *testing.T, tt *ui.Tester, label string) {
+	t.Helper()
+	b := visibleSidebarRow(t, tt, label).Bounds
+	tt.ClickAt(b.X+b.W/2, b.Y+b.H/2)
+}
+
+func rightClickSidebarRow(t *testing.T, tt *ui.Tester, label string) {
+	t.Helper()
+	b := visibleSidebarRow(t, tt, label).Bounds
+	tt.RightClickAt(b.X+b.W/2, b.Y+b.H/2)
+}
+
 // TestProjectMenu covers the sidebar's right-click menus over the demo: every
 // item does what it says on the demo's data, in memory, and none of them
 // tells a preview's notice or is left dead.
@@ -83,8 +95,7 @@ func TestProjectMenu(t *testing.T) {
 	// project and the session too.
 	menu := func(t *testing.T, tt *ui.Tester, row string) []string {
 		t.Helper()
-		info := visibleSidebarRow(t, tt, row)
-		tt.RightClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
+		rightClickSidebarRow(t, tt, row)
 		return tt.Menu()
 	}
 	choose := func(t *testing.T, tt *ui.Tester, row string, path ...string) {

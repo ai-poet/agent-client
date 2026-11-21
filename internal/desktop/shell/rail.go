@@ -3,12 +3,12 @@ package shell
 import (
 	"slices"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/internal/desktop/theme"
 	"github.com/ai-poet/agent-client/internal/desktop/transfers"
+	"github.com/egoist/mygo/ui"
 )
 
 // Feature is a rail entry.
@@ -21,8 +21,7 @@ type Feature struct {
 	DefaultPinned bool
 }
 
-// Features are the rail's features in their default order: Conversation,
-// Activity, Files, Git, Market.
+// Features are the rail's built-in entries in their default order.
 var Features = []Feature{
 	{ID: "page:conversation", Icon: icons.Chat, Label: "shell_sessions", Fixed: true},
 	{ID: "page:image_studio", Icon: icons.Image, Label: "image_studio", DefaultPinned: true},

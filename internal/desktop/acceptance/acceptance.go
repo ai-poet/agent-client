@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	core "github.com/ai-poet/agent-client/internal/acceptance"
 	"github.com/ai-poet/agent-client/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/internal/desktop/preview"
 	"github.com/ai-poet/agent-client/internal/desktop/shell"
+	"github.com/egoist/mygo/ui"
 )
 
 type scenario struct {
@@ -129,9 +129,45 @@ func (w *window) selectConversation(id string) error {
 	if cv == nil {
 		return fmt.Errorf("fixture conversation %q does not exist", id)
 	}
-	if err := w.click(cv.Title); err != nil {
+	if err := w.ctx.Err(); err != nil {
 		return err
 	}
+	// The sidebar's access tree includes rows clipped by its scroll viewport.
+	// Bring the actual sidebar row into view before sending pointer input.
+	var viewport ui.Rect
+	for _, info := range w.tester.AccessAll() {
+		if b := info.Bounds; info.Role == ui.RoleScroll && b.X >= shell.RailWidth && b.X < shell.RailWidth+w.app.NavWidth && b.W > 0 && b.H > 0 {
+			viewport = b
+			break
+		}
+	}
+	if viewport.H == 0 {
+		return liveFail("conversation sidebar has no scroll viewport")
+	}
+	findRow := func() (ui.AccessInfo, bool) {
+		for _, info := range w.tester.AccessAll() {
+			if b := info.Bounds; info.Role == ui.RoleButton && info.Name == cv.Title && b.X >= viewport.X && b.X < viewport.X+viewport.W {
+				return info, true
+			}
+		}
+		return ui.AccessInfo{}, false
+	}
+	visible := func(info ui.AccessInfo) bool {
+		b := info.Bounds
+		return !info.Offscreen && b.W > 0 && b.H > 0 && b.Y >= viewport.Y && b.Y+b.H <= viewport.Y+viewport.H
+	}
+	row, ok := findRow()
+	if ok && !visible(row) {
+		x, y := viewport.X+viewport.W/2, viewport.Y+viewport.H/2
+		w.tester.Scroll(x, y, 0, row.Bounds.Y+row.Bounds.H/2-y)
+		w.tester.Frame()
+		row, ok = findRow()
+	}
+	if !ok || !visible(row) {
+		return liveFail(fmt.Sprintf("conversation %q is not visible in the sidebar", cv.Title))
+	}
+	w.tester.ClickAt(row.Bounds.X+row.Bounds.W/2, row.Bounds.Y+row.Bounds.H/2)
+	w.tester.Frame()
 	if w.app.Sidebar.Selected != id {
 		return fmt.Errorf("selecting %q selected %q", id, w.app.Sidebar.Selected)
 	}

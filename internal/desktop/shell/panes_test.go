@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/internal/desktop/panel"
 	"github.com/ai-poet/agent-client/internal/desktop/panes"
 	"github.com/ai-poet/agent-client/internal/desktop/preview"
+	"github.com/egoist/mygo/ui"
 )
 
 const themeChat = "sailry-go/theme" // "Port the neutral theme tokens"
@@ -291,7 +291,7 @@ func TestPanesRender(t *testing.T) {
 	if a.panes.Displayed() != nil || tt.HasText("Drag to split") {
 		t.Fatal("the split still shows")
 	}
-	click(t, tt, "Port the neutral theme tokens")
+	clickSidebarRow(t, tt, "Port the neutral theme tokens")
 	if a.panes.Displayed() == nil {
 		t.Fatal("the split does not come back")
 	}

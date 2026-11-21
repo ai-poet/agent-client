@@ -96,7 +96,7 @@ func TestActivityStrip(t *testing.T) {
 	}
 
 	// An idle conversation in a repository: the Git badge alone.
-	click(t, tt, "Port the neutral theme tokens")
+	clickSidebarRow(t, tt, "Port the neutral theme tokens")
 	tt.Frame()
 	if !tt.HasText(git[0]) || tt.HasText("12m") || tt.HasText(terminals) {
 		t.Fatalf("the idle conversation's strip: %q", tt.Texts())
@@ -125,7 +125,7 @@ func TestActivityStrip(t *testing.T) {
 	}
 	draft, _ := tt.AccessByRole(ui.RoleTextField, i18n.In("en", "composer"))
 	// A chat outside a project has no capsule, but the row stays.
-	click(t, tt, "Regex for semantic versions")
+	clickSidebarRow(t, tt, "Regex for semantic versions")
 	tt.Frame()
 	if tt.HasText(git[0]) {
 		t.Fatalf("a chat outside a project shows Git changes")

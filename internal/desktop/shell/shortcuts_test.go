@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/internal/desktop/panel"
 	"github.com/ai-poet/agent-client/internal/desktop/preview"
 	"github.com/ai-poet/agent-client/internal/desktop/settings"
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
 )
 
 // settle lets the columns' motion end.
@@ -217,7 +217,7 @@ func TestMenu(t *testing.T) {
 		"View": {{"Search", cmd(ui.Cmd, ui.KeyK)}, {"Find in Conversation", cmd(ui.Cmd, ui.KeyF)},
 			{"Toggle Sidebar", cmd(ui.Cmd, ui.KeyB)}, {"Toggle Details", cmd(ui.Cmd|ui.Alt, ui.KeyB)},
 			{"Toggle Full Screen", cmd(ui.Ctrl|ui.Super, ui.KeyF)},
-			{"Chats", ""}, {"Activity board", ""}, {"Files", ""}, {"Git", ""}, {"Market", ""}},
+			{"Chats", ""}, {"Creative Studio", ""}, {"Activity board", ""}, {"Files", ""}, {"Git", ""}, {"Market", ""}},
 		"Window": {{"Minimize", cmd(ui.Super, ui.KeyM)}, {"Zoom", ""}, {"Bring All to Front", ""}},
 		"Help":   {{"Website", ""}, {"Feedback", ""}, {"Logs", ""}, {"Welcome to CheapRouter", ""}, {"Selected text", ""}},
 	}
@@ -361,9 +361,7 @@ func TestMenuCommandsScoped(t *testing.T) {
 	// does not open itself, and they run again once it closed.
 	t.Run("sidebar confirmation", func(t *testing.T) {
 		a, tt := newTester(t)
-		if err := tt.RightClick("Port the neutral theme tokens"); err != nil {
-			t.Fatal(err)
-		}
+		rightClickSidebarRow(t, tt, "Port the neutral theme tokens")
 		if err := tt.ChooseMenuItem(i18n.In("en", "workspace_archive")); err != nil {
 			t.Fatal(err)
 		}
@@ -387,9 +385,7 @@ func TestMenuCommandsScoped(t *testing.T) {
 	})
 	t.Run("delete confirmation", func(t *testing.T) {
 		a, tt := newTester(t)
-		if err := tt.RightClick("Port the neutral theme tokens"); err != nil {
-			t.Fatal(err)
-		}
+		rightClickSidebarRow(t, tt, "Port the neutral theme tokens")
 		if err := tt.ChooseMenuItem(i18n.In("en", "session_delete")); err != nil {
 			t.Fatal(err)
 		}

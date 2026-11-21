@@ -101,7 +101,7 @@ func testSidebarOpensConversation(t *testing.T) {
 	if !tt.HasText("Virtualized transcript stress test") {
 		t.Fatalf("the large conversation is not shown: %q", tt.Texts())
 	}
-	click(t, tt, "Port the neutral theme tokens")
+	clickSidebarRow(t, tt, "Port the neutral theme tokens")
 	if a.Sidebar.Selected != "sailry-go/theme" {
 		t.Fatalf("selected %q", a.Sidebar.Selected)
 	}
@@ -142,7 +142,7 @@ func clickButton(t *testing.T, tt *ui.Tester, name string) {
 
 func TestComposerSend(t *testing.T) {
 	a, tt := newTester(t)
-	click(t, tt, "Port the neutral theme tokens")
+	clickSidebarRow(t, tt, "Port the neutral theme tokens")
 	send, _ := tt.AccessByRole(ui.RoleButton, "Send")
 	if !send.Disabled {
 		t.Fatalf("Send is enabled with an empty draft: %+v", send)
@@ -186,7 +186,7 @@ func TestComposerSend(t *testing.T) {
 // The sent reply plays to its end: the run completes and its answer shows.
 func TestReplyPlays(t *testing.T) {
 	a, tt := newTester(t)
-	click(t, tt, "Port the neutral theme tokens")
+	clickSidebarRow(t, tt, "Port the neutral theme tokens")
 	click(t, tt, i18n.In("en", "composer"))
 	tt.Type("Hello")
 	tt.Key(0, ui.KeyEnter)
@@ -351,16 +351,16 @@ func TestModelPickerAndEffort(t *testing.T) {
 	if got := composer.Efforts[int(comp.Effort)]; got != "high" {
 		t.Errorf("effort %q after choosing high", got)
 	}
-	// A model without reasoning shows the default effort, its slider off.
-	// The picker stays open on its main panel after a choice.
+	// A model without reasoning has no effort slider. The picker stays open
+	// on its main panel after a choice.
 	clickButton(t, tt, "GPT-5.2")
 	clickButton(t, tt, i18n.In("en", "provider_anthropic"))
 	clickButton(t, tt, "Claude Haiku 5.5")
 	if comp.Model != "claude-haiku-5-5" {
 		t.Fatalf("model %q", comp.Model)
 	}
-	if !tt.HasText(i18n.In("en", "composer_effort_unavailable")) {
-		t.Errorf("no default effort for a model without reasoning: %q", tt.Texts())
+	if _, ok := tt.AccessByRole(ui.RoleSlider, i18n.In("en", "composer_effort")); ok {
+		t.Error("a model without reasoning still offers an effort slider")
 	}
 	// The vendor column names each vendor alongside its brand mark.
 	clickButton(t, tt, "Claude Haiku 5.5")

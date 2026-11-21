@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/internal/desktop/kit"
@@ -19,6 +18,7 @@ import (
 	"github.com/ai-poet/agent-client/internal/desktop/settings"
 	"github.com/ai-poet/agent-client/internal/desktop/theme"
 	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
+	"github.com/egoist/mygo/ui"
 )
 
 func TestPanelOpensWithShortcutsAndTabs(t *testing.T) {
@@ -622,7 +622,10 @@ func TestSidebarToggleAndPrefs(t *testing.T) {
 	// is its own preferences', which the file neither replaces nor loses.
 	t.Run("rail", func(t *testing.T) {
 		a := New(preview.Load())
-		a.features = MoveFeature(a.features, "page:git", "page:activity", false)
+		a.features = MoveFeature(a.features, "page:image_studio", "page:git", true)
+		if got := slices.Index(a.features, "page:image_studio"); got != slices.Index(a.features, "page:git")+1 {
+			t.Fatalf("Creative Studio did not move after Git: %v", a.features)
+		}
 		a.unpinned["page:files"] = true
 		saved := a.Prefs()
 		if err := SavePrefs(dir, saved); err != nil {
@@ -637,7 +640,7 @@ func TestSidebarToggleAndPrefs(t *testing.T) {
 		stale.Features = []string{"page:git", "page:gone", "page:conversation"}
 		b = New(preview.Load())
 		b.SetPrefs(stale)
-		if want := []string{"page:conversation", "page:git", "page:gone", "page:activity", "page:files", "page:settings_plugins"}; !slices.Equal(b.features, want) {
+		if want := []string{"page:conversation", "page:git", "page:gone", "page:image_studio", "page:activity", "page:files", "page:settings_plugins"}; !slices.Equal(b.features, want) {
 			t.Errorf("stale order merged to %v, want %v", b.features, want)
 		}
 
@@ -1007,11 +1010,11 @@ func TestMoreDragShowsInsertionLine(t *testing.T) {
 	tt.Advance(time.Second) // the popover's entrance
 	tt.Frame()
 	row := func(key string) ui.Rect {
-		r, ok := tt.Find(i18n.In("en", key))
+		r, ok := tt.AccessByRole(ui.RoleButton, i18n.In("en", key))
 		if !ok {
 			t.Fatalf("no %s row: %q", key, tt.Texts())
 		}
-		return r
+		return r.Bounds
 	}
 	activity, files, git, market := row("activity"), row("files"), row("git"), row("market_title")
 	center := func(r ui.Rect) float32 { return r.Y + r.H/2 }
@@ -1046,7 +1049,7 @@ func TestMoreDragShowsInsertionLine(t *testing.T) {
 	tt.Release(px+160, center(files)+10)
 	tt.Frame()
 	tt.Frame()
-	want := []string{"page:conversation", "page:files", "page:activity", "page:git", "page:settings_plugins"}
+	want := []string{"page:conversation", "page:image_studio", "page:files", "page:activity", "page:git", "page:settings_plugins"}
 	if !slices.Equal(a.features, want) {
 		t.Errorf("order %v, want %v", a.features, want)
 	}

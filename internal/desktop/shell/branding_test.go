@@ -69,6 +69,7 @@ func TestBrandUnifiedAcrossLocalesAndUI(t *testing.T) {
 	assertNoSailry(t, "about page zh-CN", tt.Texts(), i18n.In("zh-CN", attributionKey), upstreamProject)
 	shot(t, tt, "brand-about-zh")
 
+	// The guide overlays Settings; the About attribution remains in the frame.
 	a.Welcome.Open = true
 	for range 10 {
 		tt.Frame()
@@ -76,7 +77,7 @@ func TestBrandUnifiedAcrossLocalesAndUI(t *testing.T) {
 	if !tt.HasText("欢迎使用 CheapRouter") {
 		t.Fatalf("welcome guide missing CheapRouter title: %q", tt.Texts())
 	}
-	assertNoSailry(t, "welcome guide zh-CN", tt.Texts())
+	assertNoSailry(t, "welcome guide zh-CN", tt.Texts(), i18n.In("zh-CN", attributionKey), upstreamProject)
 	shot(t, tt, "brand-welcome-zh")
 
 	tt.SetLocale("en")
@@ -84,7 +85,7 @@ func TestBrandUnifiedAcrossLocalesAndUI(t *testing.T) {
 	if !tt.HasText("Welcome to CheapRouter") {
 		t.Fatalf("english welcome guide missing CheapRouter title: %q", tt.Texts())
 	}
-	assertNoSailry(t, "welcome guide en", tt.Texts())
+	assertNoSailry(t, "welcome guide en", tt.Texts(), i18n.In("en", attributionKey), upstreamProject)
 
 	a.Welcome.Open = false
 	a.Do("app.about")
