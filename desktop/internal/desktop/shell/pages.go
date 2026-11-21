@@ -13,6 +13,7 @@ import (
 // page each opens.
 var pageFeatures = map[string]Page{
 	"page:conversation":     ConversationPage,
+	"page:image_studio":     ImageStudioPage,
 	"page:activity":         ActivityPage,
 	"page:files":            FilesPage,
 	"page:git":              GitPage,

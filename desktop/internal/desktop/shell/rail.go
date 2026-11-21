@@ -25,6 +25,7 @@ type Feature struct {
 // Activity, Files, Git, Market.
 var Features = []Feature{
 	{ID: "page:conversation", Icon: icons.Chat, Label: "shell_sessions", Fixed: true},
+	{ID: "page:image_studio", Icon: icons.Image, Label: "image_studio", DefaultPinned: true},
 	{ID: "page:activity", Icon: icons.Grid, Label: "activity"},
 	{ID: "page:files", Icon: icons.Folder, Label: "files"},
 	{ID: "page:git", Icon: icons.Network, Label: "git"},
