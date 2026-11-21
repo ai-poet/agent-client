@@ -633,8 +633,13 @@ func (r *Runtime) inspectConnectorCLI(id string, done func([]string)) {
 		return
 	}
 	r.execute(protocol.Command{Kind: "inspect_connector_cli", Data: protocol.CommandInspectConnectorCliPayload{Package: value.Package, Connector: value.Declaration.ID}}, func(c *ui.Context, output protocol.Output, err error) {
-		if err != nil {
+		// A CLI that is missing or signed out is the editor's empty list,
+		// which can look again; only other failures are reported.
+		var fault *protocol.Fault
+		if err != nil && !(errors.As(err, &fault) && (fault.Code == protocol.ErrorCodeNotConfigured || fault.Code == protocol.ErrorCodeExpired)) {
 			r.connectorError(c, err)
+		}
+		if err != nil {
 			done(nil)
 			return
 		}
