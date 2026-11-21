@@ -90,7 +90,7 @@ func TestNodeDatabasePathPreservesIncompleteStorage(t *testing.T) {
 			if err := os.WriteFile(path, nil, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if selected, err := nodeDatabasePath(t.Context(), directory); err == nil {
+			if selected, _, err := nodeDatabasePath(t.Context(), directory); err == nil {
 				t.Fatalf("incomplete storage selected %s", selected)
 			}
 			if info, err := os.Lstat(path); err != nil || info.Size() != 0 {

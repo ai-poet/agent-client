@@ -52,12 +52,16 @@ func LoadDefault(development bool) error {
 		filepath.Join(directory, "..", "Resources", name),
 		filepath.Join(directory, "Frameworks", "SailryIroh.framework", "SailryIroh"),
 		filepath.Join(directory, "..", "Frameworks", "SailryIroh.framework", "SailryIroh"),
-		filepath.Join(".runtime", "native", runtime.GOOS+"-"+runtime.GOARCH, name),
 	}
 	for _, path := range candidates {
 		if _, err := os.Stat(path); err == nil {
 			return Load(path)
 		}
+	}
+	cwd, _ := os.Getwd()
+	stagedOrigin, _ := shipped.Directory()
+	if staged := shipped.StagedDirectory(name, cwd, stagedOrigin); staged != "" {
+		return Load(filepath.Join(staged, name))
 	}
 	return fmt.Errorf("native iroh library is unavailable; set SAILRY_IROH_LIB or bundle %s", name)
 }
