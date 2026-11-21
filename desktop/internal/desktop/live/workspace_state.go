@@ -67,6 +67,9 @@ type workspaceProject struct {
 	directories              map[string]bool
 	loading                  map[string]bool
 	failedReads              map[string]bool
+	missingEntries           map[string]bool
+	staleReads               map[string]bool
+	trashing                 map[string]bool
 	diffs                    map[string]bool
 	diffContents             map[string][]viewmodel.Hunk
 	manualDiffs              map[string]workspaceGitDiff
@@ -202,7 +205,7 @@ func (r *Runtime) workspaceFrame(c *ui.Context) {
 	if project.pendingFiles {
 		busy := false
 		for key := range project.loading {
-			if strings.HasPrefix(key, "file/") || strings.HasPrefix(key, "directory") {
+			if strings.HasPrefix(key, "file/") || strings.HasPrefix(key, "file-check/") || strings.HasPrefix(key, "directory") {
 				busy = true
 			}
 		}
@@ -276,18 +279,26 @@ func (p *workspaceProject) actions() *panel.Actions {
 	}
 }
 func (p *workspaceProject) read(key string, command protocol.Command, done func(*ui.Context, protocol.Output), failures ...func(*ui.Context, error)) {
-	if p.loading[key] || p.failedReads[key] {
+	if p.loading[key] || p.failedReads[key] || p.trashBlocksRead(key) {
 		return
 	}
 	p.loading[key] = true
 	p.runtime.executeScoped("workspace-read/"+p.owner.ID.String()+"/"+key, command, func(c *ui.Context, out protocol.Output, err error) {
 		delete(p.loading, key)
+		if p.staleReads[key] {
+			delete(p.staleReads, key)
+			return
+		}
 		if err != nil {
 			if key == "git-log" {
 				p.projectGitHistory(false)
 			}
 			if strings.HasPrefix(key, "file/") {
-				p.fileUnavailable(strings.TrimPrefix(key, "file/"))
+				relative := strings.TrimPrefix(key, "file/")
+				if faultCode(err) == protocol.ErrorCodeNotFound {
+					p.entryMissing(relative)
+				}
+				p.fileUnavailable(relative)
 			}
 			if key == "git-status" {
 				p.statusKnown = false
@@ -299,6 +310,9 @@ func (p *workspaceProject) read(key string, command protocol.Command, done func(
 			p.failedReads[key] = true
 			if strings.HasPrefix(key, "directory/") {
 				directory := strings.TrimPrefix(key, "directory/")
+				if faultCode(err) == protocol.ErrorCodeNotFound {
+					p.entryMissing(directory)
+				}
 				state := p.directoryStates[directory]
 				state.Loading = false
 				state.Failed = true
@@ -322,6 +336,7 @@ func (p *workspaceProject) refresh() {
 	p.reviewTarget = nil
 	p.reviewTurns = map[string]protocol.TurnID{}
 	p.failedReads = map[string]bool{}
+	p.missingEntries = nil
 	p.documents = map[string]uint32{}
 	p.diffs = map[string]bool{}
 	p.refreshFiles()
@@ -330,7 +345,7 @@ func (p *workspaceProject) refresh() {
 	p.readSessionResources()
 }
 func (p *workspaceProject) readDirectory(directory string, refresh bool) {
-	if p.directories[directory] && !refresh {
+	if !refresh && (p.directories[directory] || p.entryIsMissing(directory)) {
 		return
 	}
 	if refresh {
@@ -355,7 +370,7 @@ func (p *workspaceProject) directoryState(directory string, state panel.Director
 }
 func (p *workspaceProject) requestDirectory(directory string, after *protocol.DirectoryCursor, accumulated []protocol.FileEntry, extent int, partial bool) {
 	key := "directory/" + directory
-	if p.loading[key] || p.failedReads[key] {
+	if p.loading[key] || p.failedReads[key] || p.trashBlocksRead(key) {
 		return
 	}
 	state := p.directoryStates[directory]
@@ -398,6 +413,7 @@ func (p *workspaceProject) directoryPage(c *ui.Context, directory string, page p
 	if node == nil {
 		return
 	}
+	p.entryFound(directory)
 	old := map[string]*viewmodel.FileNode{}
 	for _, child := range node.Children {
 		old[child.Path] = child
@@ -412,6 +428,7 @@ func (p *workspaceProject) directoryPage(c *ui.Context, directory string, page p
 		names[entry.Name] = true
 		entries = append(entries, entry)
 		relative := path.Join(directory, entry.Name)
+		p.entryFound(relative)
 		child := old[relative]
 		if child == nil {
 			child = &viewmodel.FileNode{Name: entry.Name, Path: relative}
@@ -426,6 +443,7 @@ func (p *workspaceProject) directoryPage(c *ui.Context, directory string, page p
 		children = append(children, child)
 	}
 	node.Children = children
+	p.keepMissingDrafts()
 	p.panel.PruneFileSelection()
 	p.directories[directory] = true
 	p.directoryEntries[directory] = entries
@@ -445,7 +463,11 @@ func workspaceFileNode(root *viewmodel.FileNode, relative string) *viewmodel.Fil
 	return nil
 }
 func (p *workspaceProject) readFile(relative string) {
-	if relative == "" {
+	if relative == "" || p.trashBlocksRead("file/"+relative) {
+		return
+	}
+	if p.entryIsMissing(relative) {
+		p.settleChanged(relative)
 		return
 	}
 	if value, loaded := p.files[relative]; loaded {
@@ -479,6 +501,7 @@ func (p *workspaceProject) loadFile(relative string) {
 // fileLoaded shows the content a read returned. Under a draft it is not the
 // draft's new source but what the file holds on disk now.
 func (p *workspaceProject) fileLoaded(relative string, value protocol.FileContent) {
+	p.entryFound(relative)
 	if _, loaded := p.files[relative]; loaded {
 		if _, dirty := p.panel.FileDraft(relative); dirty {
 			p.draftSource(relative, changedFile{content: value})
@@ -674,8 +697,14 @@ func (p *workspaceProject) projectBranches(value protocol.GitBranches) {
 }
 
 func (p *workspaceProject) refreshFiles() {
+	if len(p.trashing) > 0 {
+		p.pendingFiles = true
+		return
+	}
 	for key := range p.failedReads {
-		if strings.HasPrefix(key, "file/") || strings.HasPrefix(key, "directory") {
+		if relative, file := strings.CutPrefix(key, "file/"); file && !p.entryIsMissing(relative) {
+			delete(p.failedReads, key)
+		} else if directory, listing := strings.CutPrefix(key, "directory/"); listing && !p.entryIsMissing(directory) {
 			delete(p.failedReads, key)
 		}
 	}
@@ -689,10 +718,24 @@ func (p *workspaceProject) refreshFiles() {
 			directories = append(directories, directory)
 		}
 	}
+	for relative := range p.missingEntries {
+		directory := path.Dir(relative)
+		if directory == "." {
+			directory = ""
+		}
+		if directory != "" && !p.directories[directory] && workspaceFileNode(p.data.Files, directory) != nil {
+			directories = append(directories, directory)
+		}
+	}
 	for _, directory := range directories {
-		p.readDirectory(directory, true)
+		if !p.entryIsMissing(directory) {
+			p.readDirectory(directory, true)
+		}
 	}
 	for filename := range p.files {
+		if p.entryIsMissing(filename) {
+			continue
+		}
 		if _, dirty := p.panel.FileDraft(filename); dirty {
 			p.checkDraft("draft", filename, nil)
 		} else {
