@@ -246,10 +246,13 @@ func (s *State) modelChip(c *ui.Context, ctx *Context, actions Actions) {
 		MaxWidth(width).MinWidth(0).Shrink(1).Disabled(ctx.Readonly)
 	if team != nil {
 		kit.Tooltip(c, chip, lead)
-	} else if compact {
+	} else if compact || (m.Group != nil && m.Group.Summary != "") {
 		tip := lead
 		if m.Provider != "" {
 			tip = m.Provider + " · " + lead
+		}
+		if m.Group != nil && m.Group.Summary != "" {
+			tip += " · " + m.Group.Summary
 		}
 		kit.Tooltip(c, chip, tip)
 	}
@@ -382,6 +385,9 @@ func (s *State) controls(c *ui.Context, ctx *Context, actions Actions) {
 		if len(efforts(m)) == 0 {
 			h = float32(68 + teamRow + 9)
 		}
+		if m.Group != nil {
+			h += 24
+		}
 	}
 	switch s.layer {
 	case layerModels:
@@ -471,6 +477,9 @@ func (s *State) mainPanel(c *ui.Context, ctx *Context) {
 			s.layer, s.family, s.modelQuery = layerModels, vendorID(m), ""
 			s.efforts = effortState{enter: true}
 		})
+		if m.Group != nil {
+			modelGroupHintRow(c, p, "model-group-hint", m.Group)
+		}
 	})
 	if hasReasoning {
 		before := *effortIndex
@@ -976,10 +985,42 @@ func score(c *ui.Context, sc *Score) ui.Element {
 		TextColor(theme.Of(c).MutedForeground)
 }
 
+// modelGroupHintRow draws the active routing group's name, canonical tags, and
+// online rate / degraded status below the model selector trigger.
+func modelGroupHintRow(c *ui.Context, p *theme.Palette, key string, hint *ModelGroupHint) {
+	if hint == nil {
+		return
+	}
+	row := ui.Row(c.Key(key)).MaxWidth(panelWidth).Height(20).Gap(4).AlignItems(ui.Center).Center()
+	if hint.Summary != "" {
+		kit.Tooltip(c, row, hint.Summary)
+	}
+	row.Children(func() {
+		if hint.GroupName != "" {
+			ui.Text(c, hint.GroupName).FontSize(11).SingleLine().Shrink(1).MinWidth(0).TextColor(p.MutedForeground)
+		}
+		for _, tag := range hint.Tags {
+			kit.StatusPill(c, tag.Label, tag.Icon, tag.Tone, true)
+		}
+		if hint.Rate != "" {
+			ui.Text(c, hint.Rate).FontSize(10).SingleLine().Shrink(0).TextColor(p.MutedForeground)
+		}
+		if hint.StatusText != "" {
+			statusEl := kit.StatusIndicator(c, hint.StatusText, hint.StatusIcon, hint.StatusTone, true)
+			if hint.StatusError != "" {
+				kit.Tooltip(c, statusEl, hint.StatusError)
+			}
+		}
+	})
+}
+
 // modelRow chooses the model at the effort its column checks.
 func (s *State) modelRow(c *ui.Context, m, chosen Model, vendor, source string) ui.Element {
 	p := theme.Of(c)
 	b := rowLook(c, ui.ButtonBase(c.Key(m.ID)).Label(m.Name), m.ID == chosen.ID)
+	if m.Group != nil {
+		b.Height(40)
+	}
 	var detail []string
 	for _, label := range []string{vendor, source} {
 		if label != "" && !slices.Contains(detail, label) {
@@ -1000,14 +1041,33 @@ func (s *State) modelRow(c *ui.Context, m, chosen Model, vendor, source string) 
 		detail = append(detail, i18n.T(c, "meter_limit_unknown"))
 	}
 	subtitle := strings.Join(detail, " · ")
+	if m.Group != nil && m.Group.Summary != "" {
+		detail = append(detail, m.Group.Summary)
+	}
 	if m.Reasoning {
 		detail = append(detail, i18n.T(c, "composer_effort"))
 	}
 	b.Description(strings.Join(detail, " · "))
 	b.Children(func() {
-		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Children(func() {
+		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(1).Children(func() {
 			ui.Text(c, m.Name).FontSize(14).SingleLine()
-			if subtitle != "" {
+			if m.Group != nil {
+				ui.Row(c).FillWidth().MinWidth(0).Gap(4).AlignItems(ui.Center).Children(func() {
+					if subtitle != "" {
+						ui.Text(c, subtitle).FontSize(10).SingleLine().Shrink(1).MinWidth(0).TextColor(p.MutedForeground)
+						ui.Text(c, "·").FontSize(10).Shrink(0).TextColor(p.MutedForeground)
+					}
+					if m.Group.GroupName != "" {
+						ui.Text(c, m.Group.GroupName).FontSize(10).SingleLine().Shrink(1).MinWidth(0).TextColor(p.MutedForeground)
+					}
+					for _, tag := range m.Group.Tags {
+						kit.StatusPill(c, tag.Label, tag.Icon, tag.Tone, true)
+					}
+					if m.Group.StatusText != "" {
+						kit.StatusIndicator(c, m.Group.StatusText, m.Group.StatusIcon, m.Group.StatusTone, true)
+					}
+				})
+			} else if subtitle != "" {
 				ui.Text(c, subtitle).FontSize(10).SingleLine().TextColor(p.MutedForeground)
 			}
 		})

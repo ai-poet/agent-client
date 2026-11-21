@@ -268,6 +268,9 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 		var groupsErr error
 		var autoBindAttempted bool
 		var autoBindFailures map[string]string
+		var statuses []core.GroupStatus
+		var statusErr error
+		statusAttempted := false
 		if !cheapAuthRejected(accountErr) && ctx.Err() == nil {
 			groups, groupsErr = account.service.AvailableGroups(ctx)
 			if !cheapAuthRejected(groupsErr) && ctx.Err() == nil && gatewayErr == nil {
@@ -305,6 +308,12 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 						}
 					}
 				}
+			}
+			// Group status is optional decoration: a failure must not reject the
+			// session or block group switching.
+			if !cheapAuthRejected(groupsErr) && !cheapAuthRejected(gatewayErr) && ctx.Err() == nil {
+				statusAttempted = true
+				statuses, statusErr = account.service.GroupStatuses(ctx)
 			}
 		}
 		authErr := accountErr
@@ -349,10 +358,13 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 				}
 				account.state.Account, account.state.ModelCount = core.User{}, 0
 				account.state.Groups, account.state.Catalog = nil, nil
+				account.state.GroupStatuses, account.state.GroupStatusLoading = nil, false
+				account.state.GroupStatusLoaded, account.state.GroupStatusError = false, ""
 				account.state.SelectedGroupID, account.state.LaneBindings = nil, nil
 				account.state.AutoBindFailures = nil
 				account.state.GroupsLoading, account.state.SwitchingLane = false, ""
 				account.state.GroupsError, account.state.GroupError = "", ""
+				r.projectModels()
 				return
 			}
 			account.state.Account = user
@@ -365,6 +377,18 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 			} else if len(account.state.Groups) == 0 {
 				account.state.GroupsError = cheapAuthError(groupsErr)
 			}
+			if statusAttempted {
+				account.state.GroupStatusLoading = false
+				if statusErr == nil {
+					account.state.GroupStatuses = core.IndexGroupStatuses(statuses)
+					account.state.GroupStatusLoaded = true
+					account.state.GroupStatusError = ""
+				} else {
+					account.state.GroupStatuses = nil
+					account.state.GroupStatusLoaded = false
+					account.state.GroupStatusError = cheapAuthError(statusErr)
+				}
+			}
 			if len(gateway.Catalog) > 0 {
 				account.state.Catalog = gateway.Catalog
 			}
@@ -373,6 +397,7 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 			account.state.AutoBindFailures = autoBindFailures
 			if gatewayErr != nil {
 				account.state.Stage, account.state.Failure = cheapauthui.GatewayFailed, cheapAuthError(gatewayErr)
+				r.projectModels()
 				return
 			}
 			if autoBindAttempted {
@@ -381,6 +406,7 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 			account.state.ModelCount = modelCount
 			account.state.Stage, account.state.Failure = cheapauthui.Ready, ""
 			account.state.GroupError = ""
+			r.projectModels()
 			r.project()
 		})
 	})
@@ -631,12 +657,17 @@ func (r *Runtime) logoutCheapAuth() {
 			account.state.Catalog = nil
 			account.state.GroupsLoading = false
 			account.state.GroupsError = ""
+			account.state.GroupStatuses = nil
+			account.state.GroupStatusLoading = false
+			account.state.GroupStatusLoaded = false
+			account.state.GroupStatusError = ""
 			account.state.SelectedGroupID = nil
 			account.state.LaneBindings = nil
 			account.state.AutoBindFailures = nil
 			account.state.SwitchingGroup = false
 			account.state.SwitchingLane = ""
 			account.state.GroupError = ""
+			r.projectModels()
 			if disableErr != nil || logoutErr != nil {
 				account.state.Failure = "本地登录已退出；远程撤销或禁用模型网关未完全成功，请检查网络后重试"
 			}
@@ -653,19 +684,36 @@ func (r *Runtime) refreshCheapGroups() {
 	generation := account.generation
 	account.state.GroupsLoading = true
 	account.state.GroupsError = ""
+	account.state.GroupStatusLoading = true
 	r.async(func() {
-		groups, err := account.service.AvailableGroups(generation.ctx)
+		groups, groupsErr := account.service.AvailableGroups(generation.ctx)
+		var statuses []core.GroupStatus
+		var statusErr error
+		if generation.ctx.Err() == nil {
+			statuses, statusErr = account.service.GroupStatuses(generation.ctx)
+		}
 		r.enqueue(func(*ui.Context) {
 			if account.generation != generation || generation.ctx.Err() != nil || !account.state.SignedIn() {
 				return
 			}
 			account.state.GroupsLoading = false
-			if err != nil {
-				account.state.GroupsError = cheapAuthError(err)
-				return
+			account.state.GroupStatusLoading = false
+			if groupsErr != nil {
+				account.state.GroupsError = cheapAuthError(groupsErr)
+			} else {
+				account.state.Groups = groups
+				account.state.GroupsError = ""
 			}
-			account.state.Groups = groups
-			account.state.GroupsError = ""
+			if statusErr != nil {
+				account.state.GroupStatuses = nil
+				account.state.GroupStatusLoaded = false
+				account.state.GroupStatusError = cheapAuthError(statusErr)
+			} else {
+				account.state.GroupStatuses = core.IndexGroupStatuses(statuses)
+				account.state.GroupStatusLoaded = true
+				account.state.GroupStatusError = ""
+			}
+			r.projectModels()
 		})
 	})
 }

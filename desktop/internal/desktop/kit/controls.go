@@ -201,6 +201,47 @@ func Badge(c *ui.Context, text string, tone Tone) ui.Element {
 		Background(col.Alpha(0.12)).TextColor(col)
 }
 
+// StatusPill draws a rounded semantic badge with an optional leading icon
+// using Kit's Tone palette tokens.
+func StatusPill(c *ui.Context, text string, icon *ui.SVG, tone Tone, compact bool) ui.Element {
+	p := theme.Of(c)
+	fg := tone.color(p)
+	bg := fg.Alpha(0.12)
+	if tone == Neutral {
+		bg = p.Muted
+	} else if tone == Caution {
+		bg = fg.Alpha(0.14)
+	}
+	fontSize, iconSize := float32(11), float32(11)
+	padV, padH := float32(1), float32(6)
+	if compact {
+		fontSize, iconSize = 10, 10
+		padV, padH = 0, 5
+	}
+	return ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(3).Padding(padV, padH).Radius(999).Background(bg).Children(func() {
+		if icon != nil {
+			ui.Icon(c, icon).FontSize(iconSize).Shrink(0).TextColor(fg)
+		}
+		ui.Text(c, text).FontSize(fontSize).FontWeight(500).SingleLine().Shrink(0).TextColor(fg)
+	})
+}
+
+// StatusIndicator draws an inline semantic status readout (icon + text) with
+// no pill fill, pairing color with icon and text.
+func StatusIndicator(c *ui.Context, text string, icon *ui.SVG, tone Tone, compact bool) ui.Element {
+	fg := tone.color(theme.Of(c))
+	fontSize, iconSize := float32(11), float32(11)
+	if compact {
+		fontSize, iconSize = 10, 10
+	}
+	return ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(3).Children(func() {
+		if icon != nil {
+			ui.Icon(c, icon).FontSize(iconSize).Shrink(0).TextColor(fg)
+		}
+		ui.Text(c, text).FontSize(fontSize).FontWeight(500).SingleLine().Shrink(0).TextColor(fg)
+	})
+}
+
 // StatusDot is an 8 DIP dot in a tone, named by label for assistive
 // technology.
 func StatusDot(c *ui.Context, tone Tone, label string) ui.Element {

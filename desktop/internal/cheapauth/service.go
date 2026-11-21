@@ -456,6 +456,15 @@ func (s *Service) AvailableGroups(ctx context.Context) ([]Group, error) {
 	return client.AvailableGroups(ctx, credentials.AccessToken)
 }
 
+// GroupStatuses returns upstream availability and health from GET /group-status.
+func (s *Service) GroupStatuses(ctx context.Context) ([]GroupStatus, error) {
+	credentials, client, err := s.session(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return client.GroupStatuses(ctx, credentials.AccessToken)
+}
+
 // SelectedGroup returns a copy of the legacy single bound group ID, or nil.
 func (s *Service) SelectedGroup() *int64 {
 	s.mu.Lock()

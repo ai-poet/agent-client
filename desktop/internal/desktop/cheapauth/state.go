@@ -38,16 +38,20 @@ type State struct {
 	Account                core.User
 	ModelCount             int
 
-	Groups           []core.Group
-	Catalog          []core.Model
-	GroupsLoading    bool
-	GroupsError      string
-	SelectedGroupID  *int64
-	LaneBindings     map[string]int64
-	AutoBindFailures map[string]string
-	SwitchingGroup   bool
-	SwitchingLane    string
-	GroupError       string
+	Groups             []core.Group
+	Catalog            []core.Model
+	GroupsLoading      bool
+	GroupsError        string
+	GroupStatuses      map[int64]core.GroupStatus
+	GroupStatusLoading bool
+	GroupStatusLoaded  bool
+	GroupStatusError   string
+	SelectedGroupID    *int64
+	LaneBindings       map[string]int64
+	AutoBindFailures   map[string]string
+	SwitchingGroup     bool
+	SwitchingLane      string
+	GroupError         string
 
 	Start           func(manual bool)
 	SubmitPaste     func()
@@ -79,12 +83,59 @@ func (s *State) Lanes() []string {
 	return core.AvailableLanes(s.Groups, s.Catalog, s.LaneBindings)
 }
 
-// GroupsForLane returns the routing groups that belong to lane.
+// GroupsForLane returns the routing groups that belong to lane, stably ordered
+// by subscription/standard/welfare tier.
 func (s *State) GroupsForLane(lane string) []core.Group {
 	if s == nil {
 		return nil
 	}
-	return core.GroupsForLane(lane, s.Groups, s.Catalog)
+	return core.SortGroups(core.GroupsForLane(lane, s.Groups, s.Catalog))
+}
+
+// GroupSectionsForLane groups lane's routing groups into ordered sections
+// (订阅 -> 常驻 -> 福利).
+func (s *State) GroupSectionsForLane(lane string) []core.GroupSection {
+	if s == nil {
+		return nil
+	}
+	return core.GroupSections(core.GroupsForLane(lane, s.Groups, s.Catalog))
+}
+
+// GroupStatusFailed reports whether the latest /group-status fetch failed.
+func (s *State) GroupStatusFailed() bool {
+	return s != nil && strings.TrimSpace(s.GroupStatusError) != ""
+}
+
+// GroupStatusFor looks up the latest runtime status for groupID.
+func (s *State) GroupStatusFor(groupID int64) *core.GroupStatus {
+	if s == nil || groupID <= 0 || len(s.GroupStatuses) == 0 {
+		return nil
+	}
+	if status, ok := s.GroupStatuses[groupID]; ok {
+		copied := status
+		return &copied
+	}
+	return nil
+}
+
+// DescribeGroup returns the canonical presentation view (tags, rate, online
+// rate / degraded status) for g.
+func (s *State) DescribeGroup(g core.Group) core.GroupPresentation {
+	return core.DescribeGroup(g, s.GroupStatusFor(g.ID), s.GroupStatusFailed())
+}
+
+// BoundGroup returns the group currently bound to lane, or false when unbound.
+func (s *State) BoundGroup(lane string) (core.Group, bool) {
+	id := s.BoundGroupID(lane)
+	if id == nil {
+		return core.Group{}, false
+	}
+	for _, g := range s.Groups {
+		if g.ID == *id {
+			return g, true
+		}
+	}
+	return core.Group{ID: *id, Name: fmt.Sprintf("#%d", *id)}, true
 }
 
 // BoundGroupID returns the bound group ID for lane, or nil when unbound.

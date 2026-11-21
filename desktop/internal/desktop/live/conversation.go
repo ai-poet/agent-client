@@ -3,11 +3,14 @@ package live
 import (
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	core "github.com/ai-poet/agent-client/desktop/internal/cheapauth"
+	cheapauthui "github.com/ai-poet/agent-client/desktop/internal/desktop/cheapauth"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
@@ -98,6 +101,7 @@ func (r *Runtime) projectModels() {
 	for _, p := range r.snapshot().Providers {
 		providers = append(providers, viewmodel.Provider{ID: p.ID.String(), Name: p.Name})
 	}
+	cheapHints := r.cheapModelGroupHints()
 	for _, p := range r.composerProviders() {
 		if !p.Enabled {
 			continue
@@ -110,6 +114,9 @@ func (r *Runtime) projectModels() {
 			key := modelKey(p.ID, m.ID)
 			limits, contextEstimated := nodeproviders.ResolveModelLimits(p.Api, m, nodeproviders.ModelLimits{})
 			v := composer.Model{ID: key, Name: name, Provider: p.Name, Reasoning: m.Reasoning, Family: composerModelVendor(p, m), ContextWindow: limits.Context, ContextUnknown: contextEstimated, DefaultEffort: effortName(m.DefaultEffort), Score: r.measuredScore(key, m.DefaultEffort)}
+			if p.ID == nodeproviders.CheapRouterProviderID {
+				v.Group = cheapHints.forModel(m.ID, m.Platform)
+			}
 			for _, e := range m.Efforts {
 				v.Efforts = append(v.Efforts, effortName(e))
 			}
@@ -147,6 +154,110 @@ func (r *Runtime) projectModels() {
 		r.App.Data.Providers = providers
 	}
 	r.readModelScores()
+}
+
+type cheapGroupHintProjector struct {
+	state            *cheapauthui.State
+	groupsByID       map[int64]core.Group
+	modelLanes       map[string]string
+	bestGroupByModel map[string]core.GroupRef
+}
+
+func (r *Runtime) cheapModelGroupHints() *cheapGroupHintProjector {
+	if r.cheapAuth == nil || r.cheapAuth.state == nil || !r.cheapAuth.state.SignedIn() {
+		return nil
+	}
+	state := r.cheapAuth.state
+	if len(state.Groups) == 0 && len(state.LaneBindings) == 0 && state.SelectedGroupID == nil {
+		return nil
+	}
+	groupsByID := make(map[int64]core.Group, len(state.Groups))
+	for _, g := range state.Groups {
+		if g.ID > 0 {
+			groupsByID[g.ID] = g
+		}
+	}
+	var modelLanes map[string]string
+	if len(state.LaneBindings) > 0 && len(state.Catalog) > 0 {
+		_, modelLanes = core.SelectCatalogForBindings(state.Catalog, state.LaneBindings, state.Groups)
+	}
+	bestByModel := make(map[string]core.GroupRef, len(state.Catalog))
+	for _, item := range state.Catalog {
+		key := strings.ToLower(strings.TrimSpace(item.ID))
+		if key != "" && item.BestGroup.ID > 0 {
+			if _, exists := bestByModel[key]; !exists {
+				bestByModel[key] = item.BestGroup
+			}
+		}
+	}
+	return &cheapGroupHintProjector{
+		state:            state,
+		groupsByID:       groupsByID,
+		modelLanes:       modelLanes,
+		bestGroupByModel: bestByModel,
+	}
+}
+
+func (p *cheapGroupHintProjector) forModel(modelID, platform string) *composer.ModelGroupHint {
+	if p == nil || p.state == nil {
+		return nil
+	}
+	key := strings.ToLower(strings.TrimSpace(modelID))
+	lane := p.modelLanes[key]
+	if lane == "" {
+		lane = core.ModelLane(core.Model{ID: modelID, Platform: platform})
+	}
+	var groupID int64
+	explicit := false
+	if lane != "" {
+		if bound := p.state.BoundGroupID(lane); bound != nil && *bound > 0 {
+			groupID = *bound
+			explicit = true
+		}
+	}
+	if groupID == 0 && p.state.SelectedGroupID != nil && *p.state.SelectedGroupID > 0 {
+		groupID = *p.state.SelectedGroupID
+		explicit = true
+	}
+	var group core.Group
+	if groupID > 0 {
+		if found, ok := p.groupsByID[groupID]; ok {
+			group = found
+		} else if explicit {
+			group = core.Group{ID: groupID, Name: fmt.Sprintf("#%d", groupID)}
+		}
+	} else if best, ok := p.bestGroupByModel[key]; ok && best.ID > 0 {
+		if found, exists := p.groupsByID[best.ID]; exists {
+			group = found
+		} else {
+			group = core.Group{ID: best.ID, Name: best.Name, RateMultiplier: best.RateMultiplier}
+		}
+	}
+	if group.ID <= 0 && strings.TrimSpace(group.Name) == "" {
+		return nil
+	}
+	desc := p.state.DescribeGroup(group)
+	tags := make([]composer.GroupTag, 0, len(desc.Tags))
+	for _, tag := range desc.Tags {
+		tone, icon := cheapauthui.TagSpec(tag.Kind)
+		tags = append(tags, composer.GroupTag{Label: tag.Label, Tone: tone, Icon: icon})
+	}
+	statusTone, statusIcon := cheapauthui.HealthSpec(desc.Status.Health)
+	laneLabel := ""
+	if lane != "" {
+		laneLabel = core.LaneDisplayName(lane)
+	}
+	return &composer.ModelGroupHint{
+		Lane:        laneLabel,
+		GroupName:   desc.DisplayName(),
+		Tags:        tags,
+		Rate:        desc.Rate,
+		StatusText:  desc.Status.ShortText(),
+		StatusTone:  statusTone,
+		StatusIcon:  statusIcon,
+		StatusError: p.state.GroupStatusError,
+		Summary:     desc.CompactSummary(),
+	}
 }
 
 func effortName(e protocol.Effort) string {
