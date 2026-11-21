@@ -1,0 +1,130 @@
+package panel
+
+import (
+	"fmt"
+
+	"github.com/egoist/mygo/ui"
+	"github.com/ai-poet/agent-client/internal/desktop/i18n"
+	"github.com/ai-poet/agent-client/internal/desktop/icons"
+	"github.com/ai-poet/agent-client/internal/desktop/kit"
+	"github.com/ai-poet/agent-client/internal/desktop/theme"
+)
+
+type GitState struct {
+	Known        bool
+	Kind         string
+	Repositories []string
+	Conflicts    map[string]bool
+	Head         bool
+	HeadMessage  string
+}
+
+func (pr *Project) SetGitHeadMessage(message string) { pr.Git.live.HeadMessage = message }
+func (pr *Project) gitHasHead() bool {
+	if pr.Actions != nil {
+		return pr.Git.live.Head
+	}
+	return len(pr.Data.Repo.Commits) > 0
+}
+
+func (pr *Project) SetGitSwitchPending(operations []PendingOperation) {
+	pr.Git.switchPending = operations
+}
+
+// GitHistoryState is the history's read: Loading while a page is read, Next
+// while the repository has commits after the ones listed, Partial when a
+// commit or the references were cut short.
+type GitHistoryState struct{ Loading, Next, Partial bool }
+type GitDiffState struct {
+	Binary, Partial bool
+	// Size is the length in bytes of a file that is not compared as text.
+	Size uint64
+}
+
+// binaryDiff says that a file is not compared as text, with its size when
+// that is known.
+func binaryDiff(c *ui.Context, size uint64) string {
+	return i18n.T(c, "git_diff_binary") + binarySize(size)
+}
+
+func binarySize(size uint64) string {
+	switch {
+	case size == 0:
+		return ""
+	case size >= 1_000_000_000:
+		return fmt.Sprintf(" · %.1f GB", float64(size)/1e9)
+	case size >= 1_000_000:
+		return fmt.Sprintf(" · %.1f MB", float64(size)/1e6)
+	case size >= 1_000:
+		return fmt.Sprintf(" · %.1f KB", float64(size)/1e3)
+	}
+	return fmt.Sprintf(" · %d B", size)
+}
+
+func (pr *Project) SetGitDiffState(path, scope string, state GitDiffState) {
+	if pr.Git.diffStates == nil {
+		pr.Git.diffStates = map[string]GitDiffState{}
+	}
+	pr.Git.diffStates[scope+"/"+path] = state
+}
+
+func (pr *Project) SetGitState(state GitState)          { pr.Git.live = state }
+func (pr *Project) SetGitHistory(state GitHistoryState) { pr.Git.log = state }
+func (pr *Project) gitConflicted(path string) bool {
+	return pr.Actions != nil && pr.Git.live.Conflicts[path]
+}
+func (pr *Project) gitWritable() bool {
+	return pr.Actions == nil || pr.Git.live.Known && pr.Git.live.Kind != "directory"
+}
+func (pr *Project) gitCanCommit() bool {
+	return pr.gitWritable() && len(pr.Git.live.Conflicts) == 0 && !pr.gitBusy()
+}
+
+// gitBusy reports a Git action under way: the header shows the spinner and
+// Commit waits.
+func (pr *Project) gitBusy() bool {
+	return pr.Actions != nil && pr.Actions.GitBusy != nil && pr.Actions.GitBusy()
+}
+
+// gitVacant reports a live folder whose details show no repository: one
+// not read yet, or a plain directory (gitEmpty with details).
+func (pr *Project) gitVacant() bool {
+	return pr.Actions != nil && (!pr.Git.live.Known || pr.Git.live.Kind == "directory")
+}
+
+func (pr *Project) gitEmpty(c *ui.Context, details bool) bool {
+	state := pr.Git.live
+	if pr.Actions == nil {
+		return false
+	}
+	if !state.Known {
+		ui.Column(c).Grow(1)
+		return true
+	}
+	if state.Kind != "directory" && (state.Kind != "unborn" || details) {
+		return false
+	}
+	key := "git_unborn_title"
+	if state.Kind == "directory" {
+		key = "git_directory_title"
+	}
+	if len(state.Repositories) > 0 {
+		key = "git_repositories"
+	}
+	ui.Column(c.Key("git-empty")).Grow(1).Center().Padding(16).Gap(12).Children(func() {
+		kit.Result(c, kit.ResultProps{Icon: icons.Network, Title: i18n.T(c, key, "count", len(state.Repositories))})
+		if len(state.Repositories) > 0 {
+			ui.Column(c.Key("repositories")).FillWidth().MaxWidth(384).Border(1, theme.Of(c).Border).Radius(theme.Of(c).Radius).Children(func() {
+				for index, name := range state.Repositories {
+					ui.Row(c.Key(index)).Padding(8, 12).Gap(8).Children(func() { ui.Icon(c, icons.Folder).FontSize(14); ui.Text(c, name).FontSize(14).SingleLine() })
+				}
+			})
+		}
+		// The details column has the button; the main area only says so.
+		if state.Kind == "directory" && details {
+			label := i18n.T(c, "git_initialize")
+			kit.Primary(c.Key("initialize"), label, false).OnClick(func() { pr.gitAction(c, GitAction{Kind: "git_initialize"}) })
+		}
+	})
+	return true
+}

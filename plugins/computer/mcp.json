@@ -1,0 +1,41 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "desktop": {
+      "type": "stdio",
+      "command": "${SAILRY_COMPUTER_USE}",
+      "args": [
+        "mcp"
+      ],
+      "env": {
+        "AGENT_DESKTOP_HOME": "${PLUGIN_DATA}/agent-desktop"
+      },
+      "exclusive": true,
+      "keep_images": 3,
+      "reuse": false,
+      "tools": [
+        "desktop_list_apps",
+        "desktop_list_windows",
+        "desktop_launch",
+        "desktop_snapshot",
+        "desktop_find",
+        "desktop_get",
+        "desktop_is",
+        "desktop_screenshot",
+        "desktop_wait",
+        "desktop_skills_get",
+        "desktop_click",
+        "desktop_right_click",
+        "desktop_type",
+        "desktop_set_value",
+        "desktop_press",
+        "desktop_scroll",
+        "desktop_scroll_to",
+        "desktop_select",
+        "desktop_toggle",
+        "desktop_check",
+        "desktop_uncheck"
+      ]
+    }
+  }
+}

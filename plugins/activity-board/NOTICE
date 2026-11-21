@@ -1,0 +1,9 @@
+Activity Board package
+
+The desktop implementation was extracted from the Progress package at
+sailry-plugins 6127373f6b8c0294fe0efb5e3ec8c7b249c0cc56.
+It is adapted from Sailry ef5e82ea, desktop/activity/{board,cards,projects}.rs,
+and preserves the workbench grouping and card layout through the public
+activity catalog, shared Client lanes and ordinary Kit controls.
+
+Session activity, navigation and notifications remain core capabilities.

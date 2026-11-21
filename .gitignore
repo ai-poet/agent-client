@@ -1,30 +1,44 @@
-target
-.waku-cache
-
-# The pre-fork TypeScript client, kept in the working tree for reference only.
-# It carries its own .git and its own node_modules; tracking it here would add
-# six figures of files to a repo that has nothing to do with it.
-old-code/
-cc-switch-main/
-codeg-main/
-claurst-main/
-zcode-main/
-zeron-main/
-deepseek-harness-master/
-dsh-claude-style-master/
-fusion-reference/
-t3-code/
-check_agent/
-/gpui-kit/
-pi_agent_rust/
-/sailry-harness/
-
+.preview/
+.runtime/
+.waku-cache/
+/dist/
+/sailry
+/sailry-desktop
+*.test
+*.prof
 .DS_Store
-*.log
-.env
-
-/dist
-node_modules
+native/**/target/
+node_modules/
 temp/
 
-.DS_Store
+# Native artifacts staged for packaging by `go run ./native/fetch -bundle`.
+/cmd/sailry-desktop/resources/*-*/
+!/cmd/sailry-desktop/resources/ai-logo/
+!/cmd/sailry-desktop/resources/model-capabilities/
+
+# Credentials, signing material and machine-specific configuration.
+.env
+.env.*
+!.env.example
+!.env.*.example
+.npmrc
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+/.secrets/
+/.codex/
+/.claude/
+/.cursor/
+/.idea/
+/.vscode/
+
+# Local development plans and reference checkouts.
+/plans/
+
+# Transient diagnostics.
+__pycache__/
+*.py[cod]
+*.log

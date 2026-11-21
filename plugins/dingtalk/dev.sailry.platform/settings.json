@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "description": "1. Create an internal app in the [DingTalk developer console](https://open-dev.dingtalk.com/)\n2. Enable [Wiki.Workspace.Read](https://open.dingtalk.com/document/development/get-my-documents) and the [Drive file-list read permission](https://open.dingtalk.com/document/orgapp/obtain-the-file-list)\n3. Publish the app and grant access to the required spaces\n4. Copy AppKey and AppSecret, then enter the operator’s union ID",
+  "properties": {
+    "operator": {
+      "type": "string",
+      "title": "Operator union ID",
+      "maxLength": 1024,
+      "default": ""
+    }
+  },
+  "required": [],
+  "x-sailry-locales": {
+    "en": {
+      "description": "1. Create an internal app in the [DingTalk developer console](https://open-dev.dingtalk.com/)\n2. Enable [Wiki.Workspace.Read](https://open.dingtalk.com/document/development/get-my-documents) and the [Drive file-list read permission](https://open.dingtalk.com/document/orgapp/obtain-the-file-list)\n3. Publish the app and grant access to the required spaces\n4. Copy AppKey and AppSecret, then enter the operator’s union ID",
+      "operator": "Operator union ID"
+    },
+    "zh-CN": {
+      "description": "1. 在[钉钉开放平台](https://open-dev.dingtalk.com/)创建企业内部应用\n2. 开通 [Wiki.Workspace.Read](https://open.dingtalk.com/document/development/get-my-documents) 和[钉盘文件列表读取权限](https://open.dingtalk.com/document/orgapp/obtain-the-file-list)\n3. 发布应用，并授权访问需要读取的空间\n4. 复制 AppKey 和 AppSecret，填写操作者的 union ID",
+      "operator": "操作者 union ID"
+    },
+    "zh-TW": {
+      "description": "1. 在[釘釘開放平台](https://open-dev.dingtalk.com/)建立企業內部應用\n2. 開通 [Wiki.Workspace.Read](https://open.dingtalk.com/document/development/get-my-documents) 和[釘盤檔案清單讀取權限](https://open.dingtalk.com/document/orgapp/obtain-the-file-list)\n3. 發佈應用，並授權存取需要讀取的空間\n4. 複製 AppKey 和 AppSecret，填寫操作者的 union ID",
+      "operator": "操作者 union ID"
+    },
+    "de": {
+      "description": "1. Erstelle eine interne App in der [DingTalk-Entwicklerkonsole](https://open-dev.dingtalk.com/)\n2. Aktiviere [Wiki.Workspace.Read](https://open.dingtalk.com/document/development/get-my-documents) und die [Leserechte für Drive-Dateilisten](https://open.dingtalk.com/document/orgapp/obtain-the-file-list)\n3. Veröffentliche die App und erteile Zugriff auf die benötigten Bereiche\n4. Kopiere AppKey und AppSecret und trage die Union-ID des Benutzers ein",
+      "operator": "Union-ID des Benutzers"
+    },
+    "es": {
+      "description": "1. Crea una aplicación interna en la [consola de DingTalk](https://open-dev.dingtalk.com/)\n2. Activa [Wiki.Workspace.Read](https://open.dingtalk.com/document/development/get-my-documents) y el [permiso de lectura de listas de Drive](https://open.dingtalk.com/document/orgapp/obtain-the-file-list)\n3. Publica la aplicación y permite el acceso a los espacios necesarios\n4. Copia AppKey y AppSecret e introduce el union ID del operador",
+      "operator": "Union ID del operador"
+    },
+    "fr": {
+      "description": "1. Créez une application interne dans la [console DingTalk](https://open-dev.dingtalk.com/)\n2. Activez [Wiki.Workspace.Read](https://open.dingtalk.com/document/development/get-my-documents) et le [droit de lecture des listes Drive](https://open.dingtalk.com/document/orgapp/obtain-the-file-list)\n3. Publiez l’application et autorisez l’accès aux espaces nécessaires\n4. Copiez AppKey et AppSecret, puis indiquez le union ID de l’utilisateur",
+      "operator": "Union ID de l’utilisateur"
+    },
+    "ja": {
+      "description": "1. [DingTalk 開発者コンソール](https://open-dev.dingtalk.com/)で社内アプリを作成\n2. [Wiki.Workspace.Read](https://open.dingtalk.com/document/development/get-my-documents) と [Drive ファイル一覧の読み取り権限](https://open.dingtalk.com/document/orgapp/obtain-the-file-list)を有効化\n3. アプリを公開し、必要なスペースへのアクセスを許可\n4. AppKey と AppSecret をコピーし、操作ユーザーの union ID を入力",
+      "operator": "操作ユーザーの union ID"
+    },
+    "ko": {
+      "description": "1. [DingTalk 개발자 콘솔](https://open-dev.dingtalk.com/)에서 내부 앱 생성\n2. [Wiki.Workspace.Read](https://open.dingtalk.com/document/development/get-my-documents)와 [Drive 파일 목록 읽기 권한](https://open.dingtalk.com/document/orgapp/obtain-the-file-list) 활성화\n3. 앱을 게시하고 필요한 공간에 대한 접근 허용\n4. AppKey와 AppSecret을 복사하고 사용자 union ID 입력",
+      "operator": "사용자 union ID"
+    },
+    "pt-BR": {
+      "description": "1. Crie um aplicativo interno no [console do DingTalk](https://open-dev.dingtalk.com/)\n2. Ative [Wiki.Workspace.Read](https://open.dingtalk.com/document/development/get-my-documents) e a [permissão de leitura de listas do Drive](https://open.dingtalk.com/document/orgapp/obtain-the-file-list)\n3. Publique o aplicativo e conceda acesso aos espaços necessários\n4. Copie AppKey e AppSecret e informe o union ID do operador",
+      "operator": "Union ID do operador"
+    },
+    "ru": {
+      "description": "1. Создайте внутреннее приложение в [консоли DingTalk](https://open-dev.dingtalk.com/)\n2. Включите [Wiki.Workspace.Read](https://open.dingtalk.com/document/development/get-my-documents) и [право чтения списков файлов Drive](https://open.dingtalk.com/document/orgapp/obtain-the-file-list)\n3. Опубликуйте приложение и предоставьте доступ к нужным пространствам\n4. Скопируйте AppKey и AppSecret и укажите Union ID пользователя",
+      "operator": "Union ID пользователя"
+    }
+  }
+}

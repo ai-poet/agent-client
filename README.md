@@ -1,251 +1,176 @@
-# CheapRouter
+# CheapRouter Desktop
 
-CheapRouter 把「低价模型网关」和「原生 Agent 工作台」合成了一个桌面应用：
-一端是 Claude / GPT / Grok，以及订阅分组里的 DeepSeek / Kimi / GLM 等模型的
-网关，另一端是用 Rust + [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)
-写的本地编码 agent 工作台，自带一个编译在客户端里的内置 Agent。登录即用，
-模型按当前源站自动拉取，不需要安装或配置任何外部 CLI。
+基于 [Sailry](https://github.com/sailry/sailry-harness) 开发的 CheapRouter 原生桌面客户端，使用 Go 与 [MyGo](https://github.com/egoist/mygo) 原生 GPU UI 工具包构建，将低价多模型网关、内置编码 Agent 工作台、创作工作台与插件生态集成于单一桌面应用。
 
-> **Built on [Waku](https://github.com/egoist/waku)** by egoist, licensed under
-> GPL-3.0-only. This is a modified fork; see [NOTICE.md](NOTICE.md) for the list
-> of changes and [docs/FORK.md](docs/FORK.md) for how it tracks upstream.
-> Please report issues with this build here, not to the upstream project.
+> 本仓库派生自 [sailry/sailry-harness](https://github.com/sailry/sailry-harness)（Apache-2.0），详见 [NOTICE](NOTICE) 与 [LICENSE](LICENSE)。
 
-## 为什么选 CheapRouter
+## 应用截图
 
-- **内置 Agent，装好就能用。** 引擎直接编译在客户端里，不需要 Node、npm 或任何
-  外部 CLI。网关上能对话的 Claude、GPT、Grok、DeepSeek、Kimi、GLM 等模型都在
-  它的模型选择器里，每个模型自动走对应的接口格式、用提供它的那个分组的密钥，
-  推理强度按模型家族给出可选档位。详见下文 [内置 Agent](#内置-agent)。
-- **源站一切，全局联动。** 底部源站菜单切换后，内置 Agent 的模型请求、模型目录、
-  余额、用量、订阅、公告和充值等业务 API 都使用新源站；旧源站尚未返回的请求不会
-  覆盖新数据。登录和令牌刷新仍固定在完成登录的认证域名，避免认证会话跨节点漂移。
-- **订阅一目了然。** 设置 → CheapRouter 账号列出你的每个有效订阅：剩余天数、日 /
-  周 / 月的已用额度与上限；左下角账号菜单也有一行摘要。订阅里的模型按周期计费，
-  不扣余额，内置 Agent 会让 DeepSeek、Kimi、GLM 这类模型自动走提供它的订阅。
-- **按厂商选模型。** 模型入口位于输入区的一级控件里，打开后直接按厂商分类，
-  只列出当前厂商的可用模型；也可按名称、厂商或自定义接口跨分类搜索，不用再进入
-  服务商二级菜单。
-- **余额、充值、用量原生内置。** 左下角实时余额（每个任务结束自动刷新，低于 $5
-  变黄、$1 变红），原生充值弹窗支持扫码 / Stripe / 兑换码，用量页带模型与分组
-  筛选、分页、逐请求的 token / 缓存 / 费用 / 延迟明细——不用再开网页后台。
-- **模型广场，先比价再干活。** 全部在售模型的官方价与网关价对照（划线价一目了然）、
-  分组倍率与健康度、缓存 / 长上下文 / 阶梯计费标注，一眼挑出最划算的分组。
-- **分组一键切换。** 左下角账号菜单按模型平台选择计费分组，内置 Agent 会立即拿到
-  新的分组密钥；进行中的单次请求保持在原线路，新请求使用新分组。菜单里每个分组旁
-  直接标注倍率（如 ×0.50）、24 小时在线率和降级/故障状态；也可以按平台开启自动
-  故障转移，分组故障时切到健康分组，恢复后自动切回。
-- **画图，文生图和图生图都在一个框里。** 侧栏「搜索」下面点「画图」：只写提示词
-  就出图，拖入、粘贴或选几张图片就在它们的基础上改图。模型、尺寸（每档标好单价）、
-  质量、张数随手选，预计花费和余额就在「生成」旁边；画好的图存进系统「图片」
-  文件夹，也留在图库里随时预览、再改、发到对话。详见下文 [画图](#画图)。
-- **电脑操作。** 在 macOS 和 Windows 上，agent 可以直接操作桌面应用（Windows 在
-  设置 → 电脑操作里一键下载驱动），也能在对话里调用 `generate_image` 生成图片。
-  驱动没装时只是不开放桌面控制，对话照常进行。
-- **公告直达。** 标题栏铃铛实时同步服务公告（限时活动、模型上新、维护通知），
-  未读红点提醒，客户端内直接阅读。
-- **看得清 agent 在做什么。** 翻代码的动作合成一行（如「已探索 · 2 次搜索，3 个
-  文件」），命令合成另一行，每一步都写明在做什么、做完了什么；失败的命令标红，
-  悬停看输出结尾。思考只占一行，中途发的转向消息立刻出现，前后的工作各自折叠、
-  各自计时，「工作了多久」不含等你批准的时间。转录区右上角的状态胶囊随时告诉你
-  目标、当前步骤、计划进度和后台任务。
-- **出错有交代，改错能撤回。** 一轮失败时输入框上方出现错误条：完整报错、一键
-  复制、一键重试（重试不会删文件），不再编一段假回复。每轮的改动卡片可以只撤销
-  这一轮改过的文件——之后又被改过的文件原样保留并列出来，文件夹里的其他东西一概
-  不碰；点卡片上的文件直接看 diff。
-- **批准不打断你。** 多个权限请求排队显示、带计数，按数字键就能作答，Esc 不会
-  误停整个任务；「拒绝并说明」直接告诉 agent 该怎么做。应用在后台时有待你处理的
-  请求会弹系统通知，侧栏也标出等待数。快捷键：⇧⌘M 切换权限模式、⇧⌘P 切换
-  Plan 模式、⌘T 切换推理强度（Windows 用 Ctrl）。
-- **完整的 Agent 工作台。** 多项目、多会话并行，消息排队与中途转向，Git
-  checkpoint 会话级回滚，worktree 隔离，内置终端、diff 与技能库——上游 Waku
-  的全部能力都在。
+<!-- 截图占位：替换为最新客户端界面截图 -->
+| 主工作台 / 会话视图 | 创作工作台 / 账号与模型分组 |
+| :---: | :---: |
+| ![主工作台截图占位](assets/readme/workspace.webp) | _[待补充：创作工作台 / 账号分组与模型选择截图]_ |
 
-## 两步上手
+## 核心特性
 
-1. **安装并登录。** 从 [最新 Release](../../releases/latest) 下载对应平台安装包，
-   打开应用点「登录」，浏览器里完成注册——回到客户端即可拉取当前源站的模型目录。
-2. **开跑。** 打开一个项目文件夹，输入你想做的事，回车。默认且唯一使用的 Agent
-   就是内置 Agent；余额在左下角，随用随充。
+- **原生轻量界面**：纯 Go + MyGo 原生绘制，无 Electron 壳，长会话渲染流畅；无 GPU 环境下自动降级到 CPU 渲染。
+- **内置 Agent 工作台**：原生执行循环、多文件编辑、Git / Worktree 管理、内置终端、代码审查与插件系统，支持通过 iroh P2P 加密链路连接远程 Host。
+- **CheapRouter 账号与网关联动（可选）**：支持主站与 CDN 线路切换、PKCE 本地回跳登录、多平台计费分组与在线率展示、余额与套餐同步；未登录时本地项目、会话与自定义模型服务商仍可正常使用。
+- **创作工作台（Image Studio）**：统一文生图与图生图入口，支持网关生图模型与自定义画图接口配置、任务调度与本地保存。
+- **旧版数据无损迁移**：首次启动只读检测旧版数据目录，先完整备份再按稳定 ID 导入项目、会话与历史记录。
 
-进阶：设置 → 模型接口 统一登记你自己的接口——地址、密钥、接口格式、模型列表，
-以及可测速自动选优的备用域名。内置 Agent 的 Messages、Responses、Chat Completions
-三种接口格式可分别绑定自定义接口；未绑定的格式使用底部当前源站。输入框只展示内置
-Agent 实际支持的 `/` 命令、共享技能和自定义命令，不再发现或透传外部 CLI 命令。
+## 本地开发
 
-## 内置 Agent
+### 环境要求
 
-内置 Agent 是默认且唯一可启动的 provider。它是编译进客户端的一个完整编码 agent：读写文件、
-执行命令、搜索代码、调用 MCP 工具、启动子 agent。会话记录由应用自己保存，回滚、
-分支、续聊都不依赖任何外部进程。
+- **Go**：`go1.27.3`（`GOTOOLCHAIN=go1.27.3`，默认禁用 cgo：`CGO_ENABLED=0`）
+- **Native 工具链**：首次编译本地原生动态库（`native/iroh`、`native/turso`、`native/capture`）需安装对应构建工具（`native/iroh` 与 `native/turso` 通过 `rust-toolchain.toml` 固定工具链版本 `1.98.0`；`native/capture` 需要 C 编译器）
+- **可选工具**：`just`（快捷任务）、`jq`（打包脚本）、`node >= 22.13`（插件测试）
 
-**模型与接口格式。** 模型选择器列出网关目录里能对话的模型（Gemini 系列目前只接入 Gemini 4 Argon），
-同一个模型只列一次。接口格式由模型家族决定，不需要手动选：
-
-| 模型家族 | 接口格式 | 推理强度 |
-|---|---|---|
-| Claude | Anthropic Messages | low 至 max，最新型号另有 ultracode |
-| GPT / o 系列、Grok | OpenAI Responses | low 至 max |
-| DeepSeek、GLM 4.5 及以后、Kimi K3 | OpenAI Chat Completions | low / high / max |
-| Kimi K2、MiniMax | OpenAI Chat Completions | 由模型自己决定（接口不提供档位） |
-| Gemini 4 Argon | Google Gemini（网关 v1beta） | low / medium / high |
-
-**每个模型走对的分组。** 一个密钥只属于一个分组，而每个分组只提供它支持的那些
-模型。内置 Agent 按模型挑分组：Claude、GPT、Grok 使用账号菜单里为对应模型平台
-绑定的分组；其余模型优先走提供它的有效订阅，没有订阅时走提供它的、倍率最低的
-分组。需要的密钥会自动准备好（优先复用账号里已有的密钥），选择器里走订阅的模型
-会注明订阅名。
-
-**Claude 路线省钱又听话。** 走 Claude 时按 Claude Code 的方式打提示缓存断点，
-直连 Anthropic 的分组（如 Claude Max）每一步都从缓存读前面的对话，不再整段重付；
-推理强度也按 Claude Code 的方式发送（新一代模型用 adaptive thinking 加 effort，
-老模型仍用思考预算），网关的用量日志里能看到所选档位，Opus 5.5 选任何档位都
-不会报错。
-
-**先规划，再动手。** Plan 模式下 agent 只读代码、写计划，计划经你批准后才开始
-修改；它也可以在对话中自己进入 Plan 模式，界面上的模式标签会跟着变。
-
-**目标模式。** `/goal` 给任务定一个目标，agent 一轮接一轮地做下去，直到它确认
-目标完成；停止当前一轮会暂停目标，每轮的 token 都计入目标。
-
-**上下文心里有数。** 所有路线（Claude、GPT、Grok、DeepSeek、Kimi、GLM……）都会
-按设置里的阈值自动压缩上下文，压缩前后的 token 数留在转录里；`/compact` 手动
-压缩，`/context` 看上下文占用，`/cost` 看本次用量。用量面板显示每次请求的输入、
-缓存命中和输出。各家 agent 的待办清单统一显示成 ○ / → / ✓，重新打开任务也还在。
-
-**跨平台的命令行。** macOS 上用 bash；Windows 上优先用 Git Bash，没有安装时改用
-PowerShell（有 7 就用 7），工作目录在多次调用之间保持，中文输出不乱码，超时会
-结束整棵进程树。
-
-**项目指令。** 自动读取项目里的 `AGENTS.md` / `CLAUDE.md`（从全局配置目录到当前
-目录逐级读取），与你在设置里写的系统提示一起生效。
-
-**不设步数上限。** 一条消息可以连续执行任意多步，长任务不会被中途截断；想停的时候
-随时取消。
-
-**可配置项。** 设置 → 内置 Agent：三种接口格式各用哪个接口、系统提示、自动压缩
-与自定义百分比阈值、内置工具开关、MCP 服务器和权限规则。内置 Agent 始终启用。
-
-内置 Agent 的执行内核移植自 [Sailry](https://github.com/sailry/sailry-harness)，
-现有 Provider、工具、权限和历史适配继续复用 Claurst 层。代码统一位于
-[`crates/agent-core`](crates/agent-core)，其中 `engine` 保留 Sailry 的
-`agent/engine`、`agent/model`、`agent/canonical` 结构；所做的修改逐条记录在
-[NOTICE.md](NOTICE.md)。
-
-## 画图
-
-侧栏「搜索」下面的「画图」打开一个独立页面，和任务并排，不遮住侧栏。
-
-- **一个输入框，两种画法。** 只写提示词就是文生图；把图片拖到页面上、粘贴截图，
-  或点回形针选文件，就变成图生图（PNG / JPEG / WebP，单张不超过 20 MB）。回车或
-  点「生成」提交。
-- **选项都在手边。** 模型（网关目录里的 gpt-image、Grok 生图模型）、分组（默认
-  自动）、尺寸（每档标出 1K / 2K / 4K 和单价）、质量、一次几张，旁边显示预计花费
-  和余额。
-- **图库。** 最新的在前；生成中的卡片会计时，失败的卡片写明原因（没开生图、没过
-  审核、余额不足……），余额不足时直接给出充值入口。每张图可以预览、用作参考图、
-  改提示词再画、重新生成、发到对话、复制提示词、在文件夹中显示。
-- **存在哪。** 图片在系统「图片」文件夹下的 `CheapRouter/年-月/`，图库记录与参考图
-  在 `~/.cheaprouter/image-studio/`。
-- **不怕长任务。** 网关支持异步生图时，图在网关上排队生成，关掉窗口也不丢，下次
-  打开画图页接着取结果；不支持时自动改用流式请求，不会被代理的超时掐断。
-- **自动找能画的分组。** 生图权限按分组单独开放，遇到没开的分组会自动换下一个，
-  画成功的分组会被记住；agent 在对话里调用 `generate_image` 时也走这个分组。
-
-## 支持的 agent
-
-只支持 **内置 Agent**。它直接运行在 `client-daemon` 内，支持云网关和自定义模型接口，
-无需安装任何外部程序。Claude Code、Codex、Grok Build、OpenCode、Pi、Amp、Cursor、
-Fx、Kimi Code 等外部 CLI 不再被检测、配置、导入或启动；已有本地会话镜像仍可查看，
-但不能续跑外部 CLI。
-
-## Install
-
-macOS 一键安装（推荐，绕开 Gatekeeper 弹窗）：
-
-```bash
-curl -fsSL https://s3.cheaprouter.cc/cheaprouter-releases/install-mac.sh | sh
-```
-
-Windows 从 [最新 Release](../../releases/latest) 下载 `CheapRouter-*-Setup.exe`
-安装（x64 与 arm64 均有）。安装后应用内自动更新。目前不提供 Linux 安装包。
-
-## Architecture
-
-The native desktop is an RPC client of the standalone `client-daemon` process.
-Provider sessions run in [`client-core`](crates/client-core), behind the
-authenticated, versioned WebSocket contract in
-[`client-protocol`](crates/client-protocol). The desktop depends on
-[`client`](crates/client), not on the daemon implementation. The
-daemon owns task SQLite data, uploaded attachments, provider-native session
-forks, and all workspace filesystem and Git operations; paths returned by it
-always refer to the daemon host. The desktop retains only presentation state
-and a disposable preview cache.
-
-The built-in agent (`ProviderKind::Native`) runs inside the daemon rather than
-as a child process: Sailry's execution state machine in
-[`crates/agent-core/engine`](crates/agent-core/engine), with the existing
-provider, tool, permission, and history adapters in `crates/agent-core/query`,
-driven through [`crates/agent-bridge`](crates/agent-bridge) and translated into
-the provider contract by `crates/client-core/src/driver/native.rs`. Its transcript is owned by the
-daemon, which is what makes rewind, branch and resume plain truncations.
-
-All fork functionality lives in [`crates/sub2api`](crates/sub2api) plus a
-handful of view files; see [docs/FORK.md](docs/FORK.md) for the hook-point
-register. Routing is desktop-local: the desktop writes only the built-in agent's
-own settings (with backups in `~/.cheaprouter/takeover.json`), never an external
-CLI's configuration. Business API clients resolve the currently selected gateway
-origin; login, token refresh and logout stay on the credential's authentication
-origin. Switching origin invalidates origin-scoped caches and rejects late
-responses from the previous origin.
-
-The browser client lives at [`apps/web`](apps/web) and uses the generated
-browser transport in [`packages/client`](packages/client). Its
-checked-in types are generated directly from the Rust protocol. Run
-`bun run protocol:generate` after changing a wire type and
-`bun run protocol:check` to verify that generated files are current.
-
-App data lives under `~/.cheaprouter` (projectless task workspaces at
-`~/.cheaprouter/projects/<date>/<slug>`; the Release desktop writes
-`app.json` and daemon settings `settings.json` there, while Debug stays
-isolated at `temp/`). Legacy `~/.waku` directories from older builds are
-renamed in place at startup.
-
-Release apps bundle and sign `client-daemon`. Development keeps the daemon at
-`target/debug/waku-debug-daemon`, allowing provider-only edits to rebuild and
-replace the daemon without relaunching the debug build.
-
-## Development
-
-Development is supported on macOS and Windows and requires
-[Rust 1.96 or newer](https://www.rust-lang.org/tools/install) and
-[Bun](https://bun.sh/). Windows needs the MSVC toolchain; install the native
-build prerequisites listed in [CONTRIBUTING.md](CONTRIBUTING.md) first. The
-customized GPUI workspace is vendored under `vendor/gpui/`, and reusable UI
-components live in `vendor/gpui-kit/` (the `client-ui` crate); no
-separate checkout or submodule initialization is needed. Linux
-still builds from source, but it is not tested in CI and no Linux package is
-published.
+### 一键启动开发客户端
 
 ```sh
-bun install
-bun run dev
+./dev-desktop.sh [dev|release|<profile>] [额外启动参数]
 ```
 
-The embedded browser remains macOS-only. Computer Use runs on macOS and on
-Windows, where it drives the desktop through `cua-driver` (downloaded from
-Settings → Computer Use). Agent sessions, projects, transcripts, skills,
-usage, diffs, file editing, and the terminal run natively on both.
+`dev-desktop.sh` 会自动检测平台与架构，按需构建并复用 `.runtime/native/<platform>-<arch>/` 下的原生动态库，随后运行 `go run ./cmd/sailry-desktop`：
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and checks.
-Release maintainers should also read [RELEASING.md](RELEASING.md).
+- `dev`（默认）：数据目录 `$HOME/.sailry-dev`（隔离正式版数据）
+- `release`：数据目录 `$HOME/.sailry`
+- `<profile>`：数据目录 `.runtime/profiles/<profile>`
 
-## Upstream
+仅查看隔离的 UI 预览（不打开 profile、不启动 Node）：
 
-This fork exists because of upstream Waku. You can support its development via
-[GitHub Sponsors](https://github.com/sponsors/egoist).
+```sh
+unset GOROOT && export GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0
+go run ./cmd/sailry-desktop --preview
+```
 
-## License
+### 常用环境变量
 
-Licensed under the [GNU General Public License v3.0 only](LICENSE), the same
-license as upstream Waku. Modifications are recorded in [NOTICE.md](NOTICE.md).
+| 环境变量 | 说明 |
+| --- | --- |
+| `GOTOOLCHAIN` | 固定为 `go1.27.3`（运行 Go 命令前建议先 `unset GOROOT`） |
+| `CGO_ENABLED` | 固定为 `0`（原生动态库通过 `purego` / `dlopen` 按需加载） |
+| `SAILRY_IROH_LIB` | 指定 `libsailry_iroh.{dylib,so}` / `sailry_iroh.dll` 路径 |
+| `SAILRY_TURSO_LIB` | 指定 `libturso_sync_sdk_kit.{dylib,so}` / `turso_sync_sdk_kit.dll` 路径 |
+| `SAILRY_HELPERS_DIR` | 指定辅助工具目录（如 `.runtime/native/<os>-<arch>/helpers`） |
+| `SAILRY_ARCH` | 交叉编译或打包时覆盖目标架构（`arm64` / `amd64`） |
+| `SAILRY_TELEMETRY` | 设为 `off`（或 `DO_NOT_TRACK=1`）可关闭匿名诊断遥测 |
+| `MYGO_UPDATE_FEED_URL` | 打包期注入 MyGo 更新清单基址（默认 `https://s3.cheaprouter.cc/cheaprouter-releases/mygo`） |
+| `MYGO_UPDATE_PUBLIC_KEY` | 打包期注入 MyGo 第二跳 Ed25519 公钥（base64） |
+
+### Native 原生库
+
+Go 主程序保持 `CGO_ENABLED=0`，运行期通过 `dlopen` 加载三个原生库，产物统一缓存于 `.runtime/native/<os>-<arch>/`：
+
+```sh
+sh native/iroh/build.sh      # P2P 加密传输与中继库（libsailry_iroh）
+sh native/turso/build.sh     # 本地持久化与同步库（libturso_sync_sdk_kit）
+sh native/capture/build.sh   # 平台音频采集库（libsailry_capture）
+```
+
+> 仅修改 Go 代码时无需重新编译 native 库；也可以通过 `go run ./native/fetch` 拉取锁定版本的预编译产物。
+
+## 构建与打包
+
+### 编译全部 Go 包
+
+```sh
+unset GOROOT && export GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0
+go build ./...
+```
+
+### 发行版打包
+
+在仓库根目录执行对应平台的打包脚本（支持 `--dry-run` 在 Linux 上预检配置与产物路径）：
+
+```sh
+# macOS（产出 .app、.dmg、第一跳更新 .zip、第二跳 MyGo .tar.gz）
+./cmd/sailry-desktop/macos/package.sh -arch arm64 --require-update-key
+./cmd/sailry-desktop/macos/package.sh -arch amd64 --require-update-key
+
+# Windows（产出 Inno Setup -Setup.exe、便携 .zip、第二跳 MyGo .tar.gz）
+./cmd/sailry-desktop/windows/package.sh -arch amd64 --require-update-key
+./cmd/sailry-desktop/windows/package.sh -arch arm64 --require-update-key
+```
+
+CI 发布流水线定义在 [`.github/workflows/release.yml`](.github/workflows/release.yml) 与 [`.github/workflows/sync-release.yml`](.github/workflows/sync-release.yml)，完整发布与回滚手册见 [docs/RELEASING.zh.md](docs/RELEASING.zh.md)。
+
+## 热更新（两跳模型）
+
+发布链使用同一个对象存储桶（`cheaprouter-releases`）与两把独立的 Ed25519 密钥，兼顾旧版客户端原地升级与 MyGo 客户端原生热更新：
+
+1. **第一跳（旧版 v0.3.x → MyGo v0.4.0+）**：
+   - macOS：保持 Bundle ID `sh.waku` 与递增数值 `CFBundleVersion`（`major*1_000_000 + minor*1_000 + patch`），由 `scripts/appcast.ts` 签发桶根 `appcast.xml`，指向 `CheapRouter-<v>.zip`。
+   - Windows：保持既有 Inno Setup `AppId` 并在安装前清理旧版可执行文件，由 `scripts/appcast-windows.ts` 签发桶根 `appcast-windows-{x86_64,aarch64}.xml`，指向静默安装器 `CheapRouter-<v>-<arch>-Setup.exe`。
+2. **第二跳（MyGo v0.4.0+ → 后续 MyGo 版本）**：
+   - 打包后由 `cmd/mygo-manifest pack/sign/verify` 对四端 `.tar.gz` 的 SHA-256 摘要做 Ed25519 签名，产出 `mygo/update-{darwin-arm64,darwin-amd64,windows-amd64,windows-arm64}.json`。
+   - 客户端通过 `internal/update` 与 MyGo 内置更新器拉取清单、验签并执行原子替换；上传顺序严格遵循「先传不可变归档，再更新短缓存清单」。
+
+## 架构简述
+
+核心代码按五层单向依赖组织，详见 [ARCHITECTURE.md](ARCHITECTURE.md)：
+
+```text
+Desktop UI (internal/desktop, MyGo)
+        │  视图投影 / 动作分发 (internal/desktop/live)
+        ▼
+Client (internal/client)
+        │  命令发送 / 事件归约 / 断线恢复
+        ▼
+Link (internal/link, iroh P2P / 本地传输)
+        │  对等认证 / 帧传输 / 回执
+        ▼
+Node (internal/node, Agent 引擎 / Turso 存储 / 工具与插件运行时)
+        ▲
+Protocol (internal/protocol, 共享命令 / 事件 / 快照 / 线协议定义)
+```
+
+| 模块 | 职责 |
+| --- | --- |
+| `internal/protocol` | 命令、事件、ID、快照、错误码、能力声明及 `wire` 编解码契约 |
+| `internal/link` | 节点身份、配对、本地传输与基于 `iroh` 的端到端加密通信、回执与重连 |
+| `internal/client` | 类型化命令调用、有序事件投影、去重以及请求与快照恢复 |
+| `internal/node` | Agent 执行引擎、模型适配、工具、Git/文件/终端资源服务、Turso 持久化与插件宿主 |
+| `internal/desktop` | MyGo 桌面壳、共享控件库（`kit`）、主题、多语言（`i18n`）、侧栏/会话/设置/创作工作台视图与 `live` 绑定层 |
+| `internal/cheapauth` | CheapRouter 账号认证、PKCE 回调、网关线路与分组/余额同步 |
+| `internal/imagestudio` | 创作工作台后端客户端、任务存储与画图接口配置 |
+| `internal/update` | MyGo 第二跳热更新配置、检查与安装接入 |
+| `internal/migrate` | 旧版客户端项目、会话与历史的只读备份与无损迁移 |
+
+## 目录结构
+
+```text
+.
+├── go.mod / go.sum           # Go 模块定义（github.com/ai-poet/agent-client）
+├── bundled.go                # 嵌入内置插件与主题资源
+├── dev-desktop.sh            # 跨平台本地开发启动脚本
+├── justfile                  # 常用开发与检查任务配方
+├── cmd/
+│   ├── sailry-desktop/       # 桌面端主入口、mygo.json 及 macOS/Windows 打包脚本
+│   ├── sailry-host/          # 无头 Host 后台服务入口
+│   ├── mygo-manifest/        # MyGo 第二跳更新归档打包与 Ed25519 清单签名/校验工具
+│   ├── gen-win-icon/         # Windows 多尺寸 .ico 生成工具
+│   └── update-model-catalog/ # 模型目录快照更新工具
+├── internal/                 # 核心业务与桌面端实现（protocol / link / client / node / desktop 等）
+├── native/                   # 原生动态库源码、构建脚本与锁定清单（iroh / turso / capture / fetch / windows）
+├── assets/                   # 品牌图标、预置目录与文档资源
+├── locales/                  # 多语言源文件（经 go generate 生成内嵌词典）
+├── plugins/                  # 内置官方插件快照
+├── themes/                   # 内置主题快照
+├── schemas/                  # 插件与清单 JSON Schema
+├── sdk/                      # 插件 TypeScript 声明与开发文档（sdk/plugins.md）
+├── scripts/                  # 发布辅助脚本（第一跳 appcast 签发、CHANGELOG 提取、macOS 安装脚本）
+├── docs/                     # 发布手册（RELEASING.zh.md）、能力裁剪记录与测试预算说明
+├── .github/workflows/        # CI 测试、MyGo 两跳发布与 R2 同步流水线
+├── LICENSE                   # Apache-2.0 许可证
+├── NOTICE                    # Sailry 上游与第三方归属声明
+└── third_party_licenses/     # 第三方依赖与组件完整许可文本
+```
+
+## 开源归属与许可证
+
+- 本项目基于 [Sailry](https://github.com/sailry/sailry-harness) 派生，遵循 **Apache License 2.0** 协议，完整文本见 [LICENSE](LICENSE)。
+- Sailry 上游及第三方组件（MyGo、CrychicUI、Ghostty、Codex/Goose/Rig/ADK 衍生源码、字体、图标与原生运行时等）的著作权与来源声明完整保留于 [NOTICE](NOTICE) 与 [third_party_licenses/](third_party_licenses/)。
+- Apache-2.0 许可不授予 Sailry 商标与标识使用权，详见 [TRADEMARKS.md](TRADEMARKS.md)。

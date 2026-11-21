@@ -12,51 +12,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Rust (${{ matrix.os }})
+  go-desktop:
+    name: Go desktop (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         # No Linux runner: this fork ships no Linux build.
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 20
+    env:
+      CGO_ENABLED: "0"
+      GOTOOLCHAIN: go1.27.3
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
 
-      - name: Install Rust
-        run: |
-          rustup toolchain install 1.96.0 --profile minimal
-          rustup default 1.96.0
-
-      - name: Install Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Cache Cargo
-        uses: actions/cache@v6
+      - name: Install Go
+        uses: actions/setup-go@v6
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ matrix.os }}-rust-1.96.0-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            ${{ matrix.os }}-rust-1.96.0-cargo-
+          go-version: 1.27.3
+          cache: true
+          cache-dependency-path: go.sum
 
-      - name: Run tests
-        run: cargo test --locked
+      - name: Run desktop tests
+        run: go test ./...
 
-      # The generated protocol and browser client are platform-independent, so
-      # one runner is enough to catch a drifted checked-in artifact.
-      - name: Install JavaScript dependencies
-        if: runner.os == 'macOS'
-        run: bun install --frozen-lockfile
-
-      - name: Check generated protocol and browser client
-        if: runner.os == 'macOS'
-        run: |
-          bun run protocol:check
-          bun run --filter client check
-          bun run --filter client test
+      - name: Build desktop shell
+        run: go build ./...

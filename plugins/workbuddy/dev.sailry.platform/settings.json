@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "checkin_enabled",
+    "checkin_time"
+  ],
+  "properties": {
+    "free_only_china": {
+      "type": "boolean",
+      "title": "Free models only (China)",
+      "default": true
+    },
+    "free_only_international": {
+      "type": "boolean",
+      "title": "Free models only (WorkBuddy International)",
+      "default": true
+    },
+    "free_only_codebuddy": {
+      "type": "boolean",
+      "title": "Free models only (CodeBuddy International)",
+      "default": true
+    },
+    "checkin_enabled": {
+      "type": "boolean",
+      "title": "Automatic check-in",
+      "default": false
+    },
+    "checkin_time": {
+      "type": "string",
+      "title": "Check-in time (Asia/Shanghai)",
+      "default": "09:05",
+      "minLength": 5,
+      "maxLength": 5,
+      "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$",
+      "x-sailry-time": true
+    }
+  },
+  "x-sailry-locales": {
+    "en": {
+      "checkin_time": "Daily check-in time (Asia/Shanghai)",
+      "checkin_enabled": "Automatic check-in",
+      "free_only_china": "Free models only (China)",
+      "free_only_international": "Free models only (WorkBuddy International)",
+      "free_only_codebuddy": "Free models only (CodeBuddy International)"
+    },
+    "zh-CN": {
+      "checkin_time": "每日签到时间（北京时间）",
+      "checkin_enabled": "自动签到",
+      "free_only_china": "仅使用免费模型（国内版）",
+      "free_only_international": "仅使用免费模型（WorkBuddy 国际版）",
+      "free_only_codebuddy": "仅使用免费模型（CodeBuddy 国际版）"
+    },
+    "zh-TW": {
+      "checkin_time": "每日簽到時間（北京時間）",
+      "checkin_enabled": "自動簽到",
+      "free_only_china": "僅使用免費模型（中國版）",
+      "free_only_international": "僅使用免費模型（WorkBuddy 國際版）",
+      "free_only_codebuddy": "僅使用免費模型（CodeBuddy 國際版）"
+    },
+    "de": {
+      "checkin_time": "Tägliche Check-in-Zeit (Asia/Shanghai)",
+      "checkin_enabled": "Automatischer Check-in",
+      "free_only_china": "Nur kostenlose Modelle (China)",
+      "free_only_international": "Nur kostenlose Modelle (WorkBuddy International)",
+      "free_only_codebuddy": "Nur kostenlose Modelle (CodeBuddy International)"
+    },
+    "es": {
+      "checkin_time": "Hora diaria de registro (Asia/Shanghai)",
+      "checkin_enabled": "Registro automático",
+      "free_only_china": "Solo modelos gratuitos (China)",
+      "free_only_international": "Solo modelos gratuitos (WorkBuddy International)",
+      "free_only_codebuddy": "Solo modelos gratuitos (CodeBuddy International)"
+    },
+    "fr": {
+      "checkin_time": "Heure quotidienne de connexion (Asia/Shanghai)",
+      "checkin_enabled": "Connexion automatique",
+      "free_only_china": "Modèles gratuits uniquement (Chine)",
+      "free_only_international": "Modèles gratuits uniquement (WorkBuddy International)",
+      "free_only_codebuddy": "Modèles gratuits uniquement (CodeBuddy International)"
+    },
+    "ja": {
+      "checkin_time": "毎日のチェックイン時刻（HH:mm、北京時間）",
+      "checkin_enabled": "自動チェックイン",
+      "free_only_china": "無料モデルのみ（中国版）",
+      "free_only_international": "無料モデルのみ（WorkBuddy 国際版）",
+      "free_only_codebuddy": "無料モデルのみ（CodeBuddy 国際版）"
+    },
+    "ko": {
+      "checkin_time": "일일 체크인 시간 (베이징 시간)",
+      "checkin_enabled": "자동 체크인",
+      "free_only_china": "무료 모델만 사용 (중국판)",
+      "free_only_international": "무료 모델만 사용 (WorkBuddy 국제판)",
+      "free_only_codebuddy": "무료 모델만 사용 (CodeBuddy 국제판)"
+    },
+    "pt-BR": {
+      "checkin_time": "Horário diário de check-in (Asia/Shanghai)",
+      "checkin_enabled": "Check-in automático",
+      "free_only_china": "Somente modelos gratuitos (China)",
+      "free_only_international": "Somente modelos gratuitos (WorkBuddy International)",
+      "free_only_codebuddy": "Somente modelos gratuitos (CodeBuddy International)"
+    },
+    "ru": {
+      "checkin_time": "Время ежедневной отметки (Asia/Shanghai)",
+      "checkin_enabled": "Автоматическая отметка",
+      "free_only_china": "Только бесплатные модели (Китай)",
+      "free_only_international": "Только бесплатные модели (WorkBuddy International)",
+      "free_only_codebuddy": "Только бесплатные модели (CodeBuddy International)"
+    }
+  }
+}

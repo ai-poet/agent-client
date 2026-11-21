@@ -1,0 +1,63 @@
+WorkBuddy protocol translations reference the third-party project
+dingminhua/dsh-connect-workbuddy, version 4.8.1, commit
+aa87b71a2dc59f056a52c90b9411f2b70e8c18a1:
+https://github.com/dingminhua/dsh-connect-workbuddy
+Copyright (c) 2026 LaoDing. MIT License, reproduced in LICENSE.
+
+The Sailry implementation adapts the request, token-field and model-catalog
+rules in src/upstream.ts and src/oauth.ts. It does not include that project's
+pi-ai integration, HTTP shim, credential scanner, account pool,
+DSML recovery parser, or their source files and runtimes.
+
+This package is not an official DSH or Tencent integration.
+
+Discovery Origin/Referer headers and wrapped/bare catalog handling also reference
+corrinehu/dsh-workbuddy-connect, commit
+9e2d2559119e93113097554adacc52d62aef7882:
+https://github.com/corrinehu/dsh-workbuddy-connect/blob/9e2d2559119e93113097554adacc52d62aef7882/src/upstream.ts
+Copyright (c) 2026 Corrine Hu. MIT License, reproduced in LICENSE.
+
+That companion implementation was identified through the user's reference,
+ddGuo/dsh-workbuddy-switcher, commit
+167632f8f2e0c9efd4777d9a39c531ef2084f4d1:
+https://github.com/ddGuo/dsh-workbuddy-switcher/tree/167632f8f2e0c9efd4777d9a39c531ef2084f4d1
+No account-switching, credential-file scanning or account-pool code is included.
+
+Desktop generation User-Agent/IDE headers, safe structured error-field handling
+and the personal-resource billing request also follow the fixed companion
+src/upstream.ts and src/client-identity.ts above. Only declared read-only personal
+resource fields are queried; no account switching, check-in/claim mutation,
+external account storage or quota-management workflow is included.
+
+Gateway request markers, regional language and billing User-Agent follow
+linguo2625469/workbuddy2api-panel, commit
+6b31db6d045e985042620c819c3a938002e7b0b1:
+https://github.com/linguo2625469/workbuddy2api-panel/blob/6b31db6d045e985042620c819c3a938002e7b0b1/internal/upstream/headers.go
+MIT License. Only public wire metadata is used; no device-token scanning,
+account switching or account-management workflow is included.
+
+CodeBuddy International CLI request identity and usage trailers follow
+Lbryany/dsh-codebuddy, commit 216124e75a2d24fae8089788b26a1c0ccf6772d9:
+https://github.com/Lbryany/dsh-codebuddy/blob/216124e75a2d24fae8089788b26a1c0ccf6772d9/src/codebuddy.ts
+Copyright (c) 2026 Lbryany. MIT License, reproduced in LICENSE.
+Existing authorization and renewal declarations remain unchanged.
+
+Daily check-in endpoint and response fields were independently implemented from:
+https://github.com/codeLong1024/workbuddy-checkin/tree/8f7524f1bcf6a72bc58945cc745b0e9e0c7fd832
+
+The package and channel-type glyph is the official WorkBuddy mark, reduced to a
+monochrome foreground: the head and eye shapes from
+https://download.codebuddy.ai/web/workbuddy/2365138d79c29bb1cbce4644f5cbbffd2b561a5c/assets/logo.svg
+(the favicon of https://www.workbuddy.ai), clipped to its circular frame, with the
+background, blur, gradients and colors removed. WorkBuddy is a trademark of its
+owner; it identifies the service this package connects to.
+
+The free-model price rules (catalog credits and promotions), the current
+desktop and CLI request identity with its agent headers, the reasoning replay
+field, the international GLM image limit and the check-in answer codes 1001 and
+1003 follow magpie-community/plugins, packages/workbuddy version 0.2.30, commit
+2b7da48: https://github.com/magpie-community/plugins
+Copyright (c) 2026 magpie-community contributors. MIT License, reproduced in
+LICENSE. The rules are reimplemented here; its enterprise accounts, API-key
+sign-in, desktop sign-in file import, Messages route and usage estimates are not
+included. Free models only starts on here and off there.

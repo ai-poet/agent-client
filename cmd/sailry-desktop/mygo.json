@@ -1,0 +1,35 @@
+{
+  "name": "CheapRouter",
+  "slug": "cheaprouter",
+  "identifier": "sh.waku",
+  "version": "0.4.0",
+  "copyright": "Copyright © 2026 CheapRouter",
+  "icon": "../../assets/branding/cheaprouter.png",
+  "main": ".",
+  "out": "../../.runtime/package/out",
+  "updates": {
+    "url": "https://s3.cheaprouter.cc/cheaprouter-releases/mygo",
+    "publicKey": "o2mLrSnSQ59ylkBcA8rNhn3cz78OALnGAq6FbfQglWg="
+  },
+  "macos": {
+    "icon": "../../assets/branding/Sailry.icns",
+    "minimumSystemVersion": "13.0",
+    "entitlements": "macos/app.entitlements.plist",
+    "helperEntitlements": {
+      "python/bin/python3.12": "macos/python.entitlements.plist"
+    },
+    "infoPlist": {
+      "CFBundleVersion": "4000",
+      "SUPublicEDKey": "IUd9ZU+OYtZIzWi/MmSrVKXY4cbfrTC3ahtEz52H8ZI=",
+      "NSAppTransportSecurity": {
+        "NSAllowsArbitraryLoadsInWebContent": true
+      },
+      "NSMicrophoneUsageDescription": "Use the microphone for voice input"
+    }
+  },
+  "windows": {
+    "displayName": "CheapRouter",
+    "installDirName": "CheapRouter",
+    "icon": "../../assets/branding/cheaprouter.ico"
+  }
+}

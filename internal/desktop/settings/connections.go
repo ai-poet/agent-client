@@ -1,0 +1,578 @@
+package settings
+
+import (
+	"runtime"
+
+	"github.com/ELY-Open-Source/CrychicUI/feedback"
+	"github.com/ai-poet/agent-client/internal/desktop/i18n"
+	"github.com/ai-poet/agent-client/internal/desktop/icons"
+	"github.com/ai-poet/agent-client/internal/desktop/kit"
+	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
+	"github.com/egoist/mygo/ui"
+)
+
+// Method is how a host is added.
+type Method int
+
+const (
+	ByPairing Method = iota
+	ByWSL
+)
+
+// hostOS is the system the methods are offered for.
+var hostOS = runtime.GOOS
+
+// ConnectionStatus is what the backend reports of the page's operations
+// beyond the dialog's own draft.
+type ConnectionStatus struct {
+	// Recovery is an installation whose outcome is uncertain: the dialog
+	// locks its draft and offers Check status instead of Install.
+	Recovery bool
+	// Distributions are the WSL distributions a Host can be installed in.
+	Distributions                             []string
+	DistributionsLoading, DistributionsLoaded bool
+	// Revoking are the devices whose pairing is being removed, by ID.
+	Revoking  map[string]bool
+	Narrowing map[string]bool
+}
+
+// SetConnectionStatus is the backend's report, each frame.
+func (m *Model) SetConnectionStatus(status ConnectionStatus) { m.pairing.status = status }
+
+// pairing is the Connections page's dialogs: adding a host, sharing this
+// computer's code, and the pairing being revoked. Pairing, installing over
+// WSL and sharing reach the network; the preview stops at the
+// notice.
+type pairing struct {
+	adding, sharing bool
+	relay           int // of relayOptions
+	address         string
+	method          int // a Method
+	code            string
+	distribution    int // of status.Distributions
+	revoking        *viewmodel.Device
+	status          ConnectionStatus
+}
+
+// distributionName is the chosen WSL distribution, "" for none.
+func (pr *pairing) distributionName() string {
+	if pr.distribution < 0 || pr.distribution >= len(pr.status.Distributions) {
+		return ""
+	}
+	return pr.status.Distributions[pr.distribution]
+}
+
+// installable is whether the draft names what its method needs before the
+// backend can act on it.
+func (pr *pairing) installable() bool {
+	switch method := Method(pr.method); {
+	case method == ByWSL:
+		return pr.distributionName() != ""
+	}
+	return true
+}
+
+// relayOptions are the connection servers: the public network, the named
+// relays, and a custom address.
+func relayOptions(c *ui.Context, relays []string) []string {
+	return append(append([]string{i18n.T(c, "pairing_relay_iroh")}, relays...), i18n.T(c, "pairing_relay_custom"))
+}
+
+// connections is the hosts, with sharing and adding one, and the mobile
+// controllers.
+func connections(c *ui.Context, m *Model) {
+	pr := &m.pairing
+	kit.Group(c, "hosts", i18n.T(c, "connections_hosts"), "", func() {
+		kit.Secondary(c.Key("share"), i18n.T(c, "pairing_share")).OnClick(func() { pr.sharing = true })
+		label := i18n.T(c, "settings_add")
+		kit.Primary(c.Key("add"), label, false).OnClick(func() {
+			m.openAddHost()
+		})
+	}, func() { devices(c, m, true) })
+	kit.Group(c, "mobile", i18n.T(c, "connections_mobile"), "", nil, func() { devices(c, m, false) })
+	addHost(c, m)
+	shareCode(c, m)
+	connectionDialogs(c, m)
+	if d := pr.revoking; d != nil {
+		open := true
+		// Removing the pairing tells the device to forget this one.
+		if kit.AlertDialog(c.Key("revoke"), &open, i18n.T(c, "live_revoke")+" "+deviceName(c, *d),
+			i18n.T(c, "connections_revoke_confirm"), i18n.T(c, "settings_cancel"), i18n.T(c, "live_revoke")) == 1 {
+			if m.ConnectionActions != nil && m.ConnectionActions.Revoke != nil {
+				m.ConnectionActions.Revoke(*d)
+			} else {
+				notice(c)
+			}
+		}
+		if !open {
+			pr.revoking = nil
+		}
+	}
+}
+
+// devices lists the hosts (execution) or the mobile controllers: each a media
+// row of its platform, name and short ID, then its latency, its status dot
+// and label, and revoking its pairing. A host's context menu edits its
+// network and opens its monitor.
+func devices(c *ui.Context, m *Model, execution bool) {
+	p := theme.Of(c)
+	var list []viewmodel.Device
+	for _, d := range m.Devices {
+		if d.Execution == execution {
+			list = append(list, d)
+		}
+	}
+	if len(list) == 0 {
+		kit.Result(c, kit.ResultProps{Icon: icons.Inbox, Title: i18n.T(c, "settings_empty"), Card: true})
+		return
+	}
+	kit.Card(c, func() {
+		for _, d := range list {
+			row := ui.Row(c.Key(d.ID)).Padding(12, 0).Gap(12)
+			row.ContextMenu(func(menu *ui.Menu) {
+				if execution && m.ConnectionActions != nil && m.ConnectionActions.Inspect != nil && menu.Item(i18n.T(c, "workspace_host")).Chosen() {
+					m.ConnectionActions.Inspect(d)
+				}
+				if !d.Local && d.Direction == "both" {
+					for _, choice := range []struct{ direction, key string }{{"host", "connections_only_host"}, {"controller", "connections_only_controller"}} {
+						if menu.Item(i18n.T(c, choice.key)).Disabled(m.pairing.status.Narrowing[d.ID]).Chosen() && m.ConnectionActions != nil && m.ConnectionActions.Narrow != nil {
+							m.ConnectionActions.Narrow(d, choice.direction)
+						}
+					}
+				}
+				// Editing a host's network asks the host for it.
+				if execution && menu.Item(i18n.T(c, "connection_action_edit")).Chosen() {
+					if m.ConnectionActions != nil && m.ConnectionActions.EditNetwork != nil {
+						m.ConnectionActions.EditNetwork(d)
+					} else {
+						notice(c)
+					}
+				}
+				if execution && m.FollowActions != nil && menu.Item(i18n.T(c, "configuration_follow_title")).Chosen() {
+					m.FollowActions.Open(d)
+				}
+				if menu.Item(i18n.T(c, "connections_copy_id")).Chosen() {
+					c.WriteClipboard(d.ID)
+				}
+			})
+			row.Children(func() {
+				kit.MediaRecord(c, deviceName(c, d), func() {
+					ui.Icon(c, platformIcon(d)).FontSize(20).TextColor(p.Foreground)
+				}, nil, func() {
+					// One muted line: the system, the Sailry release and the
+					// start of the Node ID, whose tooltip is the whole ID.
+					ui.Row(c).MinWidth(0).Gap(4).Children(func() {
+						if d.Direction == "both" {
+							key := "connections_bidirectional"
+							if d.Legacy {
+								key = "connections_legacy_bidirectional"
+							}
+							ui.Text(c, i18n.T(c, key)+" ·").FontSize(14).LineHeight(1.3).SingleLine().Shrink(1).TextColor(p.Description())
+						}
+						if detail := deviceDetail(d); detail != "" {
+							ui.Text(c, detail+" ·").FontSize(14).LineHeight(1.3).SingleLine().Shrink(1).TextColor(p.Description())
+						}
+						short := ui.Text(c, deviceShortID(d.ID)).FontSize(14).LineHeight(1.3).SingleLine().Shrink(0).TextColor(p.Description())
+						if deviceShortID(d.ID) != d.ID {
+							kit.Tooltip(c, short, d.ID)
+						}
+					})
+				})
+				ui.Row(c).Shrink(0).Gap(12).Children(func() {
+					if d.Online && !d.Local && d.RTT > 0 {
+						// The size of the status beside it, which is the library's.
+						ui.Textf(c, "%d ms", d.RTT).FontSize(c.Theme().Rem(0.85)).TextColor(p.MutedForeground)
+					}
+					// CrychicUI's status, as the host page's header: the dot
+					// in the success color for a device that is reachable
+					// and muted for one that is not, beside the label.
+					text, state := i18n.T(c, deviceStatus(d)), feedback.Offline
+					if d.Online {
+						state = feedback.Online
+					}
+					feedback.ConnectionStatus(c.Key("status"), state, feedback.ConnectionStatusOptions{Online: text, Reconnecting: text, Offline: text}).
+						Shrink(0).AlignSelf(ui.Center).AlignItems(ui.Center).TextColor(p.MutedForeground)
+					ui.Row(c).Width(28).Justify(ui.End).Children(func() {
+						if d.Local && (!execution || m.ConnectionActions == nil || m.ConnectionActions.Inspect == nil) {
+							return
+						}
+						// A pairing being removed cannot be removed again.
+						if m.pairing.status.Revoking[d.ID] {
+							ui.Row(c.Key("revoking")).Size(28, 28).Center().Children(func() {
+								kit.Busy(c).Label(i18n.T(c, "live_revoke"))
+							})
+							return
+						}
+						kit.MenuButton(c.Key("menu"), "device-menu-"+d.ID, func(b ui.Element) {
+							kit.IconLook(c, b, icons.EllipsisVertical, i18n.T(c, "more"), "", 28, false)
+						}, func(menu *kit.Menu) {
+							if execution && m.ConnectionActions != nil && m.ConnectionActions.Inspect != nil && menu.Item(i18n.T(c, "workspace_host")).Chosen() {
+								m.ConnectionActions.Inspect(d)
+							}
+							if d.Local {
+								return
+							}
+							// Editing a host's network asks the host for it.
+							if execution && menu.Item(i18n.T(c, "connection_action_edit")).Chosen() {
+								if m.ConnectionActions != nil && m.ConnectionActions.EditNetwork != nil {
+									m.ConnectionActions.EditNetwork(d)
+								} else {
+									notice(c)
+								}
+							}
+							if execution && m.FollowActions != nil && menu.Item(i18n.T(c, "configuration_follow_title")).Chosen() {
+								m.FollowActions.Open(d)
+							}
+							if menu.Item(i18n.T(c, "live_revoke")).Danger().Chosen() {
+								m.pairing.revoking = &d
+							}
+						}, kit.MenuOptions{At: ui.AnchorBottomEnd, Self: ui.AnchorTopEnd})
+					})
+				})
+			})
+		}
+	})
+}
+
+func deviceName(c *ui.Context, d viewmodel.Device) string {
+	if d.Name != "" {
+		return d.Name
+	}
+	return i18n.T(c, "connections_device", "id", deviceShortID(d.ID))
+}
+
+// deviceShortID is the start of a Node ID, enough to tell devices apart.
+func deviceShortID(id string) string { return id[:min(8, len(id))] }
+
+// deviceDetail is what a device reported of itself: its system with the
+// version when known, then its Sailry release.
+func deviceDetail(d viewmodel.Device) string {
+	system := map[string]string{"macos": "macOS", "windows": "Windows", "linux": "Linux", "ios": "iOS", "android": "Android"}[d.Platform]
+	if system != "" && d.OS != "" {
+		system += " " + d.OS
+	}
+	if d.Version == "" {
+		return system
+	}
+	if system == "" {
+		return "CheapRouter " + d.Version
+	}
+	return system + " · CheapRouter " + d.Version
+}
+
+// deviceStatus is the status label's key: the route of an online remote
+// device, else this computer, online or offline (label_key).
+func deviceStatus(d viewmodel.Device) string {
+	switch {
+	case d.Online && !d.Local && d.Route == "p2p":
+		return "connection_route_p2p"
+	case d.Online && !d.Local && d.Route == "relay":
+		return "connection_route_relay"
+	case d.Local:
+		return "composer_host_local"
+	case d.Online:
+		return "connections_online"
+	}
+	return "connections_offline"
+}
+
+func platformIcon(d viewmodel.Device) *ui.SVG {
+	icon := icons.Platform(d.Platform)
+	if icon == icons.Device && !d.Execution {
+		return icons.Smartphone
+	}
+	return icon
+}
+
+// relayFields are relay::controls: the server, and its address when
+// custom.
+func relayFields(c *ui.Context, pr *pairing, relays []string, bare bool) {
+	options := relayOptions(c, relays)
+	label := i18n.T(c, "pairing_relay_server")
+	relayField(c, "relay", label, bare, func() { pick(c, "relay", label, &pr.relay, options, false).Fill() })
+	if pr.relay == len(options)-1 {
+		title := i18n.T(c, "pairing_relay_address")
+		relayField(c, "address", title, bare, func() {
+			ui.TextInput(c.Key("input"), &pr.address).Label(title).Placeholder(i18n.T(c, "pairing_relay_address_hint")).FillWidth()
+		})
+	}
+}
+
+// addHost separates connecting an existing device from installing a Host. Only
+// installation chooses the new WSL Host's network.
+func addHost(c *ui.Context, m *Model) {
+	pr := &m.pairing
+	if !pr.adding {
+		m.ConnectionFailure = nil
+		return
+	}
+	p := theme.Of(c)
+	title := i18n.T(c, "host_add")
+	locked := m.ConnectionPending || pr.status.Recovery
+	var tabs float32
+	kit.Dialog(c.Key("add-host"), &pr.adding, func() {
+		ui.Column(c.Key("head")).Gap(4).Children(func() {
+			ui.Text(c, title).FontSize(16).FontWeight(600)
+			hint := "host_pairing_hint"
+			if Method(pr.method) != ByPairing {
+				hint = "host_install_hint"
+			}
+			ui.Text(c, i18n.T(c, hint)).FontSize(14).TextColor(p.MutedForeground)
+		})
+		ui.Scroll(c.Key("body")).Grow(1).Shrink(1).Gap(16).Padding(4, 0, 0, 0).Children(func() {
+			names := []string{i18n.T(c, "host_pairing_mode")}
+			if hostOS == "windows" {
+				names = append(names, i18n.T(c, "host_wsl"))
+			}
+			choice := int(Method(pr.method))
+			props := kit.SegmentedProps{Block: true, Natural: true}
+			tabs = kit.SegmentedWidth(c, names, props)
+			kit.Segmented(c, "mode", &choice, names, props).Disabled(locked).Label(i18n.T(c, "connection"))
+			pr.method = choice
+			switch method := Method(pr.method); {
+			case method == ByPairing:
+				codePanel(c, func() {
+					kit.InputOTP(c, "input", &pr.code, kit.InputOTPProps{Length: 6, Size: kit.SizeLarge, Fill: true}).Disabled(locked).Label(i18n.T(c, "host_pairing_mode"))
+					ui.Text(c, i18n.T(c, "pairing_pin_hint")).FontSize(13).TextColor(p.MutedForeground)
+				})
+			case method == ByWSL:
+				connectionRelayFields(c, pr, m.Relays, m.ConnectionRelays, locked, false)
+				wslFields(c, pr, locked)
+
+			}
+			switch failure := m.ConnectionFailure; {
+			case m.ConnectionPending:
+				installProgress(c, m.ConnectionStage, Method(pr.method) != ByPairing && !pr.status.Recovery)
+			case failure != nil:
+				text := i18n.T(c, failure.Title)
+				if failure.Detail != "" {
+					text += "\n" + failure.Detail
+				}
+				kit.Alert(c, "failure", failure.Tone, text, nil)
+			}
+		})
+		action := i18n.T(c, "pairing_connect")
+		switch {
+		case pr.status.Recovery:
+			action = i18n.T(c, "host_check_status")
+		case Method(pr.method) != ByPairing:
+			action = i18n.T(c, "host_install")
+		}
+		ui.Row(c.Key("footer")).Gap(8).Justify(ui.End).Children(func() {
+			kit.Secondary(c.Key("cancel"), i18n.T(c, "settings_cancel")).OnClick(func() { pr.adding = false })
+			// A step under way shows in its button, which cannot start another.
+			kit.PrimaryBusy(c.Key("ok"), action, !pr.status.Recovery && !pr.installable(), m.ConnectionPending).OnClick(func() {
+				m.ConnectionFailure = nil
+				if m.ConnectionActions == nil || m.ConnectionActions.Add == nil {
+					notice(c)
+					return
+				}
+				draft := m.ConnectionDraft()
+				generation := m.connectionGeneration
+				completed := func(ok bool) {
+					current := m.ConnectionDraft()
+					current.Relay = draft.Relay
+					if ok && generation == m.connectionGeneration && draft == current {
+						pr.adding = false
+					}
+				}
+				// Checking asks the host what became of the installation
+				// already sent; it never sends another.
+				if pr.status.Recovery {
+					if m.ConnectionActions.CheckStatus != nil {
+						m.ConnectionActions.CheckStatus(completed)
+					}
+					return
+				}
+				m.ConnectionActions.Add(draft, completed)
+			})
+		})
+	}).Width(min(max(pairingWidth, tabs+2*kit.DialogInset), width(c)-48)).Label(title)
+}
+
+// installSteps are an installation's stages in order, by the keys its
+// progress reports (live WSL progress) and the label each shows as a step.
+var installSteps = [...][2]string{
+	{"connection_connecting", "host_step_connect"},
+	{"host_install_detecting", "host_install_detecting"},
+	{"host_install_installing", "host_install_installing"},
+	{"host_install_pairing", "host_step_pair"},
+}
+
+// installProgress is the attempt under way: an installation's steps, those
+// done checked, the current one turning and those ahead faint, in a muted
+// panel; pairing or checking an installation, its one stage turning.
+func installProgress(c *ui.Context, stage string, installing bool) {
+	p := theme.Of(c)
+	if stage == "" {
+		stage = "connection_connecting"
+	}
+	current := -1
+	for index, step := range installSteps {
+		if step[0] == stage {
+			current = index
+		}
+	}
+	ui.Column(c.Key("progress")).FillWidth().Gap(10).Padding(12).Radius(p.Radius).Background(p.Muted).Role(ui.RoleStatus).Children(func() {
+		row := func(key any, label string, state int) {
+			ui.Row(c.Key(key)).Gap(10).AlignItems(ui.Center).Children(func() {
+				ui.Box(c.Key("mark")).Size(16, 16).Shrink(0).Center().Children(func() {
+					switch {
+					case state < 0:
+						ui.Icon(c, icons.Check).FontSize(14).TextColor(p.Success)
+					case state == 0:
+						kit.BusySized(c, 14)
+					default:
+						ui.Box(c).Size(6, 6).Radius(3).Background(p.MutedForeground.Alpha(0.4))
+					}
+				})
+				color := p.Foreground
+				if state != 0 {
+					color = p.MutedForeground
+				}
+				ui.Text(c, label).FontSize(14).SingleLine().TextColor(color)
+			})
+		}
+		if !installing || current < 0 {
+			row("stage", i18n.T(c, stage), 0)
+			return
+		}
+		for index, step := range installSteps {
+			row(step[0], i18n.T(c, step[1]), index-current)
+		}
+	})
+}
+
+// wslFields are the distribution the Host is installed in, of those the
+// Node found.
+func wslFields(c *ui.Context, pr *pairing, locked bool) {
+	p := theme.Of(c)
+	label := i18n.T(c, "host_wsl_distribution")
+	status := pr.status
+	kit.Field(c, "distribution", label, i18n.T(c, "host_wsl_requirement"), func() {
+		switch {
+		case status.DistributionsLoading:
+			kit.Shimmer(c, i18n.T(c, "host_runtime_loading"), 14, p.MutedForeground)
+		case len(status.Distributions) > 0:
+			pick(c, "distribution", label, &pr.distribution, status.Distributions, locked).Fill()
+		case status.DistributionsLoaded:
+			ui.Text(c, i18n.T(c, "host_wsl_empty")).FontSize(14).TextColor(p.MutedForeground)
+		}
+	})
+}
+
+// shareCode is the share dialog: the title over how to use the code, the
+// network, and this computer's pairing code with its validity or progress,
+// as in Add host. The preview has no pairing service, so it shows no code.
+func shareCode(c *ui.Context, m *Model) {
+	pr := &m.pairing
+	if !pr.sharing {
+		return
+	}
+	p, t := theme.Of(c), c.Theme()
+	title := i18n.T(c, "pairing_local_code")
+	kit.Dialog(c.Key("share"), &pr.sharing, func() {
+		ui.Column(c.Key("head")).Gap(4).Children(func() {
+			ui.Text(c, title).FontSize(16).FontWeight(600)
+			ui.Text(c, i18n.T(c, "pairing_share_hint")).FontSize(14).TextColor(p.MutedForeground)
+		})
+		ui.Column(c.Key("body")).Gap(16).Padding(4, 0, 0, 0).Children(func() {
+			connectionRelayFields(c, pr, m.Relays, m.ConnectionRelays, false, true)
+			codePanel(c, func() {
+				ready := m.Live && len(m.Share.Code) == 6
+				// The cells of a large InputOTP, so the code reads as the one
+				// typed on the other device.
+				ui.Row(c.Key("digits")).AlignSelf(ui.Stretch).Gap(8).Children(func() {
+					for i := range 6 {
+						digit, color := "–", p.MutedForeground
+						if ready {
+							digit, color = m.Share.Code[i:i+1], p.Foreground
+						}
+						ui.Row(c.Key(i)).Grow(1).Basis(0).MinWidth(48).Height(56).AlignItems(ui.Center).Justify(ui.Center).Radius(p.RadiusLg).
+							Background(t.Surface).Border(1, p.Input).Children(func() {
+							ui.Text(c, digit).FontSize(24).FontWeight(600).FontFeatures("tnum").TextColor(color)
+						})
+					}
+				})
+				status := func(key string) { ui.Text(c, i18n.T(c, key)).FontSize(13).TextColor(p.MutedForeground) }
+				switch {
+				case !m.Live:
+					status("pairing_preview_disabled")
+				case m.Share.Kind == "preparing" || m.Share.Kind == "retrying" || m.Share.Kind == "checking":
+					key := "pairing_preparing"
+					if m.Share.Kind == "checking" {
+						key = "pairing_relay_checking"
+					}
+					kit.Shimmer(c, i18n.T(c, key), 13, p.MutedForeground)
+				case m.Share.Kind == "failed":
+					kit.Secondary(c.Key("retry"), i18n.T(c, "update_retry")).OnClick(func() {
+						if m.ConnectionActions != nil && m.ConnectionActions.RetryShare != nil {
+							m.ConnectionActions.RetryShare()
+						}
+					})
+				case m.Share.Code != "":
+					status("pairing_refresh_hint")
+				}
+			})
+		})
+	}).Width(min(pairingWidth, width(c)-48)).Label(title)
+}
+
+// pairingWidth is the pairing dialogs' width: the code's cells span it
+// as the fields do, at about the cells' height.
+const pairingWidth = 440
+
+// codePanel holds a pairing code as wide as the dialog's fields, with its
+// status line centered below.
+func codePanel(c *ui.Context, children func()) {
+	ui.Column(c.Key("code")).FillWidth().PaddingY(12).Gap(12).AlignItems(ui.Center).Children(children)
+}
+
+// AddHost opens the Add host dialog (Shell::add_host), as the rail's Add
+// host does over the Connections page.
+func (s *State) AddHost() { s.Model.openAddHost() }
+
+func (m *Model) openAddHost() {
+	m.connectionGeneration++
+	m.pairing = pairing{adding: true, status: m.pairing.status}
+}
+
+// relayField is a relay control under its label, or alone where the
+// dialog says what it is for (bare): the control still names itself.
+func relayField(c *ui.Context, key, label string, bare bool, control func()) {
+	if bare {
+		ui.Column(c.Key(key)).Children(control)
+		return
+	}
+	kit.Field(c, key, label, "", control)
+}
+
+func connectionRelayFields(c *ui.Context, pr *pairing, relays []string, choices []RelayChoice, disabled, bare bool) {
+	if len(choices) == 0 {
+		relayFields(c, pr, relays, bare)
+		return
+	}
+	options := make([]string, len(choices))
+	for index, choice := range choices {
+		label := choice.Label
+		if choice.LabelKey != "" {
+			label = i18n.T(c, choice.LabelKey)
+		}
+		timing := i18n.T(c, "composer_metric_unknown")
+		if choice.Pending {
+			timing = "…"
+		} else if choice.Millis != nil {
+			timing = i18n.T(c, "usage_duration_ms", "value", *choice.Millis)
+		}
+		options[index] = label + " · " + timing
+	}
+	label := i18n.T(c, "pairing_relay_server")
+	relayField(c, "relay", label, bare, func() { pick(c, "relay", label, &pr.relay, options, disabled).Fill() })
+	if pr.relay >= 0 && pr.relay < len(choices) && choices[pr.relay].Custom {
+		title := i18n.T(c, "pairing_relay_address")
+		relayField(c, "address", title, bare, func() {
+			ui.TextInput(c.Key("input"), &pr.address).Disabled(disabled).Label(title).Placeholder(i18n.T(c, "pairing_relay_address_hint")).FillWidth()
+		})
+	}
+}

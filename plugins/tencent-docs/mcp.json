@@ -1,0 +1,9 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "tencent-docs": {
+      "type": "streamable-http",
+      "url": "https://docs.qq.com/openapi/mcp"
+    }
+  }
+}

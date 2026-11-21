@@ -61,13 +61,12 @@ export function publicKeyBase64(privateKey: ReturnType<typeof createPrivateKey>)
 
 /** SUPublicEDKey, the one value both platforms have to agree on. */
 export async function appPublicKey(): Promise<string> {
-  const plist = await Bun.file(join(projectRoot, "resources/Info.plist")).text();
-  const key = plist
-    .split("<key>SUPublicEDKey</key>")[1]
-    ?.split("<string>")[1]
-    ?.split("</string>")[0]
-    ?.trim();
-  if (!key) throw new Error("resources/Info.plist has no SUPublicEDKey");
+  const configPath = join(projectRoot, "cmd/sailry-desktop/mygo.json");
+  const config = (await Bun.file(configPath).json()) as {
+    macos?: { infoPlist?: { SUPublicEDKey?: string } };
+  };
+  const key = config.macos?.infoPlist?.SUPublicEDKey?.trim();
+  if (!key) throw new Error(`${configPath} has no macos.infoPlist.SUPublicEDKey`);
   return key;
 }
 

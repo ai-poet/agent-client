@@ -1,0 +1,121 @@
+package panel
+
+import (
+	"strings"
+
+	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
+	"github.com/egoist/mygo/ui/richtext"
+)
+
+func (pr *Project) runEditorAction(c *ui.Context, path, action string) {
+	item := pr.Files.item(path)
+	state := item.documentState()
+	if action == "wrap" {
+		state.wrap = !state.wrap
+		if item.editor != nil {
+			item.editor.SoftWrap = state.wrap
+		}
+		return
+	}
+	if action == "find" || action == "replace" {
+		item.source = 1
+		state.pendingEdit = false
+		state.pending = func(native *editor.State) {
+			if action == "replace" && pr.fileWritable(item) {
+				native.Run(editor.FindReplace)
+			} else {
+				native.Find("")
+			}
+		}
+		return
+	}
+	if !pr.fileWritable(item) {
+		return
+	}
+	rich := markdownFile(path) && item.source == 0 && state.richSafe && state.rich != nil
+	if action == "undo" || action == "redo" {
+		if rich {
+			if action == "undo" {
+				state.rich.Undo()
+			} else {
+				state.rich.Redo()
+			}
+			pr.syncRichDraft(path)
+		} else if item.editor != nil {
+			changed := false
+			if action == "undo" {
+				changed = item.editor.Buffer.Undo()
+			} else {
+				changed = item.editor.Buffer.Redo()
+			}
+			if changed {
+				pr.FileChanged(path, item.editor.Buffer.String())
+			}
+		}
+		return
+	}
+	if action == "link" || action == "insert:image" {
+		value := ""
+		if rich && action == "link" {
+			value = state.rich.Formatting().Link
+		}
+		// A link is its address, which the caret's link fills in and an
+		// empty one removes; an image is its address and its alt text.
+		label, fields, values := "files_link", []string{"content_link_address"}, []string{value}
+		if value != "" {
+			label = "content_link_edit"
+		}
+		if action == "insert:image" {
+			label, fields, values = "files_insert_image", []string{"content_image_address", "content_image_alt"}, []string{"", ""}
+		}
+		pr.Prompt(label, fields, values, func(values []string, finish func(bool)) {
+			if !pr.fileWritable(item) {
+				finish(false)
+				return
+			}
+			switch {
+			case rich && action == "link":
+				state.rich.SetLink(strings.TrimSpace(values[0]))
+				pr.syncRichDraft(path)
+			case action == "insert:image":
+				pr.editorSourceAction(c, path, action, markdownImage(values[0], values[1]))
+			default:
+				pr.editorSourceAction(c, path, action, strings.TrimSpace(values[0]))
+			}
+			finish(true)
+		})
+		return
+	}
+	if !rich || strings.HasPrefix(action, "insert:") || action == "block:callout" {
+		pr.editorSourceAction(c, path, action, "")
+		return
+	}
+	switch action {
+	case "bold":
+		state.rich.ToggleBold()
+	case "italic":
+		state.rich.ToggleItalic()
+	case "strike":
+		state.rich.ToggleStrikethrough()
+	case "inline_code":
+		state.rich.ToggleCode()
+	case "block:paragraph":
+		state.rich.FormatParagraphs(func(paragraph *richtext.ParagraphStyle) { *paragraph = richtext.ParagraphStyle{ID: paragraph.ID} })
+	case "block:bullet":
+		state.rich.ToggleList(richtext.Bullets)
+	case "block:ordered":
+		state.rich.ToggleList(richtext.Numbers)
+	case "block:task":
+		state.rich.ToggleList(richtext.Tasks)
+	case "block:quote":
+		state.rich.ToggleQuote()
+	case "block:code":
+		state.rich.ToggleCodeBlock()
+	default:
+		if heading, ok := strings.CutPrefix(action, "block:heading"); ok && len(heading) == 1 {
+			state.rich.SetHeading(int(heading[0] - '0'))
+		}
+	}
+	pr.syncRichDraft(path)
+}

@@ -1,0 +1,27 @@
+Code review package
+
+The skill instructions and package metadata are independently authored for Sailry.
+No Anthropic prompt, source file or Claude Code runtime is included.
+
+Workflow reference: Anthropic Claude Code's code-review plugin, reviewed at
+2bfb629dfaff0c8318047a4beb93cf1dc5b58b18 (2026-10-03):
+https://github.com/anthropics/claude-code/tree/2bfb629dfaff0c8318047a4beb93cf1dc5b58b18/plugins/code-review
+
+That repository's LICENSE.md reserves all rights to Anthropic PBC and points to
+its Commercial Terms of Service. The reference is not an open-source import and
+does not grant permissions or runtime dependencies to this package.
+
+Review rules
+
+skills/code-review/rules/*.md, except index.md, are copied unmodified from
+alibaba/open-code-review at fabbdb296b0d97e2140ada8d54ca7d6d6d1d7ad4:
+https://github.com/alibaba/open-code-review/tree/fabbdb296b0d97e2140ada8d54ca7d6d6d1d7ad4/internal/config/rules/rule_docs
+Copyright 2026 alibaba/open-code-review Contributors, licensed under
+Apache-2.0. The upstream license is included in LICENSE-APACHE.
+
+skills/code-review/rules/index.md is written for Sailry. Its ordered patterns
+and the .m Objective-C detection are derived from that revision's
+internal/config/rules/system_rules.json and internal/config/rules/sniffer.go.
+The file-listing, grouping and location checks in SKILL.md follow the review
+workflow described in that repository's README; no upstream prompt text,
+executable or runtime is included.

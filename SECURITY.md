@@ -1,17 +1,16 @@
-# Security Policy
+# Security policy
 
-## Supported Versions
+Report suspected vulnerabilities through [GitHub's private vulnerability reporting](https://github.com/ai-poet/agent-client/security/advisories/new).
+Do not publish vulnerability details in public issues, pull requests or discussions.
 
-Only the latest release of Waku receives security fixes. Updates ship
-through the in-app updater and https://waku.sh.
+Include the affected release or commit, operating system, potential impact and
+minimal steps to reproduce the problem. Use synthetic data where possible, and
+remove credentials, private profiles and unrelated personal information from
+logs or examples.
 
-## Reporting a Vulnerability
+Keep the report and investigation private while maintainers assess the issue and
+coordinate disclosure with you. Do not access or alter other people's data when
+investigating a possible vulnerability.
 
-Please use GitHub private vulnerability reporting:
-https://github.com/egoist/waku/security/advisories/new
-
-If that doesn't work for you, email hi@egoist.dev.
-
-Please don't open a public issue for anything you believe is
-exploitable before it has been fixed. Include reproduction steps and
-the Waku version (Waku → About Waku) you tested.
+Use [issues](https://github.com/ai-poet/agent-client/issues) for ordinary bugs and
+feature requests. Community conduct concerns follow the [code of conduct](CODE_OF_CONDUCT.md).

@@ -1,0 +1,123 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "context7",
+  "version": "0.1.7",
+  "description": "Current library documentation through the official Context7 MCP service",
+  "homepage": "https://context7.com",
+  "extensions": {
+    "dev.sailry.platform": {
+      "api_version": "v1",
+      "min_sailry_version": "0.1.6",
+      "scope": "host",
+      "actions": [],
+      "display": {
+        "label": "Context7",
+        "locales": {
+          "zh-CN": "Context7"
+        },
+        "icon": "phosphor:book-open-text"
+      },
+      "description": {
+        "label": "Current library documentation",
+        "locales": {
+          "zh-CN": "查询最新库文档"
+        }
+      },
+      "tools": [
+        {
+          "name": "resolve-library-id",
+          "server": "context7",
+          "display": {
+            "label": "Find library",
+            "locales": {
+              "zh-CN": "查找库",
+              "zh-TW": "尋找程式庫",
+              "ja": "ライブラリを探す",
+              "ko": "라이브러리 찾기",
+              "fr": "Trouver une bibliothèque",
+              "de": "Bibliothek suchen",
+              "es": "Buscar biblioteca",
+              "pt-BR": "Buscar biblioteca",
+              "ru": "Найти библиотеку",
+              "en": "Find library"
+            },
+            "icon": "reicon:ui/magnifier"
+          }
+        },
+        {
+          "name": "query-docs",
+          "server": "context7",
+          "display": {
+            "label": "Read documentation",
+            "locales": {
+              "zh-CN": "查询文档",
+              "zh-TW": "讀取文件",
+              "ja": "ドキュメントを読む",
+              "ko": "문서 읽기",
+              "fr": "Lire la documentation",
+              "de": "Dokumentation lesen",
+              "es": "Leer documentación",
+              "pt-BR": "Ler documentação",
+              "ru": "Прочитать документацию",
+              "en": "Read documentation"
+            },
+            "icon": "reicon:newicons/book-square"
+          }
+        }
+      ],
+      "category": "development",
+      "tint": "teal",
+      "connectors": [
+        {
+          "id": "context7",
+          "display": {
+            "label": "Context7",
+            "locales": {
+              "zh-CN": "Context7"
+            },
+            "icon": "phosphor:book-open-text"
+          },
+          "accounts": "single",
+          "origins": [
+            "https://mcp.context7.com"
+          ],
+          "auth": [
+            {
+              "kind": "secret",
+              "fields": [
+                "api_key"
+              ]
+            }
+          ],
+          "fields": [
+            {
+              "name": "api_key",
+              "title": "API key",
+              "secret": true,
+              "locales": {
+                "en": "API key",
+                "zh-CN": "API 密钥",
+                "zh-TW": "API 金鑰",
+                "de": "API-Schlüssel",
+                "es": "Clave de API",
+                "fr": "Clé API",
+                "ja": "API キー",
+                "ko": "API 키",
+                "pt-BR": "Chave de API",
+                "ru": "Ключ API"
+              },
+              "optional": true,
+              "help": "https://context7.com/dashboard"
+            }
+          ],
+          "inject": [
+            {
+              "server": "context7",
+              "header": "Context7-API-Key"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

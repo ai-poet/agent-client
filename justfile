@@ -1,0 +1,123 @@
+# Local development recipes. Commands and environment follow CONTRIBUTING.md.
+# Run `just --list` for an overview.
+
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
+# Every Go command runs with the pinned toolchain, without cgo and without an
+# inherited GOROOT. The two documented cgo exceptions override it per command.
+export GOTOOLCHAIN := "go1.27.3"
+export CGO_ENABLED := "0"
+unexport GOROOT
+
+goos := if os() == "macos" { "darwin" } else { os() }
+goarch := if arch() == "aarch64" { "arm64" } else if arch() == "x86_64" { "amd64" } else { arch() }
+native := justfile_directory() / ".runtime/native" / goos + "-" + goarch
+iroh := if os() == "macos" { "libsailry_iroh.dylib" } else if os() == "windows" { "sailry_iroh.dll" } else { "libsailry_iroh.so" }
+profiles := justfile_directory() / ".runtime/profiles"
+
+# List the recipes.
+default:
+    @just --list
+
+# Show the isolated preview UI; it opens no profile and starts no Node.
+preview:
+    go run ./cmd/sailry-desktop --preview
+
+# Show the development demo without a profile, Node or model calls.
+demo:
+    go run ./cmd/sailry-desktop --preview
+
+# Run Desktop with release data by default, dev data for "dev", or a named test profile.
+desktop name="": native
+    SAILRY_HELPERS_DIR={{ quote(native / "helpers") }} go run ./cmd/sailry-desktop --data-dir {{ quote(if name == "" { home_directory() / ".sailry" } else if name == "dev" { home_directory() / ".sailry-dev" } else { profiles / name }) }}
+
+# Build and run Host against the fixed profile .runtime/profiles/<name>; extra arguments are Host options such as --internet.
+host name="host" *options: native
+    go build -o .runtime/sailry-host ./cmd/sailry-host
+    .runtime/sailry-host --data-dir {{ quote(profiles / name) }} {{ options }}
+
+# Test a dedicated profile; --start=false attaches to its running Host.
+[positional-arguments]
+acceptance name="acceptance" *options: native
+    go build -o {{ quote(native / "sailry-host") }} ./cmd/sailry-host
+    go build -o {{ quote(native / "sailry-desktop") }} ./cmd/sailry-desktop
+    {{ quote(native / "sailry-host") }} acceptance --data-dir {{ quote(profiles / name) }} --start --desktop {{ quote(native / "sailry-desktop") }} --open-report "${@:2}"
+
+# Stop and remove only recorded acceptance sessions, preserving their recordings.
+[positional-arguments]
+acceptance-cleanup name="acceptance" *options: native
+    go build -o {{ quote(native / "sailry-host") }} ./cmd/sailry-host
+    {{ quote(native / "sailry-host") }} acceptance-cleanup --data-dir {{ quote(profiles / name) }} --start --open-report "${@:2}"
+
+# Replay recorded outputs through the real interface without a Node or model.
+[positional-arguments]
+acceptance-replay name="acceptance" *options:
+    go build -o {{ quote(native / "sailry-host") }} ./cmd/sailry-host
+    go build -o {{ quote(native / "sailry-desktop") }} ./cmd/sailry-desktop
+    {{ quote(native / "sailry-host") }} acceptance --data-dir {{ quote(profiles / name) }} --suite replay --desktop {{ quote(native / "sailry-desktop") }} --open-report "${@:2}"
+
+# Manually test conversation interactions in an isolated Desktop process, without a Node or model.
+acceptance-ui: native
+    go build -o {{ quote(native / "sailry-desktop") }} ./cmd/sailry-desktop
+    go build -o {{ quote(native / "sailry-host") }} ./cmd/sailry-host
+    {{ quote(native / "sailry-host") }} acceptance --data-dir {{ quote(profiles / "acceptance-ui") }} --suite ui --desktop {{ quote(native / "sailry-desktop") }} --open-report
+
+# Build the local iroh library with the pinned Rust toolchain when it is missing.
+native:
+    test -f {{ quote(native / iroh) }} || sh native/iroh/build.sh
+
+# Rebuild the local iroh library after its source, C ABI, pins or target changed.
+native-build:
+    sh native/iroh/build.sh
+
+# Stage this machine's pinned native runtimes in .runtime/native after checking them against the lock files.
+native-fetch:
+    go run ./native/fetch
+
+# Print the local tools beside the versions this repository pins.
+tools:
+    @echo "Go: go1.27.3 pinned"; go version
+    @echo "Rust: 1.98.0 pinned in native/iroh/rust-toolchain.toml"; cd native/iroh && (rustc --version || echo "rustc is not installed")
+    @echo "Node.js: 22.13.0 or newer for plugin tests"; node --version || echo "node is not installed"
+    @just --version
+
+# Generate the desktop catalogs from the source catalogs in locales/.
+i18n:
+    go generate ./internal/desktop/i18n
+
+# Run the standard full-repository Go checks.
+check:
+    test -z "$(gofmt -l .)"
+    go build ./...
+    go vet ./...
+    go test ./...
+
+# Run every default test.
+test:
+    go test ./...
+
+# Run the Desktop UI and composition tests.
+test-desktop:
+    go test ./internal/desktop/... ./cmd/sailry-desktop/...
+
+# Run the tests of every package outside Desktop.
+test-backend:
+    go test $(go list ./... | grep -v -e '/internal/desktop' -e '/cmd/sailry-desktop')
+
+# Run integration-tagged tests of the named packages, for example ./internal/link.
+test-integration +packages:
+    go test -tags integration {{ packages }}
+
+# Run the named packages under the race detector, once per phase for Node, Client and Link changes.
+test-race +packages:
+    CGO_ENABLED=1 go test -race {{ packages }}
+
+# Run the transcript frame benchmarks.
+bench:
+    go test ./internal/desktop/conversation -run '^$' -bench .
+
+# Run every plugin package's deterministic tests from the plugins submodule.
+[working-directory('plugins')]
+test-plugins:
+    node --experimental-vm-modules scripts/check-packages.mjs
+    python3 scripts/test.py

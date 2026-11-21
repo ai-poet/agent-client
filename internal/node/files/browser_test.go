@@ -1,0 +1,285 @@
+package files
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"os/user"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"testing"
+
+	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/shirou/gopsutil/v4/disk"
+)
+
+func TestBrowserHomeFallsBackToHostAccount(t *testing.T) {
+	home := t.TempDir()
+	for _, environment := range []string{"", "relative/home", string([]byte{'/', 0xff})} {
+		t.Run(strconv.Quote(environment), func(t *testing.T) {
+			value, err := browserHome(func() (string, error) {
+				if environment == "" {
+					return "", errors.New("HOME is not defined")
+				}
+				return environment, nil
+			}, func() (*user.User, error) { return &user.User{HomeDir: home}, nil })
+			if err != nil || value != home {
+				t.Fatalf("service home=%q, error=%v", value, err)
+			}
+		})
+	}
+	t.Run("explicit home", func(t *testing.T) {
+		value, err := browserHome(func() (string, error) { return home, nil }, func() (*user.User, error) {
+			t.Fatal("valid environment home should not look up another account")
+			return nil, nil
+		})
+		if err != nil || value != home {
+			t.Fatalf("explicit home=%q, error=%v", value, err)
+		}
+	})
+	t.Run("invalid account home", func(t *testing.T) {
+		if _, err := browserHome(func() (string, error) { return "", nil }, func() (*user.User, error) {
+			return &user.User{HomeDir: "relative"}, nil
+		}); err == nil {
+			t.Fatal("relative account home accepted")
+		}
+	})
+}
+
+// TestBrowseLocations is not parallel: it browses under a home of its own,
+// set in the environment.
+func TestBrowseLocations(t *testing.T) {
+	ctx := context.Background()
+	// The standard folders follow the system's rules, and only those that
+	// exist and can be listed are offered.
+	t.Run("places", func(t *testing.T) {
+		home := t.TempDir()
+		incoming := filepath.Join(t.TempDir(), "incoming")
+		documents := filepath.Join(t.TempDir(), `My "Docs"`)
+		none := func(string) string { return "" }
+		kinds := func(places []place) (out []string) {
+			for _, entry := range places {
+				out = append(out, string(entry.kind)+"="+entry.path)
+			}
+			return out
+		}
+		if got, want := kinds(userPlaces("darwin", home, none)), []string{"desktop=" + filepath.Join(home, "Desktop"),
+			"documents=" + filepath.Join(home, "Documents"), "downloads=" + filepath.Join(home, "Downloads"), "applications=/Applications"}; !slices.Equal(got, want) {
+			t.Errorf("the places of macOS are %q, want %q", got, want)
+		}
+		// Without a user-dirs.dirs file the environment names a folder, and
+		// the usual names the rest.
+		env := func(name string) string {
+			return map[string]string{"XDG_DOWNLOAD_DIR": incoming, "XDG_DESKTOP_DIR": "relative"}[name]
+		}
+		if got, want := kinds(userPlaces("linux", home, env)), []string{"desktop=" + filepath.Join(home, "Desktop"),
+			"documents=" + filepath.Join(home, "Documents"), "downloads=" + incoming}; !slices.Equal(got, want) {
+			t.Errorf("the places of Linux without a file are %q, want %q", got, want)
+		}
+		// The file outranks the environment: localized names, an absolute
+		// path, an escaped character, and a folder turned off by naming the
+		// home. Lines of any other form are skipped.
+		config := filepath.Join(home, "settings")
+		if err := os.MkdirAll(config, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		dirs := "# written by xdg-user-dirs-update\n\nXDG_DESKTOP_DIR=\"$HOME/Schreibtisch\"\n  XDG_DOCUMENTS_DIR = " + strconv.Quote(documents) + "\n" +
+			"XDG_DOWNLOAD_DIR=\"$HOME/\"\nXDG_MUSIC_DIR=\"$HOMEWORK/Music\"\nXDG_PICTURES_DIR=relative\nOTHER=\"/x\"\n"
+		if err := os.WriteFile(filepath.Join(config, "user-dirs.dirs"), []byte(dirs), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		listed := xdgUserDirs(dirs, home)
+		if len(listed) != 3 || listed["XDG_DESKTOP_DIR"] != filepath.Join(home, "Schreibtisch") || listed["XDG_DOCUMENTS_DIR"] != documents || listed["XDG_DOWNLOAD_DIR"] != home {
+			t.Errorf("the file reads as %q", listed)
+		}
+		env = func(name string) string {
+			return map[string]string{"XDG_CONFIG_HOME": config, "XDG_DESKTOP_DIR": "/elsewhere"}[name]
+		}
+		if got, want := kinds(userPlaces("linux", home, env)), []string{"desktop=" + filepath.Join(home, "Schreibtisch"),
+			"documents=" + documents, "downloads=" + home}; !slices.Equal(got, want) {
+			t.Errorf("the places of Linux are %q, want %q", got, want)
+		}
+
+		// Browsing lists the home, then the folders that exist: a missing
+		// one, a file of the name and one the account cannot list are left
+		// out.
+		home, err := filepath.EvalSymlinks(home)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+		t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "none"))
+		if err := os.Mkdir(filepath.Join(home, "Desktop"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(home, "Documents"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		locked := filepath.Join(home, "Downloads")
+		if err := os.Mkdir(locked, 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+		listing, err := Browse(ctx, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var places, devices []string
+		for _, location := range listing.Locations {
+			switch location.Kind {
+			case protocol.FileBrowserLocationKindVolume, protocol.FileBrowserLocationKindRoot:
+				devices = append(devices, location.Path)
+			case protocol.FileBrowserLocationKindApplications:
+			default:
+				places = append(places, string(location.Kind)+"="+location.Path)
+			}
+		}
+		want := []string{"home=" + home, "desktop=" + filepath.Join(home, "Desktop")}
+		// A privileged process, and a file system without modes, list the
+		// locked folder all the same.
+		if _, err := os.ReadDir(locked); err == nil {
+			want = append(want, "downloads="+locked)
+		}
+		if !slices.Equal(places, want) {
+			t.Errorf("the places are %q, want %q", places, want)
+		}
+		if root := filepath.VolumeName(home) + string(filepath.Separator); !slices.Contains(devices, root) {
+			t.Errorf("the devices %q lack the root %s", devices, root)
+		}
+		for i, location := range listing.Locations {
+			if i > 0 && location.Kind != protocol.FileBrowserLocationKindVolume && location.Kind != protocol.FileBrowserLocationKindRoot &&
+				(listing.Locations[i-1].Kind == protocol.FileBrowserLocationKindVolume || listing.Locations[i-1].Kind == protocol.FileBrowserLocationKindRoot) {
+				t.Errorf("the place %+v follows a device", location)
+			}
+		}
+		// A later page of the directory repeats none of them.
+		if page, err := Browse(ctx, nil, &protocol.DirectoryCursor{}); err == nil && len(page.Locations) != 0 {
+			t.Errorf("a later page lists %+v", page.Locations)
+		}
+	})
+
+	// The devices are what a file manager shows of the mounts.
+	t.Run("volumes", func(t *testing.T) {
+		names := func(list []protocol.FileBrowserLocation) (out []string) {
+			for _, location := range list {
+				medium := "-"
+				if location.Medium != nil {
+					medium = string(*location.Medium)
+				}
+				out = append(out, string(location.Kind)+" "+location.Name+" "+location.Path+" "+medium)
+			}
+			return out
+		}
+		none := func(string) (string, *protocol.FileBrowserMedium) { return "", nil }
+		local := []string{"rw", "local", "journaled"}
+		mac := []disk.PartitionStat{
+			{Mountpoint: "/dev", Fstype: "devfs", Opts: []string{"rw", "local", "nobrowse"}},
+			{Mountpoint: "/System/Volumes/Data", Fstype: "apfs", Opts: append([]string{"nobrowse"}, local...)},
+			{Mountpoint: "/Volumes/Work", Fstype: "apfs", Opts: local},
+			{Mountpoint: "/", Fstype: "apfs", Opts: local},
+			{Mountpoint: "/Volumes/Recovery", Fstype: "apfs", Opts: append([]string{"nobrowse"}, local...)},
+			{Mountpoint: "/Volumes/.timemachine", Fstype: "apfs", Opts: local},
+			{Mountpoint: "/Volumes/Work/nested", Fstype: "apfs", Opts: local},
+			{Mountpoint: "/Volumes/share", Fstype: "smbfs", Opts: []string{"rw"}},
+			{Mountpoint: "/Volumes/Work", Fstype: "apfs", Opts: local},
+		}
+		if got, want := names(volumes("darwin", mac, "me", "Macintosh HD", none)), []string{"root Macintosh HD / internal",
+			"volume Work /Volumes/Work -", "volume share /Volumes/share network"}; !slices.Equal(got, want) {
+			t.Errorf("the volumes of macOS are %q, want %q", got, want)
+		}
+		linux := []disk.PartitionStat{
+			{Mountpoint: "/boot/efi", Fstype: "vfat"}, {Mountpoint: "/", Fstype: "ext4"}, {Mountpoint: "/home", Fstype: "ext4"},
+			{Mountpoint: "/media/me/USB STICK", Fstype: "exfat"}, {Mountpoint: "/media/other/theirs", Fstype: "exfat"},
+			{Mountpoint: "/run/media/me/card", Fstype: "vfat"}, {Mountpoint: "/mnt/data", Fstype: "xfs"}, {Mountpoint: "/mnt", Fstype: "ext4"},
+			{Mountpoint: "/mnt/data/inner", Fstype: "xfs"}, {Mountpoint: "/snap/core/1", Fstype: "squashfs"},
+		}
+		if got, want := names(volumes("linux", linux, "me", "", none)), []string{"root  / internal", "volume USB STICK /media/me/USB STICK external",
+			"volume card /run/media/me/card external", "volume data /mnt/data -"}; !slices.Equal(got, want) {
+			t.Errorf("the volumes of Linux are %q, want %q", got, want)
+		}
+		external, network := protocol.FileBrowserMediumExternal, protocol.FileBrowserMediumNetwork
+		detail := func(root string) (string, *protocol.FileBrowserMedium) {
+			switch root {
+			case `C:\`:
+				return "Windows", nil
+			case `E:\`:
+				return "", &external
+			}
+			return "", &network
+		}
+		drives := []disk.PartitionStat{{Mountpoint: "C:"}, {Mountpoint: ""}, {Mountpoint: `C:\mounted\`}, {Mountpoint: "E:"}, {Mountpoint: "Z:"}}
+		if got, want := names(volumes("windows", drives, "me", "", detail)), []string{`volume Windows (C:) C:\ -`, `volume E: E:\ external`,
+			`volume Z: Z:\ network`}; !slices.Equal(got, want) {
+			t.Errorf("the drives of Windows are %q, want %q", got, want)
+		}
+
+		// The rule the host metrics share: the volumes the user stores
+		// files on, whatever a file manager makes of where they are mounted.
+		kept := func(goos string, mounts []disk.PartitionStat) (out []string) {
+			for _, mount := range mounts {
+				if IsVolume(goos, mount) {
+					out = append(out, mount.Mountpoint)
+				}
+			}
+			return out
+		}
+		if got, want := kept("darwin", mac), []string{"/Volumes/Work", "/", "/Volumes/.timemachine", "/Volumes/Work/nested", "/Volumes/share", "/Volumes/Work"}; !slices.Equal(got, want) {
+			t.Errorf("the volumes among the mounts of macOS are %q, want %q", got, want)
+		}
+		kernel := []disk.PartitionStat{{Mountpoint: "/proc", Fstype: "proc"}, {Mountpoint: "/dev/shm", Fstype: "ext4"}, {Mountpoint: "/run/user/1000", Fstype: "ext4"},
+			{Mountpoint: "/sys/fs/cgroup", Fstype: "cgroup2"}, {Mountpoint: "/tmp", Fstype: "TMPFS"}, {Mountpoint: "", Fstype: "ext4"}, {Mountpoint: "/system", Fstype: "ext4"}}
+		if got, want := kept("linux", append(kernel, linux...)), []string{"/system", "/boot/efi", "/", "/home", "/media/me/USB STICK", "/media/other/theirs",
+			"/run/media/me/card", "/mnt/data", "/mnt", "/mnt/data/inner"}; !slices.Equal(got, want) {
+			t.Errorf("the volumes among the mounts of Linux are %q, want %q", got, want)
+		}
+		if got, want := kept("windows", drives), []string{"C:", `C:\mounted\`, "E:", "Z:"}; !slices.Equal(got, want) {
+			t.Errorf("the volumes among the drives of Windows are %q, want %q", got, want)
+		}
+
+		// The startup volume is named by the link to the root kept beside
+		// the other volumes.
+		directory := t.TempDir()
+		if startupName(directory) != "" || startupName(filepath.Join(directory, "gone")) != "" {
+			t.Error("a directory without a link names a startup volume")
+		}
+		if err := os.Mkdir(filepath.Join(directory, "Work"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(directory, "Work"), filepath.Join(directory, "Alias")); err != nil {
+			t.Skip(err)
+		}
+		root := filepath.VolumeName(directory) + string(filepath.Separator)
+		if err := os.Symlink(root, filepath.Join(directory, "Macintosh HD")); err != nil {
+			t.Fatal(err)
+		}
+		if name := startupName(directory); name != "Macintosh HD" {
+			t.Errorf("the startup volume is %q", name)
+		}
+
+		// A location's medium is optional on the wire, and the new kind is
+		// one of the enumeration.
+		encoded, err := json.Marshal(protocol.FileBrowserLocation{Kind: protocol.FileBrowserLocationKindVolume, Name: "USB", Path: "/Volumes/USB", Medium: &external})
+		if want := `{"medium":"external","kind":"volume","name":"USB","path":"/Volumes/USB"}`; err != nil || string(encoded) != want {
+			t.Errorf("the volume encodes as %s %v, want %s", encoded, err, want)
+		}
+		var decoded protocol.FileBrowserLocation
+		if err := json.Unmarshal(encoded, &decoded); err != nil || decoded.Medium == nil || *decoded.Medium != external {
+			t.Errorf("the volume decodes as %+v %v", decoded, err)
+		}
+		if err := json.Unmarshal([]byte(`{"kind":"applications","name":"","path":"/Applications"}`), &decoded); err != nil ||
+			decoded.Medium != nil || decoded.Kind != protocol.FileBrowserLocationKindApplications {
+			t.Errorf("a location without a medium decodes as %+v %v", decoded, err)
+		}
+		if err := json.Unmarshal([]byte(`{"kind":"volume","name":"","path":"/x","medium":"tape"}`), &decoded); err == nil {
+			t.Error("an unknown medium decodes")
+		}
+		// What this machine reports, for the record of a run.
+		home, _ := os.UserHomeDir()
+		if listing, err := Browse(ctx, &home, nil); err == nil {
+			t.Logf("this machine: %q", names(listing.Locations))
+		}
+	})
+}

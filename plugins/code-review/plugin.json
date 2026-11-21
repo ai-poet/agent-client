@@ -1,0 +1,728 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "code-review",
+  "version": "0.1.17",
+  "description": "Review code changes and pull requests with evidence-backed findings",
+  "extensions": {
+    "dev.sailry.platform": {
+      "api_version": "v1",
+      "min_sailry_version": "0.1.6",
+      "scope": "host",
+      "actions": [
+        "git.read",
+        "conversation.read",
+        "storage.read",
+        "storage.write",
+        "agents.delegate"
+      ],
+      "display": {
+        "label": "Code review",
+        "locales": {
+          "zh-CN": "代码审查"
+        },
+        "icon": "phosphor:git-pull-request"
+      },
+      "description": {
+        "label": "Review changes and pull requests",
+        "locales": {
+          "zh-CN": "审查代码变更与拉取请求"
+        }
+      },
+      "instructions": "Use delegate_review to assign complete frozen groups rather than manually composing spawn_agent tasks. Select record_receipt explicitly: formal receipts require an authorized Code or Flagship turn and a writable, tool-capable captured role; omit role for a new child inheriting the current turn; evidence-only never counts as a receipt. For a requested code review, load code-review:code-review. The creator establishes review_scope and exhausts its pages before patch reads; delegated children reuse the complete delegate_review capture for their assigned groups instead of creating another scope. Use the immutable revisions and selected rule resources. Use read_review_change with review_id, path and part diff/old/new for every captured patch and full changed-file context page. Do not substitute live Git or file reads for captured evidence. Later worktree edits, unrelated paths, HEAD or index changes do not invalidate a published review. A new scope captures the new state; older metadata-only reviews remain readable but cannot fabricate missing content. Report only demonstrated findings with report_finding. Each reviewer submits explicit whole-group review_complete receipts, including zero findings; only the creator finalizes after all coverage receipts. A revision_conflict from a failed storage flow requires a fresh tool invocation and re-reading current scope; do not retry within that failed flow. Creating scopes, recording findings and submitting receipts write private review records and require Code or Flagship mode. read_review_change is read-only and remains available for evidence gathering in Plan mode. A review request does not authorize edits, commits or publication. Read-only child roles run in Plan mode: use them only for evidence gathering, then independently verify and record coverage in the authorized parent. Do not ask a read-only child to submit private review records or change its permissions.",
+      "storage": {
+        "collections": [
+          {
+            "scope": "node",
+            "prefix": "review/",
+            "schema": {
+              "type": "object",
+              "required": [
+                "v",
+                "kind"
+              ],
+              "properties": {
+                "v": {
+                  "const": 1
+                },
+                "kind": {
+                  "enum": [
+                    "head",
+                    "scope",
+                    "finding",
+                    "receipt",
+                    "capture",
+                    "content"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "host": {
+        "entry": "dev.sailry.platform/host/main.js",
+        "resources": [
+          "dev.sailry.platform/host/main.js",
+          "dev.sailry.platform/host/policy.js",
+          "dev.sailry.platform/host/git.js",
+          "dev.sailry.platform/host/filter.js",
+          "dev.sailry.platform/host/groups.js",
+          "dev.sailry.platform/host/records.js",
+          "dev.sailry.platform/host/rules.js",
+          "dev.sailry.platform/host/matching.js",
+          "dev.sailry.platform/host/scope.js",
+          "dev.sailry.platform/host/findings.js",
+          "dev.sailry.platform/host/complete.js",
+          "dev.sailry.platform/host/locales.js",
+          "dev.sailry.platform/host/delegation.js",
+          "dev.sailry.platform/host/capture.js",
+          "dev.sailry.platform/host/capture/scope.js",
+          "dev.sailry.platform/host/content.js"
+        ],
+        "handlers": [
+          "scope",
+          "finding",
+          "complete",
+          "initialize",
+          "delegate",
+          "read"
+        ],
+        "turn": {
+          "initialize": "initialize"
+        },
+        "read_only": [
+          "read"
+        ]
+      },
+      "tools": [
+        {
+          "name": "review_scope",
+          "contexts": [
+            "workspace"
+          ],
+          "presentation": "summary",
+          "description": "Capture every eligible mapped diff and full old/new changed-file context before publishing an immutable review. While status is capturing, call again with the returned review_id and no offset to continue its durable capture. Once open, follow next with review_id and offset until null; limit bounds each response, never samples coverage. Omit target for worktree all. Host reads validate file revisions; a final inventory check precedes publication. Later repository changes do not invalidate published evidence. Read it with read_review_change, never live Git or readFile. Binary or unsupported files have explicit skips. A failed capture never publishes a partial review.",
+          "handler": {
+            "name": "scope",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "worktree"
+                        },
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "scope": {
+                              "enum": [
+                                "all",
+                                "staged",
+                                "unstaged"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "scope"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "data"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "commit"
+                        },
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "revision": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "revision"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "data"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "range"
+                        },
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "base": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "head": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "base",
+                            "head"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "data"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "review_id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$"
+                },
+                "offset": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Row offset for an existing review_id only; use the returned next value."
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Requested rows; each response uses a 100-row output budget and returns next for remaining rows. Allowed when creating the complete frozen scope or reading an existing page."
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "display": {
+            "label": "Review scope",
+            "locales": {
+              "zh-CN": "审查范围",
+              "en": "Review scope",
+              "zh-TW": "審查範圍",
+              "ja": "レビュー範囲",
+              "ko": "검토 범위",
+              "fr": "Périmètre de révision",
+              "de": "Prüfumfang",
+              "es": "Alcance de revisión",
+              "pt-BR": "Escopo da revisão",
+              "ru": "Область проверки"
+            },
+            "icon": "reicon:it/code"
+          }
+        },
+        {
+          "name": "read_review_change",
+          "contexts": [
+            "workspace"
+          ],
+          "presentation": "details",
+          "description": "Read immutable captured review content using review_id and scoped path. part diff returns mapped changed/context lines; old or new returns the complete captured source side, preserving CR/LF and a missing final newline. Offset and next count mapped rows for diff or source lines for old/new. Follow next until null. No live Git or file read occurs. Metadata-only older reviews cannot provide missing bytes; create a new scope without discarding the old review.",
+          "handler": {
+            "name": "read",
+            "read_only": true,
+            "parameters": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "review_id",
+                "path"
+              ],
+              "properties": {
+                "review_id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$"
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "part": {
+                  "enum": [
+                    "diff",
+                    "old",
+                    "new"
+                  ],
+                  "default": "diff"
+                },
+                "offset": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          "display": {
+            "label": "Read review change",
+            "locales": {
+              "zh-CN": "读取审查变更",
+              "en": "Read review change",
+              "zh-TW": "讀取審查變更",
+              "ja": "レビュー変更を読む",
+              "ko": "검토 변경 읽기",
+              "fr": "Lire le changement examiné",
+              "de": "Geprüfte Änderung lesen",
+              "es": "Leer cambio revisado",
+              "pt-BR": "Ler alteração revisada",
+              "ru": "Читать проверяемое изменение"
+            },
+            "icon": "reicon:it/code",
+            "input": {
+              "summary": {
+                "path": "/path"
+              },
+              "target": {
+                "path": "/path"
+              }
+            },
+            "output": {
+              "preview": {
+                "parts": [
+                  {
+                    "value": {
+                      "source": "result",
+                      "path": "/text"
+                    }
+                  },
+                  {
+                    "rows": {
+                      "value": {
+                        "source": "result",
+                        "path": "/lines"
+                      },
+                      "text": {
+                        "parts": [
+                          {
+                            "text": "+",
+                            "when": {
+                              "all": [
+                                {
+                                  "value": {
+                                    "source": "item",
+                                    "path": "/kind"
+                                  },
+                                  "equals": "added"
+                                }
+                              ]
+                            }
+                          },
+                          {
+                            "text": "-",
+                            "when": {
+                              "all": [
+                                {
+                                  "value": {
+                                    "source": "item",
+                                    "path": "/kind"
+                                  },
+                                  "equals": "deleted"
+                                }
+                              ]
+                            }
+                          },
+                          {
+                            "text": " ",
+                            "when": {
+                              "all": [
+                                {
+                                  "value": {
+                                    "source": "item",
+                                    "path": "/kind"
+                                  },
+                                  "equals": "context"
+                                }
+                              ]
+                            }
+                          },
+                          {
+                            "value": {
+                              "source": "item",
+                              "path": "/text"
+                            }
+                          }
+                        ]
+                      },
+                      "separator": "\n"
+                    }
+                  }
+                ],
+                "separator": "\n"
+              },
+              "notices": [
+                {
+                  "message": {
+                    "label": "Partial results",
+                    "locales": {
+                      "en": "Partial results",
+                      "zh-CN": "仅显示部分结果",
+                      "zh-TW": "僅顯示部分結果",
+                      "ja": "一部の結果",
+                      "ko": "일부 결과",
+                      "fr": "Résultats partiels",
+                      "de": "Teilergebnisse",
+                      "es": "Resultados parciales",
+                      "pt-BR": "Resultados parciais",
+                      "ru": "Частичные результаты"
+                    }
+                  },
+                  "when": {
+                    "all": [
+                      {
+                        "value": {
+                          "source": "result",
+                          "path": "/next"
+                        },
+                        "equals": null,
+                        "negate": true
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "report_finding",
+          "contexts": [
+            "workspace"
+          ],
+          "presentation": "details",
+          "description": "Record one demonstrated P0-P3 finding in an open review. Pass the scoped path and strong revision, side new for added lines or old for deleted lines, and a complete source-line snippet with LF separators (one trailing LF allowed). The snippet must uniquely match mapped diff lines on that side and contain a changed line; context-only or ambiguous snippets fail. A unique match corrects a mistaken line number. State the trigger and consequence in explanation and concrete supporting evidence; confidence or agreement is not evidence. Use the captured revision, not the current worktree revision. Snippets are matched only against stored mapped diff content.",
+          "handler": {
+            "name": "finding",
+            "flow": {
+              "operations": [
+                "storage.transaction"
+              ]
+            },
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "review_id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$"
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "revision": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "side": {
+                  "enum": [
+                    "new",
+                    "old"
+                  ]
+                },
+                "line": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "snippet": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "severity": {
+                  "enum": [
+                    "P0",
+                    "P1",
+                    "P2",
+                    "P3"
+                  ]
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "explanation": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "evidence": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "review_id",
+                "path",
+                "revision",
+                "side",
+                "line",
+                "snippet",
+                "severity",
+                "title",
+                "explanation",
+                "evidence"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "display": {
+            "label": "Report finding",
+            "locales": {
+              "zh-CN": "记录问题",
+              "en": "Report finding",
+              "zh-TW": "記錄問題",
+              "ja": "問題を記録",
+              "ko": "문제 기록",
+              "fr": "Signaler un problème",
+              "de": "Problem melden",
+              "es": "Informar hallazgo",
+              "pt-BR": "Relatar problema",
+              "ru": "Сообщить о проблеме"
+            },
+            "icon": "reicon:it/code",
+            "input": {
+              "summary": {
+                "path": "/title",
+                "result_path": "/finding/title"
+              },
+              "target": {
+                "path": "/path"
+              }
+            },
+            "output": {
+              "preview": {
+                "parts": [
+                  {
+                    "value": {
+                      "source": "result",
+                      "path": "/finding/severity"
+                    }
+                  },
+                  {
+                    "value": {
+                      "source": "result",
+                      "path": "/finding/path"
+                    }
+                  },
+                  {
+                    "value": {
+                      "source": "result",
+                      "path": "/finding/line"
+                    }
+                  },
+                  {
+                    "value": {
+                      "source": "result",
+                      "path": "/finding/title"
+                    }
+                  },
+                  {
+                    "value": {
+                      "source": "result",
+                      "path": "/finding/explanation"
+                    }
+                  },
+                  {
+                    "value": {
+                      "source": "result",
+                      "path": "/finding/evidence"
+                    }
+                  },
+                  {
+                    "value": {
+                      "source": "result",
+                      "path": "/finding/snippet"
+                    }
+                  }
+                ],
+                "separator": "\n"
+              }
+            }
+          }
+        },
+        {
+          "name": "review_complete",
+          "contexts": [
+            "workspace"
+          ],
+          "presentation": "summary",
+          "description": "Submit exact reviewed_files path/revision receipts and every fully covered reviewed_group, even when no findings exist. Each claimed group must contain all its files; duplicate, unknown, stale or partial receipts fail. Direct delegated children use finalize=false. Only the creator may finalize=true after all stored and incoming receipts cover the scope; it validates the complete stored snapshot, never the changing worktree. To finalize coverage already submitted by children, pass empty arrays. On failure inspect remaining and scope pages; revision_conflict requires a fresh invocation. Success counts findings and does not claim tests were run.",
+          "handler": {
+            "name": "complete",
+            "flow": {
+              "operations": [
+                "storage.transaction"
+              ]
+            },
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "review_id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$"
+                },
+                "reviewed_files": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "revision": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "revision"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "reviewed_groups": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "finalize": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "review_id",
+                "reviewed_files",
+                "reviewed_groups",
+                "finalize"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "display": {
+            "label": "Complete review",
+            "locales": {
+              "zh-CN": "完成审查",
+              "en": "Complete review",
+              "zh-TW": "完成審查",
+              "ja": "レビューを完了",
+              "ko": "검토 완료",
+              "fr": "Terminer la révision",
+              "de": "Prüfung abschließen",
+              "es": "Completar revisión",
+              "pt-BR": "Concluir revisão",
+              "ru": "Завершить проверку"
+            },
+            "icon": "reicon:it/code"
+          }
+        },
+        {
+          "name": "delegate_review",
+          "contexts": [
+            "workspace"
+          ],
+          "presentation": "details",
+          "description": "Delegate complete frozen review groups to a new direct child. The package supplies the unchanged snapshot, inventory metadata revision, every file metadata/strong revision and selected rules; do not hand-write captures. Set record_receipt=true only for an authorized Code or Flagship turn and writable, tool-capable captured role. Omit role to inherit the current turn rather than guessing a role. Evidence-only delegation is explicit and never records coverage. A group is never sampled to fit the task budget. Existing children and roles are not changed.",
+          "handler": {
+            "name": "delegate",
+            "operation": "agents.delegate",
+            "parameters": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "review_id",
+                "groups",
+                "record_receipt"
+              ],
+              "properties": {
+                "review_id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$"
+                },
+                "groups": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "record_receipt": {
+                  "type": "boolean",
+                  "description": "Require a formal receipt, or explicitly gather evidence only"
+                },
+                "role": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Omit for a new child inheriting the current turn; named roles retain their captured mode and model",
+                  "default": null
+                },
+                "background": {
+                  "type": "boolean"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          "display": {
+            "label": "Delegate review",
+            "locales": {
+              "zh-CN": "委托审查",
+              "en": "Delegate review",
+              "zh-TW": "委派審查",
+              "ja": "レビューを委任",
+              "ko": "검토 위임",
+              "fr": "Déléguer la révision",
+              "de": "Prüfung delegieren",
+              "es": "Delegar revisión",
+              "pt-BR": "Delegar revisão",
+              "ru": "Делегировать проверку"
+            },
+            "icon": "reicon:users/users2",
+            "input": {
+              "summary": {
+                "path": "/title"
+              },
+              "context": {
+                "path": "/role"
+              }
+            }
+          }
+        }
+      ],
+      "category": "development",
+      "tint": "violet"
+    }
+  }
+}

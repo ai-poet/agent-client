@@ -1,0 +1,136 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "claude-auth",
+  "version": "0.1.5",
+  "description": "Sign in to use Claude models",
+  "license": "MIT",
+  "extensions": {
+    "dev.sailry.platform": {
+      "api_version": "v1",
+      "scope": "host",
+      "actions": [
+        "models.authenticate",
+        "credentials.inspect"
+      ],
+      "display": {
+        "label": "Claude OAuth",
+        "icon": "ailogo:claude"
+      },
+      "description": {
+        "label": "Sign in to use Claude models",
+        "locales": {
+          "zh-CN": "登录并使用 Claude 模型",
+          "zh-TW": "登入並使用 Claude 模型",
+          "de": "Bei Claude anmelden und Modelle nutzen",
+          "es": "Inicia sesión para usar modelos de Claude",
+          "fr": "Se connecter pour utiliser les modèles Claude",
+          "ja": "ログインして Claude モデルを利用",
+          "ko": "로그인하여 Claude 모델 사용",
+          "pt-BR": "Entre para usar os modelos Claude",
+          "ru": "Войдите, чтобы использовать модели Claude"
+        }
+      },
+      "category": "data",
+      "tint": "teal",
+      "model_auth": [
+        {
+          "id": "subscription",
+          "authentication": "claude_oauth",
+          "display": {
+            "label": "Claude OAuth"
+          },
+          "flow": {
+            "kind": "script",
+            "script": {
+              "entry": "dev.sailry.platform/auth/flow.js",
+              "resources": []
+            },
+            "handler": "authorize",
+            "requests": {
+              "token": {
+                "url": "https://api.anthropic.com/v1/oauth/token",
+                "body": {
+                  "kind": "json",
+                  "value": {
+                    "grant_type": "authorization_code",
+                    "client_id": "{client_id}",
+                    "code": "{code}",
+                    "state": "{state}",
+                    "redirect_uri": "{redirect_uri}",
+                    "code_verifier": "{verifier}"
+                  }
+                },
+                "headers": {}
+              },
+              "refresh": {
+                "url": "https://api.anthropic.com/v1/oauth/token",
+                "body": {
+                  "kind": "json",
+                  "value": {
+                    "grant_type": "refresh_token",
+                    "client_id": "{client_id}",
+                    "refresh_token": "{refresh}"
+                  }
+                },
+                "headers": {
+                  "anthropic-beta": "oauth-2025-04-20",
+                  "User-Agent": "anthropic-sdk-typescript/0.112.1 userOAuthProvider"
+                }
+              },
+              "identity": {
+                "url": "https://api.anthropic.com/api/claude_cli/bootstrap",
+                "method": "GET",
+                "query": {
+                  "entrypoint": "cli",
+                  "model": "claude-opus-4-8"
+                },
+                "headers": {
+                  "Accept": "application/json, text/plain, */*",
+                  "Authorization": "Bearer {access}",
+                  "Content-Type": "application/json",
+                  "User-Agent": "{bootstrap_agent}",
+                  "anthropic-beta": "oauth-2025-04-20"
+                }
+              }
+            },
+            "callback": {
+              "path": "/callback",
+              "redirect_uri": "http://localhost:54545/callback",
+              "manual": true,
+              "allow_localhost": true,
+              "port": 54545
+            },
+            "issuer": null,
+            "refresh": true
+          },
+          "client": {
+            "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+          },
+          "scopes": [
+            "org:create_api_key",
+            "user:profile",
+            "user:inference",
+            "user:sessions:claude_code",
+            "user:mcp_servers",
+            "user:file_upload"
+          ],
+          "warning": {
+            "text": "Signing in with a Claude subscription outside Anthropic's own clients may violate Anthropic's terms and can lead to your account being restricted.",
+            "locales": {
+              "zh-CN": "在 Anthropic 官方客户端之外使用 Claude 订阅登录可能违反 Anthropic 的条款，并可能导致账号受限。",
+              "zh-TW": "在 Anthropic 官方用戶端之外使用 Claude 訂閱登入可能違反 Anthropic 的條款，並可能導致帳號受限。",
+              "de": "Die Anmeldung mit einem Claude-Abonnement außerhalb der eigenen Clients von Anthropic kann gegen die Bedingungen von Anthropic verstoßen und dazu führen, dass dein Konto eingeschränkt wird.",
+              "es": "Iniciar sesión con una suscripción de Claude fuera de los clientes propios de Anthropic puede infringir los términos de Anthropic y hacer que se restrinja tu cuenta.",
+              "fr": "Se connecter avec un abonnement Claude en dehors des clients d'Anthropic peut enfreindre les conditions d'Anthropic et entraîner la restriction de votre compte.",
+              "ja": "Anthropic 公式クライアント以外で Claude のサブスクリプションを使ってログインすると、Anthropic の規約に違反し、アカウントが制限されることがあります。",
+              "ko": "Anthropic 공식 클라이언트 밖에서 Claude 구독으로 로그인하면 Anthropic 약관을 위반할 수 있으며 계정이 제한될 수 있습니다.",
+              "pt-BR": "Entrar com uma assinatura do Claude fora dos clientes da própria Anthropic pode violar os termos da Anthropic e levar à restrição da sua conta.",
+              "ru": "Вход с подпиской Claude вне собственных клиентов Anthropic может нарушать условия Anthropic и привести к ограничению аккаунта."
+            }
+          }
+        }
+      ],
+      "min_sailry_version": "0.1.6"
+    }
+  }
+}

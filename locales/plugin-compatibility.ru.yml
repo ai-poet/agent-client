@@ -1,0 +1,7 @@
+plugins_requires_sailry: "Требуется CheapRouter %{version}"
+plugins_requires_node: "На %{node} требуется CheapRouter %{version}"
+plugins_update_sailry: "Обновить CheapRouter"
+plugins_updates_require_sailry: "Для %{count} обновлений нужен более новый CheapRouter"
+plugins_review_updates: "Посмотреть обновления"
+plugins_version_history: "История версий"
+plugins_version_compatible: "Совместимо"

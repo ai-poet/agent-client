@@ -1,0 +1,123 @@
+package live
+
+import (
+	"crypto/sha256"
+	"path"
+	"slices"
+	"strings"
+
+	"github.com/ai-poet/agent-client/internal/client"
+	"github.com/ai-poet/agent-client/internal/desktop/i18n"
+	"github.com/ai-poet/agent-client/internal/desktop/kit"
+	"github.com/ai-poet/agent-client/internal/desktop/shell"
+	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/egoist/mygo/ui"
+)
+
+// workspaces visits every project this window has opened, on the local Node
+// and on each bound one.
+func (r *Runtime) workspaces(visit func(*workspaceProject)) {
+	root := r.localRuntime()
+	owners := []*Runtime{root}
+	for _, bound := range root.bindings {
+		owners = append(owners, bound)
+	}
+	for _, owner := range owners {
+		if owner.workspace == nil {
+			continue
+		}
+		for _, project := range owner.workspace.projects {
+			visit(project)
+		}
+	}
+}
+
+// UnsavedDocuments captures the drafts that closing this window would lose.
+func (r *Runtime) UnsavedDocuments() []shell.CloseDocument {
+	var documents []shell.CloseDocument
+	r.workspaces(func(project *workspaceProject) {
+		for _, file := range project.panel.Unsaved() {
+			text, _ := project.panel.FileDraft(file)
+			documents = append(documents, shell.CloseDocument{
+				Project: project.panel, Path: file, Name: path.Join(path.Base(project.owner.Path), file), Digest: sha256.Sum256([]byte(text)),
+			})
+		}
+	})
+	slices.SortFunc(documents, func(a, b shell.CloseDocument) int { return strings.Compare(a.Name, b.Name) })
+	return documents
+}
+
+// saveAllBatch is the saves one Save all started. The close prompt leaves
+// once they end, so the documents whose file changed on disk are told in one
+// toast then; each keeps its draft and its own question.
+type saveAllBatch struct {
+	pending int
+	changed []string
+}
+
+func (batch *saveAllBatch) finished(c *ui.Context) {
+	if batch == nil {
+		return
+	}
+	if batch.pending--; batch.pending > 0 || len(batch.changed) == 0 {
+		return
+	}
+	slices.Sort(batch.changed)
+	c.AddToast(ui.Toast{Type: "warning", Title: i18n.T(c, "files_changed_on_disk"), Description: strings.Join(batch.changed, "\n"), Timeout: kit.ToastDuration(c)})
+	batch.changed = nil
+}
+
+// SaveDocuments starts saving every unsaved document in this window's next
+// frame. A failed save tells its own toast and keeps its draft; the saves
+// that files changed on disk refused tell one toast together.
+func (r *Runtime) SaveDocuments() {
+	root := r.localRuntime()
+	if root.workspace == nil {
+		return
+	}
+	root.workspace.savingAll = true
+	root.enqueue(func(c *ui.Context) {
+		root.workspace.savingAll = false
+		started := true
+		root.workspace.saveAll = &saveAllBatch{}
+		root.workspaces(func(project *workspaceProject) {
+			if !project.panel.SaveUnsaved(c) {
+				started = false
+			}
+		})
+		root.workspace.saveAll = nil
+		if !started {
+			kit.Toast(c, kit.Failed, i18n.T(c, "workspace_action_failed"))
+		}
+	})
+}
+
+// SavingDocuments reports whether document saves are queued or under way.
+func (r *Runtime) SavingDocuments() bool {
+	root := r.localRuntime()
+	if root.workspace != nil && root.workspace.savingAll {
+		return true
+	}
+	saving := false
+	root.workspaces(func(project *workspaceProject) { saving = saving || project.panel.Saving() })
+	return saving
+}
+
+// LocalWork reports whether the local Node, which stops with the
+// application, is running a task or a terminal. Work on a remote Node goes
+// on without this controller.
+func (r *Runtime) LocalWork() bool { return nodeWorks(r.localRuntime().snapshot()) }
+
+func nodeWorks(snapshot protocol.Snapshot) bool {
+	for _, session := range snapshot.Sessions {
+		if lane := client.LaneOf(session); lane == client.LaneRunning || lane == client.LaneWaiting {
+			return true
+		}
+	}
+	for _, terminal := range snapshot.Terminals {
+		if terminal.Status.Kind == "running" {
+			return true
+		}
+	}
+	return false
+}

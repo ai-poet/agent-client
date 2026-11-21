@@ -1,0 +1,112 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "progress",
+  "version": "0.1.9",
+  "description": "Track task progress",
+  "extensions": {
+    "dev.sailry.platform": {
+      "api_version": "v1",
+      "min_sailry_version": "0.1.6",
+      "instructions": "Use update_plan for substantial multi-step tasks; skip direct questions and simple changes. Include affected files, implementation steps and verification, plus risks or questions when relevant. Create a persistent goal only when the user requests one.",
+      "actions": [],
+      "display": {
+        "label": "Plan",
+        "locales": {
+          "zh-CN": "计划"
+        },
+        "icon": "phosphor:list-checks"
+      },
+      "description": {
+        "label": "Track task progress",
+        "locales": {
+          "zh-CN": "跟踪任务进度"
+        }
+      },
+      "host": {
+        "entry": "dev.sailry.platform/host/main.js",
+        "resources": [
+          "dev.sailry.platform/host/main.js"
+        ],
+        "handlers": [
+          "update"
+        ]
+      },
+      "tools": [
+        {
+          "name": "update_plan",
+          "description": "Record the complete current task plan and each step's progress. Include every step on each update. Use pending, in_progress, completed, or skipped; mark completed only after the described work is verified. Multiple steps may be in progress for parallel work. This reports progress; it does not request plan approval, change work mode, or execute the steps.",
+          "contexts": [
+            "plugin",
+            "workspace"
+          ],
+          "presentation": "progress",
+          "grouping": "standalone",
+          "handler": {
+            "name": "update",
+            "parameters": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "title",
+                "steps"
+              ],
+              "properties": {
+                "title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "steps": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "description",
+                      "state"
+                    ],
+                    "properties": {
+                      "description": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": [
+                          "pending",
+                          "in_progress",
+                          "completed",
+                          "skipped"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "display": {
+            "label": "Update plan",
+            "locales": {
+              "zh-CN": "更新计划",
+              "zh-TW": "更新計畫",
+              "ja": "計画を更新",
+              "ko": "계획 업데이트",
+              "fr": "Mettre à jour le plan",
+              "de": "Plan aktualisieren",
+              "es": "Actualizar plan",
+              "pt-BR": "Atualizar plano",
+              "ru": "Обновить план",
+              "en": "Update plan"
+            },
+            "icon": "reicon:ui/grid"
+          }
+        }
+      ],
+      "category": "automation",
+      "tint": "amber"
+    }
+  }
+}
