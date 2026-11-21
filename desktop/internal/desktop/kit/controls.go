@@ -91,6 +91,69 @@ func Tag(c *ui.Context, text string) ui.Element {
 		Background(p.Primary.Alpha(0.12)).TextColor(p.Primary)
 }
 
+// Tone selects a semantic color role from theme.Palette.
+type Tone uint8
+
+const (
+	ToneNeutral Tone = iota
+	TonePrimary
+	ToneSuccess
+	ToneWarning
+	ToneDanger
+)
+
+// ToneColors maps a semantic Tone onto foreground and soft-fill background
+// colors from the active palette.
+func ToneColors(p *theme.Palette, tone Tone) (fg, bg ui.Color) {
+	switch tone {
+	case TonePrimary:
+		return p.Primary, p.Primary.Alpha(0.12)
+	case ToneSuccess:
+		return p.Success, p.Success.Alpha(0.12)
+	case ToneWarning:
+		return p.Warning, p.Warning.Alpha(0.14)
+	case ToneDanger:
+		return p.Danger, p.Danger.Alpha(0.12)
+	default:
+		return p.MutedForeground, p.Muted
+	}
+}
+
+// StatusPill draws a rounded semantic badge with an optional leading icon.
+func StatusPill(c *ui.Context, text string, icon *ui.SVG, tone Tone, compact bool) ui.Element {
+	p := theme.Of(c)
+	fg, bg := ToneColors(p, tone)
+	fontSize, iconSize := float32(11), float32(11)
+	padV, padH := float32(1), float32(6)
+	if compact {
+		fontSize, iconSize = 10, 10
+		padV, padH = 0, 5
+	}
+	return ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(3).Padding(padV, padH).Radius(999).Background(bg).Children(func() {
+		if icon != nil {
+			ui.Icon(c, icon).FontSize(iconSize).Shrink(0).TextColor(fg)
+		}
+		ui.Text(c, text).FontSize(fontSize).FontWeight(500).SingleLine().Shrink(0).TextColor(fg)
+	})
+}
+
+// StatusIndicator draws an inline semantic status readout (icon + text) with
+// no pill fill, keeping dense rows legible without encoding meaning in color alone.
+func StatusIndicator(c *ui.Context, text string, icon *ui.SVG, tone Tone, compact bool) ui.Element {
+	p := theme.Of(c)
+	fg, _ := ToneColors(p, tone)
+	fontSize, iconSize := float32(11), float32(11)
+	if compact {
+		fontSize, iconSize = 10, 10
+	}
+	return ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(3).Children(func() {
+		if icon != nil {
+			ui.Icon(c, icon).FontSize(iconSize).Shrink(0).TextColor(fg)
+		}
+		ui.Text(c, text).FontSize(fontSize).FontWeight(500).SingleLine().Shrink(0).TextColor(fg)
+	})
+}
+
 // Secondary is Kit's outline button: a 1 DIP border over the
 // button.secondary fill, 32 high, its label 14.
 func Secondary(c *ui.Context, label string) ui.Element {
