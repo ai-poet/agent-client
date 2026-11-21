@@ -7,7 +7,8 @@ const (
 	AuthOAuth
 	AuthPlugin
 	AuthNone
-	AuthUnresolved // The package preset that declares the credential requirement is unavailable.
+	AuthUnresolved  // The package preset that declares the credential requirement is unavailable.
+	AuthOptionalKey // A compatible endpoint may accept requests without a credential.
 )
 
 type ChannelModel struct {
@@ -136,6 +137,7 @@ type Route struct {
 // asked before the sign-in instead and is not here.
 type Method struct {
 	ID, Name, Access, API, Endpoint string
+	Auth                            Auth
 	Custom, Keyed                   bool
 	Login, KeyURL                   string
 	Warning                         string

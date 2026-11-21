@@ -219,6 +219,24 @@ func samePresetSource(a, b protocol.ConversationPresetsSource) bool {
 // entry is listed first), else by that first entry. Brands are in name
 // order. Every entry, offered or not, stays known for the channels saved
 // with it.
+// The built-in compatible routes leave the endpoint and its credentials to
+// the operator. Hosted services and packages keep their declared key policy.
+func presetKeyAuth(entry protocol.ConversationPresetsEntry) viewmodel.Auth {
+	if entry.Source.Kind == "builtin" && entry.Preset.Auth.Kind == "api_key" && len(entry.Preset.Routes) > 0 {
+		for _, route := range entry.Preset.Routes {
+			if route.Endpoint != "" || !supportsOptionalKey(apiForProtocol(route.Protocol)) {
+				return viewmodel.AuthKey
+			}
+		}
+		return viewmodel.AuthOptionalKey
+	}
+	return viewmodel.AuthKey
+}
+
+func supportsOptionalKey(api protocol.ConversationModelApi) bool {
+	return api == protocol.ConversationModelApiResponses || api == protocol.ConversationModelApiChatCompletions || api == protocol.ConversationModelApiAnthropic
+}
+
 func (r *Runtime) applyPresets(listing protocol.ConversationPresetsListing) {
 	r.providerPresets = map[string]protocol.ConversationPresetsEntry{}
 	r.providerBrands = map[string]string{}
@@ -289,6 +307,7 @@ func (r *Runtime) applyPresets(listing protocol.ConversationPresetsListing) {
 			// An API key for an address the user gives.
 			if len(p.Routes) > 0 && p.Routes[0].Endpoint == "" {
 				method.Access, method.Keyed = "provider_access_endpoint", true
+				method.Auth = presetKeyAuth(entry)
 			}
 		}
 		if p.KeyUrl != nil {
@@ -405,7 +424,11 @@ func (r *Runtime) projectProviderSnapshot() {
 		if p.Source != nil {
 			ch.Source = p.Source.Node.String()
 		}
-		if p.Authentication != "api_key" {
+		if p.Authentication == protocol.AuthenticationApiKey {
+			if p.Preset == nil && (p.Binding == nil || *p.Binding == nil) && supportsOptionalKey(p.Api) {
+				ch.Auth = viewmodel.AuthOptionalKey
+			}
+		} else {
 			ch.Auth = viewmodel.AuthOAuth
 			if p.Credential != nil {
 				ch.AccountPending = !credentialsKnown
@@ -470,7 +493,7 @@ func (r *Runtime) projectProviderSnapshot() {
 					switch entry.Preset.Auth.Kind {
 					case "api_key", "builtin":
 						if p.Authentication == protocol.AuthenticationApiKey {
-							ch.Auth = viewmodel.AuthKey
+							ch.Auth = presetKeyAuth(entry)
 						}
 					case "none":
 						ch.Auth = viewmodel.AuthNone

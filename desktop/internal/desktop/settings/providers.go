@@ -525,7 +525,7 @@ func (e *providerEditor) edit(m *Model, ch *preview.Channel) {
 	e.oauth = ch.OAuth
 	e.apiVersion = ch.APIVersion
 	e.headers = headerRows(ch.Headers)
-	if m.Live && !ch.ConfigurationReadOnly && ch.Auth == preview.AuthKey && m.ProviderActions.ReadKey != nil {
+	if m.Live && !ch.ConfigurationReadOnly && (ch.Auth == preview.AuthKey || ch.Auth == viewmodel.AuthOptionalKey && ch.KeySet) && m.ProviderActions.ReadKey != nil {
 		id := ch.ID
 		generation := e.generation
 		m.ProviderActions.ReadKey(id, func(value string) {
@@ -554,7 +554,7 @@ func (e *providerEditor) edit(m *Model, ch *preview.Channel) {
 		}
 	}
 	if e.brand == nil {
-		e.method = preview.Method{ID: ch.Method, Name: ch.Name, API: ch.API, Access: "provider_access_key", Custom: ch.Endpoint != ""}
+		e.method = preview.Method{ID: ch.Method, Name: ch.Name, API: ch.API, Auth: ch.Auth, Keyed: ch.Auth == preview.AuthKey || ch.Auth == viewmodel.AuthOptionalKey, Access: "provider_access_key", Custom: ch.Endpoint != ""}
 	}
 	if e.azure() && e.apiVersion == "" {
 		e.apiVersion = azureDefaultVersion
@@ -724,7 +724,7 @@ func (e *providerEditor) Check() string {
 	if e.current().Custom && !strings.HasPrefix(e.endpoint, "http://") && !strings.HasPrefix(e.endpoint, "https://") {
 		return "provider_endpoint_required"
 	}
-	if e.usesKey() && !e.keySet && strings.TrimSpace(e.key) == "" {
+	if e.usesKey() && e.method.Auth != viewmodel.AuthOptionalKey && !e.keySet && strings.TrimSpace(e.key) == "" {
 		return "provider_key_required"
 	}
 	if e.azure() && strings.TrimSpace(e.apiVersion) == "" {
@@ -825,6 +825,8 @@ func (e *providerEditor) save(m *Model) string {
 	}
 	auth := preview.AuthKey
 	switch {
+	case e.method.Auth == viewmodel.AuthOptionalKey:
+		auth = viewmodel.AuthOptionalKey
 	case e.login():
 		auth = preview.AuthOAuth
 	case !e.usesKey():
