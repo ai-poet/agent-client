@@ -5,27 +5,39 @@ released only after its entry is here.
 
 ## [0.4.0](https://github.com/ai-poet/agent-client/releases/tag/v0.4.0) — 2026-11-21
 
-CheapRouter Desktop is now a MyGo-native client. The legacy Rust client has
-been removed and the repository keeps only the Go implementation.
+CheapRouter Desktop 从这一版起是 MyGo 原生客户端，旧的 Rust 客户端已移除，仓库只保留 Go 实现。
 
-### Highlights
+This release turns CheapRouter Desktop into a MyGo-native client. The legacy Rust client is gone and the repository keeps only the Go implementation.
 
-- Rewrite the desktop on Go/MyGo with no Electron shell: native rendering,
-  long conversations stay smooth, and CPU rendering is used without a GPU.
-- CheapRouter integration: PKCE loopback sign-in, site/CDN switch, per-lane
-  group binding (Claude, Codex, Gemini, domestic models, Grok) with automatic
-  first-group binding for unbound lanes, online rate and welfare/standard
-  badges, balance and plan sync. The client stays usable without an account.
-- Agent workstation: native loop, multi-file edits, Git and worktrees, built-in
-  terminal, code review, plugins, and remote hosts over iroh.
-- Image studio: text-to-image and image-to-image, automatic discovery of
-  gateway image models, and configurable custom image endpoints.
-- Two-hop updates: in-place upgrade from the previous Rust client, then MyGo's
-  updater takes over; Ed25519-signed manifests and atomic replacement.
-- Lossless migration: the first launch reads the old data directory, backs it
-  up, and imports projects, conversations and history by stable ID.
-- Branding: all user-visible copy is CheapRouter, with Sailry attribution kept
-  in NOTICE and the About page.
+### 主要改动 / Highlights
+
+- 桌面端改用 Go/MyGo 重写，不再套 Electron：原生渲染、长对话不卡顿，没有独立显卡时走 CPU 渲染
+
+  The desktop is rewritten in Go/MyGo with no Electron shell: native rendering, long conversations stay smooth, and CPU rendering is used without a GPU
+
+- CheapRouter 接入：PKCE 回调登录、站点与 CDN 切换、按 lane（Claude / Codex / Gemini / 国模 / Grok）各自绑定分组，未绑定的 lane 登录后自动绑定第一个可用分组；分组显示在线率与福利/常驻徽章，余额与套餐同步；不登录也能正常使用客户端
+
+  CheapRouter integration: PKCE loopback sign-in, site and CDN switching, per-lane group binding for Claude, Codex, Gemini, domestic models and Grok, with automatic first-group binding for unbound lanes, online rate and welfare badges, balance and plan sync. The client stays usable without an account
+
+- 智能体工作台：原生 agent 循环、多文件修改、Git 与 worktree、内置终端、代码审查、插件，以及通过 iroh 连接远程主机
+
+  Agent workstation: native agent loop, multi-file edits, Git and worktrees, built-in terminal, code review, plugins, and remote hosts over iroh
+
+- 创作工作台：文生图与图生图，自动识别网关的画图模型，也可以在设置里配置自定义画图接口
+
+  Image studio: text-to-image and image-to-image, automatic discovery of gateway image models, and configurable custom image endpoints
+
+- 两跳更新：旧 Rust 客户端原地升级到本版，之后由 MyGo 更新器接管；清单使用 Ed25519 签名，替换过程为原子操作
+
+  Two-hop updates: in-place upgrade from the previous Rust client, then MyGo's updater takes over; Ed25519-signed manifests and atomic replacement
+
+- 无损迁移：首次启动读取旧数据目录，先备份再按稳定 ID 导入项目、会话与历史记录
+
+  Lossless migration: the first launch reads the old data directory, backs it up, and imports projects, conversations and history by stable ID
+
+- 品牌统一为 CheapRouter，关于页保留「基于 Sailry 开发」与 GitHub 链接
+
+  Branding is CheapRouter throughout, with Sailry attribution kept on the About page
 
 ## [0.3.8]
 
