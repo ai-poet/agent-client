@@ -41,6 +41,7 @@ type Runtime struct {
 	browserSources           *browserSources // a test's Chrome profile, key and cookie store
 	authorizations           *authorizationState
 	cheapAuth                *cheapAuthRuntime
+	imageStudio              *imageStudioRuntime
 	migration                *migrationRuntime
 	packages                 *packageState
 	parent                   *Runtime
@@ -273,6 +274,7 @@ func NewWithPreferences(ctx context.Context, controller *client.Client, prefs *p
 		ReadNotice: r.markNotice, ReadNotices: r.readNotices, DismissRead: r.dismissRead, DismissNotices: r.dismissNotices, OpenKnowledge: r.openKnowledge,
 		CaptureSelection: func() { r.CaptureSelection(nil) }}
 	r.initCheapAuth()
+	r.initImageStudio()
 	r.App.Messages.OpenLink = r.openChatLink
 	r.App.Messages.SessionLink = func(link string) bool { return client.SessionLink(normalizeLink(link)) != nil }
 	r.App.Sidebar.Actions = &sidebar.Actions{Rename: r.rename, Archive: r.archive, Unarchive: r.unarchive, Read: r.read, Delete: r.removeSession,
@@ -394,6 +396,7 @@ func (r *Runtime) Close() error {
 	r.closePluginCards()
 	r.closePluginMemory()
 	r.closeCommands()
+	r.closeImageStudio()
 	clear(r.toolDetailReads) // Runtime cancellation stops these transfers.
 	r.closeAttachments()
 	r.invalidateFilePreview(nil)
