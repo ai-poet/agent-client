@@ -4,7 +4,11 @@
  *  Handles `## [0.2.0] - 2026-08-08`, `## 0.2.0`, `## v0.2.0`, etc. */
 function headingVersion(line: string): string | null {
   const match = line.match(/^##\s+(.+)$/); // level 2 only — `### …` won't match
-  const token = match?.[1]?.trim().split(/\s+/)[0]; // before any ` - date`
+  const rest = match?.[1]?.trim();
+  if (!rest) return null;
+  // `[0.4.0](https://…/tag/v0.4.0)` — keep just the link text.
+  const linked = rest.match(/^\[([^\]]+)\]\([^)]*\)/);
+  const token = (linked?.[1] ?? rest.split(/\s+/)[0])?.trim();
   if (!token) return null;
   return token
     .replace(/^\[|\]$/g, "") // strip [ ]
