@@ -438,13 +438,13 @@ func composerModels(t *testing.T) {
 		tt.Move(x+1, y)
 		tt.Frame()
 		column("after a move on Claude Sonnet 5.5", short)
-		// The group folds and unfolds: the row is under the pointer again.
+		// Returning by keyboard takes precedence over the stationary pointer.
 		key(ui.KeyUp)
 		key(ui.KeyUp)
 		column("with the focus on Claude Opus 5.5", composer.Efforts)
-		key(ui.KeyUp)
-		key(ui.KeyUp)
-		column("with the focus back on Claude Opus 5.5", composer.Efforts)
+		tt.Frame()
+		tt.Frame()
+		column("with the pointer still at rest", composer.Efforts)
 		tt.Move(x+2, y)
 		tt.Frame()
 		column("after a move on that row", short)
@@ -457,12 +457,14 @@ func composerModels(t *testing.T) {
 		column("after a move down Claude Haiku 5.5", nil)
 	})
 
-	// A model without efforts keeps the column, a muted line in the rows'
-	// place: the panel is as wide as before.
+	// Unsupported efforts hide the column and divider without resizing
+	// the panel itself.
 	t.Run("model without efforts", func(t *testing.T) {
 		tt, _, _ := modelPickerAt(t, 960, nil)
 		before, _ := popups(tt)
-		column, _ := tt.AccessByRole(ui.RoleListBox, heading)
+		if _, ok := tt.AccessByRole(ui.RoleListBox, heading); !ok {
+			t.Fatal("Claude Opus 5.5 has no effort column")
+		}
 		if tt.HasText(none) {
 			t.Fatalf("the line of a model without efforts shows for Claude Opus 5.5: %q", tt.Texts())
 		}
@@ -472,15 +474,14 @@ func composerModels(t *testing.T) {
 		if len(before) != 1 || len(after) != 1 || after[0].Bounds != before[0].Bounds {
 			t.Fatalf("the panel was %+v and is %+v over a model without efforts", before, after)
 		}
-		if now, ok := tt.AccessByRole(ui.RoleListBox, heading); !ok || now.Bounds != column.Bounds {
-			t.Errorf("the effort column was %v and is %v (shown %v)", column.Bounds, now.Bounds, ok)
+		if now, ok := tt.AccessByRole(ui.RoleListBox, heading); ok {
+			t.Errorf("a model without efforts still shows the column at %v", now.Bounds)
 		}
 		if names, _ := effortNames(tt); len(names) != 0 {
 			t.Errorf("a model without efforts lists %q", names)
 		}
-		line, ok := tt.Find(none)
-		if !ok || !inside(line, column.Bounds) {
-			t.Errorf("the line of a model without efforts is %v (shown %v), the column %v", line, ok, column.Bounds)
+		if tt.HasText(none) {
+			t.Error("a model without efforts still shows an unavailable placeholder")
 		}
 	})
 
@@ -569,7 +570,7 @@ func composerModels(t *testing.T) {
 		// The column follows the focus down the models.
 		key(0, ui.KeyDown, ui.RoleButton, "Claude Sonnet 5.5")
 		key(0, ui.KeyDown, ui.RoleButton, "Claude Haiku 5.5")
-		if names, _ := effortNames(tt); len(names) != 0 || !tt.HasText(none) {
+		if names, _ := effortNames(tt); len(names) != 0 || tt.HasText(none) {
 			t.Errorf("with the focus on a model without efforts the column lists %q: %q", names, tt.Texts())
 		}
 		// No efforts to go to.

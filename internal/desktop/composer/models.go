@@ -51,10 +51,9 @@ const (
 	effortWidth      = 132
 	columnGap        = 8
 	pickerWidth      = railWidth + listWidth + effortWidth + 2*(2*columnGap+1)
-	// pickerReserve is what the picker's page leaves of the window's height:
-	// the composer under the popover, the popover's own edges and the rows
-	// the compact settings popover has under the page.
-	pickerReserve = 320
+	// The model controls use the same inset and gap on every page.
+	modelPopoverPadding = 12
+	modelPopoverGap     = 8
 	// windowInset is how far a popover stays from the window's sides.
 	windowInset = 8
 )
@@ -305,9 +304,10 @@ func (s *State) modelChip(c *ui.Context, ctx *Context, actions Actions) {
 		s.settings = false
 		s.picker, s.layer = !s.picker, layerMain
 	})
-	panel := kit.Popover(c, chip, &s.picker, func() { s.controls(c, ctx, actions) })
+	panel := kit.Popover(c, chip, &s.picker, func() { s.controls(c, ctx, actions, chip.Bounds()) })
 	if panel != (ui.Element{}) {
-		panel.AttachTo(chip, ui.AnchorTopEnd, ui.AnchorBottomEnd).Margin(0, 0, 8, 0).Padding(12).Width(s.popoverWidth(c, 12))
+		panel.AttachTo(chip, ui.AnchorTopEnd, ui.AnchorBottomEnd).Margin(0, 0, modelPopoverGap, 0).
+			Padding(modelPopoverPadding).Width(s.popoverWidth(c, modelPopoverPadding))
 		s.sizePopover(panel)
 	}
 }
@@ -376,7 +376,7 @@ func (s *State) chosenFeatures(c *ui.Context, m Model) (fast, other []featureBad
 // controls is the popover's body: its height animates between the main
 // page's and the team list's own (up to the picker's); the picker's page
 // has its own at once.
-func (s *State) controls(c *ui.Context, ctx *Context, actions Actions) {
+func (s *State) controls(c *ui.Context, ctx *Context, actions Actions, anchor ui.Rect) {
 	// The main page has the team row's divider (1, and a gap of 8); the
 	// team list is as tall as its rows, the model picker the full height.
 	h := float32(108 + teamRow + 9)
@@ -391,10 +391,13 @@ func (s *State) controls(c *ui.Context, ctx *Context, actions Actions) {
 	}
 	switch s.layer {
 	case layerModels:
-		// As tall as ten rows, less in a window
-		// too short for it, where the models and the efforts scroll.
+		// The picker floats outside the composer. Size it against the
+		// space on either side of its actual anchor, not a fixed allowance
+		// for the composer that can cut off ordinary effort rows.
 		_, wh := c.Size()
-		h = max(panelHeight/2, min(panelHeight, wh-pickerReserve))
+		room := max(anchor.Y, wh-anchor.Y-anchor.H)
+		chrome := windowInset + modelPopoverGap + 2*(modelPopoverPadding+1)
+		h = min(panelHeight, max(0, room-float32(chrome)))
 	case layerTeams:
 		// Back 28, the rows 32 each, the divider 1 + 8, Manage 32, 4 apart.
 		rows := 1 + len(ctx.Teams)
