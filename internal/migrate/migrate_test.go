@@ -484,7 +484,7 @@ CREATE TABLE session_details(session_id TEXT PRIMARY KEY,data TEXT NOT NULL);`
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("INSERT INTO projects VALUES(?1,'Legacy project','/tmp/legacy-project',0,100)", testProject); err != nil {
+	if _, err := db.Exec("INSERT INTO projects VALUES(?1,'Legacy project',?2,0,100)", testProject, filepath.Join(t.TempDir(), "legacy-project")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec("INSERT INTO sessions VALUES(?1,?2,'New task','Imported title','native',NULL,'idle',100,120,120)", testSession, testProject); err != nil {

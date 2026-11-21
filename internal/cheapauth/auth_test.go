@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -97,8 +98,9 @@ func TestPKCEExchangePersistsOwnerOnlyCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("凭据权限 = %04o, want 0600", got)
+	// Windows reports synthetic mode bits; access is controlled by ACLs.
+	if got := info.Mode().Perm(); runtime.GOOS != "windows" && got != 0o600 {
+		t.Fatalf("credential file mode = %04o, want 0600", got)
 	}
 	stored, err := service.store.Load()
 	if err != nil || stored == nil || stored.RefreshToken != testRefresh {

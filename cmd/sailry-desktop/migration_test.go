@@ -44,7 +44,7 @@ CREATE TABLE session_details(session_id TEXT PRIMARY KEY,data TEXT NOT NULL);`
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("INSERT INTO projects VALUES('11111111-1111-1111-1111-111111111111','Legacy App','/tmp/legacy-app',0,100)"); err != nil {
+	if _, err := db.Exec("INSERT INTO projects VALUES('11111111-1111-1111-1111-111111111111','Legacy App',?1,0,100)", filepath.Join(t.TempDir(), "legacy-app")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec("INSERT INTO sessions VALUES('22222222-2222-2222-2222-222222222222','11111111-1111-1111-1111-111111111111','Legacy chat',NULL,'native',NULL,'idle',100,120,120)"); err != nil {
@@ -109,10 +109,12 @@ func TestFirstLaunchSilentAutoMigrationAndIdempotency(t *testing.T) {
 
 	// First launch: silent auto-migration runs with no confirmation popup.
 	backend := startTestBackend(t, ctx, profile)
+	defer backend.Close()
 	runtime, err := liveWindow(ctx, backend, true)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer runtime.Close()
 	tester := ui.NewTesterWith(runtime.App.View, 1280, 820, ui.TesterOptions{Preferences: ui.Preferences{ReduceTransparency: true}})
 	tester.SetLocale("zh-CN")
 	confirmLabel := i18n.In("zh-CN", "migration_confirm")
@@ -145,6 +147,26 @@ func TestFirstLaunchSilentAutoMigrationAndIdempotency(t *testing.T) {
 		}
 	}
 
+	// Verify app.json theme, language (simplified-chinese -> chinese -> zh-CN),
+	// and telemetry (analytics_enabled: false) migrated cleanly.
+	prefs := preferences.Open(filepath.Join(profile, "desktop", "preferences.json"))
+	if !prefs.Readable || prefs.Data.Appearance.Mode != "dark" {
+		t.Fatalf("migrated preferences = %+v (readable=%v)", prefs.Data, prefs.Readable)
+	}
+	if prefs.Data.Language == nil || *prefs.Data.Language != "chinese" || preferenceLocale(prefs.Data.Language) != "zh-CN" {
+		t.Fatalf("migrated language = %v (locale=%q), want chinese/zh-CN", prefs.Data.Language, preferenceLocale(prefs.Data.Language))
+	}
+
+	nodeID := backend.Node.ID()
+	// Release the profile lock before inspecting every file. On Windows, a
+	// second handle cannot read the locked byte range in node.lock.
+	if err := runtime.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := backend.Close(); err != nil {
+		t.Fatal(err)
+	}
+
 	// Verify backup exists and excludes cloud-account.json, and no secret token
 	// appears anywhere in the new profile.
 	backups, err := filepath.Glob(filepath.Join(profile, "migration-backup-*"))
@@ -170,23 +192,14 @@ func TestFirstLaunchSilentAutoMigrationAndIdempotency(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Verify app.json theme, language (simplified-chinese -> chinese -> zh-CN),
-	// and telemetry (analytics_enabled: false) migrated cleanly.
-	prefs := preferences.Open(filepath.Join(profile, "desktop", "preferences.json"))
-	if !prefs.Readable || prefs.Data.Appearance.Mode != "dark" {
-		t.Fatalf("migrated preferences = %+v (readable=%v)", prefs.Data, prefs.Readable)
+	marker, err := migrate.ReadMarker(profile)
+	if err != nil || marker == nil || marker.Counts != (migrate.Counts{Projects: 1, Sessions: 1, Messages: 1}) {
+		t.Fatalf("first launch migration marker = %+v, err = %v", marker, err)
 	}
-	if prefs.Data.Language == nil || *prefs.Data.Language != "chinese" || preferenceLocale(prefs.Data.Language) != "zh-CN" {
-		t.Fatalf("migrated language = %v (locale=%q), want chinese/zh-CN", prefs.Data.Language, preferenceLocale(prefs.Data.Language))
-	}
-
-	nodeID := backend.Node.ID()
 	markerBytesBefore, err := os.ReadFile(filepath.Join(profile, migrate.MarkerFilename))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = runtime.Close()
-	_ = backend.Close()
 
 	// Verify telemetry setting persisted in node.turso.
 	storage, err := store.Open(ctx, profile, nodeID)
