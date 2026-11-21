@@ -1,6 +1,7 @@
 package preview
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -15,8 +16,8 @@ import (
 
 // deploy is approvals in every state: an SSH host key to trust and one that
 // replaces a known key, details still being read and a read that failed,
-// a decision on its way, one whose outcome is unknown and a receipt; and a
-// question whose answer is sent again.
+// a decision on its way, one whose outcome is unknown and a receipt. It also
+// shows status checks for an open question and for one already answered.
 func (b *demo) deploy() *Conversation {
 	const id = "harbor-api/deploy"
 	const where = "~/Web/harbor-api"
@@ -37,12 +38,16 @@ func (b *demo) deploy() *Conversation {
 	scale := pending("command", "command", "kubectl scale deploy/harbor-api --replicas=4 -n staging")
 	tag := pending("command", "command", "git tag -a v2.4.0-rc.3 -m \"Release candidate 3\"")
 	job := pending("command", "command", "kubectl apply -f deploy/staging/migrate-job.yaml")
+	askID, receiptID := ship.ID+"/ask", ship.ID+"/ask-migration"
+	askPrompt, receiptPrompt := b.t("deploy.ask.prompt"), b.t("deploy.receipt.prompt")
+	options := strings.Split(b.t("deploy.ask.options"), "\n")
 	ship.Reply = cv.Reply{Status: cv.Running, Elapsed: secs(141), Phase: cv.AwaitingResponse}
 	ship.Reply.Blocks = []cv.Block{
 		reasoning(b.t("deploy.0.think")),
 		tools(build),
+		question(receiptID, cv.QuestionAnswered, receiptPrompt, nil, b.t("deploy.receipt.answer")),
 		tools(staging, bastion, values, secrets, scale, tag, job),
-		question(ship.ID+"/ask", cv.QuestionPending, b.t("deploy.ask.prompt"), nil),
+		question(askID, cv.QuestionPending, askPrompt, options),
 	}
 
 	c := b.conv(id, "deploy.title", Waiting, 3*time.Minute, cv.Usage{Tokens: 27400, Speed: 68.0, Cost: 0.0171, Cached: 19800, Context: 0.14}, ship)
@@ -79,8 +84,17 @@ func (b *demo) deploy() *Conversation {
 			{ID: job.ID, Title: b.t("tool.command"), Context: where, Description: "kubectl apply -f deploy/staging/migrate-job.yaml", Code: true,
 				Receipt: true, Again: again(job.ID)},
 		},
-		Question: &composer.Ask{ID: ship.ID + "/ask", Prompt: b.t("deploy.ask.prompt"),
-			Options: strings.Split(b.t("deploy.ask.options"), "\n"), Retry: true},
+		// Checking status reveals the stored outcome; it does not send an answer.
+		Question: &composer.Ask{ID: askID, Prompt: askPrompt, Options: options, Check: func() {
+			if q := c.Waiting.Question; q != nil && q.ID == askID {
+				Resolve(c, askID, cv.QuestionAnswered, []string{options[1]})
+			}
+		}},
+		QuestionReceipts: []composer.QuestionReceipt{{ID: receiptID, Prompt: receiptPrompt, Check: func() {
+			c.Waiting.QuestionReceipts = slices.DeleteFunc(c.Waiting.QuestionReceipts, func(r composer.QuestionReceipt) bool {
+				return r.ID == receiptID
+			})
+		}}},
 	}
 	// Two messages wait behind the run.
 	c.Queue = []composer.Queued{

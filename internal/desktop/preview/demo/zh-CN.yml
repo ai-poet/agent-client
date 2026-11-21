@@ -423,6 +423,8 @@ deploy.queue.prod: "预发环境正常后，准备生产环境的发布"
 deploy.queue.notes: "在团队频道发布本次发布摘要"
 deploy.0.think: "镜像已经构建好。预发布环境要经过堡垒机访问，而这个工作区还没有信任过这两台主机的密钥，所以先处理它们。然后是 values 文件、密钥文件、扩容、打标签和迁移任务。"
 deploy.approval.replaced: "此主机已记录的密钥添加于 10 月 12 日"
+deploy.receipt.prompt: "在哪个环境运行迁移任务？"
+deploy.receipt.answer: "预发布环境"
 deploy.ask.prompt: "什么时候开始发布？"
 deploy.ask.options: |-
   现在

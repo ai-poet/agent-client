@@ -424,6 +424,8 @@ deploy.queue.prod: "When staging is healthy, prepare the production rollout"
 deploy.queue.notes: "Post the release summary in the team channel"
 deploy.0.think: "The image is built. Staging is reached through the bastion, and this workspace has not trusted either host key yet, so both come first. Then the values file, the secrets, the scale-up, the tag and the migration job."
 deploy.approval.replaced: "The key on record for this host was added on 12 October"
+deploy.receipt.prompt: "Which environment should run the migration job?"
+deploy.receipt.answer: "Staging"
 deploy.ask.prompt: "When should the rollout start?"
 deploy.ask.options: |-
   Now

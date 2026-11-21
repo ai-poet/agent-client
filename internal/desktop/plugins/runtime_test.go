@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo/ui"
-	"github.com/jonboulle/clockwork"
 	sailry "github.com/ai-poet/agent-client"
 	"github.com/ai-poet/agent-client/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/internal/desktop/theme"
 	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/egoist/mygo/ui"
+	"github.com/jonboulle/clockwork"
 )
 
 func TestRuntimeLifecycle(t *testing.T) {
@@ -442,15 +442,17 @@ export default class Example extends View {render(){return `+current.expression+
 				}
 			}
 			if current.name == "pagination bound" {
-				// A package's count builds no more page buttons than the bound.
-				pages := 0
-				for _, text := range tester.Texts() {
-					if _, err := strconv.Atoi(text); err == nil {
-						pages++
+				// Test the actual buttons: Kit also renders a text child for
+				// each accessible button label.
+				var pages []int
+				for _, item := range tester.AccessAll() {
+					if page, err := strconv.Atoi(item.Name); item.Role == ui.RoleButton && err == nil {
+						pages = append(pages, page)
 					}
 				}
-				if pages != 9 {
-					t.Fatalf("%d page buttons", pages)
+				slices.Sort(pages)
+				if want := []int{1, 2, 3, 4, 5, 6, 7, 8, 9}; !slices.Equal(pages, want) {
+					t.Fatalf("page buttons %v, want %v", pages, want)
 				}
 			}
 			if current.name == "shimmer" && !tester.HasText("Pending") {

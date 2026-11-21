@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/ai-poet/agent-client/internal/desktop/composer"
+	cv "github.com/ai-poet/agent-client/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/internal/desktop/icons"
 )
@@ -45,6 +46,8 @@ var unshown = map[string]string{
 	"composer.Queued.Revision":                 "a live queue's revision",
 	"composer.Queued.Marker":                   "a continuation is queued only for the moment before it starts",
 	"composer.Ask.Busy":                        "a moment while an answer is on its way",
+	"composer.Ask.Retry":                       "live question recovery checks the original answer instead of retrying",
+	"composer.QuestionReceipt.Busy":            "a moment while an answer or its status check is on its way",
 	"conversation.Editing.Pending":             "a moment while a message's replacement is on its way",
 }
 
@@ -381,6 +384,37 @@ func TestDemo(t *testing.T) {
 		if before != 7 || len(after) != 6 || slices.ContainsFunc(after, func(a composer.Approval) bool { return a.Failed || a.Receipt }) {
 			t.Errorf("the release waits on %d approvals, then %d", before, len(after))
 		}
+	})
+
+	t.Run("question recovery", func(t *testing.T) {
+		d := Demo("en", "local")
+		ship := d.Find("harbor-api/deploy")
+		waiting := DemoComposer(d, ship, ship.Worktree).Interactions
+		q := waiting.Question
+		if q == nil || q.Check == nil || q.Retry || len(waiting.QuestionReceipts) != 1 {
+			t.Fatal("the rollout should have a status check and one earlier receipt")
+		}
+		r := waiting.QuestionReceipts[0]
+		if r.ID == q.ID || r.Prompt == "" || r.Check == nil || r.Busy {
+			t.Fatal("the earlier question should have its own checkable receipt")
+		}
+		r.Check()
+		if ship.Waiting.Question != q || len(ship.Waiting.QuestionReceipts) != 0 {
+			t.Fatal("checking the earlier receipt should not settle the rollout question")
+		}
+		q.Check()
+		if ship.Waiting.Question != nil {
+			t.Fatal("checking the rollout question should settle it")
+		}
+		for _, block := range ship.Turns[0].Reply.Blocks {
+			if got := block.Question; got != nil && got.CallID == q.ID {
+				if got.State != cv.QuestionAnswered || !slices.Equal(got.Answers, []string{"After the migration job"}) {
+					t.Fatalf("wrong stored rollout answer: %+v", got)
+				}
+				return
+			}
+		}
+		t.Fatal("the rollout question is missing from the transcript")
 	})
 
 	// One provider, DeepSeek, wherever a model shows: the composer's models
