@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -55,17 +56,34 @@ type envelope struct {
 }
 
 func (c *Client) do(ctx context.Context, method, path, accessToken string, input, output any) error {
+	data, status, err := c.doData(ctx, method, path, accessToken, input)
+	if err != nil {
+		return err
+	}
+	if output == nil {
+		return nil
+	}
+	if len(data) == 0 || string(data) == "null" {
+		return &AuthError{Kind: ErrorResponse, Op: path, Status: status}
+	}
+	if err := json.Unmarshal(data, output); err != nil {
+		return &AuthError{Kind: ErrorResponse, Op: path, Status: status}
+	}
+	return nil
+}
+
+func (c *Client) doData(ctx context.Context, method, path, accessToken string, input any) (json.RawMessage, int, error) {
 	var body io.Reader
 	if input != nil {
 		encoded, err := json.Marshal(input)
 		if err != nil {
-			return &AuthError{Kind: ErrorResponse, Op: path}
+			return nil, 0, &AuthError{Kind: ErrorResponse, Op: path}
 		}
 		body = bytes.NewReader(encoded)
 	}
 	request, err := http.NewRequestWithContext(ctx, method, c.apiURL(path), body)
 	if err != nil {
-		return &AuthError{Kind: ErrorResponse, Op: path}
+		return nil, 0, &AuthError{Kind: ErrorResponse, Op: path}
 	}
 	request.Header.Set("Accept", "application/json")
 	if input != nil {
@@ -77,45 +95,36 @@ func (c *Client) do(ctx context.Context, method, path, accessToken string, input
 	response, err := c.http.Do(request)
 	if err != nil {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return nil, 0, ctx.Err()
 		}
-		return &AuthError{Kind: ErrorNetwork, Op: path}
+		return nil, 0, &AuthError{Kind: ErrorNetwork, Op: path}
 	}
 	defer response.Body.Close()
 	authStatus := response.StatusCode == http.StatusUnauthorized ||
 		path == "/auth/refresh" && response.StatusCode == http.StatusForbidden
 	if authStatus && path != "/auth/desktop-session/exchange" {
-		return apiError(path, response.StatusCode, envelope{})
+		return nil, response.StatusCode, apiError(path, response.StatusCode, envelope{})
 	}
 	if response.ContentLength > maxResponseSize {
-		return &AuthError{Kind: ErrorResponse, Op: path, Status: response.StatusCode}
+		return nil, response.StatusCode, &AuthError{Kind: ErrorResponse, Op: path, Status: response.StatusCode}
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponseSize+1))
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return nil, response.StatusCode, ctx.Err()
 	}
 	if err != nil || len(raw) > maxResponseSize {
-		return &AuthError{Kind: ErrorResponse, Op: path, Status: response.StatusCode}
+		return nil, response.StatusCode, &AuthError{Kind: ErrorResponse, Op: path, Status: response.StatusCode}
 	}
 	var wrapped envelope
 	if len(raw) != 0 {
 		if err := json.Unmarshal(raw, &wrapped); err != nil {
-			return &AuthError{Kind: ErrorResponse, Op: path, Status: response.StatusCode}
+			return nil, response.StatusCode, &AuthError{Kind: ErrorResponse, Op: path, Status: response.StatusCode}
 		}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 || wrapped.Code != 0 {
-		return apiError(path, response.StatusCode, wrapped)
+		return nil, response.StatusCode, apiError(path, response.StatusCode, wrapped)
 	}
-	if output == nil {
-		return nil
-	}
-	if len(wrapped.Data) == 0 || string(wrapped.Data) == "null" {
-		return &AuthError{Kind: ErrorResponse, Op: path, Status: response.StatusCode}
-	}
-	if err := json.Unmarshal(wrapped.Data, output); err != nil {
-		return &AuthError{Kind: ErrorResponse, Op: path, Status: response.StatusCode}
-	}
-	return nil
+	return wrapped.Data, response.StatusCode, nil
 }
 
 func apiError(op string, status int, wrapped envelope) error {
@@ -205,6 +214,129 @@ func (c *Client) AvailableGroups(ctx context.Context, accessToken string) ([]Gro
 	var groups []Group
 	err := c.do(ctx, http.MethodGet, "/groups/available", accessToken, nil, &groups)
 	return groups, err
+}
+
+// GroupStatuses fetches upstream availability and runtime status for monitored
+// groups via GET /api/v1/group-status, accepting both flat and nested
+// {group, summary} payloads as well as data: null (empty monitored list).
+func (c *Client) GroupStatuses(ctx context.Context, accessToken string) ([]GroupStatus, error) {
+	data, status, err := c.doData(ctx, http.MethodGet, "/group-status", accessToken, nil)
+	if err != nil {
+		return nil, err
+	}
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		return nil, nil
+	}
+	var rawItems []json.RawMessage
+	if err := json.Unmarshal(data, &rawItems); err != nil {
+		var wrapped struct {
+			Items []json.RawMessage `json:"items"`
+		}
+		if err2 := json.Unmarshal(data, &wrapped); err2 != nil {
+			return nil, &AuthError{Kind: ErrorResponse, Op: "/group-status", Status: status}
+		}
+		rawItems = wrapped.Items
+	}
+	items := make([]GroupStatus, 0, len(rawItems))
+	for _, raw := range rawItems {
+		if item, ok := normalizeGroupStatus(raw); ok {
+			items = append(items, item)
+		}
+	}
+	return items, nil
+}
+
+func normalizeGroupStatus(raw json.RawMessage) (GroupStatus, bool) {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil || len(top) == 0 {
+		return GroupStatus{}, false
+	}
+	summary := decodeJSONObject(top["summary"])
+	group := decodeJSONObject(top["group"])
+
+	firstFloat := func(sources ...json.RawMessage) *float64 {
+		for _, src := range sources {
+			if len(src) == 0 || string(src) == "null" {
+				continue
+			}
+			var v float64
+			if err := json.Unmarshal(src, &v); err == nil && !math.IsNaN(v) && !math.IsInf(v, 0) {
+				return &v
+			}
+		}
+		return nil
+	}
+	firstInt64 := func(sources ...json.RawMessage) int64 {
+		for _, src := range sources {
+			if len(src) == 0 || string(src) == "null" {
+				continue
+			}
+			var v int64
+			if err := json.Unmarshal(src, &v); err == nil {
+				return v
+			}
+			var f float64
+			if err := json.Unmarshal(src, &f); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
+				return int64(f)
+			}
+		}
+		return 0
+	}
+	firstString := func(sources ...json.RawMessage) string {
+		for _, src := range sources {
+			if len(src) == 0 || string(src) == "null" {
+				continue
+			}
+			var s string
+			if err := json.Unmarshal(src, &s); err == nil && strings.TrimSpace(s) != "" {
+				return s
+			}
+		}
+		return ""
+	}
+
+	item := GroupStatus{
+		GroupID: firstInt64(
+			top["group_id"],
+			summary["group_id"],
+			group["id"],
+			group["ID"],
+		),
+		GroupName: firstString(
+			top["group_name"],
+			group["name"],
+			group["Name"],
+			summary["group_name"],
+		),
+		LatestStatus: firstString(top["latest_status"], summary["latest_status"]),
+		StableStatus: firstString(top["stable_status"], summary["stable_status"]),
+		LatencyMS:    firstFloat(top["latency_ms"], summary["latency_ms"]),
+		Availability24h: firstFloat(
+			top["availability_24h"],
+			top["availability24"],
+			summary["availability_24h"],
+			summary["availability24"],
+		),
+		Availability7d: firstFloat(
+			top["availability_7d"],
+			top["availability7d"],
+			summary["availability_7d"],
+			summary["availability7d"],
+		),
+	}
+	return item, true
+}
+
+func decodeJSONObject(raw json.RawMessage) map[string]json.RawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil
+	}
+	return obj
 }
 
 func (c *Client) ModelCatalog(ctx context.Context, accessToken string) (ModelCatalog, error) {
