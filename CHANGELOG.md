@@ -3,6 +3,30 @@
 Release entries supply the corresponding GitHub Release notes. A version is
 released only after its entry is here.
 
+## [0.4.0](https://github.com/ai-poet/agent-client/releases/tag/v0.4.0) — 2026-11-21
+
+CheapRouter Desktop is now a MyGo-native client. The legacy Rust client has
+been removed and the repository keeps only the Go implementation.
+
+### Highlights
+
+- Rewrite the desktop on Go/MyGo with no Electron shell: native rendering,
+  long conversations stay smooth, and CPU rendering is used without a GPU.
+- CheapRouter integration: PKCE loopback sign-in, site/CDN switch, per-lane
+  group binding (Claude, Codex, Gemini, domestic models, Grok) with automatic
+  first-group binding for unbound lanes, online rate and welfare/standard
+  badges, balance and plan sync. The client stays usable without an account.
+- Agent workstation: native loop, multi-file edits, Git and worktrees, built-in
+  terminal, code review, plugins, and remote hosts over iroh.
+- Image studio: text-to-image and image-to-image, automatic discovery of
+  gateway image models, and configurable custom image endpoints.
+- Two-hop updates: in-place upgrade from the previous Rust client, then MyGo's
+  updater takes over; Ed25519-signed manifests and atomic replacement.
+- Lossless migration: the first launch reads the old data directory, backs it
+  up, and imports projects, conversations and history by stable ID.
+- Branding: all user-visible copy is CheapRouter, with Sailry attribution kept
+  in NOTICE and the About page.
+
 ## [0.2.0](https://github.com/ai-poet/agent-client/releases/tag/v0.2.0) — 2026-11-17
 
 This is the first stable release of Sailry's Go runtime, shared Client and Link
