@@ -21,6 +21,7 @@ type Launch struct {
 	TimeoutMs      uint64
 	Pty            bool
 	Background     bool
+	FollowUp       bool // Report background progress for this launch, including after promotion.
 	Scratch        string
 	Inputs         string
 	Environment    map[string]string
