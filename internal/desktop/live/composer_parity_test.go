@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/internal/client"
 	"github.com/ai-poet/agent-client/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/internal/desktop/i18n"
@@ -16,6 +15,7 @@ import (
 	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
 	"github.com/ai-poet/agent-client/internal/link"
 	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 // composerParityCommands drives the window over a session that runs, with a
@@ -386,12 +386,12 @@ func composerParityCommands(t *testing.T) {
 	if !tester.Focused(text("composer")) {
 		t.Error("⌘L did not focus the composer")
 	}
-	if tester.HasText(text("composer_effort")) {
+	if _, open := tester.AccessByRole(ui.RoleButton, text("composer_effort_reset")); open {
 		t.Fatal("the model controls are open before ⇧⌘M")
 	}
 	tester.Key(ui.Cmd|ui.Shift, ui.KeyM)
 	settle()
-	if !tester.HasText(text("composer_effort")) {
+	if _, open := tester.AccessByRole(ui.RoleButton, text("composer_effort_reset")); !open {
 		t.Errorf("⇧⌘M did not open the model controls: %q", tester.Texts())
 	}
 	tester.Key(0, ui.KeyEscape)

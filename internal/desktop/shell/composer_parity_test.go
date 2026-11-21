@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo/transfer"
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/agent-client/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/internal/desktop/i18n"
 	"github.com/ai-poet/agent-client/internal/desktop/icons"
 	"github.com/ai-poet/agent-client/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/internal/desktop/preview"
 	"github.com/ai-poet/agent-client/internal/desktop/settings"
+	"github.com/egoist/mygo/transfer"
+	"github.com/egoist/mygo/ui"
 )
 
 // recorded is a composer's owner that writes down what it is asked.
@@ -536,10 +536,17 @@ func headerParity(t *testing.T) {
 	if !tt.Focused(zh("composer")) {
 		t.Error("⌘L did not focus the composer")
 	}
+	modelControlsOpen := func() bool {
+		_, ok := tt.AccessByRole(ui.RoleButton, zh("composer_effort_reset"))
+		return ok
+	}
+	if modelControlsOpen() {
+		t.Fatal("the model controls are open before ⇧⌘M")
+	}
 	tt.Key(ui.Cmd|ui.Shift, ui.KeyM)
 	tt.Frame()
 	tt.Frame()
-	if !tt.HasText(zh("composer_select_model")) && !tt.HasText(zh("composer_execution_model")) {
+	if !modelControlsOpen() {
 		t.Errorf("⇧⌘M did not open the model controls: %q", tt.Texts())
 	}
 	settled(t, tt, "parity-model-shortcut")

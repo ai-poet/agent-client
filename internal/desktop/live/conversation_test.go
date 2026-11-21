@@ -455,10 +455,10 @@ func TestConversationProjection(t *testing.T) {
 	})
 
 	t.Run("context_estimate_and_bound_mentions", func(t *testing.T) {
-		count, estimate := uint64(80), uint64(20)
-		limit := uint32(100)
+		count, estimate := uint64(80_000), uint64(20_000)
+		limit := uint32(100_000)
 		for _, reported := range []bool{false, true} {
-			statistics := protocol.ConversationStatistics{ContextEstimate: &estimate, ContextLimit: &limit, Budget: &protocol.ConversationCompactionBudget{ContextLimit: 200}}
+			statistics := protocol.ConversationStatistics{ContextEstimate: &estimate, ContextLimit: &limit, Budget: &protocol.ConversationCompactionBudget{ContextLimit: 200_000}}
 			want := 0.1
 			if reported {
 				statistics.ContextTokens, want = &count, 0.8
@@ -1514,19 +1514,15 @@ func TestComposerSendRouting(t *testing.T) {
 				frame = nil
 			}
 			if row.name == "failure_retains_draft" {
-				// A send that fails after its text left the composer offers it back from the toast.
+				// A definite failure restores the capture into an empty composer
+				// immediately, without making the user act on the error toast.
 				transport.mu.Lock()
 				actions.Send(message)
 				comp.Draft = ""
 				transport.mu.Unlock()
 				settle()
-				if err := tester.Click(i18n.In("en", "chat_restore_draft")); err != nil {
-					t.Fatal(err, tester.Texts())
-				}
-				tester.Frame()
-				tester.Frame()
 				if comp.Draft != "Captured draft" {
-					t.Fatal("Restore draft did not put the failed submission back", comp.Draft)
+					t.Fatal("the failed submission was not put back into the empty composer", comp.Draft)
 				}
 			}
 			if row.name == "replace_references" {

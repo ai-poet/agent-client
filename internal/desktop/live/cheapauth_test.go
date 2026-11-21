@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -327,6 +328,17 @@ func (d *cheapDesktop) accountPage() {
 	}
 }
 
+func (d *cheapDesktop) accountLogout() {
+	d.t.Helper()
+	if app := d.runtime.App; app.Page != shell.SettingsPage || app.Settings.Section != settings.CheapAccount {
+		d.accountPage()
+	}
+	// The lane cards can push the sign-out button below the account viewport.
+	d.tester.Scroll(500, 700, 0, 1000)
+	d.tester.Frame()
+	d.click("退出登录")
+}
+
 func (d *cheapDesktop) provider(id protocol.ProviderID) *protocol.ConversationProvider {
 	for _, provider := range d.controller.Snapshot().Providers {
 		if provider.ID == id {
@@ -531,7 +543,8 @@ func TestCheapSignInAddsProviderAndSignOutDisablesOnlyIt(t *testing.T) {
 	if stored := d.stored(); stored == nil || stored.RefreshToken != cheapTestRefresh || stored.Endpoint != gateway.URL {
 		t.Fatal("the sign-in was not saved")
 	}
-	if info, err := os.Stat(filepath.Join(d.profile, "cheaprouter-account.json")); err != nil || info.Mode().Perm() != 0o600 {
+	if info, err := os.Stat(filepath.Join(d.profile, "cheaprouter-account.json")); err != nil ||
+		!info.Mode().IsRegular() || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("the credential file: %v, %v", info, err)
 	}
 	d.accountPage()
@@ -541,7 +554,7 @@ func TestCheapSignInAddsProviderAndSignOutDisablesOnlyIt(t *testing.T) {
 		}
 	}
 
-	d.click("退出登录")
+	d.accountLogout()
 	d.await("the sign-out", func() bool { return d.account().Stage == cheapauthui.SignedOut && !d.account().LoggingOut })
 	if d.account().Failure != "" || !d.tester.HasText(cheapSignIn) {
 		t.Fatalf("signing out left %q: %q", d.account().Failure, d.tester.Texts())
@@ -661,8 +674,7 @@ func TestCheapGatewayWriteSurvivesRevisionRace(t *testing.T) {
 		}
 	}
 	d.await("the synced provider", stored(true, saved.Revision+2))
-	d.accountPage()
-	d.click("退出登录")
+	d.accountLogout()
 	d.await("the sign-out", func() bool { return d.account().Stage == cheapauthui.SignedOut && !d.account().LoggingOut })
 	if d.account().Failure != "" || !lost[0].Load() {
 		t.Fatalf("the raced sign-out reports %q", d.account().Failure)
@@ -731,115 +743,175 @@ func TestCheapAuthErrorDistinguishesCauses(t *testing.T) {
 func TestCheapSidebarAccountAndGroupSwitchEndToEnd(t *testing.T) {
 	gateway := newCheapGateway(t)
 	gateway.failCreateKeyGroup = 3
-	gateway.keysBody = `{"code":0,"data":{"items":[` +
-		`{"id":1,"key":"` + cheapTestKey + `","status":"active"},` +
-		`{"id":10,"key":"sk-group-1-disabled","group_id":1,"status":"disabled"},` +
-		`{"id":11,"key":"sk-group-1-active","group_id":1,"status":"active"}],"total":3}}`
+	gateway.groupsBody = `{"code":0,"data":[` +
+		`{"id":1,"name":"Claude 高速组","platform":"anthropic","status":"active"},` +
+		`{"id":2,"name":"OpenAI 订阅组","platform":"openai","status":"active"},` +
+		`{"id":3,"name":"故障测试组","platform":"gemini","status":"active"},` +
+		`{"id":4,"name":"OpenAI 备用组","platform":"openai","status":"active"},` +
+		`{"id":5,"name":"Claude 备用组","platform":"anthropic","status":"active"}]}`
+	keyItems := `{"id":1,"key":"` + cheapTestKey + `","status":"active"},` +
+		`{"id":2,"key":"sk-group-1","group_id":1,"status":"active"},` +
+		`{"id":3,"key":"sk-group-2","group_id":2,"status":"active"},` +
+		`{"id":10,"key":"sk-group-5-disabled","group_id":5,"status":"disabled"},` +
+		`{"id":11,"key":"sk-group-5-active","group_id":5,"status":"active"}`
+	gateway.keysBody = `{"code":0,"data":{"items":[` + keyItems + `],"total":5}}`
 	gateway.catalogBody = `{"code":0,"data":{"items":[` +
-		`{"model":"claude-sonnet-4-6","display_name":"Claude Sonnet 4.6","billing_mode":"token","context_window":200000,"best_group":{"id":1,"name":"Claude 高速组"}},` +
-		`{"model":"gpt-5","display_name":"GPT-5","billing_mode":"token","context_window":128000,"best_group":{"id":2,"name":"OpenAI 订阅组"}}` +
-		`]}}`
-	d := openCheapDesktop(t, func(d *cheapDesktop) { d.signedIn(gateway.URL, cheapTestAccess, time.Hour) })
+		`{"model":"claude-sonnet-4-6","billing_mode":"token","context_window":200000,"best_group":{"id":1}},` +
+		`{"model":"gpt-5","billing_mode":"token","context_window":128000,"best_group":{"id":2}},` +
+		`{"model":"gemini-2.5-pro","billing_mode":"token","context_window":128000,"best_group":{"id":3}},` +
+		`{"model":"gpt-5-mini","billing_mode":"token","context_window":128000,"best_group":{"id":4}},` +
+		`{"model":"claude-haiku-4-5","billing_mode":"token","context_window":200000,"best_group":{"id":5}}]}}`
+	d := openCheapDesktop(t, func(d *cheapDesktop) {
+		store, err := core.NewStore(d.profile)
+		if err == nil {
+			err = store.Save(core.Credentials{AccessToken: cheapTestAccess, RefreshToken: cheapTestRefresh,
+				ExpiresAt: time.Now().Add(time.Hour).Unix(), Endpoint: gateway.URL, APIKey: cheapTestKey,
+				LaneBindings: map[string]core.LaneBinding{
+					core.LaneClaude: {GroupID: 1, APIKey: "sk-group-1"},
+					core.LaneCodex:  {GroupID: 2, APIKey: "sk-group-2"},
+				},
+				ClearedLanes: []string{core.LaneGemini},
+			})
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
 	d.await("initial sync and groups load", func() bool {
-		return d.account().Stage == cheapauthui.Ready && len(d.account().Groups) == 3
+		return d.account().Stage == cheapauthui.Ready && len(d.account().Groups) == 5
 	})
 	if !d.tester.HasText("dev@example.test") || !d.tester.HasText("Pro") {
 		t.Fatalf("sidebar footer missing signed-in info: %q", d.tester.Texts())
 	}
 
-	// Open bottom-left account popover: groups are NOT flattened in level 1.
-	d.click("dev@example.test")
-	d.await("level-1 popover shows 分组 entry", func() bool { return d.tester.HasText("分组") })
-	if d.tester.HasText("OpenAI 订阅组") {
-		t.Fatalf("level-1 popover flattened groups before opening submenu: %q", d.tester.Texts())
+	clickButton := func(name string) {
+		t.Helper()
+		button, ok := d.tester.AccessByRole(ui.RoleButton, name)
+		if !ok {
+			t.Fatalf("no button %q: %q", name, d.tester.Texts())
+		}
+		d.tester.ClickAt(button.Bounds.X+button.Bounds.W/2, button.Bounds.Y+button.Bounds.H/2)
+		d.tester.Frame()
 	}
-
-	// Expand level-2 group submenu and switch to group 2 (mints a group-bound key + refreshes provider + refreshes model selector).
-	d.click("分组")
-	d.await("level-2 submenu shows groups", func() bool { return d.tester.HasText("OpenAI 订阅组") })
-	group2Requests := len(gateway.requests())
-	d.click("OpenAI 订阅组")
-	d.await("group 2 switch completes", func() bool {
-		return !d.account().SwitchingGroup && d.account().SelectedGroupID != nil && *d.account().SelectedGroupID == 2
-	})
-	if d.account().GroupError != "" || d.account().Stage != cheapauthui.Ready || d.account().ModelCount != 1 {
-		t.Fatalf("after group 2 switch: stage=%d count=%d err=%q", d.account().Stage, d.account().ModelCount, d.account().GroupError)
+	openLane := func(lane, option string) {
+		t.Helper()
+		clickButton(lane)
+		d.await(lane+" submenu", func() bool {
+			_, ok := d.tester.AccessByRole(ui.RoleButton, option)
+			return d.tester.HasText(lane+" 分组") && ok
+		})
 	}
-	d.await("group 2 provider event", func() bool {
-		current := d.provider(providers.CheapRouterProviderID)
-		return current != nil && current.Enabled && current.DefaultModel == "gpt-5"
-	})
-	provider := d.gateway(true)
-	if len(provider.Models) != 1 || provider.Models[0].ID != "gpt-5" {
-		t.Fatalf("provider models after switching to group 2 = %+v, want [gpt-5]", provider.Models)
+	choose := func(lane, option string) {
+		t.Helper()
+		openLane(lane, option)
+		clickButton(option)
 	}
-	d.await("composer model selector refreshes to group 2 models", func() bool {
-		hasGPT5 := false
-		hasSonnet := false
-		for _, m := range d.runtime.App.Data.Models {
-			if strings.HasSuffix(m.ID, "/gpt-5") {
-				hasGPT5 = true
-			}
-			if strings.HasSuffix(m.ID, "/claude-sonnet-4-6") {
-				hasSonnet = true
+	bindings := func(claude, codex int64) {
+		t.Helper()
+		want := map[string]int64{core.LaneClaude: claude, core.LaneCodex: codex}
+		state := d.account()
+		if state.SelectedGroupID != nil || !maps.Equal(state.LaneBindings, want) || state.Stage != cheapauthui.Ready || state.ModelCount != 2 {
+			t.Fatalf("confirmed account stage=%d models=%d bindings=%v, want %v", state.Stage, state.ModelCount, state.LaneBindings, want)
+		}
+		stored := d.stored()
+		if stored == nil || stored.GroupID != nil || len(stored.LaneBindings) != len(want) {
+			t.Fatalf("wrong persisted lane selection: %v", stored)
+		}
+		for lane, group := range want {
+			if stored.LaneBindings[lane].GroupID != group {
+				t.Fatalf("stored group for %s = %d, want %d", lane, stored.LaneBindings[lane].GroupID, group)
 			}
 		}
-		return hasGPT5 && !hasSonnet
-	})
-	key, _ := detail[protocol.Secret](d.do(protocol.Command{Kind: "read_provider_key", Data: protocol.CommandReadProviderKeyPayload{
-		Provider: provider.ID, ExpectedRevision: provider.Revision}}).Data)
-	if key.Expose() != "sk-group-2-minted" {
-		t.Fatal("switching to group 2 did not save the minted key")
+		if !slices.Contains(stored.ClearedLanes, core.LaneGemini) {
+			t.Fatal("changing another lane lost Gemini's cleared state")
+		}
 	}
+	routes := func(claude, codex string) protocol.ConversationProvider {
+		t.Helper()
+		d.await("provider and composer use both selected lane models", func() bool {
+			p := d.provider(providers.CheapRouterProviderID)
+			if p == nil || !p.Enabled || len(p.Models) != 2 ||
+				!slices.ContainsFunc(p.Models, func(m protocol.ConversationModel) bool { return m.ID == claude }) ||
+				!slices.ContainsFunc(p.Models, func(m protocol.ConversationModel) bool { return m.ID == codex }) {
+				return false
+			}
+			var shown []string
+			for _, m := range d.runtime.App.Data.Models {
+				if name, ok := strings.CutPrefix(m.ID, p.ID.String()+"/"); ok {
+					shown = append(shown, name)
+				}
+			}
+			return len(shown) == 2 && slices.Contains(shown, claude) && slices.Contains(shown, codex)
+		})
+		return d.gateway(true)
+	}
+	checkKey := func(p protocol.ConversationProvider, model, want string) {
+		t.Helper()
+		key, ok := detail[protocol.Secret](d.do(protocol.Command{Kind: "read_provider_key", Data: protocol.CommandReadProviderKeyPayload{
+			Provider: p.ID, ExpectedRevision: p.Revision}}).Data)
+		if !ok {
+			t.Fatal("the saved provider did not return its key")
+		}
+		resolved, _ := providers.ResolveCheapRouterKey(key.Expose(), model, "")
+		if resolved != want {
+			t.Fatalf("model %s did not use its selected lane key", model)
+		}
+	}
+
+	clickButton("dev@example.test")
+	d.await("account popover and bound lanes", func() bool {
+		return d.tester.HasText("模型分组") && d.tester.HasText("OpenAI 订阅组") && d.tester.HasText("Claude 高速组")
+	})
+	if d.tester.HasText("OpenAI 备用组") {
+		t.Fatalf("the popover showed unselected groups before opening the lane: %q", d.tester.Texts())
+	}
+	bindings(1, 2)
+	routes("claude-sonnet-4-6", "gpt-5")
+
+	beforeSwitch := len(gateway.requests())
+	choose("Codex", "OpenAI 备用组")
+	d.await("Codex group switch completes", func() bool {
+		return !d.account().SwitchingGroup && d.account().LaneBindings[core.LaneCodex] == 4
+	})
+	if d.account().GroupError != "" {
+		t.Fatalf("switching Codex failed: %q", d.account().GroupError)
+	}
+	bindings(1, 4)
+	provider := routes("claude-sonnet-4-6", "gpt-5-mini")
+	checkKey(provider, "gpt-5-mini", "sk-group-4-minted")
+	checkKey(provider, "claude-sonnet-4-6", "sk-group-1")
 	for _, route := range []string{"GET /models/catalog", "GET /keys", "POST /keys"} {
-		if !slices.Contains(gateway.requests()[group2Requests:], route) {
-			t.Errorf("switching to group 2 did not call %s", route)
+		if !slices.Contains(gateway.requests()[beforeSwitch:], route) {
+			t.Errorf("switching Codex did not call %s", route)
 		}
 	}
-	if stored := d.stored(); stored == nil || stored.GroupID == nil || *stored.GroupID != 2 {
-		t.Fatal("switching to group 2 did not persist the bound group")
-	}
+	// The minted key is now visible to later switches in other lanes.
+	gateway.set(func() {
+		gateway.keysBody = `{"code":0,"data":{"items":[` + keyItems +
+			`,{"id":104,"key":"sk-group-4-minted","group_id":4,"status":"active"}],"total":6}}`
+	})
 
-	// Re-open level-2 group submenu and attempt to switch to group 3 (POST /keys fails with 500):
-	// must report error in panel/toast AND keep group 2 + working provider + model selector intact.
-	d.click("分组")
-	d.await("level-2 submenu reopens with 故障测试组", func() bool { return d.tester.HasText("故障测试组") })
-	d.click("故障测试组")
-	d.await("failed group switch settles", func() bool {
+	// A failed key mint must report the error without changing either working lane.
+	choose("Gemini", "故障测试组")
+	d.await("failed key mint settles", func() bool {
 		return !d.account().SwitchingGroup && d.account().GroupError != ""
 	})
-	if !strings.Contains(d.account().GroupError, "切换分组失败") {
-		t.Fatalf("unexpected group switch error: %q", d.account().GroupError)
+	if err := d.account().GroupError; !strings.Contains(err, "切换分组失败") || !d.tester.HasText(err) {
+		t.Fatalf("failed group switch did not report its error: %q; texts: %q", err, d.tester.Texts())
 	}
-	if !d.tester.HasText(d.account().GroupError) {
-		t.Fatalf("failed group switch error not visible in UI: %q", d.tester.Texts())
-	}
-	if d.account().Stage != cheapauthui.Ready || d.account().SelectedGroupID == nil || *d.account().SelectedGroupID != 2 || d.account().ModelCount != 1 {
-		t.Fatalf("failed switch altered working state: stage=%d group=%v count=%d", d.account().Stage, d.account().SelectedGroupID, d.account().ModelCount)
-	}
-	afterFail := d.gateway(true)
-	if afterFail.Revision != provider.Revision || len(afterFail.Models) != 1 || afterFail.Models[0].ID != "gpt-5" {
-		t.Fatalf("failed switch modified active provider: before=%+v after=%+v", provider, afterFail)
-	}
-	if stored := d.stored(); stored == nil || stored.GroupID == nil || *stored.GroupID != 2 {
-		t.Fatal("failed switch altered the persisted group")
+	bindings(1, 4)
+	if after := routes("claude-sonnet-4-6", "gpt-5-mini"); !reflect.DeepEqual(after, provider) {
+		t.Fatal("failed key mint changed the active provider")
 	}
 
-	// An existing group key is reused even if the provider write fails. The
-	// already staged account preference must return to group 2 on refusal.
+	// A definite provider refusal must roll back the staged Claude binding.
 	d.reject.Store(true)
-	d.click("分组")
 	reuseRequests := len(gateway.requests())
-	d.click("Claude 高速组")
-	d.await("provider refusal rolls back group 1", func() bool {
+	choose("Claude", "Claude 备用组")
+	d.await("provider refusal rolls back Claude", func() bool {
 		return !d.account().SwitchingGroup && strings.Contains(d.account().GroupError, "fixture refused provider write")
 	})
-	if state := d.account(); state.SelectedGroupID == nil || *state.SelectedGroupID != 2 || state.ModelCount != 1 || state.Stage != cheapauthui.Ready {
-		t.Fatal("provider refusal changed the confirmed account state")
-	}
-	if stored := d.stored(); stored == nil || stored.GroupID == nil || *stored.GroupID != 2 {
-		t.Fatal("provider refusal did not restore the persisted group")
-	}
+	bindings(1, 4)
 	if after := d.gateway(true); !reflect.DeepEqual(after, provider) {
 		t.Fatal("provider refusal changed the active provider")
 	}
@@ -870,13 +942,12 @@ func TestCheapSidebarAccountAndGroupSwitchEndToEnd(t *testing.T) {
 		}
 	}
 	d.before.Store(&observe)
-	d.click("分组")
-	d.click("Claude 高速组")
+	choose("Claude", "Claude 备用组")
 	d.await("local binding write fails", func() bool {
 		return !d.account().SwitchingGroup && d.account().GroupError != ""
 	})
 	d.before.Store(nil)
-	if attempted.Load() || d.account().SelectedGroupID == nil || *d.account().SelectedGroupID != 2 {
+	if attempted.Load() || d.account().LaneBindings[core.LaneClaude] != 1 || d.account().LaneBindings[core.LaneCodex] != 4 {
 		t.Fatal("failed account persistence attempted to change the working route")
 	}
 	if after := d.gateway(true); !reflect.DeepEqual(after, provider) {
@@ -891,21 +962,16 @@ func TestCheapSidebarAccountAndGroupSwitchEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d.click("分组")
-	d.click("Claude 高速组")
-	d.await("group 1 switch with a reusable key", func() bool {
-		state := d.account()
-		return !state.SwitchingGroup && state.SelectedGroupID != nil && *state.SelectedGroupID == 1
+	choose("Claude", "Claude 备用组")
+	d.await("Claude group switch with a reusable key", func() bool {
+		return !d.account().SwitchingGroup && d.account().LaneBindings[core.LaneClaude] == 5
 	})
-	d.await("group 1 provider event", func() bool {
-		current := d.provider(providers.CheapRouterProviderID)
-		return current != nil && current.DefaultModel == "claude-sonnet-4-6"
-	})
-	reused := d.gateway(true)
-	key, _ = detail[protocol.Secret](d.do(protocol.Command{Kind: "read_provider_key", Data: protocol.CommandReadProviderKeyPayload{
-		Provider: reused.ID, ExpectedRevision: reused.Revision}}).Data)
-	if key.Expose() != "sk-group-1-active" || slices.Contains(gateway.requests()[reuseRequests:], "POST /keys") {
-		t.Fatal("switching to group 1 did not reuse its active key")
+	bindings(5, 4)
+	reused := routes("claude-haiku-4-5", "gpt-5-mini")
+	checkKey(reused, "claude-haiku-4-5", "sk-group-5-active")
+	checkKey(reused, "gpt-5-mini", "sk-group-4-minted")
+	if slices.Contains(gateway.requests()[reuseRequests:], "POST /keys") {
+		t.Fatal("switching Claude did not reuse its active key")
 	}
 	d.untouched("after switching CheapRouter groups")
 }

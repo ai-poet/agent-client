@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo/ui"
+	"charm.land/fantasy"
 	"github.com/ai-poet/agent-client/internal/client"
 	"github.com/ai-poet/agent-client/internal/desktop/composer"
 	"github.com/ai-poet/agent-client/internal/desktop/conversation"
@@ -25,7 +25,9 @@ import (
 	"github.com/ai-poet/agent-client/internal/desktop/theme"
 	"github.com/ai-poet/agent-client/internal/link"
 	"github.com/ai-poet/agent-client/internal/node"
+	"github.com/ai-poet/agent-client/internal/node/agent/model"
 	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 // panelTabs drives the right panel of the whole desktop against a real Node,
@@ -40,7 +42,10 @@ func panelTabs(t *testing.T) {
 	// their own waits, and the test runner bounds the complete walkthrough.
 	ctx := t.Context()
 	profile := filepath.Join(t.TempDir(), "profile")
-	owner, err := node.StartWithOptions(ctx, profile, node.Options{})
+	script := &interactionModel{results: map[string]string{}}
+	owner, err := node.StartWithOptions(ctx, profile, node.Options{
+		Model: func(context.Context, model.Binding) (fantasy.LanguageModel, error) { return script, nil },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +398,7 @@ func panelTabs(t *testing.T) {
 	if !valid {
 		t.Fatal("the registered project was not returned")
 	}
-	// A provider no request is sent to: a session can be created on it.
+	// The first send in the panel lifecycle uses the scripted model, not HTTP.
 	provider := protocol.DefaultConversationProvider()
 	provider.ID = protocol.NewProviderID()
 	provider.Name, provider.Api = "Panel fixture", protocol.ConversationModelApiChatCompletions
@@ -711,6 +716,16 @@ func panelConversations(t *testing.T, f panelFixture) {
 	if tab := r.browser.tabs[page.ID]; tab == nil || tab.conversation != second {
 		t.Fatalf("the draft's browser page is not the session's: %+v", tab)
 	}
+	secondID, err := protocol.ParseSessionID(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait("the created session's first turn to finish", func() bool {
+		state, ok := f.controller.Conversation(secondID)
+		return ok && slices.ContainsFunc(state.Snapshot.Page.Runs, func(run protocol.ConversationRun) bool {
+			return run.Status == protocol.ConversationStatusCompleted
+		})
+	})
 	if !app.Panel.Offers(panel.Terminal) {
 		t.Fatal("a session without a project is offered no terminal")
 	}

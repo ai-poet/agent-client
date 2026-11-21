@@ -31,7 +31,7 @@ func TestProviderRouteProjection(t *testing.T) {
 			provider := providerRouteFixture()
 			provider.Api, provider.Preset.Route = test.api, test.route
 			listing := providers.Listing(protocol.ConversationPresetsCatalog{}, false)
-			channel, _ := projectProviderRouteFixture(t, provider, listing, viewmodel.AuthKey)
+			channel, _ := projectProviderRouteFixture(t, provider, listing, viewmodel.AuthOptionalKey)
 			if channel.Method != test.method {
 				t.Fatalf("projected method = %q, want %q", channel.Method, test.method)
 			}
@@ -65,7 +65,7 @@ func TestLegacyCompatibleProviderRouteProjection(t *testing.T) {
 					}
 				}
 			}
-			channel, brands := projectProviderRouteFixture(t, provider, listing, viewmodel.AuthKey)
+			channel, brands := projectProviderRouteFixture(t, provider, listing, viewmodel.AuthOptionalKey)
 			if test.target != "offered" {
 				if channel.Method != "builtin:compatible-chat/0" {
 					t.Fatalf("legacy method = %q without an offered replacement", channel.Method)
@@ -130,7 +130,8 @@ func projectProviderRouteFixture(t *testing.T, provider protocol.ConversationPro
 	}
 	channel := r.App.Settings.Channels[0]
 	if channel.ID != provider.ID.String() || channel.Revision != provider.Revision || channel.Name != provider.Name || channel.API != string(provider.Api) ||
-		channel.Endpoint != provider.Endpoint || channel.Enabled != provider.Enabled || channel.Auth != wantAuth || channel.KeySet != (provider.Credential != nil) || channel.Default != 1 {
+		channel.Endpoint != provider.Endpoint || channel.APIVersion != "" || channel.Enabled != provider.Enabled || channel.Auth != wantAuth ||
+		channel.KeySet != (provider.Credential != nil) || channel.Default != 1 {
 		t.Fatalf("provider configuration changed in the projection: %+v", channel)
 	}
 	wantModels := []viewmodel.ChannelModel{channelModel(provider.Models[0]), channelModel(provider.Models[1])}
