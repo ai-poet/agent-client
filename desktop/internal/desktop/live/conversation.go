@@ -832,7 +832,7 @@ func (x *conversationActions) submit(m composer.Message, guide, queue bool, draf
 				x.outgoing(m, guide)
 			}
 			if guide {
-				if run, ok := x.activeRun(); ok {
+				if run, ok := x.activeRun(); ok && acceptsGuidance(run) {
 					x.turn(protocol.Command{Kind: "guide_turn", Data: protocol.CommandGuideTurnPayload{Recipient: run.Turn, ExpectedRevision: session.Revision, Message: input}}, func(output protocol.Output, ok bool) {
 						finish(output, ok)
 						if queued, admitted := detail[protocol.QueuedTurn](output.Data); ok && admitted {
