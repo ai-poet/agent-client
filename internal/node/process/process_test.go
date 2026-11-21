@@ -218,8 +218,8 @@ func TestBackgroundCompletionEvidence(t *testing.T) {
 			t.Fatal("promoted completion published before durable evidence", snapshot, err)
 		}
 		persistOnce.Do(func() { close(persisted) })
-		if err := service.Wait(context.Background(), launch.Session, launch.ID, 30000, "missing"); err != nil {
-			t.Fatal(err)
+		if outcome, err := service.Wait(context.Background(), launch.Session, launch.ID, 30000, "missing"); err != nil || outcome != protocol.ProcessWaitExited {
+			t.Fatalf("wait = %q, %v; want exit", outcome, err)
 		}
 		if launches != 1 {
 			t.Fatal("promotion relaunched the native process", launches)
@@ -271,8 +271,8 @@ func TestBackgroundCompletionEvidence(t *testing.T) {
 				t.Fatal("completion published before durable evidence", snapshot, err)
 			}
 			releaseOnce.Do(func() { close(release) })
-			if err := service.Wait(ctx, launch.Session, launch.ID, 30000, "missing"); err != nil {
-				t.Fatal(err)
+			if outcome, err := service.Wait(ctx, launch.Session, launch.ID, 30000, "missing"); err != nil || outcome != protocol.ProcessWaitExited {
+				t.Fatalf("wait = %q, %v; want exit", outcome, err)
 			}
 			snapshot, err = service.Read(launch.Session, launch.ID)
 			want := "finished"

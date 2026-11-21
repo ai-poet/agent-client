@@ -732,15 +732,23 @@ func TestRestartNoReplay(t *testing.T) {
 	})
 }
 func TestCompactionAtThreshold(t *testing.T) {
-	configured := uint32(700)
+	configured := uint32(7000)
 	for _, row := range []struct {
 		tokens     uint64
 		percent    uint8
 		configured *uint32
 		want       bool
-	}{{800, 80, nil, false}, {801, 80, nil, true}, {0, 80, nil, false}, {1000, 100, nil, false}, {1000, 0, nil, false}, {700, 80, &configured, false}, {701, 80, &configured, true}} {
+	}{
+		{8000, 80, nil, false},
+		{8001, 80, nil, true},
+		{0, 80, nil, false},
+		{10001, 100, nil, false},
+		{10000, 0, nil, false},
+		{7000, 80, &configured, false},
+		{7001, 80, &configured, true},
+	} {
 		t.Run(fmt.Sprintf("%d tokens at %d%% configured %t", row.tokens, row.percent, row.configured != nil), func(t *testing.T) {
-			binding := model.Binding{Config: protocol.SessionConfig{Model: "fixture"}, Provider: protocol.ConversationProvider{Models: []protocol.ConversationModel{{ID: "fixture", Context: 1000, CompactionTokens: row.configured}}}}
+			binding := model.Binding{Config: protocol.SessionConfig{Model: "fixture"}, Provider: protocol.ConversationProvider{Models: []protocol.ConversationModel{{ID: "fixture", Context: 10000, CompactionTokens: row.configured}}}}
 			usage := canonical.NewRecord(protocol.NewTurnID(), "message", canonical.NewMessage(canonical.Assistant), manualNow())
 			usage.Message().Usage = &canonical.Usage{Total: &row.tokens}
 			input := canonical.NewRecord(usage.Turn, "message", canonical.NewMessage(canonical.User, canonical.Text(0, "Hidden pending input")), manualNow())

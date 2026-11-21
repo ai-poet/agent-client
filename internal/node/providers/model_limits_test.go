@@ -7,9 +7,9 @@ import (
 
 func TestCatalogModelLimits(t *testing.T) {
 	catalog, err := ParseCatalog([]byte(`{
-		"vendor-a":{"models":{"shared":{"id":"shared","limit":{"context":4096}},"placeholder":{"id":"placeholder","limit":{"context":4096}}}},
-		"vendor-b":{"models":{"shared":{"id":"shared","limit":{"context":200000,"output":32768}}}},
-		"vendor-c":{"models":{"shared":{"id":"shared","limit":{"context":64000,"output":8192}}}}
+		"vendor-a":{"models":{"shared":{"id":"shared","limit":{"context":4096}},"placeholder":{"id":"placeholder","limit":{"context":4096}},"minimum":{"id":"minimum","limit":{"context":8192}}}},
+		"vendor-b":{"models":{"shared":{"id":"shared","limit":{"context":200000,"output":8192}}}},
+		"vendor-c":{"models":{"shared":{"id":"shared","limit":{"context":64000,"output":32768}}}}
 	}`))
 	if err != nil {
 		t.Fatal(err)
@@ -21,9 +21,10 @@ func TestCatalogModelLimits(t *testing.T) {
 	}{
 		{"", "shared", ModelLimits{Context: 200000, Output: 32768}},
 		{"vendor-a", "shared", ModelLimits{Context: 200000, Output: 32768}},
-		{"vendor-c", "shared", ModelLimits{Context: 64000, Output: 8192}},
-		{"", "vendor-c/shared", ModelLimits{Context: 64000, Output: 8192}},
+		{"vendor-c", "shared", ModelLimits{Context: 200000, Output: 32768}},
+		{"", "vendor-c/shared", ModelLimits{Context: 200000, Output: 32768}},
 		{"vendor-a", "placeholder", ModelLimits{}},
+		{"vendor-a", "minimum", ModelLimits{Context: 8192}},
 		{"vendor-a", "missing", ModelLimits{}},
 	} {
 		if limits := index.lookup(row.supplier, row.id); limits != row.want {

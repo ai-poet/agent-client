@@ -403,8 +403,9 @@ Schema additions are rehearsed on an isolated snapshot, backed up and applied
 transactionally with current-format validation. Configuration and recovery records
 are checked at startup; history and captured turns are checked when read.
 Existing Turso files are opened in place. Startup does not move, convert or
-automatically select archived databases. Preview `.sqlite` files are not selected,
-converted or removed. Legacy plugin records stay
+automatically select archived databases. An archive alone does not block
+initialization of the active database family. Preview `.sqlite` files are not
+selected, converted or removed. Legacy plugin records stay
 preserved when the normal schema update adds per-user configuration tables;
 initialization runs once with those tables so later restarts do not resurrect
 removed configuration.
@@ -1034,9 +1035,10 @@ heap estimates while the diagnostics page is visible.
 
 Desktop application updates use MyGo's updater through `internal/update` and
 the process-wide `live.NativeUpdates` service. The optional profile
-`update.json` supplies the platform manifest URL, enables the feature and holds
-the automatic-check and prerelease choices; an absent or empty file disables
-all update requests. Settings › About owns manual checks, installation progress
+`update.json` supplies the platform manifest URL, public key and update
+preferences. An absent file uses build defaults and checks require a valid
+public key. An explicit empty configuration disables update requests.
+Settings › About owns manual checks, installation progress
 and restart. MyGo compares versions and verifies package signatures with the
 build's update trust configuration before installing. Update checks never
 replace or shut down a remote Host. `internal/shipped` verifies packaged native

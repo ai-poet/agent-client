@@ -50,10 +50,10 @@ func TestInstructionContextCapacity(t *testing.T) {
 	if err := validateInstructionContext(binding, context, false); err != nil {
 		t.Fatalf("large-window model rejected the complete instructions: %v", err)
 	}
-	binding.Provider.Models[0].Context = 4096
+	binding.Provider.Models[0].Context = 8192
 	err := validateInstructionContext(binding, context, false)
 	var fault *protocol.Fault
-	if !errors.As(err, &fault) || fault.Code != protocol.ErrorCodeInvalidRequest || !strings.Contains(fault.Message, "estimated") || !strings.Contains(fault.Message, "4096-token") || !strings.Contains(fault.Message, "AGENTS.md") {
+	if !errors.As(err, &fault) || fault.Code != protocol.ErrorCodeInvalidRequest || !strings.Contains(fault.Message, "estimated") || !strings.Contains(fault.Message, "8192-token") || !strings.Contains(fault.Message, "AGENTS.md") {
 		t.Fatalf("small-window instruction failure = %v", err)
 	}
 	after, _ := json.Marshal(context)
@@ -64,9 +64,10 @@ func TestInstructionContextCapacity(t *testing.T) {
 
 func TestLargeInstructionsReachModel(t *testing.T) {
 	for _, row := range []struct {
-		name  string
-		limit uint32
-	}{{"large model", 128000}, {"small model", 4096}} {
+		name       string
+		limit      uint32
+		wantReject bool
+	}{{"large model", 128000, false}, {"small model", 8192, true}} {
 		t.Run(row.name, func(t *testing.T) {
 			m := &scriptedModel{scripts: []script{response(text("Done"), finish())}}
 			f := newFixture(t, m)
@@ -93,9 +94,9 @@ func TestLargeInstructionsReachModel(t *testing.T) {
 			}
 			f.start()
 			turn := f.submit("Read the project instructions")
-			if row.limit == 4096 {
+			if row.wantReject {
 				run := f.waitRun(turn, protocol.ConversationStatusFailed)
-				if run.Error == nil || !strings.Contains(run.Error.Message, "estimated") || m.count() != 0 {
+				if run.Error == nil || !strings.Contains(run.Error.Message, "estimated") || !strings.Contains(run.Error.Message, "8192-token") || m.count() != 0 {
 					t.Fatalf("oversized fixed instructions made a model request or lost the capacity explanation: %+v", run.Error)
 				}
 				if count := f.readQuery("SELECT count(*) FROM agent_events WHERE json_extract(body,'$.kind')='compaction'"); count != 0 {

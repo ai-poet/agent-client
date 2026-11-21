@@ -34,8 +34,8 @@ func TestSessionOverviewBackgroundRefresh(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				r, source, cv, id := cacheTestRuntime(t)
 				state := cacheTestFrame(t, r, cv, id)
-				read := &overviewRead{open: true, loaded: true, revision: state.Snapshot.Page.Revision, head: state.Snapshot.Sequence,
-					loadedRevision: state.Snapshot.Page.Revision, loadedHead: state.Snapshot.Sequence}
+				read := &overviewRead{open: true, loaded: true, revision: state.Snapshot.Page.Revision, inventory: state.InventoryVersion,
+					loadedRevision: state.Snapshot.Page.Revision, loadedInventory: state.InventoryVersion}
 				if populated {
 					read.groups = []protocol.ConversationAssetsGroup{overviewFixtureAsset(1, "existing.txt")}
 				}
@@ -53,8 +53,8 @@ func TestSessionOverviewBackgroundRefresh(t *testing.T) {
 						Session: id, Revision: read.revision, Groups: []protocol.ConversationAssetsGroup{overviewFixtureAsset(2, "generated.txt")},
 					}}}, true
 				}
-				// New text/history events advance the stream without replacing its revision.
-				state.Snapshot.Sequence++
+				// A canonical commit may change the inventory without replacing history.
+				state.InventoryVersion++
 				r.beginConversationFrame()
 				r.conversationVersion++
 				r.conversationCopies[id] = conversationCopy{state: state, ok: true, generation: r.conversationVersion}
@@ -84,9 +84,9 @@ func TestSessionOverviewForegroundReads(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				r, source, cv, id := cacheTestRuntime(t)
 				state := cacheTestFrame(t, r, cv, id)
-				read := &overviewRead{revision: state.Snapshot.Page.Revision, head: state.Snapshot.Sequence}
+				read := &overviewRead{revision: state.Snapshot.Page.Revision, inventory: state.InventoryVersion}
 				if kind != "initial" {
-					read.loaded, read.loadedRevision, read.loadedHead = true, read.revision, read.head
+					read.loaded, read.loadedRevision, read.loadedInventory = true, read.revision, read.inventory
 					read.groups = []protocol.ConversationAssetsGroup{overviewFixtureAsset(2, "existing.txt")}
 				}
 				if kind == "paging" {

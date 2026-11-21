@@ -49,7 +49,7 @@ func contextFixture(t *testing.T) {
 		}{
 			{"listed", protocol.ConversationModelApiAnthropic, "claude-sonnet-4-5", []protocol.ConversationModel{entry("claude-sonnet-4-5", 64000)}, 64000},
 			{"family", protocol.ConversationModelApiResponses, "gpt-5", nil, 400000},
-			{"dated", protocol.ConversationModelApiAnthropic, "claude-sonnet-4-5-20250929", nil, 200000},
+			{"dated alias uses same-name maximum", protocol.ConversationModelApiAnthropic, "claude-sonnet-4-5-20250929", nil, 1000000},
 			{"gateway prefix", protocol.ConversationModelApiChatCompletions, "openai/gpt-5", nil, 400000},
 			{"other vendor", protocol.ConversationModelApiChatCompletions, "DeepSeek-Flash", nil, 1048576},
 			{"unknown", protocol.ConversationModelApiChatCompletions, "fixture/unknown", nil, 256000},

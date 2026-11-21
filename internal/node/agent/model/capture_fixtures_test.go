@@ -136,12 +136,12 @@ func capturedPolicyFixtures(t *testing.T) {
 		if summary.Config.Effort.Kind != "none" || binding.Config.Effort.Kind != "high" || OutputLimit(binding, true) != 4096 {
 			t.Fatalf("summary policy=%+v", summary.Config.Effort)
 		}
-		// The summary output is twice the handoff cap of the window, within the
-		// model's own limit; a 200,000 token window keeps 8,000.
+		// Summary output is bounded by the effective window and model output.
+		// A sub-floor context uses the estimated window and missing-output cap.
 		for _, row := range []struct {
 			context, output uint32
 			want            int64
-		}{{4096, 0, 1024}, {8192, 0, 2048}, {8192, 8192, 2048}, {8192, 1024, 1024}, {200000, 64000, 8000}, {32000, 8000, 8000}, {128000, 0, 8000}, {400000, 64000, 16000}, {1000000, 64000, 24000}, {1000000, 10000, 10000}, {1000000, 0, 8000}} {
+		}{{4096, 0, 8000}, {8192, 0, 2048}, {8192, 8192, 2048}, {8192, 1024, 1024}, {200000, 64000, 8000}, {32000, 8000, 8000}, {128000, 0, 8000}, {400000, 64000, 16000}, {1000000, 64000, 24000}, {1000000, 10000, 10000}, {1000000, 0, 8000}} {
 			sized := binding
 			sized.Provider.Models = []protocol.ConversationModel{{ID: "fixture", Context: row.context, Output: row.output}}
 			if got := OutputLimit(sized, true); got != row.want {
@@ -154,7 +154,7 @@ func capturedPolicyFixtures(t *testing.T) {
 }
 func providerResourceFixtures(t *testing.T) {
 	t.Run("provider_catalog_and_efforts", func(t *testing.T) {
-		download, err := providers.ParseCatalog([]byte(`{"fixture":{"models":{"reasoner":{"id":"reasoner","name":"Reference","limit":{"context":100000,"output":8192},"modalities":{"input":["text","image"],"output":["text"]},"tool_call":true,"reasoning":true,"reasoning_options":[{"type":"effort","values":["low","high","max"]},{"type":"toggle"}]}}}}`))
+		download, err := providers.ParseCatalog([]byte(`{"fixture":{"models":{"reasoner":{"id":"reasoner","name":"Reference","limit":{"context":100000,"output":8192},"modalities":{"input":["text","image"],"output":["text"]},"tool_call":true,"reasoning":true,"reasoning_options":[{"type":"effort","values":["low","high","xhigh","max","high"]},{"type":"toggle"}]}}}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -166,14 +166,14 @@ func providerResourceFixtures(t *testing.T) {
 			t.Fatal(err)
 		}
 		completed := providers.CompleteModel(protocol.ConversationModel{ID: "reasoner", Context: 200000, Output: 8192, DefaultEffort: protocol.Effort{Kind: "default"}}, &reference, protocol.ConversationModelApiDeepSeek)
-		if !completed.Reasoning || !completed.Vision || !completed.Tools || completed.Context != 200000 || completed.DefaultEffort.Kind != "high" {
+		if !completed.Reasoning || !completed.Vision || !completed.Tools || completed.Context != 200000 || completed.Output != 8192 || completed.DefaultEffort.Kind != "low" {
 			t.Fatalf("completed metadata=%+v", completed)
 		}
 		efforts := []string{}
 		for _, effort := range completed.Efforts {
 			efforts = append(efforts, effort.Kind)
 		}
-		if !reflect.DeepEqual(efforts, []string{"high", "max", "none"}) {
+		if !reflect.DeepEqual(efforts, []string{"low", "high", "max", "none"}) {
 			t.Fatalf("catalog choices=%v", efforts)
 		}
 	})

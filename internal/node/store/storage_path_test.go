@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/ai-poet/agent-client/internal/core"
@@ -100,7 +99,7 @@ func TestNodeDatabasePathPreservesIncompleteStorage(t *testing.T) {
 	}
 }
 
-func TestArchivedNativeStoragePreventsEmptyInitialization(t *testing.T) {
+func TestArchivedNativeStorageDoesNotBlockInitialization(t *testing.T) {
 	t.Parallel()
 	profile := t.TempDir()
 	directory := filepath.Join(profile, "storage")
@@ -118,11 +117,11 @@ func TestArchivedNativeStoragePreventsEmptyInitialization(t *testing.T) {
 		t.Fatal(err)
 	}
 	storage, err := Open(t.Context(), profile, protocol.NodeID{31})
-	if storage != nil {
-		_ = storage.Close()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err == nil || !strings.Contains(err.Error(), "preserved") {
-		t.Fatalf("archived native storage was ignored: %v", err)
+	if err := storage.Close(); err != nil {
+		t.Fatal(err)
 	}
 	if body, err := os.ReadFile(path); err != nil || !bytes.Equal(body, original) {
 		t.Fatalf("archived native storage changed: %v", err)
@@ -130,9 +129,9 @@ func TestArchivedNativeStoragePreventsEmptyInitialization(t *testing.T) {
 	if body, err := os.ReadFile(preview); err != nil || string(body) != "preview database" {
 		t.Fatalf("preview storage changed: %v", err)
 	}
-	for _, name := range []string{"node.turso", "knowledge.turso", "backups"} {
-		if _, err := os.Lstat(filepath.Join(directory, name)); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("archived native storage created %s: %v", name, err)
+	for _, name := range []string{"node.turso", "knowledge.turso"} {
+		if info, err := os.Lstat(filepath.Join(directory, name)); err != nil || !info.Mode().IsRegular() {
+			t.Fatalf("active storage was not initialized at %s: %v", name, err)
 		}
 	}
 }

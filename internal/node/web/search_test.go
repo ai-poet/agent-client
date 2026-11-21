@@ -208,9 +208,9 @@ func TestSearchDriverContracts(t *testing.T) {
 	if _, err := normalizeSearch(protocol.SearchRequest{Query: "query", Limit: 5, IncludeDomains: []string{"EXAMPLE.COM."}, ExcludeDomains: []string{"example.com"}}); err == nil {
 		t.Fatal("normalized domain overlap ignored")
 	}
-	filtered := filterSearchResults([]protocol.SearchResult{{Url: "https://example.com/"}, {Url: "https://private.example.com/"}, {Url: "https://example.com.evil/"}}, input, now)
-	if len(filtered) != 1 {
-		t.Fatal(filtered)
+	filtered, allOutsideDomains := filterSearchResults([]protocol.SearchResult{{Url: "https://example.com/"}, {Url: "https://private.example.com/"}, {Url: "https://example.com.evil/"}}, input, now)
+	if len(filtered) != 1 || filtered[0].Url != "https://example.com/" || allOutsideDomains {
+		t.Fatalf("filtered = %v, all outside domains = %t", filtered, allOutsideDomains)
 	}
 }
 

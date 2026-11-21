@@ -56,7 +56,7 @@ func TestConfigurationRefusalLogging(t *testing.T) {
 			}
 			fields = nil
 			span := logging.NewSpan("command", slog.String("operation", "submit_turn"))
-			rejectCommand(span, failure, false)
+			rejectCommand(span, "submit_turn", failure, false)
 			if severity != test.level || fields["code"] != "not_configured" {
 				t.Fatalf("logged %v %v, want %v", severity, fields, test.level)
 			}
@@ -76,12 +76,12 @@ func TestConfigurationRefusalLogging(t *testing.T) {
 	// A known reason must not hide an internal error or a script diagnostic.
 	internal := protocol.NewConfigurationFault(protocol.ConfigurationLoginRequired, "private")
 	internal.Code = protocol.ErrorCodeInternal
-	rejectCommand(logging.NewSpan("command"), internal, false)
+	rejectCommand(logging.NewSpan("command"), "submit_turn", internal, false)
 	if severity != slog.LevelError {
 		t.Fatal("internal error was downgraded")
 	}
 	diagnostic := &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Details: &protocol.FaultDetails{Kind: "system_diagnostic"}}
-	rejectCommand(logging.NewSpan("command"), diagnostic, false)
+	rejectCommand(logging.NewSpan("command"), "submit_turn", diagnostic, false)
 	if severity != slog.LevelError {
 		t.Fatal("system diagnostic was downgraded")
 	}

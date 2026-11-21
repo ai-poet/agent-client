@@ -189,6 +189,7 @@ func TestInstallRejectsSignatureMismatch(t *testing.T) {
 		}}, nil
 	}
 	client := fixtureClient(server.URL+"/manifest.json", "1.0.0", native)
+	client.config.PublicKey = base64.StdEncoding.EncodeToString(otherPublic)
 	found, err := client.Check(context.Background())
 	if err != nil || found == nil {
 		t.Fatalf("Check = %+v, %v", found, err)
@@ -206,7 +207,15 @@ func TestEmptyConfigDoesNotRequest(t *testing.T) {
 		requests.Add(1)
 		return nil, nil
 	}}
-	client := &Client{version: "1.0.0", native: native}
+	path := filepath.Join(t.TempDir(), ConfigName)
+	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &Client{config: store.Config(), version: "1.0.0", native: native}
 	if client.Enabled() {
 		t.Fatal("empty config enabled updates")
 	}
@@ -420,10 +429,26 @@ func TestMyGoNativeUpdaterEnabledWithBuildFlags(t *testing.T) {
 		"-X github.com/ai-poet/agent-client/internal/update.BuildFeedURL=" + feedURL,
 		"-X github.com/ai-poet/agent-client/internal/update.BuildPublicKey=" + encodedKey,
 	}, " ")
-	cmd := exec.CommandContext(t.Context(), "go", "test", "-run", "^TestMyGoNativeUpdaterEnabledWithBuildFlags$", "-count=1", "-ldflags", ldflags, ".")
-	cmd.Env = append(os.Environ(), "UPDATE_LDFLAGS_PROBE=1")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
+	dir := t.TempDir()
+	if runtime.GOOS == "darwin" {
+		// MyGo enables self-updates only for an executable inside an app bundle.
+		dir = filepath.Join(dir, "Probe.app", "Contents", "MacOS")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	binary := filepath.Join(dir, "update-probe")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
+	build := exec.CommandContext(t.Context(), "go", "test", "-c", "-o", binary, "-ldflags", ldflags, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build ldflags probe: %v\n%s", err, out)
+	}
+	cmd := exec.CommandContext(t.Context(), binary, "-test.run", "^TestMyGoNativeUpdaterEnabledWithBuildFlags$")
+	// AppImages are deliberately not self-updatable, unlike this fixture.
+	cmd.Env = append(cmd.Environ(), "UPDATE_LDFLAGS_PROBE=1", "APPIMAGE=")
+	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("ldflags probe failed: %v\n%s", err, out)
 	}
 }
