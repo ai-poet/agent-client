@@ -754,7 +754,14 @@ func connectorDialog(c *ui.Context, m *Model) {
 					return
 				}
 				if m.Live && m.ConnectorActions != nil && m.ConnectorActions.Save != nil {
-					m.ConnectorActions.Save(ConnectorDraft{Type: k.ID, Service: e.service, Method: method, ExpectedRevision: e.revision, Fields: maps.Clone(e.fields), Update: configuring}, e.saving())
+					input := ConnectorDraft{Type: k.ID, Service: e.service, Method: method, ExpectedRevision: e.revision, Fields: maps.Clone(e.fields), Update: configuring}
+					if method == "connector_cli" && !configuring {
+						if e.account < 0 || e.account >= len(m.ConnAccounts) {
+							return
+						}
+						input.CLIAccount = m.ConnAccounts[e.account]
+					}
+					m.ConnectorActions.Save(input, e.saving())
 					return
 				}
 				if s := m.service(e.service); s == nil {
@@ -800,6 +807,8 @@ func (e *connectorEditor) saving() func(bool) {
 		e.request, e.pending = nil, false
 		if ok {
 			e.open = false
+		} else if e.cliStarted {
+			e.cliStarted, e.accounts = false, preview.Fetch{}
 		}
 	}
 }
