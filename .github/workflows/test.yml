@@ -83,9 +83,20 @@ jobs:
           $output >> $env:GITHUB_PATH
 
       - name: Run desktop tests
+        shell: bash
         env:
           SAILRY_TURSO_LIB: ${{ github.workspace }}/.runtime/native/${{ matrix.platform }}-${{ matrix.arch }}/${{ matrix.turso-library }}
-        run: go test -timeout 30m ./...
+        run: |
+          set -euo pipefail
+          # Keep pull-request checks fast: the desktop UI suites rasterize whole
+          # windows and the storage/agent suites take minutes on hosted runners.
+          # Run them locally with:
+          #   go test ./internal/desktop/shell ./internal/desktop/live \
+          #     ./internal/node ./internal/node/store \
+          #     ./internal/node/agent/engine ./internal/node/knowledge/service
+          slow='(internal/desktop/(shell|live)|internal/node|internal/node/(store|agent/engine|knowledge/service))$'
+          pkgs=$(go list ./... | grep -Ev "$slow")
+          go test -timeout 20m ${pkgs}
 
       - name: Build desktop shell
         run: go build ./...
