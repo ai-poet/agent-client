@@ -11,9 +11,9 @@ This release turns CheapRouter Desktop into a MyGo-native client. The legacy Rus
 
 ### 主要改动 / Highlights
 
-- 桌面端改用 Go/MyGo 重写，不再套 Electron：原生渲染、长对话不卡顿，没有独立显卡时走 CPU 渲染
+- 桌面端从 Rust 客户端迁移到 Go/MyGo，仍是原生渲染、不套 Electron：长对话不卡顿，没有独立显卡时走 CPU 渲染
 
-  The desktop is rewritten in Go/MyGo with no Electron shell: native rendering, long conversations stay smooth, and CPU rendering is used without a GPU
+  The desktop moves from the Rust client to Go/MyGo while keeping native rendering and no Electron shell: long conversations stay smooth, and CPU rendering is used without a GPU
 
 - CheapRouter 接入：PKCE 回调登录、站点与 CDN 切换、按 lane（Claude / Codex / Gemini / 国模 / Grok）各自绑定分组，未绑定的 lane 登录后自动绑定第一个可用分组；分组显示在线率与福利/常驻徽章，余额与套餐同步；不登录也能正常使用客户端
 
