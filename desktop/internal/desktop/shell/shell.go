@@ -16,6 +16,7 @@ import (
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/conversation"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/host"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/i18n"
+	"github.com/ai-poet/agent-client/desktop/internal/desktop/imagestudio"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/kit"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/onboarding"
 	"github.com/ai-poet/agent-client/desktop/internal/desktop/panel"
@@ -72,6 +73,7 @@ const (
 	NotificationsPage
 	ProjectPage
 	PluginPage
+	ImageStudioPage
 )
 
 // App is the window's state.
@@ -144,8 +146,9 @@ type App struct {
 
 	Sidebar           *sidebar.State
 	Settings          *settings.State
-	Messages         *conversation.State
-	accountOpen      bool
+	Messages          *conversation.State
+	ImageStudio       *imagestudio.State
+	accountOpen       bool
 	accountGroupLane string
 	// overviews are the session overview popovers by conversation, each
 	// opened by its conversation's own button (conversationActions); band
@@ -292,6 +295,7 @@ func newApp(d *viewmodel.Data, selected string, st *settings.State) *App {
 	}
 	// The sidebar's sort menu and the settings' session order are one choice.
 	a.Sidebar.Sort = &st.Model.SessionOrder
+	a.Sidebar.OpenImageStudio = func() { a.Navigate(ImageStudioPage) }
 	return a
 }
 
@@ -439,7 +443,7 @@ type frame struct {
 // center have none. A package page can supply its own resource navigation.
 func (a *App) HasNavigation() bool {
 	switch a.Page {
-	case ConversationPage, HostPage, ProjectPage, SettingsPage:
+	case ConversationPage, HostPage, ProjectPage, SettingsPage, ImageStudioPage:
 		return true
 	case PluginPage:
 		return a.PluginNavigation != nil
@@ -520,6 +524,7 @@ func (a *App) nav(c *ui.Context, f frame, panel ui.Color) {
 	if a.Page == HostPage {
 		a.Sidebar.SelectedHost = a.Host
 	}
+	a.Sidebar.ImageStudioActive = a.Page == ImageStudioPage
 	a.Sidebar.Preview = a.Preview || a.Demo()
 	p := theme.Of(c)
 	ui.Row(c.Key("nav")).Width(f.navWidth * f.nav).Shrink(0).ClipX().AlignItems(ui.Stretch).Children(func() {
@@ -735,6 +740,9 @@ func (a *App) page(c *ui.Context) {
 		return
 	case ProjectPage:
 		a.projectView(c)
+		return
+	case ImageStudioPage:
+		imagestudio.Page(c, a.ImageStudio)
 		return
 	}
 	if a.split(c) {

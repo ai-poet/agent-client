@@ -241,6 +241,7 @@ func (r *Runtime) stopCheapSync() {
 	account.stopSync()
 	account.stopSync = nil
 	account.state.Stage, account.state.Failure = cheapauthui.GatewayFailed, "已取消本次模型网关配置"
+	r.syncImageStudioCatalog()
 }
 
 // startCheapSync is one cancellable pass. The account projection is optional;
@@ -253,6 +254,7 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 	account.state.AccountFailure = ""
 	account.state.AutoBindFailures = nil
 	shouldAutoBind := !account.autoBindDone
+	r.syncImageStudioCatalog()
 	r.async(func() {
 		// A group write can outlive its reply. Resolve it before reading the
 		// catalog so a confirmed rejection restores the previous binding first.
@@ -364,6 +366,7 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 				account.state.AutoBindFailures = nil
 				account.state.GroupsLoading, account.state.SwitchingLane = false, ""
 				account.state.GroupsError, account.state.GroupError = "", ""
+				r.syncImageStudioCatalog()
 				r.projectModels()
 				return
 			}
@@ -397,6 +400,7 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 			account.state.AutoBindFailures = autoBindFailures
 			if gatewayErr != nil {
 				account.state.Stage, account.state.Failure = cheapauthui.GatewayFailed, cheapAuthError(gatewayErr)
+				r.syncImageStudioCatalog()
 				r.projectModels()
 				return
 			}
@@ -406,6 +410,7 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 			account.state.ModelCount = modelCount
 			account.state.Stage, account.state.Failure = cheapauthui.Ready, ""
 			account.state.GroupError = ""
+			r.syncImageStudioCatalog()
 			r.projectModels()
 			r.project()
 		})
@@ -667,6 +672,7 @@ func (r *Runtime) logoutCheapAuth() {
 			account.state.SwitchingGroup = false
 			account.state.SwitchingLane = ""
 			account.state.GroupError = ""
+			r.syncImageStudioCatalog()
 			r.projectModels()
 			if disableErr != nil || logoutErr != nil {
 				account.state.Failure = "本地登录已退出；远程撤销或禁用模型网关未完全成功，请检查网络后重试"
@@ -766,6 +772,7 @@ func (r *Runtime) selectCheapLaneGroup(lane string, groupID *int64) {
 			}
 			account.state.Stage = cheapauthui.Ready
 			account.state.Failure = ""
+			r.syncImageStudioCatalog()
 			r.project()
 			label := core.LaneDisplayName(lane)
 			if target == nil {

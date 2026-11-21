@@ -102,6 +102,7 @@ type Credentials struct {
 	GroupID      *int64                 `json:"group_id,omitempty"`
 	LaneBindings map[string]LaneBinding `json:"lane_bindings,omitempty"`
 	ClearedLanes []string               `json:"cleared_lanes,omitempty"`
+	ImageGroups  map[string]int64       `json:"image_groups,omitempty"`
 }
 
 func (Credentials) String() string   { return "CheapRouter 凭据（已隐藏）" }
@@ -277,17 +278,41 @@ type GroupCompanion struct {
 	Group GroupRef `json:"group"`
 }
 
-// Model is the part of model_catalog needed to configure sailry.
+// Price carries optional unit prices for a catalog model.
+type Price struct {
+	InputPerMTokUSD  *float64 `json:"input_per_mtok_usd,omitempty"`
+	OutputPerMTokUSD *float64 `json:"output_per_mtok_usd,omitempty"`
+	PerRequestUSD    *float64 `json:"per_request_usd,omitempty"`
+	PerImageUSD      *float64 `json:"per_image_usd,omitempty"`
+}
+
+// MediaTier records one resolution tier's effective price for an image/video model.
+type MediaTier struct {
+	Tier          string   `json:"tier"`
+	OfficialUSD   *float64 `json:"official_usd,omitempty"`
+	EffectiveUSD  *float64 `json:"effective_usd,omitempty"`
+	IsDefaultTier bool     `json:"is_default_tier,omitempty"`
+}
+
+// PricingDetails holds per-resolution media pricing tiers and billing unit.
+type PricingDetails struct {
+	MediaTiers []MediaTier `json:"media_tiers,omitempty"`
+	MediaUnit  string      `json:"media_unit,omitempty"`
+}
+
+// Model is the part of model_catalog needed to configure sailry and image studio.
 type Model struct {
-	ID              string           `json:"model"`
-	DisplayName     string           `json:"display_name"`
-	Platform        string           `json:"platform"`
-	Provider        string           `json:"provider,omitempty"`
-	BillingMode     string           `json:"billing_mode"`
-	ContextWindow   int64            `json:"context_window"`
-	MaxOutputTokens int64            `json:"max_output_tokens,omitempty"`
-	BestGroup       GroupRef         `json:"best_group,omitempty"`
-	OtherGroups     []GroupCompanion `json:"other_groups,omitempty"`
+	ID               string           `json:"model"`
+	DisplayName      string           `json:"display_name"`
+	Platform         string           `json:"platform"`
+	Provider         string           `json:"provider,omitempty"`
+	BillingMode      string           `json:"billing_mode"`
+	ContextWindow    int64            `json:"context_window"`
+	MaxOutputTokens  int64            `json:"max_output_tokens,omitempty"`
+	BestGroup        GroupRef         `json:"best_group,omitempty"`
+	OtherGroups      []GroupCompanion `json:"other_groups,omitempty"`
+	EffectivePricing Price            `json:"effective_pricing_usd,omitempty"`
+	PricingDetails   PricingDetails   `json:"pricing_details,omitempty"`
 }
 
 // ServesGroup reports whether this catalog item is offered through groupID.

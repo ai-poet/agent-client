@@ -33,9 +33,11 @@ type State struct {
 	Actions      *Actions
 	Sample       Sample
 	Metrics      *Metrics
-	Selected     string // conversation ID
-	SelectedHost string
-	Preview      bool
+	Selected          string // conversation ID
+	SelectedHost      string
+	ImageStudioActive bool
+	OpenImageStudio   func()
+	Preview           bool
 	// Sort is the order of the projects and of the conversations in the
 	// chats and in each project, as a Sort: the session order preference,
 	// which the sort menu sets. New gives the sidebar its own, SortUpdated;
@@ -221,7 +223,7 @@ func (s *State) Order() []string {
 // View builds the navigation column's content.
 func View(c *ui.Context, s *State) {
 	s.drawn = false
-	ui.Column(c).Padding(16, 12, 8, 12).Children(func() {
+	ui.Column(c).Padding(16, 12, 8, 12).Gap(6).Children(func() {
 		b := kit.PrimaryLook(c, ui.ButtonBase(c.Key("new")), i18n.T(c, "conversation"), false).FillWidth()
 		if v := theme.Of(c).Variant; v != nil {
 			kit.Fill(c, b, v.NewSession, false)
@@ -230,6 +232,22 @@ func View(c *ui.Context, s *State) {
 			ui.Icon(c, icons.Plus).FontSize(16)
 			ui.Text(c, i18n.T(c, "conversation")).FontSize(14).SingleLine()
 		}).OnClick(s.NewChat)
+		if s.OpenImageStudio != nil {
+			p := theme.Of(c)
+			label := i18n.T(c, "image_studio")
+			studio := ui.ButtonBase(c.Key("image-studio")).Label(label).FillWidth().Height(32).PaddingX(10).Gap(8).
+				Radius(p.Radius).Cursor(ui.CursorPointer).AlignItems(ui.Center).Justify(ui.Start)
+			hovered := studio.Hovered()
+			studio.Background(p.SidebarItem(s.ImageStudioActive, hovered))
+			color := p.MutedForeground
+			if s.ImageStudioActive || hovered {
+				color = p.SidebarForeground
+			}
+			studio.TextColor(color).Children(func() {
+				ui.Icon(c, icons.Image).FontSize(15).Shrink(0)
+				ui.Text(c, label).FontSize(14).SingleLine().Grow(1).Shrink(1)
+			}).OnClick(s.OpenImageStudio)
+		}
 	})
 	ui.Scroll(c.Key("sessions")).Grow(1).Padding(8, 12).Gap(4).Children(func() {
 		if s.Data.Workspace != nil && len(s.Data.Workspace.Hosts) > 0 {

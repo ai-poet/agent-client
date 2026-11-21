@@ -2344,3 +2344,92 @@ controller_login_identity_unavailable: Diese Anmeldung hat keine verifizierte Ko
 controller_login_target_changed: Das ursprüngliche Authentifizierungsziel der Aufgabe hat sich geändert
 controller_login_original_controller: Anmeldung auf dem ursprünglichen Controller der Aufgabe wiederherstellen
 controller_login_provider_missing: Der ursprüngliche Anbieter der Aufgabe ist nicht verfügbar
+image_studio: Kreativstudio
+image_studio_subtitle: Bilder mit CheapRouter oder einer benutzerdefinierten OpenAI-kompatiblen API erstellen
+image_studio_picture_count: '%{count} Bild(er)'
+image_studio_channel: Kanal
+image_studio_channel_cheaprouter: CheapRouter
+image_studio_channel_custom: Eigene API
+image_studio_model: Modell
+image_studio_size: Größe
+image_studio_size_auto: Auto
+image_studio_quality: Qualität
+image_studio_quality_auto: Auto
+image_studio_quality_low: Niedrig
+image_studio_quality_medium: Mittel
+image_studio_quality_high: Hoch
+image_studio_quality_standard: Standard
+image_studio_quality_hd: HD
+image_studio_count: Anzahl
+image_studio_count_n: '%{count} Bild(er)'
+image_studio_prompt_placeholder: Beschreibe das Bild, das du erstellen möchtest…
+image_studio_generate: Generieren
+image_studio_generating: Wird generiert…
+image_studio_cancel: Abbrechen
+image_studio_retry: Wiederholen
+image_studio_rerun: Erneut generieren
+image_studio_edit_prompt: Prompt übernehmen
+image_studio_copy_prompt: Prompt kopieren
+image_studio_save_as: Speichern unter…
+image_studio_reveal: Im Ordner anzeigen
+image_studio_open_folder: Ausgabeordner
+image_studio_remove: Entfernen
+image_studio_open_settings: Bild-API-Einstellungen
+image_studio_sign_in: Bei CheapRouter anmelden
+image_studio_refresh_models: Modelle aktualisieren
+image_studio_empty_title: Bereit zum Erstellen
+image_studio_empty_body: Gib unten einen Prompt ein und wähle Modell sowie Größe; erstellte Bilder werden lokal gespeichert und hier angezeigt.
+image_studio_signed_out_notice: Melde dich bei CheapRouter an oder konfiguriere unter Einstellungen > Bild-API eine eigene OpenAI-kompatible Schnittstelle.
+image_studio_no_models_notice: Im CheapRouter-Katalog wurden keine Bildmodelle gefunden. Unter Einstellungen > Bild-API kannst du eine eigene Schnittstelle einrichten.
+image_studio_models_loading: CheapRouter-Modellkatalog wird geladen…
+image_studio_custom_unconfigured_notice: Eigene Bild-API ist noch nicht eingerichtet. Trage unter Einstellungen > Bild-API Base URL, API Key und Modell ein.
+image_studio_file_missing: Bilddatei nicht auf dem Datenträger gefunden
+image_studio_drawing: Wird generiert · %{time}
+image_studio_running_task: Warte auf asynchrone Aufgabe…
+image_studio_running_direct: Bild-API wird angefragt…
+image_studio_saved_toast: Bild gespeichert
+image_studio_save_failed: Bild konnte nicht gespeichert werden
+image_studio_error_no_permission: Für diese Gruppe ist die Bildgenerierung nicht aktiviert
+image_studio_error_wrong_platform: Die gewählte Gruppe unterstützt die Images-API nicht
+image_studio_error_model_unavailable: Modell nicht verfügbar oder nicht gefunden
+image_studio_error_content_policy: Durch Inhaltsrichtlinien blockiert
+image_studio_error_balance: Guthaben oder Kontingent erschöpft
+image_studio_error_upstream_balance: Upstream-Bildkontingent erschöpft
+image_studio_error_busy: Zu viele Anfragen; bitte gleich erneut versuchen
+image_studio_error_timeout: Zeitüberschreitung bei der Bildgenerierung
+image_studio_error_task_lost: Bildaufgabe abgelaufen oder nicht gefunden
+image_studio_error_interrupted: Generierung wurde vor Abschluss unterbrochen
+image_studio_error_unauthorized: Authentifizierung fehlgeschlagen — API-Key oder Anmeldung prüfen
+image_studio_error_bad_request: Nicht unterstützter Parameter oder ungültige Anfrage
+image_studio_error_network: Netzwerkfehler — Verbindung und Endpunkt-URL prüfen
+image_studio_error_cancelled: Generierung abgebrochen
+image_studio_error_other: Bildgenerierung fehlgeschlagen
+settings_image_api: Bild-API
+settings_image_api_description: Benutzerdefinierten OpenAI-kompatiblen Images-Endpunkt (POST /v1/images/generations) neben CheapRouter einrichten
+settings_image_api_base_url: Base URL
+settings_image_api_base_url_desc: Basis-URL oder /v1-URL; /v1/images/generations wird bei Bedarf automatisch ergänzt
+settings_image_api_base_url_placeholder: https://api.openai.com/v1
+settings_image_api_key: API Key
+settings_image_api_key_desc: Wird privat (0600) gespeichert und nie in Logs oder Fehlermeldungen ausgegeben
+settings_image_api_key_placeholder: sk-...
+settings_image_api_key_saved_placeholder: Gespeichert — leer lassen zum Beibehalten
+settings_image_api_key_saved_badge: Schlüssel gespeichert
+settings_image_api_clear_key: Schlüssel löschen
+settings_image_api_model: Modellname
+settings_image_api_model_desc: Standard-Bildmodell für Anfragen an diesen Endpunkt
+settings_image_api_model_placeholder: gpt-image-1
+settings_image_api_extra: Zusätzliche Parameter (JSON, optional)
+settings_image_api_extra_desc: Optionales JSON-Objekt, das in den Request-Body übernommen wird
+settings_image_api_extra_placeholder: '{"response_format": "b64_json"}'
+settings_image_api_save: Konfiguration speichern
+settings_image_api_clear: Konfiguration löschen
+settings_image_api_saved: Bild-API-Konfiguration gespeichert
+settings_image_api_cleared: Bild-API-Konfiguration gelöscht
+settings_image_api_key_cleared: Gespeicherter API-Key gelöscht
+settings_image_api_invalid_url: Bitte eine gültige http://- oder https://-Base-URL eingeben
+settings_image_api_invalid_model: Bitte einen Modellnamen eingeben
+settings_image_api_invalid_extra: Zusätzliche Parameter müssen ein gültiges JSON-Objekt sein
+settings_image_api_save_failed: Bild-API-Konfiguration konnte nicht gespeichert werden
+settings_image_api_open_studio: Kreativstudio öffnen
+settings_image_api_status_ready: Konfiguriert
+settings_image_api_status_empty: Nicht konfiguriert

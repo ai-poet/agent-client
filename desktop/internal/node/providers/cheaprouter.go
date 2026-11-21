@@ -40,7 +40,7 @@ func CheapRouterProvider(gateway cheapauth.Gateway) (protocol.ConversationProvid
 	indexByID := make(map[string]int, len(gateway.Models))
 	for _, item := range gateway.Models {
 		id := strings.TrimSpace(item.ID)
-		if id == "" || len(id) > maxCheapRouterModelIDLen || isNonConversationalCheapRouterModel(id) {
+		if id == "" || len(id) > maxCheapRouterModelIDLen || isNonConversationalCheapRouterModel(id) || cheapauth.IsImageCatalogModel(item) {
 			continue
 		}
 		mode := strings.ToLower(strings.TrimSpace(item.BillingMode))
@@ -127,7 +127,7 @@ func normalizeCheapRouterPlatform(item cheapauth.Model) string {
 func isNonConversationalCheapRouterModel(modelID string) bool {
 	name := strings.ToLower(strings.TrimSpace(modelID))
 	name = name[strings.LastIndex(name, "/")+1:]
-	for _, prefix := range []string{"gpt-image", "dall-e", "sora", "tts-", "gpt-4o-mini-tts", "whisper", "grok-image"} {
+	for _, prefix := range []string{"gpt-image", "dall-e", "sora", "tts-", "gpt-4o-mini-tts", "whisper", "grok-image", "grok-imagine", "grok-2-image", "imagen-", "flux-"} {
 		if strings.HasPrefix(name, prefix) {
 			return true
 		}

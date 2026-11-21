@@ -657,6 +657,82 @@ func (s *Service) SetGroup(ctx context.Context, groupID *int64) error {
 	return nil
 }
 
+// ImageRouteCandidates returns the ordered routing groups to try for an image
+// model using the current credentials snapshot (no secrets are returned).
+func (s *Service) ImageRouteCandidates(catalog []Model, model string) []ImageGroup {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.credentials == nil {
+		return nil
+	}
+	return ImageRouteCandidates(*s.credentials, catalog, model)
+}
+
+// ImageRouteKey resolves the gateway origin and an active API key for groupID
+// (or the account default key when groupID is nil), minting one if necessary.
+// The returned key must only be used in background HTTP calls.
+func (s *Service) ImageRouteKey(ctx context.Context, groupID *int64) (string, string, error) {
+	credentials, client, err := s.session(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	keys, err := client.Keys(ctx, credentials.AccessToken)
+	if err != nil {
+		return "", "", err
+	}
+	var key string
+	if groupID != nil && *groupID > 0 {
+		key, err = ensureGroupKey(ctx, client, credentials.AccessToken, &keys, *groupID)
+		if err != nil {
+			return "", "", err
+		}
+	} else {
+		key = accountKey(keys, credentials.APIKey)
+		if key == "" {
+			created, err := client.CreateKeyForGroup(ctx, credentials.AccessToken, CheapRouterKeyName, nil)
+			if err != nil {
+				return "", "", err
+			}
+			key = strings.TrimSpace(created.Key)
+			if key == "" {
+				return "", "", &AuthError{Kind: ErrorResponse, Op: "/keys"}
+			}
+		}
+	}
+	return client.Endpoint(), key, nil
+}
+
+// RememberImageGroup persists the group that successfully generated an image
+// for model so subsequent requests try it first.
+func (s *Service) RememberImageGroup(ctx context.Context, model string, groupID int64) error {
+	modelKey := strings.ToLower(strings.TrimSpace(model))
+	if modelKey == "" || groupID <= 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	credentialLock.Lock()
+	defer credentialLock.Unlock()
+	if err := s.adoptLocked(); err != nil {
+		return err
+	}
+	if s.credentials.ImageGroups != nil && s.credentials.ImageGroups[modelKey] == groupID {
+		return nil
+	}
+	updated := *s.credentials
+	updated.ImageGroups = make(map[string]int64, len(s.credentials.ImageGroups)+1)
+	maps.Copy(updated.ImageGroups, s.credentials.ImageGroups)
+	updated.ImageGroups[modelKey] = groupID
+	if err := s.store.Save(updated); err != nil {
+		return err
+	}
+	*s.credentials = updated
+	return nil
+}
+
 func readGateway(ctx context.Context, client *Client, credentials Credentials) (Gateway, error) {
 	return readGatewayWithGroups(ctx, client, credentials, nil)
 }
@@ -943,7 +1019,9 @@ func credentialsEqual(a, b Credentials) bool {
 	if (a.GroupID == nil) != (b.GroupID == nil) || (a.GroupID != nil && *a.GroupID != *b.GroupID) {
 		return false
 	}
-	return maps.Equal(a.LaneBindings, b.LaneBindings) && slices.Equal(a.ClearedLanes, b.ClearedLanes)
+	return maps.Equal(a.LaneBindings, b.LaneBindings) &&
+		slices.Equal(a.ClearedLanes, b.ClearedLanes) &&
+		maps.Equal(a.ImageGroups, b.ImageGroups)
 }
 
 // accountKey picks the key the whole catalog is routed with: the bridge's

@@ -2344,3 +2344,92 @@ controller_login_identity_unavailable: 此次登录缺少可验证的账号标�
 controller_login_target_changed: 任务原来的认证目标已变更，无法恢复登录
 controller_login_original_controller: 请在任务原来的控制端上恢复登录
 controller_login_provider_missing: 任务原来的供应商不可用
+image_studio: 创作工作台
+image_studio_subtitle: 使用 CheapRouter 或自定义 OpenAI 兼容接口生成图片
+image_studio_picture_count: 共 %{count} 张图片
+image_studio_channel: 画图通道
+image_studio_channel_cheaprouter: CheapRouter
+image_studio_channel_custom: 自定义接口
+image_studio_model: 模型
+image_studio_size: 尺寸
+image_studio_size_auto: 自动
+image_studio_quality: 质量
+image_studio_quality_auto: 自动
+image_studio_quality_low: 低
+image_studio_quality_medium: 中
+image_studio_quality_high: 高
+image_studio_quality_standard: 标准
+image_studio_quality_hd: 高清
+image_studio_count: 数量
+image_studio_count_n: '%{count} 张'
+image_studio_prompt_placeholder: 描述你想要生成的画面，支持中英文提示词…
+image_studio_generate: 生成图片
+image_studio_generating: 生成中…
+image_studio_cancel: 取消
+image_studio_retry: 重试
+image_studio_rerun: 再次生成
+image_studio_edit_prompt: 复用提示词
+image_studio_copy_prompt: 复制提示词
+image_studio_save_as: 另存为…
+image_studio_reveal: 在文件夹中显示
+image_studio_open_folder: 打开保存目录
+image_studio_remove: 删除记录
+image_studio_open_settings: 画图接口设置
+image_studio_sign_in: 登录 CheapRouter
+image_studio_refresh_models: 刷新模型
+image_studio_empty_title: 开始创作
+image_studio_empty_body: 在下方输入提示词并选择模型与参数，生成的图片会自动保存到本地并展示在这里。
+image_studio_signed_out_notice: 登录 CheapRouter 即可自动接入内置画图模型，也可在「设置 → 画图接口」配置自定义 OpenAI 兼容接口。
+image_studio_no_models_notice: 当前 CheapRouter 账号目录中未检测到可用的画图模型。你可以前往「设置 → 画图接口」配置自定义画图接口。
+image_studio_models_loading: 正在加载 CheapRouter 模型目录…
+image_studio_custom_unconfigured_notice: 尚未配置自定义画图接口。请前往「设置 → 画图接口」填写 Base URL、API Key 与模型名。
+image_studio_file_missing: 本地图片文件不存在
+image_studio_drawing: 生成中 · %{time}
+image_studio_running_task: 等待异步任务完成…
+image_studio_running_direct: 正在请求画图接口…
+image_studio_saved_toast: 图片已保存
+image_studio_save_failed: 保存图片失败
+image_studio_error_no_permission: 当前分组未开通画图权限
+image_studio_error_wrong_platform: 当前分组不支持画图接口
+image_studio_error_model_unavailable: 模型不可用或接口未找到该模型
+image_studio_error_content_policy: 提示词未通过内容安全审核
+image_studio_error_balance: 账户余额或额度不足
+image_studio_error_upstream_balance: 上游画图额度不足，请稍后重试
+image_studio_error_busy: 请求过于频繁或排队已满，请稍后重试
+image_studio_error_timeout: 生成超时，请稍后重试
+image_studio_error_task_lost: 异步任务已过期或不存在
+image_studio_error_interrupted: 生成未完成即被中断
+image_studio_error_unauthorized: 鉴权失败，请检查 API Key 或重新登录
+image_studio_error_bad_request: 不支持的参数或请求无效
+image_studio_error_network: 网络请求失败，请检查网络或接口地址
+image_studio_error_cancelled: 已取消生成
+image_studio_error_other: 图片生成失败
+settings_image_api: 画图接口
+settings_image_api_description: 配置自定义 OpenAI 兼容画图接口（POST /v1/images/generations），与 CheapRouter 通道并存
+settings_image_api_base_url: Base URL
+settings_image_api_base_url_desc: 填写服务根地址或 /v1 地址，请求时会自动补全 /v1/images/generations
+settings_image_api_base_url_placeholder: https://api.openai.com/v1
+settings_image_api_key: API Key
+settings_image_api_key_desc: 以 0600 私密凭据保存，不会写入日志或错误文案
+settings_image_api_key_placeholder: sk-...
+settings_image_api_key_saved_placeholder: 已安全保存，留空则保持不变
+settings_image_api_key_saved_badge: 已保存密钥
+settings_image_api_clear_key: 清除密钥
+settings_image_api_model: 模型名
+settings_image_api_model_desc: 调用自定义画图接口时默认使用的模型标识
+settings_image_api_model_placeholder: gpt-image-1
+settings_image_api_extra: 可选额外参数（JSON）
+settings_image_api_extra_desc: 可选 JSON 对象，将合并到画图请求体中（例如 style、response_format 等）
+settings_image_api_extra_placeholder: '{"response_format": "b64_json"}'
+settings_image_api_save: 保存配置
+settings_image_api_clear: 清空配置
+settings_image_api_saved: 画图接口配置已保存
+settings_image_api_cleared: 画图接口配置已清空
+settings_image_api_key_cleared: 已清除保存的 API Key
+settings_image_api_invalid_url: 请输入有效的 http:// 或 https:// 地址（不要包含账号密码）
+settings_image_api_invalid_model: 请输入模型名
+settings_image_api_invalid_extra: 额外参数必须是合法的 JSON 对象
+settings_image_api_save_failed: 保存画图接口配置失败
+settings_image_api_open_studio: 前往创作工作台
+settings_image_api_status_ready: 已配置
+settings_image_api_status_empty: 未配置
