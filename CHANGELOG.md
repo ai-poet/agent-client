@@ -3,6 +3,48 @@
 Release entries supply the corresponding GitHub Release notes. A version is
 released only after its entry is here.
 
+## [0.4.3](https://github.com/ai-poet/cheaprouter-harness/releases/tag/v0.4.3) — 2026-11-22
+
+按分组使用原生接口协议、充值收进账号弹层，并修复旧会话压缩失败。
+
+Each bound group now uses its native API protocol, top-ups live in the account popover, and old conversations compact again.
+
+### 新增 / Added
+
+- 按分组使用原生接口：GPT / Codex / Grok 走 Responses，国模走 Chat Completions，Claude 走 Messages，Gemini 走原生流式；网关明确不支持时按声明回退
+
+  Native APIs per bound group: GPT, Codex and Grok use Responses, domestic models use Chat Completions, Claude uses Messages and Gemini its native stream, with an explicit opt-out honoured
+
+- 充值入口移到左下角账号弹层，展示余额与套餐；弹窗改为两层——金额与快捷档位、预计到账（含赠送）→ 支付方式 → 下单后进入二维码、倒计时与取消
+
+  Top-up now starts in the account popover with balance and plan; the dialog is two layers: amount and quick amounts with the expected credit, then the payment method, then the QR code, countdown and cancel
+
+- 自动检查到新版本时弹出升级窗口，显示版本与更新日志，「稍后」按版本记住
+
+  A new release opens an upgrade window with the version and its notes, and "Later" is remembered per version
+
+- Ask User 提问到达即展开选项，无需再点；没在输入时可直接用方向键与回车作答
+
+  Ask User questions open their choices on arrival, and arrow keys with Enter answer them without a click when nothing is being typed
+
+### 修复 / Fixed
+
+- 旧会话压缩报「没有可用模型」：会话仍引用分 lane 之前的统一 provider，现按模型继任到承载它的 lane provider，不会跨 lane 顶替
+
+  Compaction of conversations created before per-lane providers reported no available model: a selection on the retired route now follows the lane that carries its model, never another lane
+
+- 压缩失败不再只显示「操作失败」，而是给出引擎原因（模型未按格式返回、摘要为空、被输出上限截断等）
+
+  A failed compaction no longer reports only a generic failure; it names the engine's reason (invalid structured handoff, empty summary, truncated output)
+
+- macOS 应用图标与 Windows 使用同一份品牌图标，旧品牌图标文件已移除
+
+  The macOS app icon now matches Windows and shares one brand source; the old brand icon file is gone
+
+- 同步上游 0.2.7 的核心修复：事件交付时校验权限、拨号重试与证书失败分类、Git 工作树截断防护、前台子任务释放、队列修订同步等 13 项
+
+  Thirteen core fixes from upstream 0.2.7: per-event authorization at delivery, dial retry and certificate failure classification, Git worktree truncation guards, foreground child release, queue revision syncing
+
 ## [0.4.1](https://github.com/ai-poet/cheaprouter-harness/releases/tag/v0.4.1) — 2026-11-22
 
 修复从 0.3.8 自动更新到 0.4.0 时安装器一闪即退的问题。
