@@ -138,8 +138,10 @@ func (r *Runtime) runMigration(fillMissing bool) {
 			ApplyPreferences: func(theme, language string) error {
 				done := make(chan error, 1)
 				r.enqueue(func(c *ui.Context) {
+					r.savePreferences()
 					applyErr := migrate.ApplyDesktopPreferences(r.Preferences, theme, language)
 					if applyErr == nil {
+						r.prefsRevision = r.Preferences.Revision()
 						r.applyPreferences()
 						if r.preferencesChanged != nil {
 							r.preferencesChanged()

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/ai-poet/cheaprouter-harness/internal/desktop/onboarding"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panes"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/sidebar"
@@ -177,8 +176,8 @@ func (a *App) SetPrefs(p Prefs) {
 	a.panes.Kept = slices.Clone(p.Tabs)
 	a.panes.order = slices.Clone(p.TabOrder)
 	a.prunePanes()
-	if a.Preview && p.WelcomeSeen != nil && !*p.WelcomeSeen {
-		a.Welcome = onboarding.Guide{Open: true}
+	if a.Preview && p.WelcomeSeen != nil {
+		a.SetWelcome(*p.WelcomeSeen)
 	}
 }
 

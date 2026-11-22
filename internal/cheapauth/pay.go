@@ -75,17 +75,18 @@ func payLang(lang string) string {
 	return tag
 }
 
-// PaySession refreshes on the login origin before selecting a payment route.
+// PaySession refreshes on the login origin before selecting a payment route
+// via the unified gatewayOrigin resolver.
 func (s *Service) PaySession(ctx context.Context, lang string) (*PayClient, string, error) {
-	cr, c, err := s.session(ctx)
+	cr, apiClient, _, err := s.apiSession(ctx)
 	if err != nil {
 		return nil, "", err
 	}
-	p, err := NewPayClient(paymentOrigin(s.store.Path(), c.endpoint), lang)
+	p, err := NewPayClient(apiClient.Endpoint(), lang)
 	if err != nil {
 		return nil, "", err
 	}
-	p.client.http = c.http
+	p.client.http = apiClient.http
 	return p, cr.AccessToken, nil
 }
 func (p *PayClient) Endpoint() string { return p.client.endpoint }

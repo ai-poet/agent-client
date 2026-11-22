@@ -27,6 +27,7 @@ func (a *App) accountFooter(c *ui.Context) {
 	signedIn := state.SignedIn()
 	if !a.accountOpen || !signedIn {
 		a.accountGroupLane = ""
+		a.accountNodesOpen = false
 	}
 	width, height := c.Size()
 	panelWidth := max(0, min(304, width-32))
@@ -76,6 +77,7 @@ func (a *App) accountFooter(c *ui.Context) {
 			opening := !a.accountOpen
 			a.accountOpen = opening
 			a.accountGroupLane = ""
+			a.accountNodesOpen = false
 			if opening && state.SignedIn() && state.RefreshGroups != nil {
 				state.RefreshGroups()
 			}
@@ -101,6 +103,7 @@ func (a *App) accountFooter(c *ui.Context) {
 			Margin(0, 0, 6, 0).Width(panelWidth).MaxHeight(max(0, height-72))
 		if panel.Dismissed() {
 			a.accountGroupLane = ""
+			a.accountNodesOpen = false
 		}
 	}
 }
@@ -154,6 +157,7 @@ func accountInitial(user core.User) string {
 func (a *App) openCheapAccountSettings() {
 	a.accountOpen = false
 	a.accountGroupLane = ""
+	a.accountNodesOpen = false
 	a.Navigate(SettingsPage)
 	a.Settings.Open(settings.CheapAccount)
 }
@@ -307,6 +311,7 @@ func (a *App) accountSignedInContent(c *ui.Context, state *cheapauthui.State) {
 							})
 						})
 					}).OnClick(func() {
+						a.accountNodesOpen = false
 						if a.accountGroupLane == lane {
 							a.accountGroupLane = ""
 						} else {
@@ -314,6 +319,7 @@ func (a *App) accountSignedInContent(c *ui.Context, state *cheapauthui.State) {
 						}
 					})
 					if laneTrigger.Shortcut(0, ui.KeyRight) {
+						a.accountNodesOpen = false
 						a.accountGroupLane = lane
 					}
 					a.accountLaneSubmenu(c, p, state, lane, laneTrigger)
@@ -340,17 +346,167 @@ func (a *App) accountSignedInContent(c *ui.Context, state *cheapauthui.State) {
 
 		ui.Box(c).FillWidth().Height(1).Background(p.Border)
 
+		a.accountOriginSection(c, p, state)
+
+		ui.Box(c).FillWidth().Height(1).Background(p.Border)
+
 		ui.Row(c.Key("account-actions")).Gap(6).Children(func() {
 			kit.Ghost(c.Key("popover-account-page"), "账号详情", false).Grow(1).Height(30).OnClick(a.openCheapAccountSettings)
 			kit.DangerBusy(c.Key("popover-logout"), "退出登录", state.LoggingOut).Grow(1).Height(30).OnClick(func() {
 				a.accountOpen = false
 				a.accountGroupLane = ""
+				a.accountNodesOpen = false
 				if state.Logout != nil {
 					state.Logout()
 				}
 			})
 		})
 	})
+}
+
+func (a *App) accountOriginSection(c *ui.Context, p *theme.Palette, state *cheapauthui.State) {
+	label := i18n.T(c, "gateway_origin_short")
+	activeLabel := state.ActiveOriginShortLabel(c)
+	open := a.accountNodesOpen
+	trigger := ui.ButtonBase(c.Key("origin-menu-trigger")).Label(label).FillWidth().Height(32).Padding(6, 8).Gap(8).
+		Radius(p.Radius).Cursor(ui.CursorPointer).AlignItems(ui.Center).
+		HasPopup(ui.PopupMenu).Expanded(open)
+	switch {
+	case trigger.Pressed() || open:
+		trigger.Background(p.Active)
+	case trigger.Hovered():
+		trigger.Background(p.Hover)
+	}
+	trigger.Children(func() {
+		ui.Icon(c, icons.Globe).FontSize(13).Shrink(0).TextColor(p.MutedForeground)
+		ui.Text(c, label).FontSize(13).FontWeight(500).SingleLine().Shrink(0).TextColor(p.PopoverForeground)
+		ui.Spacer(c)
+		if state.OriginTesting || state.OriginSwitching {
+			kit.Busy(c)
+		} else if activeLabel != "" {
+			ui.Text(c, activeLabel).FontSize(12).SingleLine().Shrink(1).MinWidth(0).TextColor(p.MutedForeground)
+		}
+		ui.Icon(c, icons.ChevronRight).FontSize(14).Shrink(0).TextColor(p.MutedForeground)
+	}).OnClick(func() {
+		a.accountGroupLane = ""
+		a.accountNodesOpen = !a.accountNodesOpen
+	})
+	if trigger.Shortcut(0, ui.KeyRight) {
+		a.accountGroupLane = ""
+		a.accountNodesOpen = true
+	}
+	a.accountOriginSubmenu(c, p, state, trigger)
+}
+
+func (a *App) accountOriginSubmenu(c *ui.Context, p *theme.Palette, state *cheapauthui.State, trigger ui.Element) {
+	disabled := state.OriginSwitching || state.LoggingOut || state.Stage == cheapauthui.SyncingGateway || state.SelectOrigin == nil
+	width, height := c.Size()
+	menuHeight := max(0, min(420, height-32))
+	open := a.accountNodesOpen
+	candidates := state.OriginCandidates()
+	active := state.ActiveOrigin()
+
+	panel := kit.Popover(c, trigger, &open, func() {
+		ui.Column(c.Key("origin-submenu-panel")).FillWidth().Shrink(1).Padding(8).Gap(6).Children(func() {
+			ui.Row(c.Key("origin-submenu-header")).AlignItems(ui.Center).Justify(ui.SpaceBetween).PaddingX(4).Gap(6).Children(func() {
+				ui.Text(c, i18n.T(c, "gateway_origin_title")).FontSize(12).FontWeight(600).TextColor(p.MutedForeground)
+				if state.TestOrigins != nil {
+					kit.IconButton(c.Key("origin-submenu-test-icon"), icons.Zap, i18n.T(c, "gateway_node_test_all"), 22, false).
+						Disabled(state.OriginTesting || state.OriginSwitching || state.LoggingOut).
+						OnClick(state.TestOrigins)
+				}
+			})
+
+			ui.Box(c).FillWidth().Height(1).Background(p.Border)
+
+			ui.Scroll(c.Key("origin-submenu-list")).MaxHeight(max(0, menuHeight-132)).Gap(2).Children(func() {
+				for i, origin := range candidates {
+					nodeURL := origin
+					selected := active == nodeURL
+					name, _ := state.OriginDisplayLabel(c, nodeURL)
+					res := state.OriginResultFor(nodeURL)
+					row := ui.ButtonBase(c.Key(fmt.Sprintf("origin-opt-%d", i))).Label(name).Description(nodeURL).
+						FillWidth().Padding(6, 8).Radius(p.Radius).Cursor(ui.CursorPointer).
+						Checked(selected).Disabled(disabled)
+					switch {
+					case selected:
+						row.Background(p.Active)
+					case row.Hovered():
+						row.Background(p.Hover)
+					}
+					row.Children(func() {
+						ui.Column(c).FillWidth().Grow(1).Shrink(1).MinWidth(0).Gap(2).Children(func() {
+							ui.Row(c).FillWidth().MinWidth(0).AlignItems(ui.Center).Gap(6).Children(func() {
+								ui.Text(c, name).FontSize(13).SingleLine().Grow(1).Shrink(1).MinWidth(0).TextColor(p.PopoverForeground)
+								cheapauthui.OriginStatusBadge(c, res, state.OriginTesting, true)
+								if selected {
+									ui.Icon(c, icons.Check).FontSize(14).Shrink(0).TextColor(p.Primary)
+								}
+							})
+							ui.Text(c, nodeURL).FontSize(11).SingleLine().TextColor(p.MutedForeground)
+						})
+					}).OnClick(func() {
+						a.accountNodesOpen = false
+						trigger.Focus()
+						if state.SelectOrigin != nil {
+							state.SelectOrigin(nodeURL)
+						}
+					})
+				}
+			})
+
+			if state.OriginError != "" {
+				ui.Text(c, state.OriginError).FontSize(11).Padding(2, 4).TextColor(p.Danger)
+			}
+
+			ui.Box(c).FillWidth().Height(1).Background(p.Border)
+
+			autoOn := state.OriginConfig.AutoSelect
+			ui.Row(c.Key("origin-submenu-auto")).FillWidth().Padding(2, 4).AlignItems(ui.Center).Justify(ui.SpaceBetween).Gap(8).Children(func() {
+				ui.Text(c, i18n.T(c, "gateway_origin_auto_select")).FontSize(12).Grow(1).Shrink(1).MinWidth(0).TextColor(p.PopoverForeground)
+				sw := ui.Switch(c.Key("origin-submenu-auto-switch"), &autoOn).
+					Label(i18n.T(c, "gateway_origin_auto_select")).
+					Disabled(state.LoggingOut || state.SetOriginAuto == nil)
+				if sw.Changed() && state.SetOriginAuto != nil {
+					state.SetOriginAuto(autoOn)
+				}
+			})
+
+			ui.Row(c.Key("origin-submenu-actions")).FillWidth().Gap(6).Children(func() {
+				testLabel := i18n.T(c, "gateway_node_test_all")
+				if state.OriginTesting {
+					testLabel = i18n.T(c, "gateway_node_testing")
+				}
+				kit.SecondaryBusy(c.Key("origin-submenu-test"), testLabel, state.OriginTesting).
+					Grow(1).Height(28).
+					Disabled(state.OriginTesting || state.OriginSwitching || state.LoggingOut || state.TestOrigins == nil).
+					OnClick(func() {
+						if state.TestOrigins != nil {
+							state.TestOrigins()
+						}
+					})
+				kit.Ghost(c.Key("origin-submenu-manage"), i18n.T(c, "gateway_node_manage"), false).
+					Height(28).PaddingX(8).
+					OnClick(a.openCheapAccountSettings)
+			})
+		})
+	})
+	if !open && a.accountNodesOpen {
+		a.accountNodesOpen = false
+	}
+	if panel == (ui.Element{}) {
+		return
+	}
+	kit.Snapped(panel).Padding(0).MinWidth(0).Width(max(0, min(320, width-32))).MaxHeight(menuHeight)
+	if width >= 660 {
+		panel.AttachTo(trigger, ui.AnchorRight, ui.AnchorLeft).Margin(0, 0, 0, 16)
+	} else {
+		panel.AttachTo(trigger, ui.AnchorTopStart, ui.AnchorBottomStart).Margin(0, 0, 6, 0)
+	}
+	if panel.Shortcut(0, ui.KeyLeft) {
+		a.accountNodesOpen = false
+		trigger.Focus()
+	}
 }
 
 func (a *App) accountLaneSubmenu(c *ui.Context, p *theme.Palette, state *cheapauthui.State, lane string, trigger ui.Element) {

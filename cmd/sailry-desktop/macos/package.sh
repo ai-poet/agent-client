@@ -125,7 +125,7 @@ bundle_build=$((10#$version_major * 1000000 + 10#$version_minor * 1000 + 10#$ver
 revision=${SAILRY_REVISION:-$(git rev-parse HEAD)}
 telemetry=github.com/ai-poet/cheaprouter-harness/internal/node/telemetry
 update_pkg=github.com/ai-poet/cheaprouter-harness/internal/update
-flags="-X github.com/ai-poet/cheaprouter-harness/internal/core.Default=~/.sailry"
+flags="-s -w -X github.com/ai-poet/cheaprouter-harness/internal/core.Default=~/.sailry"
 flags="$flags -X $telemetry.BuildRevision=$revision"
 test -z "${SAILRY_SENTRY_DSN:-}" || flags="$flags -X $telemetry.BuildDSN=$SAILRY_SENTRY_DSN"
 test -z "${SAILRY_TELEMETRY_KEY:-}" || flags="$flags -X $telemetry.BuildKey=$SAILRY_TELEMETRY_KEY"

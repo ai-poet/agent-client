@@ -173,6 +173,7 @@ func content(c *ui.Context, state *State) {
 			}
 		})
 	case GatewayFailed:
+		p := theme.Of(c)
 		ui.Row(c.Key("sync-actions")).Gap(8).Children(func() {
 			action.Button(c.Key("retry"), "重试网关配置", action.ButtonProps{Variant: action.Primary}).
 				Grow(1).Disabled(state.LoggingOut).OnClick(func() {
@@ -187,6 +188,9 @@ func content(c *ui.Context, state *State) {
 				}
 			})
 		})
+		if state.SelectOrigin != nil || state.TestOrigins != nil || state.AddOrigin != nil {
+			gatewayOriginsSection(c, p, state)
+		}
 	case Ready:
 		p := theme.Of(c)
 		ui.Column(c.Key("account")).Gap(14).Children(func() {
@@ -217,6 +221,7 @@ func content(c *ui.Context, state *State) {
 			}
 			kit.Row(c, "models", "可用聊天模型", "", func() { ui.Text(c, fmt.Sprintf("%d 个", state.ModelCount)).FontSize(14) })
 			kit.Row(c, "endpoint", "服务入口", "", func() { ui.Text(c, state.Endpoint).FontSize(13).Selectable() })
+			gatewayOriginsSection(c, p, state)
 			if lanes := state.Lanes(); len(lanes) > 0 || state.GroupsLoading || state.GroupsError != "" {
 				accountGroupsSection(c, p, state, lanes)
 			} else if groupName := state.ActiveGroupName(); groupName != "" {

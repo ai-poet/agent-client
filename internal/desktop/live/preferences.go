@@ -87,8 +87,13 @@ func (r *Runtime) applyPreferences() {
 	}
 	a.SetFeaturePreferences(order, pins)
 	if d.WelcomeSeen != nil {
-		a.SetWelcome(*d.WelcomeSeen)
+		if !r.welcomeApplied {
+			a.SetWelcome(*d.WelcomeSeen)
+		} else if *d.WelcomeSeen && !a.Welcome.Seen {
+			a.SetWelcome(true)
+		}
 	}
+	r.welcomeApplied = true
 	order, pins = a.FeaturePreferences()
 	r.lastFeatures = encoded([]any{order, pins})
 	r.lastKeys = encoded(m.Keys.Overrides())
@@ -106,6 +111,39 @@ func setChoice[T comparable](field **T, value, fallback T) {
 // savePreferences captures edits on the UI thread and writes one immutable JSON
 // snapshot off-thread. Failed bytes are not silently retried every frame.
 func (r *Runtime) savePreferences() {
+	version, bytes, err, ok := r.capturePreferences()
+	if err != nil {
+		r.enqueue(func(c *ui.Context) { kit.Toast(c, kit.Failed, i18n.T(c, "preferences_save_failed")) })
+		return
+	}
+	if !ok {
+		return
+	}
+	if r.preferencesChanged != nil {
+		r.preferencesChanged()
+	}
+	r.async(func() {
+		err := r.Preferences.WriteSnapshot(version, bytes)
+		r.enqueue(func(c *ui.Context) {
+			if err != nil {
+				kit.Toast(c, kit.Failed, i18n.T(c, "preferences_save_failed"))
+			}
+		})
+	})
+}
+
+func (r *Runtime) flushPreferences() {
+	if r.parent != nil || r.lastPreferences == "" || r.Preferences == nil || r.App == nil || r.App.Settings == nil || r.App.Settings.Model == nil {
+		return
+	}
+	version, bytes, err, ok := r.capturePreferences()
+	if err != nil || !ok {
+		return
+	}
+	_ = r.Preferences.WriteSnapshot(version, bytes)
+}
+
+func (r *Runtime) capturePreferences() (uint64, []byte, error, bool) {
 	a, m := r.App, r.App.Settings.Model
 	d := &r.Preferences.Data
 	d.Notifications, d.SidebarMetrics = m.Notify, m.SidebarMetrics
@@ -175,31 +213,20 @@ func (r *Runtime) savePreferences() {
 	}
 	current := encoded(d)
 	if current == r.lastPreferences {
-		return
+		return 0, nil, nil, false
 	}
 	bytes, err := json.MarshalIndent(d, "", "  ")
 	if err != nil {
-		return
+		return 0, nil, nil, false
 	}
 	r.lastPreferences = current
 	if !r.Preferences.Readable {
-		return
+		return 0, nil, nil, false
 	}
 	if err = d.Validate(); err != nil {
-		r.enqueue(func(c *ui.Context) { kit.Toast(c, kit.Failed, i18n.T(c, "preferences_save_failed")) })
-		return
+		return 0, nil, err, false
 	}
 	version := r.Preferences.Changed()
 	r.prefsRevision = version
-	if r.preferencesChanged != nil {
-		r.preferencesChanged()
-	}
-	r.async(func() {
-		err := r.Preferences.WriteSnapshot(version, bytes)
-		r.enqueue(func(c *ui.Context) {
-			if err != nil {
-				kit.Toast(c, kit.Failed, i18n.T(c, "preferences_save_failed"))
-			}
-		})
-	})
+	return version, bytes, nil, true
 }

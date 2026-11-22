@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	core "github.com/ai-poet/cheaprouter-harness/internal/cheapauth"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/egoist/mygo/ui"
 )
 
 type Stage uint8
@@ -56,6 +58,13 @@ type State struct {
 	SwitchingLane      string
 	GroupError         string
 
+	OriginConfig    core.GatewayOriginConfig
+	OriginResults   []core.CandidateResult
+	OriginTesting   bool
+	OriginSwitching bool
+	OriginInput     string
+	OriginError     string
+
 	Start           func(manual bool)
 	SubmitPaste     func()
 	Cancel          func()
@@ -66,9 +75,19 @@ type State struct {
 	RefreshGroups   func()
 	SelectGroup     func(groupID *int64)
 	SelectLaneGroup func(lane string, groupID *int64)
+	SelectOrigin    func(origin string)
+	AddOrigin       func(raw string)
+	RemoveOrigin    func(origin string)
+	TestOrigins     func()
+	SetOriginAuto   func(on bool)
 }
 
-func NewState() *State { return &State{Endpoint: core.PrimaryEndpoint} }
+func NewState() *State {
+	return &State{
+		Endpoint:     core.PrimaryEndpoint,
+		OriginConfig: core.DefaultGatewayOriginConfig(),
+	}
+}
 
 // SignedIn reports whether credentials are established, whatever the gateway's state.
 func (s *State) SignedIn() bool {
@@ -202,4 +221,93 @@ func (s *State) ActiveGroupName() string {
 		}
 	}
 	return ""
+}
+
+// ActiveOrigin returns the business API origin currently routed to: the
+// explicitly selected gateway node when valid, otherwise the login endpoint.
+func (s *State) ActiveOrigin() string {
+	if s == nil {
+		return core.PrimaryEndpoint
+	}
+	if strings.TrimSpace(s.Endpoint) != "" {
+		return s.OriginConfig.ResolveAPIOrigin(s.Endpoint)
+	}
+	return s.OriginConfig.Origin()
+}
+
+// OriginCandidates returns candidate origins ordered by the latest speed test
+// results (available fastest first, then failed, then untested).
+func (s *State) OriginCandidates() []string {
+	if s == nil {
+		return core.DefaultGatewayOriginConfig().EffectiveCandidates()
+	}
+	return core.SortOriginsByResults(s.OriginConfig.EffectiveCandidates(), s.OriginResults)
+}
+
+// OriginResultFor returns the latest speed test outcome for origin, if any.
+func (s *State) OriginResultFor(origin string) *core.CandidateResult {
+	if s == nil {
+		return nil
+	}
+	for i := range s.OriginResults {
+		if s.OriginResults[i].URL == origin {
+			copied := s.OriginResults[i]
+			return &copied
+		}
+	}
+	return nil
+}
+
+// OriginDisplayLabel returns the localized display name and optional secondary
+// description for a candidate origin.
+func (s *State) OriginDisplayLabel(c *ui.Context, origin string) (name, detail string) {
+	if s == nil {
+		return shortOriginHost(origin), ""
+	}
+	label := s.OriginConfig.NodeLabel(origin)
+	switch label.Kind {
+	case core.NodeLabelPrimary:
+		return i18n.T(c, "gateway_node_primary"), ""
+	case core.NodeLabelServer:
+		name = strings.TrimSpace(label.Name)
+		if name == "" {
+			name = shortOriginHost(origin)
+		}
+		return name, strings.TrimSpace(label.Description)
+	case core.NodeLabelBuiltInCDN:
+		return i18n.T(c, "gateway_node_cdn"), i18n.T(c, "gateway_node_cdn_detail")
+	default:
+		if s.OriginConfig.IsRemovable(origin) {
+			return i18n.T(c, "gateway_node_custom"), ""
+		}
+		return shortOriginHost(origin), ""
+	}
+}
+
+// ActiveOriginShortLabel returns a compact label for the active node suitable
+// for popover menus and summary rows.
+func (s *State) ActiveOriginShortLabel(c *ui.Context) string {
+	origin := s.ActiveOrigin()
+	if origin == "" {
+		return ""
+	}
+	label := s.OriginConfig.NodeLabel(origin)
+	switch label.Kind {
+	case core.NodeLabelPrimary:
+		return i18n.T(c, "gateway_node_primary")
+	case core.NodeLabelServer:
+		if name := strings.TrimSpace(label.Name); name != "" {
+			return name
+		}
+	case core.NodeLabelBuiltInCDN:
+		return i18n.T(c, "gateway_node_cdn")
+	}
+	return shortOriginHost(origin)
+}
+
+func shortOriginHost(origin string) string {
+	if _, rest, ok := strings.Cut(origin, "://"); ok && rest != "" {
+		return rest
+	}
+	return origin
 }

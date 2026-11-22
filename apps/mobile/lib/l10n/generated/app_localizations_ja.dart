@@ -1,0 +1,2287 @@
+// ignore: unused_import
+import 'package:intl/intl.dart' as intl;
+import 'app_localizations.dart';
+
+// ignore_for_file: type=lint
+
+/// The translations for Japanese (`ja`).
+class AppLocalizationsJa extends AppLocalizations {
+  AppLocalizationsJa([String locale = 'ja']) : super(locale);
+
+  @override
+  String get guidanceWithdraw => '指示を取り消す';
+
+
+
+
+
+
+
+
+
+
+  @override
+  String get welcomeTitle => '今日は何に取り組みたいですか。';
+
+  @override
+  String get welcomeExplore => 'プロジェクトを探索';
+
+  @override
+  String get welcomeExploreDetail => '構造と入り口を理解する';
+
+  @override
+  String get welcomeExplorePrompt => 'このプロジェクトを理解してくれ 重要なモジュールと入り口を含めて';
+
+  @override
+  String get welcomeBuild => 'アイデアを構築';
+
+  @override
+  String get welcomeBuildDetail => 'アイデアを実現する';
+
+  @override
+  String get welcomeBuildPrompt =>
+      'このプロジェクトに機能を追加したい。まず必要条件を確認し、実装計画を概説してください。';
+
+  @override
+  String get welcomeReview => '変更を見直す';
+
+  @override
+  String get welcomeReviewDetail => '変更と潜在的な問題をチェック';
+
+  @override
+  String get welcomeReviewPrompt =>
+      'このプロジェクトの現在の変化を，潜在的な問題と欠落したテストに焦点を当ててレビューした。';
+
+  @override
+  String get welcomePlan => '計画を立てろ';
+
+  @override
+  String get welcomePlanDetail => '目標とステップを明確にする';
+
+  @override
+  String get welcomePlanPrompt => '次の開発作業の 段階的な計画を作る手伝いを';
+
+  @override
+  String get conversationEmpty => 'あなたのタスクを説明';
+
+  @override
+  String get conversationLoading => 'チャットを読み込み中';
+
+  @override
+  String get conversationReconnecting => '再接続中';
+
+  @override
+  String get conversationErrorDetails => '理由を表示';
+
+  @override
+  String conversationModelRetrying(String attempt, String limit) {
+    return 'モデル要求 $attempt/$limit を再試行中';
+  }
+
+  @override
+  String conversationModelRetried(String attempt, String limit) {
+    return 'モデルリクエスト再試行 $attempt/$limit';
+  }
+
+  @override
+  String get conversationStepSkipped => 'スキップ済み';
+
+  @override
+  String get conversationChild => 'サブタスク';
+
+  @override
+  String get conversationOffline => '接続が途絶えました';
+
+  @override
+  String get conversationUnavailable => 'チャットが利用できません';
+
+  @override
+  String get conversationReconnectingHint => 'ホストの応答を待っています';
+
+  @override
+  String get conversationUnavailableHint => 'メッセージを読み込めません';
+
+  @override
+  String get connectionDetails => '詳細';
+
+  @override
+  String get conversationFailed => '操作に失敗しました。やり直します';
+
+  @override
+  String get conversationUnknown => '結果は確認されていません。もう一度行動する前にチャットを確認してください';
+
+  @override
+  String get conversationCheckResult => 'チェック結果';
+
+  @override
+  String get conversationConflict => '設定が変更されました。再開する前に行動してください';
+
+  @override
+  String get conversationOlder => '古いメッセージを読み込む';
+
+  @override
+  String get conversationNew => '新しいチャット';
+
+  @override
+  String get conversationNoHost => 'まずホストに接続';
+
+  @override
+  String get conversationNoProject => 'まずホスト上のプロジェクトを追加';
+
+  @override
+  String get conversationNoModel => 'まずホスト上でモデルを設定します';
+
+  @override
+  String get conversationNoTasks => 'まだチャットはありません';
+
+  @override
+  String get conversationNoMessages => 'メッセージなし';
+
+  @override
+  String get conversationPreviewUnavailable => 'メッセージは利用できません';
+
+  @override
+  String get conversationInterrupted => '中断済み';
+
+  @override
+  String get conversationContinued => '継続済み';
+
+  @override
+  String get conversationFailedStatus => '失敗';
+
+  @override
+  String get conversationStopping => '停止中';
+
+  @override
+  String get conversationQueued => 'キュー';
+
+  @override
+  String get conversationGenerating => '応答';
+
+  @override
+  String get conversationWaiting => '確認待ち';
+
+  @override
+  String get conversationWaitingChild => '1 件のサブエージェントを待機中';
+
+  @override
+  String conversationWaitingChildren(String count) {
+    return '$count 件のサブエージェントを待機中';
+  }
+
+  @override
+  String get conversationCompacting => 'コンパクト化文脈';
+
+  @override
+  String get conversationWaitingController => 'コントローラーのログイン更新を待機中';
+
+  @override
+  String get conversationCompacted => 'コンテキスト圧縮';
+
+  @override
+  String get conversationToolWaiting => '待機中';
+
+  @override
+  String get conversationStartCoding => '実行を開始';
+
+  @override
+  String get conversationPlanFeedback => '変更を提案';
+
+  @override
+  String get conversationOther => 'その他';
+
+  @override
+  String get conversationSubmit => '送信';
+
+  @override
+  String get conversationMode => 'ワークモード';
+
+  @override
+  String get conversationCode => '標準';
+
+  @override
+  String get conversationPlan => '計画';
+
+  @override
+  String get conversationFlagship => '協働';
+
+  @override
+  String get conversationAsk => '毎回尋ねる';
+
+  @override
+  String get conversationProject => 'プロジェクトアクセス';
+
+  @override
+  String get conversationFull => 'フルアクセス';
+
+  @override
+  String get conversationPermission => '権限';
+
+  @override
+  String get conversationAskDescription => 'ファイルの編集やコマンドの実行前に確認する';
+
+  @override
+  String get conversationProjectDescription =>
+      'プロジェクトファイルは自動で編集し、コマンドの実行前に確認する';
+
+  @override
+  String get conversationFullDescription => 'プロジェクト外も含め、ファイルの編集とコマンドの実行を自動で行う';
+
+  @override
+  String get conversationBudget => '推論予算';
+
+  @override
+  String get conversationAttachment => '添付ファイル';
+
+  @override
+  String get conversationImageFailed => '画像を表示できません';
+
+  @override
+  String get conversationImageUnavailable => '画像を利用できません';
+
+  @override
+  String get conversationDownloadFailed => '添付ファイルを読み込めません';
+
+  @override
+  String get conversationSources => '出典';
+
+  @override
+  String get conversationSearchSuggestions => '検索提案';
+
+  @override
+  String get conversationStats => 'チャットの利用';
+
+  @override
+  String get conversationStatsEmpty => 'まだ使用していません';
+
+  @override
+  String get conversationStatsOverview => '概要';
+
+  @override
+  String get conversationStatsTokenGroup => 'Token 使用量';
+
+  @override
+  String get conversationStatsCostGroup => 'コスト';
+
+  @override
+  String get conversationStatsGenerationGroup => '世代';
+
+  @override
+  String get conversationStatsTokens => 'Tokens';
+
+  @override
+  String get conversationStatsInput => '入力';
+
+  @override
+  String get conversationStatsOutput => '出力';
+
+  @override
+  String get conversationStatsCached => 'キャッシュされた入力';
+
+  @override
+  String get conversationStatsReasoning => '推論出力';
+
+  @override
+  String get conversationStatsCacheRate => 'キャッシュヒット';
+
+  @override
+  String get conversationStatsCost => '推定費用';
+
+  @override
+  String get conversationStatsCostCoverage => 'コストキャピタル';
+
+  @override
+  String get conversationStatsSpeed => '待ち時間込みの出力速度';
+
+  @override
+  String conversationStatsSpeedValue(String value) {
+    return '$value tok/s';
+  }
+
+  @override
+  String get conversationStatsTimingCoverage => 'タイミングコア';
+
+  @override
+  String get conversationStatsTurns => 'ターン';
+
+  @override
+  String get conversationStatsResponses => 'モデル応答';
+
+  @override
+  String get conversationStatsContext => '現在の文脈';
+
+  @override
+  String get conversationStatsInputCost => 'インプットコスト';
+
+  @override
+  String get conversationStatsOutputCost => '出力コスト';
+
+  @override
+  String get conversationStatsCacheReadCost => 'キャッシュ読み込みコスト';
+
+  @override
+  String get conversationStatsCacheWriteCost => 'キャッシュ書き込みコスト';
+
+  @override
+  String get messageHistoryUpdated => 'チャットを更新しました。元の記録は保存されました';
+
+  @override
+  String get turnUndoUnsaved => 'ファイルには未保存の変更があります。まず保存または削除してください';
+
+  @override
+  String get codePlain => 'プレーンテキスト';
+
+  @override
+  String get turnChanges => 'ターン変更';
+
+  @override
+  String turnChangesCount(String count) {
+    return '$countファイル';
+  }
+
+  @override
+  String get fileChangesApprovalOne => '1 個のファイルにパッチを適用';
+
+  @override
+  String fileChangesApproval(String count) {
+    return '$count 個のファイルにパッチを適用';
+  }
+
+  @override
+  String get fileChangesAdded => '追加';
+
+  @override
+  String get fileChangesModified => '変更';
+
+  @override
+  String get fileChangesRenamed => '名前変更';
+
+  @override
+  String get fileChangesDeleted => '削除';
+
+  @override
+  String get turnUndo => '変更を無効にする';
+
+  @override
+  String get turnUndoAll => 'すべて無効にする';
+
+  @override
+  String get turnUndoConfirm => 'このターンからファイルの変更を取り消しますか？後の変更との衝突は操作を停止します';
+
+  @override
+  String get turnUndoDone => '取り消し済み';
+
+  @override
+  String get turnUndoPartial => 'いくつかの変更を取り消しました。残りのファイルをチェックします';
+
+  @override
+  String get messageActions => 'メッセージアクション';
+
+  @override
+  String get messageEdit => '編集と再生';
+
+  @override
+  String get messageEditConfirm => 'このメッセージと次のチャットを置き換えますか？ファイルは戻されません';
+
+  @override
+  String get messageRewind => 'ここでリワード';
+
+  @override
+  String get messageRewindConfirm => 'このターンを残して後のメッセージを削除しますか？ファイルは変更されません';
+
+  @override
+  String get messageBackup => 'チャットのバックアップを表示';
+
+  @override
+  String get messageRegenerate => '再生成';
+
+  @override
+  String get messageSearch => '検索チャット';
+
+  @override
+  String get messageSearchHint => 'メッセージを検索';
+
+  @override
+  String get messageSearchMissing => 'このメッセージはもはや現在のチャットにありません';
+
+  @override
+  String get messageSearchStale => 'チャットが変更されました。もう一度検索してください';
+
+  @override
+  String get messageNoResults => '一致するメッセージがありません';
+
+  @override
+  String get messageCheck => '操作結果をチェック';
+
+  @override
+  String get messageReference => 'リファレンス';
+
+  @override
+  String get messageReferenceContext => 'この参照はメッセージが送信された時のコンテキストに属します';
+
+  @override
+  String get toolFailed => '失敗';
+
+  @override
+  String get fileLinkUnavailable => 'リンクを開けません';
+
+  @override
+  String get imagePreview => '画像のプレビュー';
+
+  @override
+  String get fileOpenExternal => '他のアプリケーションで開く';
+
+  @override
+  String get fileOpenFailed => 'ファイルを開けません';
+
+  @override
+  String get fileNoApplication => 'アプリケーションはこのファイルを開けません';
+
+  @override
+  String get fileSaveBeforeShare => '共有する前に変更を保存しますか？';
+
+  @override
+  String fileTrashConfirm(String name) {
+    return '“$name” をホストのごみ箱に移動しますか？未保存の変更も破棄されます';
+  }
+
+  @override
+  String get fileTrashUncertain => '削除結果が確認されていません。クエリをやり直します';
+
+  @override
+  String get fileSaveFailed => 'ファイルの保存に失敗しました';
+
+  @override
+  String get terminalHideKeyboard => 'キーボードを隠す';
+
+  @override
+  String get terminalEscape => 'Esc';
+
+  @override
+  String get terminalTab => 'Tab';
+
+  @override
+  String get terminalCtrl => 'Ctrl';
+
+  @override
+  String get terminalAlt => 'Alt';
+
+  @override
+  String get terminalShift => 'Shift';
+
+  @override
+  String get terminalCmd => 'Cmd';
+
+  @override
+  String get terminalArrowLeft => '左';
+
+  @override
+  String get terminalArrowUp => '上';
+
+  @override
+  String get terminalArrowDown => '下';
+
+  @override
+  String get terminalArrowRight => '右';
+
+  @override
+  String get resourceNoWorkspace => '接続されたホストのワークツリーを選択';
+
+  @override
+  String get resourceRoot => 'ルート';
+
+  @override
+  String get resourceMore => 'もっと読み込む';
+
+  @override
+  String get resourcePartial => '部分的なコンテンツを表示';
+
+  @override
+  String get resourceEmpty => 'コンテンツなし';
+
+  @override
+  String get resourceSaveError => '保存に失敗しました。草稿を保持します';
+
+  @override
+  String get resourceReloadConfirm => 'ドラフトを削除して最新のコンテンツを読み込みますか？';
+
+  @override
+  String get resourceWorktreeCreate => '新しいワークツリー';
+
+  @override
+  String get resourceSessionServices => 'チャットサービス';
+
+  @override
+  String get resourceServicesUnavailable => 'サービスリストが利用できません';
+
+  @override
+  String get resourceNoServices => 'サービスアドレスが見つかりません';
+
+  @override
+  String get resourceServiceOpen => 'オープンサービス';
+
+  @override
+  String get resourceRemotePort => 'リモートポート';
+
+  @override
+  String get resourceOpenPort => 'フォワードポート';
+
+  @override
+  String get resourceOpenBrowser => 'ウェブページのプレビュー';
+
+  @override
+  String get resourcePreviewFailed => 'ページを読み込めませんでした';
+
+  @override
+  String get resourcePreviewLink => 'このリンクをプレビューで開けません';
+
+  @override
+  String get resourceForwardStopped => 'フォーワードを停止';
+
+  @override
+  String get resourceTerminalControl => 'コントロールを取る';
+
+  @override
+  String get resourceTerminalControlHint => '他のデバイスで制御';
+
+  @override
+  String get resourceTerminalClaiming => 'コントロールを取る';
+
+  @override
+  String get resourceTerminalEnded => 'ターミナル終了';
+
+  @override
+  String get resourceTerminalConnecting => '接続端子';
+
+  @override
+  String get resourceTerminalPaste => '貼り付け';
+
+  @override
+  String get resourceGitNotRepository => 'このディレクトリは Git リポジトリではありません';
+
+  @override
+  String get resourceInvalidPort => '1-65535 のポートを入力';
+
+  @override
+  String get tool_navigate => 'ページを開く';
+
+  @override
+  String get tool_back => '戻る';
+
+  @override
+  String get tool_forward => '前進';
+
+  @override
+  String get tool_refresh => 'ページを更新';
+
+  @override
+  String get tool_right_click => 'クリック要素';
+
+  @override
+  String get tool_clear => 'テキストを入力';
+
+  @override
+  String get tool_select => 'オプションを選択';
+
+  @override
+  String get tool_hover => 'ホバー要素';
+
+  @override
+  String get tool_scroll => 'スクロールページ';
+
+  @override
+  String get tool_press_key => '押すキー';
+
+  @override
+  String get tool_new_tab => '新しいタブ';
+
+  @override
+  String get tool_list_windows => 'ブラウザタブ';
+
+  @override
+  String get tool_switch_window => 'タブを切り替え';
+
+  @override
+  String get tool_close_window => 'ウィンドウを閉じる';
+
+  @override
+  String get tool_close_session => 'ブラウザを閉じる';
+
+  @override
+  String get tool_screenshot => 'キャプチャページ';
+
+  @override
+  String get tool_print_to_pdf => 'PDF エクスポート';
+
+  @override
+  String get tool_file_upload => 'アップロード';
+
+  @override
+  String get tool_downloads => 'ダウンロードを表示';
+
+  @override
+  String get tool_save_download => 'ダウンロードしたファイルを保存';
+
+  @override
+  String get tool_evaluate_js => 'ページスクリプトを実行';
+
+  @override
+  String get tool_get_cookies => 'クッキーを読み込む';
+
+  @override
+  String get tool_delete_all_cookies => 'クッキーを変更';
+
+  @override
+  String get tool_drag_and_drop => 'ドラッグ要素';
+
+  @override
+  String get tool_focus => '焦点要素';
+
+  @override
+  String get tool_handle_alert => 'ハンドルページ警告';
+
+  @override
+  String get tool_database_catalog => 'データベースをブラウズ';
+
+  @override
+  String get tool_database_query => 'データベースのクエリ';
+
+  @override
+  String get tool_database_execute => 'データベース操作を実行';
+
+  @override
+  String get tool_search_memory => '検索メモリ';
+
+  @override
+  String get tool_review_memories => 'レビューメモリ';
+
+  @override
+  String get tool_consolidate_memories => 'メモリをマージ';
+
+  @override
+  String get tool_save_memory => 'メモリを節約';
+
+  @override
+  String get tool_forget_memory => 'メモリを削除';
+
+  @override
+  String get tool_update_plan => 'アップデートプラン';
+
+  @override
+  String get tool_create_goal => 'ゴールを作成';
+
+  @override
+  String get tool_get_goal => '目標を表示';
+
+  @override
+  String get tool_update_goal => '更新目標';
+
+  @override
+  String get tool_spawn_agent => 'サブエージェント';
+
+  @override
+  String get tool_browser_tabs => 'ブラウザタブ';
+
+  @override
+  String get tool_browser_read => 'ページを読み込み';
+
+  @override
+  String get tool_browser_navigate => 'ページを開く';
+
+  @override
+  String get tool_browser_click => 'クリック要素';
+
+  @override
+  String get tool_browser_input => 'テキストを入力';
+
+  @override
+  String get tool_browser_scroll => 'スクロールページ';
+
+  @override
+  String get tool_browser_back => '戻る';
+
+  @override
+  String get tool_browser_forward => '前進';
+
+  @override
+  String get tool_browser_refresh => 'ページを更新';
+
+  @override
+  String get tool_browser_open => '新しいタブ';
+
+  @override
+  String get tool_browser_close => 'タブを閉じる';
+
+  @override
+  String get tool_browser_focus => 'タブを切り替え';
+
+  @override
+  String get tool_browser_select => 'オプションを選択';
+
+  @override
+  String get tool_browser_hover => 'ホバー要素';
+
+  @override
+  String get tool_browser_key => '押すキー';
+
+  @override
+  String get tool_browser_frame => 'スイッチフレーム';
+
+  @override
+  String get tool_browser_wait => 'ページを待つ';
+
+  @override
+  String get tool_browser_screenshot => 'キャプチャページ';
+
+  @override
+  String get tool_ssh_run => 'SSH コマンドを実行';
+
+  @override
+  String get tool_ssh_transfer => '転送 SSH ファイル';
+
+  @override
+  String get tool_list_worktrees => 'ワークツリーのリスト';
+
+  @override
+  String get tool_create_worktree => '新しいワークツリー';
+
+  @override
+  String get tool_register_worktree => 'ワークツリーを追加';
+
+  @override
+  String get tool_remove_worktree => 'ワークツリーを削除';
+
+  @override
+  String get tool_google_search => 'ウェブ検索';
+
+  @override
+  String get tool_web_fetch => 'ページを取得';
+
+  @override
+  String get tool_fetch_url => 'ページを取得';
+
+  @override
+  String get tool_read_file => 'ファイルを読み込む';
+
+  @override
+  String get tool_write_file => 'ファイルを書き込む';
+
+  @override
+  String get tool_list_directory => 'ディレクトリをブラウズ';
+
+  @override
+  String get tool_search_files => 'ファイルを検索';
+
+  @override
+  String get tool_run_command => 'コマンドを実行';
+
+  @override
+  String get tool_read_command => '背景を表示するコマンド';
+
+  @override
+  String get tool_stop_command => '停止コマンド';
+
+  @override
+  String get tool_load_skill => 'ロードスキル';
+
+  @override
+  String get tool_read_skill_resource => 'スキルリソースを読み込む';
+
+  @override
+  String get tool_computer_desktop => 'デスクトップを表示';
+
+  @override
+  String get tool_computer_observe => '観察画面';
+
+  @override
+  String get tool_computer_input => '制御コンピュータ';
+
+  @override
+  String get tool_computer_focus => 'スイッチアプリ';
+
+  @override
+  String get tool_computer_open => 'オープンアプリケーション';
+
+  @override
+  String get tool_git_status => 'Git 状態';
+
+  @override
+  String get tool_git_diff => '差分を表示';
+
+  @override
+  String get tool_git_log => 'Gitログ';
+
+  @override
+  String get tool_inspect_image => '画像を検査';
+
+  @override
+  String get tool_generate_image => 'イメージを生成';
+
+  @override
+  String get tool_generate_video => 'ビデオを生成';
+
+  @override
+  String get refresh => '更新';
+
+  @override
+  String get loading => '読み込み中';
+
+  @override
+  String get home => 'チャット';
+
+  @override
+  String get idle => '待機中';
+
+  @override
+  String get allProjects => '全プロジェクト';
+
+  @override
+  String get unassignedChats => 'チャット';
+
+  @override
+  String get allWorktrees => 'すべてのワークツリー';
+
+  @override
+  String get tasksActive => '進行中';
+
+  @override
+  String get tasksToday => '今日';
+
+  @override
+  String get yesterday => '昨日';
+
+  @override
+  String get tasksThisWeek => '今週';
+
+  @override
+  String get tasksEarlier => 'それ以前';
+
+  @override
+  String get filterProjects => 'フィルタプロジェクト';
+
+  @override
+  String get archiveShort => 'アーカイブ';
+
+  @override
+  String get archiveTab => 'アーカイブ';
+
+  @override
+  String get delete => '削除';
+
+  @override
+  String get deleteTask => 'チャットを削除';
+
+  @override
+  String get deleteWarning => 'このチャットは削除後は再開できません';
+
+  @override
+  String get restored => '帰国';
+
+  @override
+  String get restore => '復元';
+
+  @override
+  String get archiveEmpty => 'アーカイブされたチャットはありません';
+
+  @override
+  String get brand => 'CheapRouter Harness';
+
+  @override
+  String get mobile => 'モバイルワークスペース';
+
+  @override
+  String get preview => 'プレビュー';
+
+  @override
+  String get mixed => 'ライト・アンド・ダーク';
+
+  @override
+  String get dark => 'ダーク';
+
+  @override
+  String get light => 'ライト';
+
+  @override
+  String get brandColor => 'アクセントカラー';
+
+  @override
+  String get brandOrange => 'オレンジ';
+
+  @override
+  String get brandBlue => 'ブルー';
+
+  @override
+  String get brandGreen => 'グリーン';
+
+  @override
+  String get brandPurple => 'パープル';
+
+  @override
+  String get brandPink => 'ピンク';
+
+  @override
+  String get brandTeal => 'ティール';
+
+  @override
+  String get focus => 'シングルスクリーン';
+
+  @override
+  String get page => 'ページを選択';
+
+  @override
+  String get design => '特徴・デザイン';
+
+  @override
+  String get footer => 'モバイル';
+
+  @override
+  String get tasks => 'タスク';
+
+  @override
+  String get chat => 'チャット';
+
+  @override
+  String get hosts => 'ホスト';
+
+  @override
+  String get resources => 'リソース';
+
+  @override
+  String get settings => '設定';
+
+  @override
+  String get usage => '使用量';
+
+  @override
+  String get changes => '変更';
+
+  @override
+  String get terminal => 'ターミナル';
+
+  @override
+  String get newTerminal => '新しいターミナル';
+
+  @override
+  String get terminalEnd => 'ターミナルを終了';
+
+  @override
+  String get terminalEndWarning => 'シェルと実行中のコマンドが停止します';
+
+  @override
+  String get terminalNone => '実行中のターミナルはありません';
+
+  @override
+  String get files => 'ファイル';
+
+  @override
+  String get project => 'プロジェクト';
+
+  @override
+  String get projects => 'プロジェクト';
+
+  @override
+  String get editProject => 'プロジェクトを編集';
+
+  @override
+  String get removeProject => 'プロジェクトを削除';
+
+  @override
+  String get removeProjectWarning =>
+      'プロジェクトを一覧から削除し、開いているターミナルを閉じてバックグラウンドコマンドを停止します。ファイルとチャット履歴は残ります。';
+
+  @override
+  String get projectRemovalMayHaveClosedTerminals =>
+      'プロジェクトの一部のターミナルはすでに閉じている可能性があります。';
+
+  @override
+  String get worktree => 'ワークツリー';
+
+  @override
+  String get allHosts => '全ホスト';
+
+  @override
+  String get all => 'すべて';
+
+  @override
+  String get running => '実行中';
+
+  @override
+  String get waiting => '待機中';
+
+  @override
+  String get completed => '完了';
+
+  @override
+  String get search => '検索';
+
+  @override
+  String get searchTasks => 'タスクとプロジェクトを検索';
+
+  @override
+  String get noResults => 'マッチするタスクがありません';
+
+  @override
+  String get notification => '通知';
+
+  @override
+  String get newConversation => '新しいチャット';
+
+  @override
+  String get question => 'ドキュメンテーションはどの言語を使うべきですか？';
+
+  @override
+  String get reply => '返信';
+
+  @override
+  String get approval => '承認';
+
+  @override
+  String get allow => '一度許可';
+
+  @override
+  String get deny => '拒否';
+
+  @override
+  String get working => '作業中';
+
+  @override
+  String get branch => 'feature/sign-in';
+
+  @override
+  String get today => '今日 09:36';
+
+  @override
+  String get phaseThinking => '思考';
+
+  @override
+  String get phaseReading => 'ファイルの読み込み';
+
+  @override
+  String get phaseQuestion => '応答待ち';
+
+  @override
+  String get phaseEditing => 'ファイルの編集';
+
+  @override
+  String get phaseApproval => '承認待ち';
+
+  @override
+  String get phaseTesting => '走行試験';
+
+  @override
+  String get phaseReply => '応答';
+
+  @override
+  String get phaseFollowup => '処理キュー';
+
+  @override
+  String get phaseComplete => '完了';
+
+  @override
+  String get phaseFailed => 'テスト失敗';
+
+  @override
+  String get allowShort => '許可';
+
+  @override
+  String get queueShort => 'キュー';
+
+  @override
+  String get questionPending => '返事を待っています';
+
+  @override
+  String queueCount(String count) {
+    return '$count キュー中のメッセージ';
+  }
+
+  @override
+  String queuePaused(String count) {
+    return 'キューが一時停止しました · $count';
+  }
+
+  @override
+  String queueGuidance(String queue) {
+    return '$queue、指示の合流待ち';
+  }
+
+  @override
+  String get pauseQueue => 'キューを一時停止';
+
+  @override
+  String get resumeQueue => 'キューを再開';
+
+  @override
+  String get moveUp => '上へ移動';
+
+  @override
+  String get thinkingNow => '思考';
+
+  @override
+  String get thought => '推論';
+
+  @override
+  String get describeTask => 'あなたのタスクを説明';
+
+  @override
+  String get send => '送信';
+
+  @override
+  String get attach => '添付';
+
+  @override
+  String get attachment => '添付ファイル';
+
+  @override
+  String get removeAttachment => '添付ファイルを削除';
+
+  @override
+  String get model => 'モデル';
+
+  @override
+  String get copy => 'コピー';
+
+  @override
+  String get copied => 'コピー';
+
+  @override
+  String get copyFailed => 'コピーできません。手動でテキストを選択してください';
+
+  @override
+  String get more => 'その他';
+
+  @override
+  String get close => '閉じる';
+
+  @override
+  String get back => '戻る';
+
+  @override
+  String get cancel => 'キャンセル';
+
+  @override
+  String get save => '保存';
+
+  @override
+  String get queue => 'メッセージキュー';
+
+  @override
+  String get queueEmpty => 'キュー中のメッセージはありません';
+
+  @override
+  String get fork => '会話を分岐';
+
+  @override
+  String get stop => 'タスクを停止';
+
+  @override
+  String get stoppedStatus => '停止済み';
+
+  @override
+  String get pair => 'ホストに接続';
+
+  @override
+  String get online => 'オンライン';
+
+  @override
+  String get offline => 'オフライン';
+
+  @override
+  String get cpu => 'CPU';
+
+  @override
+  String get memory => 'メモリー';
+
+  @override
+  String get metrics => 'リソース利用';
+
+  @override
+  String get activity => 'アクティビティ';
+
+  @override
+  String get processes => 'プロセス';
+
+  @override
+  String get network => 'ネットワーク';
+
+  @override
+  String get relay => 'リレー';
+
+  @override
+  String get retry => '再試行';
+
+  @override
+  String get pairTitle => 'ホストに接続';
+
+  @override
+  String get pairCode => 'ペアリングコード';
+
+  @override
+  String get pairInvalid => '6 桁を入力';
+
+  @override
+  String get pairTicket => 'ペアリングチケット';
+
+  @override
+  String get pairTicketInvalid => 'ペアリングチケットを入力してください';
+
+  @override
+  String get workspace => 'ワークスペース';
+
+  @override
+  String get selectHost => 'ホストを選択';
+
+  @override
+  String get confirm => '確認';
+
+  @override
+  String get git => 'Git';
+
+  @override
+  String get gitBranches => 'ブランチ';
+
+  @override
+  String get gitHistory => '履歴';
+
+  @override
+  String gitViewAll(String count) {
+    return '$count 件の変更をすべて表示';
+  }
+
+  @override
+  String terminalRunningCount(String count) {
+    return '$count 件実行中';
+  }
+
+  @override
+  String get gitUnstaged => '未ステージ';
+
+  @override
+  String get gitStageFile => 'ステージ';
+
+  @override
+  String gitCommitCount(String count) {
+    return '$count 件をコミット';
+  }
+
+  @override
+  String get gitRemote => 'リモート';
+
+  @override
+  String get gitCurrentShort => '現在';
+
+  @override
+  String gitDiscardConfirm(String name) {
+    return '「$name」の変更をすべて破棄しますか？';
+  }
+
+  @override
+  String gitTrashConfirm(String name) {
+    return '「$name」をホストのごみ箱に移動しますか？';
+  }
+
+  @override
+  String get gitCommitOptions => 'コミットオプション';
+
+  @override
+  String get gitSkipHooks => 'Hook をスキップ';
+
+  @override
+  String get gitPushAfterCommit => 'コミット後にプッシュ';
+
+  @override
+  String get fileShare => '共有';
+
+  @override
+  String get fileTrash => 'ごみ箱に移動';
+
+  @override
+  String get gitActions => 'Git アクション';
+
+  @override
+  String get gitFetch => 'フェッチ';
+
+  @override
+  String get gitPull => '引っ張る';
+
+  @override
+  String get gitPush => 'プッシュ';
+
+  @override
+  String get gitCurrent => '現在のブランチ';
+
+  @override
+  String get gitCreateBranch => '新しいブランチ';
+
+  @override
+  String get gitBranchName => 'ブランチ名';
+
+  @override
+  String get gitSwitch => 'ブランチを切り替え';
+
+  @override
+  String get gitMerge => 'ブランチをマージ';
+
+  @override
+  String get gitDeleteBranch => 'ブランチを削除';
+
+  @override
+  String get review => 'レビュー';
+
+  @override
+  String get selectWorkspace => 'プロジェクトとワークツリー';
+
+  @override
+  String get searchFiles => 'ファイルを検索';
+
+  @override
+  String get src => 'ソース';
+
+  @override
+  String get folder => 'フォルダー';
+
+  @override
+  String get modified => '変更済み';
+
+  @override
+  String get edit => '編集';
+
+  @override
+  String get unsaved => '未保存';
+
+  @override
+  String get discard => '変更を無視';
+
+  @override
+  String get connections => 'リソースの追加';
+
+  @override
+  String get ssh => 'SSH';
+
+  @override
+  String get database => 'データベース';
+
+  @override
+  String get ports => 'ポートフォワード';
+
+  @override
+  String get browser => 'ウェブプレビュー';
+
+  @override
+  String get openFile => 'ファイルを開く';
+
+  @override
+  String get closePort => 'クローズ・フォーワード';
+
+  @override
+  String get workingTree => 'ワーキング・ツリー';
+
+  @override
+  String get staged => 'ステージ';
+
+  @override
+  String get stage => '全ステージ';
+
+  @override
+  String get unstage => 'アンステージ';
+
+  @override
+  String get commit => 'コミット';
+
+  @override
+  String get commitMessage => 'コミットメッセージ';
+
+  @override
+  String get noChanges => 'コミットする変更はありません';
+
+  @override
+  String get terminalKeyboard => 'キーボード';
+
+  @override
+  String get terminalEnter => 'Enter';
+
+  @override
+  String get readOnly => '読み取り専用';
+
+  @override
+  String get tokens => 'Tokens';
+
+  @override
+  String get requests => 'レスポンス';
+
+  @override
+  String usageCoverage(String priced, String total) {
+    return '$priced / $total 応答価格';
+  }
+
+  @override
+  String get usageEmpty => '使用データなし';
+
+  @override
+  String get estimatedCost => '推定費用（USD）';
+
+  @override
+  String get partial => '部分データ';
+
+  @override
+  String get input => '入力';
+
+  @override
+  String get output => '出力';
+
+  @override
+  String get cached => 'キャッシュヒット';
+
+  @override
+  String get appearance => '外観';
+
+  @override
+  String get notifications => '通知';
+
+  @override
+  String get enabled => 'オン';
+
+  @override
+  String get disabled => 'オフ';
+
+  @override
+  String get add => '追加';
+
+  @override
+  String get configName => '名前';
+
+  @override
+  String get configEndpoint => 'エンドポイント';
+
+  @override
+  String get configModels => 'モデル';
+
+  @override
+  String get configEmpty => 'エントリなし';
+
+  @override
+  String get configDuplicate => '名前は既に存在します';
+
+  @override
+  String configDelete(String name) {
+    return '“$name” を削除しますか？';
+  }
+
+  @override
+  String get providers => 'モデルとプロバイダ';
+
+  @override
+  String get about => 'Sailryについて';
+
+  @override
+  String get modelPicker => 'モデルを選択';
+
+  @override
+  String get team => 'チーム';
+
+  @override
+  String get executionModel => '単一モデル';
+
+  @override
+  String get teamDefault => 'デフォルトチーム';
+
+  @override
+  String get teamLead => 'リーダー';
+
+  @override
+  String get memberReset => 'モデルをリセット';
+
+  @override
+  String get auto => '自動';
+
+  @override
+  String get manual => '毎回尋ねる';
+
+  @override
+  String get required => 'まずタスクを説明してください';
+
+  @override
+  String get hostConnectPrompt => 'ホストに接続';
+
+  @override
+  String get hostDisconnected => 'ホストはオフラインです';
+
+  @override
+  String get hostUpdateRequired => '接続するにはホストを更新してください';
+
+  @override
+  String get appUpdateRequired => '接続するにはこのアプリを更新してください';
+
+  @override
+  String get language => '言語';
+
+  @override
+  String get languageSystem => 'システム';
+
+  @override
+  String get languageChinese => '简体中文';
+
+  @override
+  String get languageEnglish => 'English';
+
+  @override
+  String get languageTraditionalChinese => '繁體中文';
+
+  @override
+  String get languageJapanese => '日本語';
+
+  @override
+  String get languageKorean => '한국어';
+
+  @override
+  String get languageFrench => 'Français';
+
+  @override
+  String get languageGerman => 'Deutsch';
+
+  @override
+  String get languageSpanish => 'Español';
+
+  @override
+  String get languagePortugueseBrazil => 'Português (Brasil)';
+
+  @override
+  String get languageRussian => 'Русский';
+
+  @override
+  String get backgroundConnection => 'バックグラウンドで接続を維持';
+
+  @override
+  String get backgroundConnectionActive => 'ホスト接続をアクティブに保つ';
+
+  @override
+  String get backgroundConnectionFailed => 'バックグラウンド接続を有効にしていません。やり直します';
+
+  @override
+  String get resetReasoning => 'リセット努力';
+
+  @override
+  String get completionAlerts => '完了警告';
+
+  @override
+  String get preferencesFailed => '設定が保存されませんでした。やり直します';
+
+  @override
+  String get startupFailed => '起動に失敗';
+
+  @override
+  String get pairAction => '接続';
+
+  @override
+  String get pairFailed => '接続に失敗しました。やり直します';
+
+  @override
+  String get pairExpired => 'ペアリングコードが失効しました。新しいコードを取得してください';
+
+  @override
+  String get pairing => '接続中';
+
+  @override
+  String get hostRemove => 'ホストを削除';
+
+  @override
+  String hostRemoveConfirm(String name) {
+    return '「$name」を削除し、この端末のアクセスを取り消しますか？データはホストに残ります。最後の端末の場合、アクセスの復元には管理者が必要です。';
+  }
+
+  @override
+  String get hostRemoved => 'ホストを削除しました';
+
+  @override
+  String get hostOriginDirect => '直接ペアリング';
+
+  @override
+  String hostOriginSource(String name) {
+    return '$name 経由';
+  }
+
+  @override
+  String get hostRemoveFailed => 'ホストを削除できませんでした';
+
+  @override
+  String get hostMetricsFailed => 'ホストの状態を読めません';
+
+  @override
+  String get hostProcessesEmpty => 'プロセスなし';
+
+  @override
+  String get hostRegisterProject => 'プロジェクトを追加';
+
+  @override
+  String get hostChooseDirectory => 'ディレクトリを選択';
+
+  @override
+  String get hostChooseFile => 'ファイルを選択';
+
+  @override
+  String get hostParentDirectory => '親ディレクトリ';
+
+  @override
+  String get hostEmptyDirectory => 'ディレクトリは空です';
+
+  @override
+  String get hostLoadMore => 'もっと読み込む';
+
+  @override
+  String get hostProjectName => 'プロジェクト名';
+
+  @override
+  String get hostProjectPath => 'ホスト上のプロジェクトパス';
+
+  @override
+  String get hostRefresh => '更新';
+
+  @override
+  String get hostMetricCpu => 'CPU';
+
+  @override
+  String get hostMetricMemory => 'メモリー';
+
+  @override
+  String get hostMetricDisk => 'ディスク';
+
+  @override
+  String get failureConflict => 'コンテンツが変更されました。再読み込みして試してください';
+
+  @override
+  String get failureUnknown => '結果は確認されていません。まずホストの状態を確認してください';
+
+  @override
+  String get failureDenied => '許可を拒否';
+
+  @override
+  String get failureUnavailable => 'ホストは接続されていません';
+
+  @override
+  String get failureBusy => 'サービスが忙しいので、後でやり直します';
+
+  @override
+  String get failureGeneric => '操作に失敗しました';
+
+  @override
+  String get settingsLoadFailed => '読み込めませんでした';
+
+  @override
+  String get settingsSaveFailed => '保存に失敗しました。草稿を保持します';
+
+  @override
+  String get settingsConflict => '設定が変更されました。再開して試してください';
+
+  @override
+  String get settingsUnknown => '結果は確認されていません。チェックするために更新します';
+
+  @override
+  String get settingsRequired => '値を入力';
+
+  @override
+  String get settingsApi => 'APIフォーマット';
+
+  @override
+  String get settingsOpenCodeGo => 'OpenCode Go';
+
+  @override
+  String get settingsOpenCodeZen => 'OpenCode Zen';
+
+  @override
+  String get settingsApiKey => 'API キー';
+
+  @override
+  String get settingsEnabled => '有効';
+
+  @override
+  String get apiChatCompletions => 'Chat Completions';
+
+  @override
+  String get apiResponses => 'Responses';
+
+  @override
+  String get apiAnthropic => 'Anthropic';
+
+  @override
+  String get apiGemini => 'Gemini';
+
+  @override
+  String get apiDeepSeek => 'DeepSeek';
+
+  @override
+  String get apiAzureOpenAi => 'Azure OpenAI';
+
+  @override
+  String get apiAzureAi => 'Azure AI';
+
+  @override
+  String get apiPlugin => 'プラグイン';
+
+  @override
+  String get providerNew => '新しいプロバイダ';
+
+  @override
+  String get providerEmpty => 'プロバイダなし';
+
+  @override
+  String get providerDesktopHint => 'OAuth モデルはデスクトップで操作します';
+
+  @override
+  String get providerConnection => '接続';
+
+  @override
+  String get providerKeyUnset => '未設定';
+
+  @override
+  String get providerShowKey => 'キーを表示';
+
+  @override
+  String get providerHideKey => 'キーを隠す';
+
+  @override
+  String providerModelCount(String count) {
+    return '$count 個のモデル';
+  }
+
+  @override
+  String get providerFetch => '取得';
+
+  @override
+  String get providerFetchTitle => 'モデルを取得';
+
+  @override
+  String providerFetched(String count) {
+    return '$count 件取得';
+  }
+
+  @override
+  String get providerSelectAll => 'すべて選択';
+
+  @override
+  String get providerSelectNone => '選択解除';
+
+  @override
+  String get providerSearch => 'モデルを検索';
+
+  @override
+  String get providerAdded => '追加済み';
+
+  @override
+  String providerContext(String tokens) {
+    return 'コンテキスト $tokens';
+  }
+
+  @override
+  String providerAddCount(String count) {
+    return '$count 件を追加';
+  }
+
+  @override
+  String get providerModelId => 'モデル ID';
+
+  @override
+  String get providerModelExists => 'モデルは追加済みです';
+
+  @override
+  String get providerDefault => 'デフォルト';
+
+  @override
+  String get providerBasic => '基本';
+
+  @override
+  String get providerContextLength => 'コンテキスト長';
+
+  @override
+  String get providerCapabilities => '機能';
+
+  @override
+  String get providerVision => '画像';
+
+  @override
+  String get providerTools => 'ツール';
+
+  @override
+  String get providerReasoning => '推論';
+
+  @override
+  String get providerCapUnderstands => '理解';
+
+  @override
+  String get providerCapCan => '対応';
+
+  @override
+  String get providerCapGenerates => '生成';
+
+  @override
+  String get providerGenerateImage => '画像';
+
+  @override
+  String get providerGenerateVideo => '動画';
+
+  @override
+  String get providerGenerateSpeech => '音声';
+
+  @override
+  String get providerDeploymentId => 'デプロイメント名';
+
+  @override
+  String get providerHeaders => 'カスタムリクエストヘッダー';
+
+  @override
+  String get providerHeadersHint => '1 行に 1 つ、名前: 値';
+
+  @override
+  String get providerHeadersInvalid => '各ヘッダー行には名前とコロンが必要です';
+
+  @override
+  String get providerEfforts => '推論の強度';
+
+  @override
+  String get providerEffortPlaceholder => '強度または Token 予算';
+
+  @override
+  String get providerEffortInvalid => '推論の強度が無効です。名前、重複、API の対応を確認してください';
+
+  @override
+  String get providerEffortDefault => 'デフォルトの強度';
+
+  @override
+  String get providerEffortSetDefault => 'デフォルトに設定';
+
+  @override
+  String get providerSetDefault => 'デフォルトモデルに設定';
+
+  @override
+  String get providerIsDefault => 'デフォルトモデル';
+
+  @override
+  String get providerDeleteModel => 'モデルを削除';
+
+  @override
+  String get providerDelete => 'プロバイダを削除';
+
+  @override
+  String get providerNumberInvalid => '正の整数を入力してください';
+
+  @override
+  String get providerLimitsInvalid => '最大出力はコンテキスト長以下にしてください';
+
+  @override
+  String get settingsUsageUnknown => '不明';
+
+  @override
+  String get settingsUsagePartial => '一部のホストのデータが最新ではありません';
+
+  @override
+  String get settingsUsageCache => 'キャッシュ';
+
+  @override
+  String get settingsUsageInput => '未キャッシュ';
+
+  @override
+  String get settingsUsageOutput => '出力';
+
+  @override
+  String get usageRange24h => '24 時間';
+
+  @override
+  String get usageRange7d => '7 日';
+
+  @override
+  String get usageRange30d => '30 日';
+
+  @override
+  String get usageRange90d => '90 日';
+
+  @override
+  String get usageRange1y => '1 年';
+
+  @override
+  String get usageReasoning => '推論';
+
+  @override
+  String get usageHitRate => 'キャッシュヒット率';
+
+  @override
+  String get usageSpeed => '待ち時間込みの速度';
+
+  @override
+  String get usageSpeedUnit => 'tok/s';
+
+  @override
+  String get usageCostPartial => '一部';
+
+  @override
+  String get usageTrend => 'Token 推移';
+
+  @override
+  String get usageLocalTime => '現地時間';
+
+  @override
+  String usageActiveDays(String count) {
+    return 'アクティブ日数 $count';
+  }
+
+  @override
+  String get usageBreakdown => '内訳';
+
+  @override
+  String get usageProvider => 'プロバイダ';
+
+  @override
+  String get usageShowAll => 'すべて表示';
+
+  @override
+  String get usageCollapse => '折りたたむ';
+
+  @override
+  String get usageUnassigned => '未分類';
+
+  @override
+  String usageHit(String value) {
+    return 'ヒット $value';
+  }
+
+  @override
+  String usageResponseCount(String count) {
+    return '$count 件の応答';
+  }
+
+  @override
+  String get artifactContents => '目次';
+
+  @override
+  String get artifactZoomIn => '拡大';
+
+  @override
+  String get artifactZoomOut => '縮小';
+
+  @override
+  String get artifactVersions => 'バージョン';
+
+  @override
+  String get artifactFormRequired => '必須項目を入力してください';
+
+  @override
+  String get artifactFormInvalid => '回答を送信できません';
+
+  @override
+  String get artifactRenderFailed => '図を表示できません';
+
+  @override
+  String artifactReply(String id, String revision, String title, String form) {
+    return '「$title」v$revision（$id/$form）への回答';
+  }
+
+  @override
+  String get connectionRouteP2p => 'P2P';
+
+  @override
+  String get connectionRouteRelay => 'Relay';
+
+  @override
+  String get connectionRouteUnknown => '—';
+
+  @override
+  String get backgroundNoticeTitle => 'バックグラウンドの結果';
+
+  @override
+  String get backgroundCompleted => '完了';
+
+  @override
+  String get backgroundFailed => '失敗';
+
+  @override
+  String get backgroundCancelled => 'キャンセル済み';
+
+  @override
+  String get backgroundStopped => '停止済み';
+
+  @override
+  String get backgroundTimedOut => 'タイムアウト';
+
+  @override
+  String get backgroundInterrupted => '中断';
+
+  @override
+  String get backgroundStalled => '最近の出力なし';
+
+  @override
+  String get backgroundUnknown => '結果は不確定';
+
+  @override
+  String conversationSteps(String count) {
+    return '$count ステップ';
+  }
+
+  @override
+  String get conversationStep => '1 ステップ';
+
+  @override
+  String get activityProgress => '進捗';
+
+  @override
+  String get activityBackground => 'バックグラウンドタスク';
+
+  @override
+  String get activityPorts => 'ポート';
+
+  @override
+  String get hostConnecting => '接続中';
+
+  @override
+  String get hostConnected => '接続済み';
+
+  @override
+  String get hostNotConnected => '未接続';
+
+  @override
+  String hostsConnected(String connected, String total) {
+    return '$connected/$total 台のホストに接続済み';
+  }
+
+  @override
+  String get hostInfo => 'ホスト情報';
+
+  @override
+  String get hostLatency => 'レイテンシ';
+
+  @override
+  String hostLatencySummary(String average, String peak) {
+    return '平均 $average　最大 $peak';
+  }
+
+  @override
+  String get hostSystem => 'システム';
+
+  @override
+  String get hostProcessor => 'プロセッサ';
+
+  @override
+  String hostCores(String count) {
+    return '$count コア';
+  }
+
+  @override
+  String hostLoad(String value) {
+    return '負荷 $value';
+  }
+
+  @override
+  String hostMemoryShare(String percent) {
+    return '使用中 $percent';
+  }
+
+  @override
+  String get hostUptime => '稼働時間';
+
+  @override
+  String hostNodeUptime(String duration) {
+    return 'サービス $duration';
+  }
+
+  @override
+  String hostDays(String count) {
+    return '$count日';
+  }
+
+  @override
+  String hostHours(String count) {
+    return '$count時間';
+  }
+
+  @override
+  String hostMinutes(String count) {
+    return '$count分';
+  }
+
+  @override
+  String get hostTrend => '推移';
+
+  @override
+  String get hostTrendWindow => '直近 1 分';
+
+  @override
+  String get hostChartStart => '60s 前';
+
+  @override
+  String get hostChartNow => '現在';
+
+  @override
+  String get hostMetricGpu => 'GPU';
+
+  @override
+  String get hostMemoryUsed => '使用中';
+
+  @override
+  String get hostMemoryCache => 'キャッシュ';
+
+  @override
+  String get hostMemorySwap => 'スワップ';
+
+  @override
+  String get hostGpuUsage => '使用率';
+
+  @override
+  String get hostNetwork => 'ネットワーク';
+
+  @override
+  String hostNetworkTotals(String received, String sent) {
+    return '累計 ↓ $received　↑ $sent';
+  }
+
+  @override
+  String get hostDownload => 'ダウンロード';
+
+  @override
+  String get hostUpload => 'アップロード';
+
+  @override
+  String hostPartitions(String count) {
+    return '$count 個のパーティション';
+  }
+
+  @override
+  String get hostDiskRead => '読み込み';
+
+  @override
+  String get hostDiskWrite => '書き込み';
+
+  @override
+  String get hostProcesses => 'プロセス';
+
+  @override
+  String get hostSortCpu => 'CPU 順';
+
+  @override
+  String get hostSortMemory => 'メモリ順';
+
+  @override
+  String get hostSortRecent => '最近使用';
+
+  @override
+  String get hostSearchProcesses => 'プロセスを検索';
+
+  @override
+  String get hostSearchProjects => 'プロジェクトを検索';
+
+  @override
+  String hostProcessLimit(String count) {
+    return '上位 $count 件を表示';
+  }
+
+  @override
+  String get hostNoMatches => '一致なし';
+
+  @override
+  String get modelFeatureOff => '標準';
+
+  @override
+  String get modelFeatureFast => '高速';
+
+  @override
+  String get modelFeatureSpeed => '速度';
+
+  @override
+  String get backgroundHeld => '結果は未配信';
+
+  @override
+  String get backgroundHoldLimit => '未配信（自動ターンの上限）';
+
+  @override
+  String get backgroundHoldStopped => '未配信（返信を停止）';
+
+  @override
+  String get backgroundHoldInterrupted => '未配信（返信が中断）';
+
+  @override
+  String get backgroundHoldFailed => '未配信（返信に失敗）';
+
+  @override
+  String get continuationRefused => '続行されませんでした';
+
+  @override
+  String get continuationPlan => 'プランモードでは続行されません';
+
+  @override
+  String get continuationChild => 'サブタスクは続行されません';
+
+  @override
+  String get continuationArchived => 'アーカイブ済みのチャットは続行されません';
+
+  @override
+  String get continuationWorktree => '続行されません（ワークツリーがありません）';
+
+  @override
+  String get continuationQueuePaused => '続行されません（キューは一時停止中）';
+
+  @override
+  String get continuationQueuedInput => '続行されません（キューにメッセージあり）';
+
+  @override
+  String get continuationRunning => '続行されません（返信を実行中）';
+
+  @override
+  String get continuationInteraction => '続行されません（対応待ちのリクエストあり）';
+
+  @override
+  String get continuationLimit => '自動ターンの上限に達しました';
+
+  @override
+  String continuationLimitCount(String count, String limit) {
+    return '自動ターンの上限に達しました · $count/$limit';
+  }
+
+  @override
+  String get continuationStale => '続行されません（チャットが先に進みました）';
+
+  @override
+  String get conversationContextOverflow => 'モデルのコンテキスト上限を超えました';
+
+  @override
+  String get conversationOutputLimit => '出力上限で返信が打ち切られました';
+
+  @override
+  String get demoHost => 'MacBook Pro';
+
+  @override
+  String get demoUnavailable => 'この操作は利用できません。';
+
+  @override
+  String get demoConversationTitle => 'サインインフォームを改善';
+
+  @override
+  String get demoNotesTitle => 'リリースレビューを準備';
+
+  @override
+  String get demoUserMessage =>
+      'サインインフォームの余白とキーボードフォーカスを改善してください。既存のレイアウトは維持してください。';
+
+  @override
+  String get demoReply =>
+      'サインインフォームの余白とタップ領域を調整しました。\n\n- フォームの間隔を 20 px に設定。\n- ボタンの最小高さを 44 px に設定。\n- フィールドの順序とキーボード操作を維持。\n\n```css\nmin-height: 44px;\n```\n\n変更は `src/pages/Login.tsx` と `src/styles/login.css` にあります。';
+
+  @override
+  String get demoReadme =>
+      '# Lumen Web\n\nアクセシブルな入力欄と分かりやすいキーボード操作を備えた、レスポンシブなサインインページです。\n\n## プロジェクト構成\n\n- `src/pages/Login.tsx` — サインインフォーム。\n- `src/styles/login.css` — レイアウトと操作のスタイル。\n- `docs/review.md` — リリースチェックリスト。\n\n## インターフェースのガイドライン\n\nフィールド間は 20 px 空け、タップ領域は 44 px 以上にします。フィールドの順序と、見えるフォーカススタイルを維持します。\n';
+
+  @override
+  String get demoReviewNotes =>
+      '# リリースレビュー\n\n| 項目 | 確認内容 |\n| --- | --- |\n| フィールド | ラベルと必須項目のメッセージを確認 |\n| キーボード | タブ順と見えるフォーカスを確認 |\n| タップ領域 | サインインボタンの高さを 44 px 以上に保つ |\n| レイアウト | 狭い画面と広い画面を確認 |\n| 変更 | リリース前にサインインページとスタイルを確認 |\n';
+
+  @override
+  String get demoNotesPrompt => 'サインインページ用の短いリリースレビューチェックリストを作成してください。';
+
+  @override
+  String get demoSimulatedReply =>
+      'レイアウトを維持したまま、サインインページに集中します。\n\n1. フィールドの余白とキーボードフォーカスを確認します。\n2. タップ領域の高さを 44 px 以上に保ちます。\n3. `src/pages/Login.tsx` と `src/styles/login.css` をあわせて確認します。\n\nリリースチェックリストは `docs/review.md` にあります。';
+
+  @override
+  String get demoTerminalWelcome =>
+      'Last login: Sun Nov 15 09:00:00 on ttys001';
+
+  @override
+  String get personalKvConflict => '個人データが競合しました。コントローラーの値を保持しました';
+
+  @override
+  String get sessionAlerts => 'チャットの通知';
+}

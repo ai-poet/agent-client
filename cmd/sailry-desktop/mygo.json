@@ -2,7 +2,7 @@
   "name": "CheapRouter",
   "slug": "cheaprouter",
   "identifier": "sh.waku",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "copyright": "Copyright © 2026 CheapRouter",
   "icon": "../../assets/branding/cheaprouter.png",
   "main": ".",
@@ -16,7 +16,7 @@
     "minimumSystemVersion": "13.0",
     "entitlements": "macos/app.entitlements.plist",
     "infoPlist": {
-      "CFBundleVersion": "4001",
+      "CFBundleVersion": "5000",
       "SUPublicEDKey": "IUd9ZU+OYtZIzWi/MmSrVKXY4cbfrTC3ahtEz52H8ZI=",
       "NSAppTransportSecurity": {
         "NSAllowsArbitraryLoadsInWebContent": true

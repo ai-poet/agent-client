@@ -76,6 +76,36 @@ func TestWelcomeGuide(t *testing.T) {
 	}
 }
 
+func TestWelcomeGuideCloseButtonAndSeenRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	a, tt := newTester(t)
+	seen := false
+	a.SetPrefs(Prefs{NavWidth: NavWidth, NavOpen: true, PanelWidth: PanelWidth, WelcomeSeen: &seen})
+	tt.Frame()
+	if !a.Welcome.Open || a.Welcome.Seen {
+		t.Fatalf("initial welcome state = %+v, want open and unseen", a.Welcome)
+	}
+	clickButton(t, tt, i18n.In("en", "close"))
+	tt.Frame()
+	if a.Welcome.Open || !a.Welcome.Seen {
+		t.Fatalf("after clicking close button: welcome = %+v, want closed and seen", a.Welcome)
+	}
+	if err := SavePrefs(dir, a.Prefs()); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := LoadPrefs(dir)
+	if reloaded.WelcomeSeen == nil || !*reloaded.WelcomeSeen {
+		t.Fatalf("reloaded prefs WelcomeSeen = %v, want true", reloaded.WelcomeSeen)
+	}
+	a2, tt2 := newTester(t)
+	a2.Welcome.Open = true
+	a2.SetPrefs(reloaded)
+	tt2.Frame()
+	if a2.Welcome.Open || !a2.Welcome.Seen || tt2.HasText(i18n.In("en", "onboarding_title")) {
+		t.Fatalf("reloaded seen prefs reopened welcome guide: state=%+v", a2.Welcome)
+	}
+}
+
 // The selection shortcut shows the captured text; Quote adds it to the
 // conversation's draft. ⌃⌥Space is the activate shortcut's key, written as
 // the platform's accelerator: Ctrl is CmdOrCtrl where it is the platform's

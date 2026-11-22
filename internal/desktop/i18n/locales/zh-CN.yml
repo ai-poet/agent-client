@@ -2575,3 +2575,35 @@ pay_completed_check: 我已完成支付
 pay_checking_status: 正在查询支付状态…
 pay_not_paid_yet: 暂未检测到到账，请稍候或继续完成支付
 pay_countdown_remaining: 剩余 %{remaining}
+gateway_origin_title: 云端 API 节点
+gateway_origin_short: API 节点
+gateway_origin_detail: Agent、账号、目录、支付与画图走所选节点；登录与令牌续期始终使用登录端点。
+gateway_origin_placeholder: https://mirror.example.com
+gateway_origin_duplicate: 该域名已在列表中。
+gateway_origin_invalid: 请输入有效的 http(s) 域名或地址。
+gateway_origin_no_key: 暂无可用的网关密钥，无法执行测速。
+gateway_origin_no_ok: 没有节点测速成功，保持原有节点不变。
+gateway_origin_switched: 已切换 API 节点至 %{url}
+gateway_origin_switch_failed: 切换节点 %{url} 失败，已回退原节点：%{error}
+gateway_origin_auto_selected: 已自动切换到最快节点 %{url}
+gateway_origin_fallback: 当前节点无法访问，已自动切换到 %{url}
+gateway_origin_restored: 原节点 %{url} 已恢复访问，已自动切回
+gateway_origin_fallback_hint: 当前已临时从 %{url} 回退，原节点恢复后将自动切回。
+gateway_origin_auto_select: 测速后自动选择最快节点
+gateway_origin_switching: 正在切换 API 节点并刷新网关…
+gateway_node_primary: 主站（默认）
+gateway_node_cdn: CDN 加速节点
+gateway_node_cdn_detail: 中国及亚太地区可尝试
+gateway_node_custom: 自行添加
+gateway_node_manage: 管理节点…
+gateway_node_add: 添加域名
+gateway_node_use: 使用
+gateway_node_remove: 移除
+gateway_node_active: 使用中
+gateway_node_test_all: 全部测速
+gateway_node_testing: 测速中…
+gateway_node_latency: '%{ms} ms'
+gateway_node_unauthorized: 密钥被拒绝
+gateway_node_http: HTTP %{status}
+gateway_node_unreachable: 无法连通
+gateway_node_invalid_url: URL 无效
