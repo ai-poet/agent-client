@@ -810,6 +810,13 @@ of the page. Connected account settings and other pages retain Kit. Presentation
 state and callbacks still belong to the existing CheapRouter controller; the
 component library owns no credentials or network work.
 
+The account's Kit payment sheet uses `internal/cheapauth` to renew the session
+at the login endpoint and to call `/pay` at the selected API origin. The live
+controller keeps the order's separate status token out of presentation state.
+Closing the sheet stops observation, not the service-side order. A confirmed
+credit refreshes the account; plan activation also refreshes subscription and
+group data. Gateway bindings change only when the user selects a group.
+
 Conversations center the messages and composer in the whole main pane. The
 transcript's scroll viewport fills that pane, with its scrollbar at the right
 edge. Wide panes show an activity card in the transcript's right margin, with a

@@ -23,12 +23,13 @@ import (
 // taking it, a worker must check its generation's context before admission.
 // Already admitted writes settle before another mutation can overtake them.
 type cheapAuthRuntime struct {
-	service      *core.Service
-	state        *cheapauthui.State
-	generation   *cheapAuthGeneration
-	attempt      *cheapLoginAttempt
-	stopSync     context.CancelFunc
-	autoBindDone bool
+	service        *core.Service
+	state          *cheapauthui.State
+	generation     *cheapAuthGeneration
+	attempt        *cheapLoginAttempt
+	stopSync       context.CancelFunc
+	stopPayRefresh context.CancelFunc
+	autoBindDone   bool
 
 	effects sync.Mutex
 	pending *cheapProviderWrite // guarded by effects; never redispatch this request
@@ -66,7 +67,11 @@ func (a *cheapAuthRuntime) advance(parent context.Context) *cheapAuthGeneration 
 	if a.generation != nil {
 		a.generation.cancel()
 	}
+	if a.state != nil {
+		a.state.Recharge = nil
+	}
 	a.stopSync, a.attempt = nil, nil
+	a.stopPayRefresh = nil
 	a.autoBindDone = false
 	ctx, cancel := context.WithCancel(parent)
 	a.generation = &cheapAuthGeneration{ctx: ctx, cancel: cancel}
@@ -90,6 +95,8 @@ func (r *Runtime) initCheapAuth() {
 	}
 	state.StopSync = r.stopCheapSync
 	state.Logout = r.logoutCheapAuth
+	state.OpenRecharge = r.openRecharge
+	state.OpenPlans = func() { r.openPayment(nil, true) }
 	state.RefreshGroups = r.refreshCheapGroups
 	state.SelectGroup = r.selectCheapGroup
 	state.SelectLaneGroup = r.selectCheapLaneGroup
