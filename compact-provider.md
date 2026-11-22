@@ -25,3 +25,9 @@
 | `store.TestCompactionProviderAtClaim` | JSON `null`、SQL `NULL`、非法 JSON 均恢复原 provider；切至同名模型的新 lane 后，缺失快照明确失败，完好快照不被替换。 |
 | `engine.TestCompactionWithoutProviderCapture` | 实际启动引擎处理无快照、原 provider 也不存在的压缩回合。修复前确认原文为 `captured model provider is unavailable`，修复后检查终态及可操作的诊断。 |
 | `live.TestComposerSendRouting` 新增的 `compact_after_model_save`、`compact_after_failed_model_save`、`compact_after_credential_rotation` | 桌面配置保存和压缩的命令顺序、精确 provider 和凭据、revision、focus，以及保存失败后不提交。 |
+
+## 验证结果
+
+Linux，`GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0`。`go build ./...` 和 `go vet ./...` 均退出 0。最终定向测试 `go test -p 1 ./internal/node/store ./internal/node/agent/engine ./internal/desktop/live` 三包全部通过：store 41.036 s，engine 54.541 s，live 300.557 s。已有的桌面命令测试还在测试窗口键入 `/compact`，检查 focus 和 Node 的错误副标题。
+
+首次运行时，内存传输返回太快，两项桌面新用例未稳定捕获“保存中”。测试夹具现将保存回调延后到压缩动作注册后处理；未放宽命令顺序或失败断言。三个新增桌面用例连续运行三次均通过，随后完整的三个指定包通过。未运行全仓测试、真实账号或模型。
