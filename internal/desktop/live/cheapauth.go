@@ -23,13 +23,16 @@ import (
 // taking it, a worker must check its generation's context before admission.
 // Already admitted writes settle before another mutation can overtake them.
 type cheapAuthRuntime struct {
-	service        *core.Service
-	state          *cheapauthui.State
-	generation     *cheapAuthGeneration
-	attempt        *cheapLoginAttempt
-	stopSync       context.CancelFunc
-	stopPayRefresh context.CancelFunc
-	autoBindDone   bool
+	service          *core.Service
+	state            *cheapauthui.State
+	generation       *cheapAuthGeneration
+	attempt          *cheapLoginAttempt
+	stopSync         context.CancelFunc
+	stopPayRefresh   context.CancelFunc
+	autoBindDone     bool
+	originGeneration uint64
+	originChecked    bool
+	nodesRefreshing  bool
 
 	effects sync.Mutex
 	pending *cheapProviderWrite // guarded by effects; never redispatch this request
@@ -100,10 +103,16 @@ func (r *Runtime) initCheapAuth() {
 	state.RefreshGroups = r.refreshCheapGroups
 	state.SelectGroup = r.selectCheapGroup
 	state.SelectLaneGroup = r.selectCheapLaneGroup
+	state.SelectOrigin = r.selectCheapGatewayOrigin
+	state.AddOrigin = r.addCheapGatewayOrigin
+	state.RemoveOrigin = r.removeCheapGatewayOrigin
+	state.TestOrigins = func() { r.runCheapGatewayOriginTest(false) }
+	state.SetOriginAuto = r.setCheapGatewayOriginAuto
 	if err != nil {
 		state.Failure = cheapAuthError(err)
 		return
 	}
+	state.OriginConfig = service.GatewayOriginConfig()
 	if err := service.Restore(); err != nil {
 		state.Failure = "无法读取已保存的登录状态，请重新登录"
 		return
@@ -412,8 +421,10 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 			account.state.AutoBindFailures = autoBindFailures
 			if gatewayErr != nil {
 				account.state.Stage, account.state.Failure = cheapauthui.GatewayFailed, cheapAuthError(gatewayErr)
+				account.state.OriginConfig = account.service.GatewayOriginConfig()
 				r.syncImageStudioCatalog()
 				r.projectModels()
+				r.refreshCheapGatewayNodes(account, generation)
 				return
 			}
 			if autoBindAttempted {
@@ -422,9 +433,11 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 			account.state.ModelCount = modelCount
 			account.state.Stage, account.state.Failure = cheapauthui.Ready, ""
 			account.state.GroupError = ""
+			account.state.OriginConfig = account.service.GatewayOriginConfig()
 			r.syncImageStudioCatalog()
 			r.projectModels()
 			r.project()
+			r.refreshCheapGatewayNodes(account, generation)
 		})
 	})
 }
@@ -772,6 +785,13 @@ func (r *Runtime) logoutCheapAuth() {
 			account.state.SwitchingGroup = false
 			account.state.SwitchingLane = ""
 			account.state.GroupError = ""
+			account.originGeneration++
+			account.originChecked = false
+			account.nodesRefreshing = false
+			account.state.OriginTesting = false
+			account.state.OriginSwitching = false
+			account.state.OriginResults = nil
+			account.state.OriginError = ""
 			r.syncImageStudioCatalog()
 			r.projectModels()
 			if disableErr != nil || logoutErr != nil {

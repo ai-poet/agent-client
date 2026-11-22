@@ -376,11 +376,11 @@ func TestGatewayOriginStorePermissionsAtomicAndCorruptRecovery(t *testing.T) {
 }
 
 // Verifies the core Rust semantic:
-// - Auth requests (refresh, logout) ALWAYS hit the login endpoint, even when
-//   chosen points to another gateway node.
-// - Business requests (account, catalog, groups, group-status, usage, payment,
-//   images, and Gateway.BaseURL for the built-in agent) ALWAYS hit chosen.
-// - Switching gateway origin never rewrites credentials.Endpoint.
+//   - Auth requests (refresh, logout) ALWAYS hit the login endpoint, even when
+//     chosen points to another gateway node.
+//   - Business requests (account, catalog, groups, group-status, usage, payment,
+//     images, and Gateway.BaseURL for the built-in agent) ALWAYS hit chosen.
+//   - Switching gateway origin never rewrites credentials.Endpoint.
 func TestAuthStaysOnLoginOriginWhileBusinessTrafficUsesChosenOrigin(t *testing.T) {
 	t.Parallel()
 	var loginMu, gwMu sync.Mutex

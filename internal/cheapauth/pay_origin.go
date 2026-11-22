@@ -24,4 +24,3 @@ func paymentOrigin(credentialPath, login string) string {
 	origin, _ := gatewayOriginForProfile(filepath.Dir(credentialPath), login)
 	return origin
 }
-

@@ -357,8 +357,12 @@ func (s *Service) RefreshServerNodes(ctx context.Context, force bool) (GatewayOr
 	if loginEndpoint != "" {
 		origins = append(origins, loginEndpoint)
 	}
-	if routed := cfg.Origin(); routed != "" && !slices.Contains(origins, routed) {
-		origins = append(origins, routed)
+	if selected := cfg.SelectedOrigin(); selected != "" && !slices.Contains(origins, selected) {
+		origins = append(origins, selected)
+	} else if loginEndpoint == "" || slices.Contains(BuiltInEndpoints(), loginEndpoint) {
+		if routed := cfg.Origin(); routed != "" && !slices.Contains(origins, routed) {
+			origins = append(origins, routed)
+		}
 	}
 	if len(origins) == 0 {
 		return cfg, false, &AuthError{Kind: ErrorResponse, Op: "/settings/public"}
