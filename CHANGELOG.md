@@ -3,6 +3,18 @@
 Release entries supply the corresponding GitHub Release notes. A version is
 released only after its entry is here.
 
+## [0.4.1](https://github.com/ai-poet/agent-client/releases/tag/v0.4.1) — 2026-11-22
+
+修复从 0.3.8 自动更新到 0.4.0 时安装器一闪即退的问题。
+
+Fixes the installer that exited immediately when 0.3.8 updated itself to 0.4.0.
+
+### 修复 / Fixes
+
+- Windows 安装器不再用 `taskkill /T` 结束旧进程：0.3.8 的更新是由旧客户端启动安装包，`/T` 会连安装包自己一起杀掉，导致更新点了没反应、客户端目录仍是旧版本
+
+  The Windows installer no longer ends the previous build with `taskkill /T`: 0.3.8 starts the setup from the running client, so `/T` killed the setup itself, leaving the update with no effect and the old build in place
+
 ## [0.4.0](https://github.com/ai-poet/agent-client/releases/tag/v0.4.0) — 2026-11-21
 
 CheapRouter Desktop 从这一版起是 MyGo 原生客户端，旧的 Rust 客户端已移除，仓库只保留 Go 实现。
