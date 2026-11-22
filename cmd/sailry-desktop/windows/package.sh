@@ -126,7 +126,7 @@ mygo_archive=$out/$app_slug-$version-windows-$arch.tar.gz
 revision=${SAILRY_REVISION:-$(git rev-parse HEAD)}
 telemetry=github.com/ai-poet/cheaprouter-harness/internal/node/telemetry
 update_pkg=github.com/ai-poet/cheaprouter-harness/internal/update
-flags="-X github.com/ai-poet/cheaprouter-harness/internal/core.Default=~/.sailry"
+flags="-s -w -X github.com/ai-poet/cheaprouter-harness/internal/core.Default=~/.sailry"
 flags="$flags -X $telemetry.BuildRevision=$revision"
 test -z "${SAILRY_SENTRY_DSN:-}" || flags="$flags -X $telemetry.BuildDSN=$SAILRY_SENTRY_DSN"
 test -z "${SAILRY_TELEMETRY_KEY:-}" || flags="$flags -X $telemetry.BuildKey=$SAILRY_TELEMETRY_KEY"
