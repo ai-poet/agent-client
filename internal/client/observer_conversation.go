@@ -34,13 +34,34 @@ type conversationObserver struct {
 	sent     map[string]bool
 }
 
+// ConversationViewOptions narrows a conversation watch for controllers that
+// project little of it, such as the mobile app.
+type ConversationViewOptions struct {
+	// Recent opens on the latest turns instead of the released bookmark.
+	Recent bool
+}
+
+// WatchConversationView observes a conversation with the controller's own
+// projection options; the desktop keeps the default watchConversationView.
+func (client *Client) WatchConversationView(ctx context.Context, session protocol.SessionID, options ConversationViewOptions) (*Observer, error) {
+	return client.watchConversationViewWith(ctx, session, options)
+}
+
 func (client *Client) watchConversationView(ctx context.Context, session protocol.SessionID) (*Observer, error) {
+	return client.watchConversationViewWith(ctx, session, ConversationViewOptions{})
+}
+
+func (client *Client) watchConversationViewWith(ctx context.Context, session protocol.SessionID, options ConversationViewOptions) (*Observer, error) {
 	observer := newObserver(ctx)
 	owner := &conversationObserver{
 		client: client, observer: observer, session: session, history: make(chan historyRequest, 8),
 		selected: map[toolReference]bool{}, reads: map[string]*detailRead{}, failures: map[string]*protocol.Fault{}, sent: map[string]bool{},
 	}
-	release, err := client.WatchConversation(observer.ctx, session, observer.notify)
+	watch := client.WatchConversation
+	if options.Recent {
+		watch = client.WatchRecentConversation
+	}
+	release, err := watch(observer.ctx, session, observer.notify)
 	if err != nil {
 		_ = observer.Close()
 		return nil, err
