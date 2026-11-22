@@ -15,7 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('launcher config reuses the desktop mark', () {
     final config = Config.loadConfigFromPubSpec('.')!;
-    final source = File('../../assets/branding/sailry.png').absolute.path;
+    final source = File('../../assets/branding/cheaprouter.png').absolute.path;
     expect(File(config.imagePath!).absolute.path, source);
     expect(File(config.adaptiveIconForeground!).absolute.path, source);
     expect(config.android, isTrue);

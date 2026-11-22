@@ -18,7 +18,7 @@ require(System.getenv("SAILRY_ANDROID_RELEASE") != "1" || hasReleaseSigning) {
 val sailryJniDir = rootProject.file("../../../.runtime/native/android-mobile-jni")
 
 android {
-    namespace = "com.sailry.sailry_mobile"
+    namespace = "cc.cheaprouter.harness"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -32,7 +32,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.sailry.sailry_mobile"
+        applicationId = "cc.cheaprouter.harness"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

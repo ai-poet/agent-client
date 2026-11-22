@@ -1,11 +1,11 @@
 {
-    "name": "sailry_mobile",
-    "short_name": "sailry_mobile",
+    "name": "CheapRouter Harness",
+    "short_name": "CheapRouter Harness",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "CheapRouter Harness mobile remote controller",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

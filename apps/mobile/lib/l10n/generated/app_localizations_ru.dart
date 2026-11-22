@@ -905,7 +905,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get archiveEmpty => 'Нет архивированных чатов';
 
   @override
-  String get brand => 'Sailry';
+  String get brand => 'CheapRouter Harness';
 
   @override
   String get mobile => 'Мобильная рабочая зона';

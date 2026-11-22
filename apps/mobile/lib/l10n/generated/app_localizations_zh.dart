@@ -881,7 +881,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get archiveEmpty => '暂无归档';
 
   @override
-  String get brand => 'Sailry';
+  String get brand => 'CheapRouter Harness';
 
   @override
   String get mobile => '移动工作台';
@@ -3157,7 +3157,7 @@ class AppLocalizationsZhHant extends AppLocalizationsZh {
   String get archiveEmpty => '尚無已歸檔對話';
 
   @override
-  String get brand => 'Sailry';
+  String get brand => 'CheapRouter Harness';
 
   @override
   String get mobile => '行動工作區';

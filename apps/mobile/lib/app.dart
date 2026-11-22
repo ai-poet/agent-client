@@ -65,7 +65,7 @@ class _SailryAppState extends State<SailryApp> {
   @override
   Widget build(BuildContext context) {
     final app = MaterialApp(
-      title: 'Sailry',
+      title: 'CheapRouter Harness',
       navigatorKey: _navigator,
       debugShowCheckedModeBanner: false,
       theme: SailryTheme.of(Brightness.light, _preferences.brand),

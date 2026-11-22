@@ -909,7 +909,7 @@ class AppLocalizationsEs extends AppLocalizations {
   String get archiveEmpty => 'No hay chats archivados';
 
   @override
-  String get brand => 'Sailry';
+  String get brand => 'CheapRouter Harness';
 
   @override
   String get mobile => 'Espacio de trabajo móvil';

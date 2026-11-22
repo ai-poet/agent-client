@@ -1,5 +1,5 @@
 name: sailry_mobile
-description: Sailry mobile controller
+description: CheapRouter Harness mobile remote controller
 publish_to: none
 version: 0.2.7+25
 
@@ -59,11 +59,11 @@ dev_dependencies:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: ../../assets/branding/sailry.png
+  image_path: ../../assets/branding/cheaprouter.png
   remove_alpha_ios: true
   background_color_ios: '#ffffff'
   adaptive_icon_background: '#ffffff'
-  adaptive_icon_foreground: ../../assets/branding/sailry.png
+  adaptive_icon_foreground: ../../assets/branding/cheaprouter.png
 
 flutter_native_splash:
   color: '#17191c'

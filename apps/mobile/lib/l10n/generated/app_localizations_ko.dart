@@ -885,7 +885,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get archiveEmpty => '보관된 채팅 없음';
 
   @override
-  String get brand => 'Sailry';
+  String get brand => 'CheapRouter Harness';
 
   @override
   String get mobile => '모바일 작업 공간';

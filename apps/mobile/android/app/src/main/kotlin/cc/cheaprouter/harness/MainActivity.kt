@@ -1,4 +1,4 @@
-package com.sailry.sailry_mobile
+package cc.cheaprouter.harness
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -1824,7 +1824,7 @@ abstract class AppLocalizations {
   /// No description provided for @brand.
   ///
   /// In en, this message translates to:
-  /// **'Sailry'**
+  /// **'CheapRouter Harness'**
   String get brand;
 
   /// No description provided for @mobile.
