@@ -2,6 +2,9 @@ name: Mobile Android Debug
 
 on:
   workflow_dispatch:
+  # Runs on the test branch so the port can be checked before it reaches main.
+  push:
+    branches: [test]
 
 permissions:
   contents: read
