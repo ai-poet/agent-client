@@ -140,6 +140,8 @@ func testTooltipKeepsPopover(t *testing.T) {
 // With nothing open, tooltips show as before.
 func testTooltipShowsWhenNothingOpen(t *testing.T) {
 	a, tt := newTester(t)
+	tt.Key(0, ui.KeyEscape) // dismiss the initial question before hovering
+	settle(tt)
 	r := ring(t, a, tt)
 	if !restSummary(tt, r.X+10, r.Y+10) {
 		t.Fatal("resting on the ring does not open its summary")

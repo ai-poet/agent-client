@@ -234,6 +234,8 @@ func TestPanesRender(t *testing.T) {
 	// a split names its own menus, so one opens alone.
 	t.Run("a composer's menu opens in its pane alone", func(t *testing.T) {
 		a, tt := newTester(t)
+		tt.Key(0, ui.KeyEscape) // the initial question would cover the split
+		settle(tt)
 		if !a.panes.Drop(session(preview.Big), session(themeChat), panes.Bottom) {
 			t.Fatal("drop")
 		}

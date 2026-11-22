@@ -99,6 +99,7 @@ func testLoadingMarks(t *testing.T) {
 		tt.SetLocale("zh-CN")
 		tt.SetScale(2)
 		tt.Frame()
+		tt.Key(0, ui.KeyEscape) // measure the transcript, not the overlay
 		tt.Advance(time.Second)
 		snapshot(t, tt, "loading-demo-"+name)
 		// Compare the baselines the platform renderer paints, including fallback

@@ -787,6 +787,9 @@ func TestDemoMode(t *testing.T) {
 				t.Fatalf("the context bar lacks the figure %s of %q: %q", figure, figures, tester.Texts())
 			}
 		}
+		// Kit suppresses hover cards behind the initial question popover.
+		tester.Key(0, ui.KeyEscape)
+		settle()
 		shot("demo-figures")
 		hover := func(figure string, rows ...string) {
 			t.Helper()
