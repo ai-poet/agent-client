@@ -12,7 +12,7 @@
     "publicKey": "o2mLrSnSQ59ylkBcA8rNhn3cz78OALnGAq6FbfQglWg="
   },
   "macos": {
-    "icon": "../../assets/branding/Sailry.icns",
+    "icon": "../../assets/branding/cheaprouter.icns",
     "minimumSystemVersion": "13.0",
     "entitlements": "macos/app.entitlements.plist",
     "infoPlist": {

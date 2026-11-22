@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"os"
 	"strconv"
@@ -10,10 +12,45 @@ import (
 	"testing"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/ai-poet/cheaprouter-harness/assets/branding"
 	"github.com/ai-poet/cheaprouter-harness/internal/core"
 	"github.com/ai-poet/cheaprouter-harness/internal/link"
 	clientupdate "github.com/ai-poet/cheaprouter-harness/internal/update"
 )
+
+func TestMacOSBundleUsesCheapRouterIcon(t *testing.T) {
+	raw, err := os.ReadFile("mygo.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct{ MacOS struct{ Icon string } }
+	if err := json.Unmarshal(raw, &config); err != nil {
+		t.Fatal(err)
+	}
+	if config.MacOS.Icon != "../../assets/branding/cheaprouter.icns" {
+		t.Fatalf("unexpected macOS icon: %q", config.MacOS.Icon)
+	}
+	icon, err := os.ReadFile(config.MacOS.Icon)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(icon) < 8 || string(icon[:4]) != "icns" || int(binary.BigEndian.Uint32(icon[4:])) != len(icon) {
+		t.Fatal("invalid ICNS header")
+	}
+	// A renamed legacy file isn't enough: the 512pt Retina entry is the
+	// unmodified 1024px PNG used by the other platforms.
+	for entries := icon[8:]; len(entries) >= 8; {
+		n := int(binary.BigEndian.Uint32(entries[4:]))
+		if n < 8 || n > len(entries) {
+			t.Fatal("invalid ICNS entry length")
+		}
+		if string(entries[:4]) == "ic10" && bytes.Equal(entries[8:n], branding.AppIconPNG) {
+			return
+		}
+		entries = entries[n:]
+	}
+	t.Fatal("missing CheapRouter Retina artwork")
+}
 
 func TestProductIdentityAlignedWithMain(t *testing.T) {
 	raw, err := os.ReadFile("mygo.json")
