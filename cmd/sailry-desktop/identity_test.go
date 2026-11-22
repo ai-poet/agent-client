@@ -119,7 +119,10 @@ func TestProductIdentityAlignedWithMain(t *testing.T) {
 	for _, required := range []string{
 		"AppId={" + core.WindowsInnoAppID,
 		"PrivilegesRequired=lowest",
-		"UsePreviousAppDir=yes",
+		// The previous directory is used on purpose, but only after the
+		// installer confirms this application still lives there.
+		"UsePreviousAppDir=no",
+		"RecordedInstallDir",
 		"OutputBaseFilename=CheapRouter-{#AppVersion}-{#Arch}-Setup",
 		"CheapRouter.exe",
 		"waku.exe",
@@ -128,6 +131,11 @@ func TestProductIdentityAlignedWithMain(t *testing.T) {
 		if !strings.Contains(issText, required) {
 			t.Fatalf("windows/cheaprouter.iss missing required Inno Setup contract %q", required)
 		}
+	}
+	// /T ends the process tree the running updater belongs to, which is the
+	// setup itself: the first-hop update then dies before it installs.
+	if strings.Contains(issText, "/F /T /IM") {
+		t.Fatal("windows/cheaprouter.iss must not end processes with taskkill /T")
 	}
 }
 
