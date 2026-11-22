@@ -37,6 +37,9 @@ type State struct {
 	MigrationFailureDetail string
 	Account                core.User
 	ModelCount             int
+	Recharge               *RechargeDialog
+	OpenRecharge           func()
+	OpenPlans              func()
 
 	Groups             []core.Group
 	Catalog            []core.Model

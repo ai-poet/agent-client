@@ -33,6 +33,11 @@ func Page(c *ui.Context, state *State) {
 				Children(func() { content(c, state) })
 		})
 	})
+	if state.SignedIn() && state.Recharge != nil {
+		owner := ui.Local(ui.Box(c.Key("payment-owner")).Absolute().Size(0, 0), "owner", func() dialogOwner { return dialogOwner{} })
+		owner.state, owner.dialog = state, state.Recharge
+		rechargeView(c, state.Recharge)
+	}
 }
 
 func content(c *ui.Context, state *State) {
@@ -55,6 +60,13 @@ func content(c *ui.Context, state *State) {
 			}
 		})
 	}
+	if state.SignedIn() && (state.Stage != Ready || state.AccountFailure != "") {
+		ui.Row(c.Key("signed-in-payments")).Gap(8).Children(func() {
+			kit.Secondary(c.Key("recharge"), i18n.T(c, "recharge_open")).Disabled(state.LoggingOut || state.OpenRecharge == nil || state.Recharge != nil).OnClick(state.OpenRecharge)
+			kit.Secondary(c.Key("plans"), i18n.T(c, "pay_plan_title")).Disabled(state.LoggingOut || state.OpenPlans == nil || state.Recharge != nil).OnClick(state.OpenPlans)
+		})
+	}
+
 	switch state.Stage {
 	case SignedOut, Starting:
 		disabled := state.Stage == Starting || state.LoggingOut
@@ -186,8 +198,19 @@ func content(c *ui.Context, state *State) {
 				}
 			})
 			if state.AccountFailure == "" {
-				kit.Row(c, "plan", "当前套餐", "", func() { ui.Text(c, state.Account.PlanDisplay()).FontSize(14) })
-				kit.Row(c, "balance", "账户余额", "", func() { ui.Textf(c, "$%.2f", state.Account.Balance).FontSize(14) })
+				kit.Row(c, "plan", "当前套餐", "", func() {
+					ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
+						ui.Text(c, state.Account.PlanDisplay()).FontSize(14)
+						kit.Secondary(c.Key("browse-plans"), i18n.T(c, "pay_plan_title")).Disabled(state.LoggingOut || state.OpenPlans == nil || state.Recharge != nil).OnClick(state.OpenPlans)
+					})
+				})
+				kit.Row(c, "balance", "账户余额", "", func() {
+					ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
+						ui.Textf(c, "$%.2f", state.Account.Balance).FontSize(14)
+						kit.Secondary(c.Key("recharge"), i18n.T(c, "recharge_open")).
+							Disabled(state.LoggingOut || state.OpenRecharge == nil || state.Recharge != nil).OnClick(state.OpenRecharge)
+					})
+				})
 			}
 			kit.Row(c, "models", "可用聊天模型", "", func() { ui.Text(c, fmt.Sprintf("%d 个", state.ModelCount)).FontSize(14) })
 			kit.Row(c, "endpoint", "服务入口", "", func() { ui.Text(c, state.Endpoint).FontSize(13).Selectable() })

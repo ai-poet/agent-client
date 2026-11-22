@@ -2435,3 +2435,125 @@ settings_image_api_save_failed: 保存画图接口配置失败
 settings_image_api_open_studio: 前往创作工作台
 settings_image_api_status_ready: 已配置
 settings_image_api_status_empty: 未配置
+recharge_open: 余额充值
+recharge_amount: 充值金额（美元）
+recharge_min: 单笔最低：$%{amount}
+recharge_max: 单笔最高：$%{amount}
+recharge_daily: 每日上限：$%{amount}
+recharge_tier: 充 $%{amount} 时赠送 $%{bonus}
+recharge_estimate: 预计到账：%{total} 美元（含赠送 %{bonus} 美元）
+recharge_method: 支付方式
+recharge_empty: 暂无可用支付方式。
+recharge_web: '%{method}（仅限网页版）'
+recharge_submit: 创建支付订单
+recharge_loading: 正在加载支付选项…
+recharge_disabled: 暂不支持余额充值。
+recharge_order: 订单号：%{id}
+recharge_scan: 扫码支付
+recharge_checkout: 打开支付页面
+recharge_retry: 重试
+recharge_load_failed: 无法加载支付选项。
+recharge_order_unknown: 无法确认订单是否已创建。再次付款前请先查看「我的订单」。
+recharge_order_failed: 无法创建支付订单。
+recharge_pending: 等待付款。
+recharge_timeout: 尚未确认付款，再次付款前请先查看此订单。
+recharge_status_failed: 无法查询付款状态，再次付款前请先查看此订单。
+recharge_paid: 付款成功，余额已到账。
+recharge_refresh_failed: 余额已到账，但未能刷新账户余额。
+recharge_no_checkout: 没有可用的支付链接或二维码，请查看「我的订单」。
+recharge_limit_rejected: 此笔支付超出服务端限额或受到限制。
+recharge_check_failed: 订单已关闭或失败。再次付款前请先查看「我的订单」。
+pay_alipay: 支付宝
+pay_amount_meta: 支付 %{pay} · 到账 %{credited}
+pay_amount_meta_bonus: 支付 %{pay} · 到账 %{credited}（含活动赠送 %{bonus}）
+pay_back_to_form: 返回重新充值
+pay_cancel_consequence: 取消订单 %{id}？取消后此订单将不再接受付款。
+pay_cancel_order: 取消订单
+pay_charge_amount: 应付金额：%{amount}
+pay_copy_data: 复制支付信息
+pay_copy_order: 复制订单号
+pay_copy_url: 复制支付链接
+pay_current_balance: 当前余额：%{balance}
+pay_estimated_charge: 预计支付 %{amount}
+pay_expired: 已过期
+pay_help_title: 帮助
+pay_keep_order: 保留订单
+pay_method_fee: 渠道手续费 %{rate}%
+pay_open_full_center: 打开完整充值中心
+pay_order_meta: 订单 %{order} · 剩余时间 %{remaining}
+pay_plan_order_meta: 应付 %{pay} · %{plan}
+pay_plan_status_complete_message: 套餐已开通，正在为你配置可用模型。
+pay_plan_status_received_message: 已收到付款，正在开通套餐…
+pay_plan_title: 购买套餐
+pay_promo_hint: 再充 $%{more} 满 $%{threshold} 即可享「%{name}」，赠送 $%{bonus}
+pay_redeem: 兑换
+pay_redeem_code: 兑换码
+pay_redirect_url_missing: 服务未返回支付页面
+pay_remaining_limit: 此方式剩余额度：%{amount}
+pay_settlement_rate: 预计结算 %{amount}
+pay_stablecoin_confirm: 我已了解，继续支付
+pay_stablecoin_direct: 用钱包或交易所的直接转账（Regular Transfer / 提现）把 %{token} 转到收款地址。不要用交易所内部转账、Binance Pay 等支付功能，也不要通过合约调用或跨链桥转账。
+pay_stablecoin_network: 只能选择 %{network} 网络转账，选其他网络转账无法识别。
+pay_stablecoin_network_unknown: 只能选择支付页面显示的网络转账，选其他网络转账无法识别。
+pay_stablecoin_title: '%{token} 支付须知'
+pay_stablecoin_warning: 否则可能不会自动到账。
+pay_status_cancelled_title: 订单已取消
+pay_status_complete_message: 余额已到账
+pay_status_expired_title: 订单已过期
+pay_status_failed_title: 支付失败
+pay_status_pending_title: 等待支付
+pay_status_received_message: 正在入账…
+pay_status_unfinished_message: 请携订单号联系客服
+pay_status_unfinished_title: 已付款，入账未完成
+pay_status_updated_title: 状态已更新
+pay_success_toast_bonus: 支付成功，实际到账 %{total}，其中活动赠送 %{bonus}
+pay_too_many_pending: 待支付订单过多（%{count}），请先取消或完成
+pay_unavailable_method: '%{method}（暂不可用）'
+pay_wxpay: 微信支付
+plans_activated_title: 「%{plan}」已开通
+plans_browse_link: 查看套餐
+plans_buy: 购买
+plans_current: 当前套餐
+plans_default_model: 默认模型：%{model}
+plans_empty: 暂无在售套餐。
+plans_for_cli: 适用于 %{cli}
+plans_intro: 套餐按周期开通一个订阅分组：经该分组的请求按套餐额度计费，不扣余额。
+plans_limit_daily: 每日 %{amount}
+plans_limit_monthly: 每月 %{amount}
+plans_limit_weekly: 每周 %{amount}
+plans_loading: 正在加载套餐…
+plans_original_price: 原价 %{price}
+plans_rate: 倍率 %{rate}
+plans_renew: 续费
+plans_scopes: 可用模型：%{scopes}
+plans_syncing: 正在同步订阅信息…
+plans_unavailable: 当前服务未提供套餐，仍可充值余额。
+plans_unlimited: 不限额度
+plans_use_for_cli: 在 %{cli} 中使用
+plans_validity_day: / %{count} 天
+plans_validity_month: / %{count} 个月
+plans_validity_week: / %{count} 周
+pay_redeemed: 兑换成功：%{value}
+pay_plan_expires: 到期时间：%{date}
+plans_use_for_cli_hint: 将 %{cli} 切换至此套餐分组，即可使用套餐额度。
+plans_done: 完成
+pay_amount_range: 金额需在 $%{min} 与 $%{max} 之间
+pay_continue: 继续支付
+pay_creating_order: 正在创建订单…
+pay_credited_range: 到账 %{credited} · 范围 %{min} – %{max}
+pay_enter_valid_amount: 请输入有效金额
+pay_max_daily: 每日累计到账上限 %{amount}
+pay_method_unavailable: 该支付方式暂不可用
+pay_plan_pay_cta: 支付 %{amount}
+pay_promo_bonus_line: 活动赠送（%{name}）+%{bonus}
+pay_promo_total_line: 实际到账（USD）%{total}
+pay_promo_unavailable: '%{tier}（暂不可用）'
+pay_select_method: 请选择支付方式
+pay_status_cancelled_message: 未发生扣款
+pay_status_complete_title: 充值完成
+pay_status_expired_message: 请重新创建订单
+pay_status_failed_message: 未能完成支付
+pay_status_pending_message: 请在支付应用中完成付款
+pay_status_received_title: 已收到付款
+pay_status_updated_message: 等待下一次更新
+pay_stripe_hint: Stripe 支付将在浏览器中打开

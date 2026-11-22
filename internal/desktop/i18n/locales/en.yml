@@ -2435,3 +2435,125 @@ settings_image_api_save_failed: Failed to save Image API configuration
 settings_image_api_open_studio: Open Creative Studio
 settings_image_api_status_ready: Configured
 settings_image_api_status_empty: Not configured
+recharge_open: Add funds
+recharge_amount: Amount (USD)
+recharge_min: 'Minimum per order: $%{amount}'
+recharge_max: 'Maximum per order: $%{amount}'
+recharge_daily: 'Daily limit: $%{amount}'
+recharge_tier: 'At $%{amount}: $%{bonus} bonus'
+recharge_estimate: 'Estimated credit: $%{total} USD (includes $%{bonus} bonus)'
+recharge_method: Payment method
+recharge_empty: No payment methods are available.
+recharge_web: '%{method} (website only)'
+recharge_submit: Create payment order
+recharge_loading: Loading payment options…
+recharge_disabled: Balance recharges are unavailable.
+recharge_order: 'Order: %{id}'
+recharge_scan: Scan to pay
+recharge_checkout: Open payment page
+recharge_retry: Retry
+recharge_load_failed: Could not load payment options.
+recharge_order_unknown: Order creation could not be confirmed. Check My Orders before starting another payment.
+recharge_order_failed: Could not create the payment order.
+recharge_pending: Awaiting payment.
+recharge_timeout: Payment has not been confirmed. Check this order before paying again.
+recharge_status_failed: Could not check payment status. Check this order before paying again.
+recharge_paid: Payment received. Funds have been credited.
+recharge_refresh_failed: Funds were credited, but the account balance could not be refreshed.
+recharge_no_checkout: No payment link or QR code is available. Check My Orders.
+recharge_limit_rejected: This payment exceeds a server limit or is restricted.
+recharge_check_failed: This order was closed or failed. Check My Orders before starting another payment.
+pay_alipay: Alipay
+pay_amount_meta: Pay %{pay} · credits %{credited}
+pay_amount_meta_bonus: Pay %{pay} · credits %{credited} (incl. %{bonus} promotion bonus)
+pay_back_to_form: Back
+pay_cancel_consequence: Cancel order %{id}? It will no longer accept payment.
+pay_cancel_order: Cancel order
+pay_charge_amount: 'Amount to pay: %{amount}'
+pay_copy_data: Copy payment details
+pay_copy_order: Copy order ID
+pay_copy_url: Copy payment link
+pay_current_balance: 'Current balance: %{balance}'
+pay_estimated_charge: Estimated charge %{amount}
+pay_expired: Expired
+pay_help_title: Support
+pay_keep_order: Keep order
+pay_method_fee: Method fee %{rate}%
+pay_open_full_center: Open the full pay center
+pay_order_meta: Order %{order} · time remaining %{remaining}
+pay_plan_order_meta: Pay %{pay} · %{plan}
+pay_plan_status_complete_message: The plan is active. Its models are being set up.
+pay_plan_status_received_message: Payment received. Activating the plan…
+pay_plan_title: Buy a plan
+pay_promo_hint: Add $%{more} more to reach $%{threshold} and get a $%{bonus} bonus (%{name})
+pay_redeem: Redeem
+pay_redeem_code: Redemption code
+pay_redirect_url_missing: The service returned no payment page
+pay_remaining_limit: 'Remaining for this method: %{amount}'
+pay_settlement_rate: Estimated settlement %{amount}
+pay_stablecoin_confirm: I understand, continue
+pay_stablecoin_direct: Send %{token} to the payment address with a regular transfer (Regular Transfer / withdrawal) from your wallet or exchange. Do not use exchange internal transfers, payment features such as Binance Pay, contract calls or cross-chain bridges.
+pay_stablecoin_network: Send on the %{network} network only. A transfer on any other network will not be detected.
+pay_stablecoin_network_unknown: Send on the network shown on the payment page only. A transfer on any other network will not be detected.
+pay_stablecoin_title: Before you pay with %{token}
+pay_stablecoin_warning: Otherwise your payment may not be credited automatically.
+pay_status_cancelled_title: Order cancelled
+pay_status_complete_message: Your balance has been credited
+pay_status_expired_title: Order expired
+pay_status_failed_title: Payment failed
+pay_status_pending_title: Awaiting payment
+pay_status_received_message: Crediting your balance…
+pay_status_unfinished_message: Contact support with the order id
+pay_status_unfinished_title: Paid, but crediting is unfinished
+pay_status_updated_title: Status updated
+pay_success_toast_bonus: 'Payment complete: %{total} credited, including a %{bonus} promotion bonus'
+pay_too_many_pending: Too many pending orders (%{count}) — cancel one first
+pay_unavailable_method: '%{method} (unavailable)'
+pay_wxpay: WeChat Pay
+plans_activated_title: “%{plan}” is active
+plans_browse_link: See plans
+plans_buy: Buy
+plans_current: Current plan
+plans_default_model: 'Default model: %{model}'
+plans_empty: No plans are on sale right now.
+plans_for_cli: for %{cli}
+plans_intro: 'A plan grants a subscription group for a period: requests through it bill against the plan''s limits instead of your balance.'
+plans_limit_daily: '%{amount} per day'
+plans_limit_monthly: '%{amount} per month'
+plans_limit_weekly: '%{amount} per week'
+plans_loading: Loading plans…
+plans_original_price: was %{price}
+plans_rate: rate %{rate}
+plans_renew: Renew
+plans_scopes: 'Models: %{scopes}'
+plans_syncing: Syncing your subscription…
+plans_unavailable: This service does not sell plans. You can still top up your balance.
+plans_unlimited: No usage cap
+plans_use_for_cli: Use in %{cli}
+plans_validity_day: '%{count}-day plan'
+plans_validity_month: '%{count}-month plan'
+plans_validity_week: '%{count}-week plan'
+pay_redeemed: 'Code redeemed: %{value}'
+pay_plan_expires: 'Expires: %{date}'
+plans_use_for_cli_hint: Route %{cli} through this plan to use its allowance.
+plans_done: Done
+pay_amount_range: Amount must be between $%{min} and $%{max}
+pay_continue: Continue to payment
+pay_creating_order: Creating order…
+pay_credited_range: Credits %{credited} · range %{min} – %{max}
+pay_enter_valid_amount: Enter a valid amount
+pay_max_daily: Max daily credited balance %{amount}
+pay_method_unavailable: This method is unavailable right now
+pay_plan_pay_cta: Pay %{amount}
+pay_promo_bonus_line: Promotion bonus (%{name}) +%{bonus}
+pay_promo_total_line: Total credited (USD) %{total}
+pay_promo_unavailable: '%{tier} (unavailable)'
+pay_select_method: Choose a payment method
+pay_status_cancelled_message: No payment was taken
+pay_status_complete_title: Top-up complete
+pay_status_expired_message: Create a new order to continue
+pay_status_failed_message: The payment did not go through
+pay_status_pending_message: Complete the payment in your payment app
+pay_status_received_title: Payment received
+pay_status_updated_message: Waiting for the next update
+pay_stripe_hint: Stripe checkout opens in your browser
