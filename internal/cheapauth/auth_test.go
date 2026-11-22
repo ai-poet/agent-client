@@ -768,3 +768,19 @@ func TestAvailableGroupsAndEnsureKeyForGroup(t *testing.T) {
 		t.Fatalf("restored group = %v, want 2", got)
 	}
 }
+
+func TestGroupResponsesCapabilityNeedsBooleanEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		raw       string
+		want, bad bool
+	}{
+		{`{}`, false, false}, {`{"supports_responses":false}`, false, false}, {`{"supports_responses":true}`, true, false},
+		{`{"supports_responses":"true"}`, false, true}, {`{"supports_responses":1}`, false, true},
+	} {
+		var group Group
+		err := json.Unmarshal([]byte(tc.raw), &group)
+		if (err != nil) != tc.bad || group.SupportsResponses != tc.want {
+			t.Fatalf("decode %s: supports=%v err=%v", tc.raw, group.SupportsResponses, err)
+		}
+	}
+}

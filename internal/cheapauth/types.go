@@ -225,14 +225,15 @@ type KeyPage struct {
 
 // Group is one model routing group returned by GET /api/v1/groups/available.
 type Group struct {
-	ID               int64   `json:"id"`
-	Name             string  `json:"name"`
-	Description      string  `json:"description"`
-	Platform         string  `json:"platform"`
-	RateMultiplier   float64 `json:"rate_multiplier"`
-	Status           string  `json:"status"`
-	Category         string  `json:"category"`
-	SubscriptionType string  `json:"subscription_type"`
+	ID                int64   `json:"id"`
+	Name              string  `json:"name"`
+	Description       string  `json:"description"`
+	Platform          string  `json:"platform"`
+	RateMultiplier    float64 `json:"rate_multiplier"`
+	Status            string  `json:"status"`
+	Category          string  `json:"category"`
+	SubscriptionType  string  `json:"subscription_type"`
+	SupportsResponses bool    `json:"supports_responses,omitempty"`
 }
 
 // IsSubscription reports whether the group bills against a subscription.
@@ -347,6 +348,7 @@ type UsageStats struct {
 // Gateway is the complete model-provider handoff. Its APIKey and LaneKeys must
 // only be passed to sailry's protected credential field, never written to logs.
 type Gateway struct {
+	Lanes        []GatewayLane
 	BaseURL      string
 	APIKey       string
 	LaneKeys     map[string]string
@@ -361,3 +363,12 @@ func (g Gateway) String() string {
 	return fmt.Sprintf("CheapRouter 网关（%d 个模型，密钥已隐藏）", len(g.Models))
 }
 func (g Gateway) GoString() string { return g.String() }
+
+// GatewayLane preserves the group's own offers, including models also offered
+// by another bound group. The group directory, not the lane label or model
+// vendor, owns the platform and endpoint capability.
+type GatewayLane struct {
+	Lane   string
+	Group  Group
+	Models []Model
+}

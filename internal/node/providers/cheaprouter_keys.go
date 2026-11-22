@@ -17,54 +17,8 @@ type cheapRouterKeyBundle struct {
 	ModelLanes map[string]string `json:"model_lanes,omitempty"`
 }
 
-// EncodeCheapRouterSecret packs per-lane gateway keys into the protected
-// provider Secret when lane routing is active, or returns the plain API key
-// for single-key gateways.
-func EncodeCheapRouterSecret(gateway cheapauth.Gateway) (*protocol.Secret, error) {
-	defaultKey := strings.TrimSpace(gateway.APIKey)
-	laneKeys := map[string]string{}
-	for lane, key := range gateway.LaneKeys {
-		key = strings.TrimSpace(key)
-		lane = strings.ToLower(strings.TrimSpace(lane))
-		if lane != "" && key != "" {
-			laneKeys[lane] = key
-		}
-	}
-	if len(laneKeys) == 0 {
-		if defaultKey == "" {
-			return nil, invalid("CheapRouter gateway key is empty")
-		}
-		secret := protocol.NewSecret(defaultKey)
-		return &secret, nil
-	}
-	modelLanes := map[string]string{}
-	for modelID, lane := range gateway.ModelLanes {
-		modelID = strings.ToLower(strings.TrimSpace(modelID))
-		lane = strings.ToLower(strings.TrimSpace(lane))
-		if modelID == "" || lane == "" || laneKeys[lane] == "" {
-			continue
-		}
-		// Only record overrides where inferred lane differs, keeping the bundle compact.
-		if cheapauth.ModelLane(cheapauth.Model{ID: modelID}) != lane {
-			modelLanes[modelID] = lane
-		}
-	}
-	bundle := cheapRouterKeyBundle{
-		Version:    cheapRouterKeyBundleVersion,
-		Default:    defaultKey,
-		LaneKeys:   laneKeys,
-		ModelLanes: modelLanes,
-	}
-	encoded, err := json.Marshal(bundle)
-	if err != nil {
-		return nil, invalid("CheapRouter gateway key bundle is invalid")
-	}
-	secret := protocol.NewSecret(string(encoded))
-	return &secret, nil
-}
-
 // ResolveCheapRouterKey selects the gateway key for modelID/platform from a
-// plain API key or an encoded multi-lane bundle, and returns all keys in the
+// plain API key or a legacy stored multi-lane bundle, and returns all keys in the
 // bundle for error redaction.
 func ResolveCheapRouterKey(rawSecret, modelID, platform string) (string, []protocol.Secret) {
 	trimmed := strings.TrimSpace(rawSecret)

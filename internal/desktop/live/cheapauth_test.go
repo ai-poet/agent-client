@@ -685,6 +685,7 @@ func TestCheapGatewayWriteSurvivesRevisionRace(t *testing.T) {
 
 func TestCheapGatewaySavesMultiOfferAndMissingContextCatalog(t *testing.T) {
 	gateway := newCheapGateway(t)
+	gateway.groupsBody = `{"code":0,"data":[]}` // Account-default catalog.
 	gateway.catalogBody = `{"code":0,"data":{"items":[` +
 		`{"model":"claude-sonnet-4-6","display_name":"Claude Sonnet 4.6","billing_mode":"token","context_window":0},` +
 		`{"model":"claude-sonnet-4-6","display_name":"Claude Sonnet 4.6","billing_mode":"token","context_window":200000},` +
@@ -826,35 +827,36 @@ func TestCheapSidebarAccountAndGroupSwitchEndToEnd(t *testing.T) {
 			t.Fatal("changing another lane lost Gemini's cleared state")
 		}
 	}
-	routes := func(claude, codex string) protocol.ConversationProvider {
+	routes := func(claude, codex string) map[string]protocol.ConversationProvider {
 		t.Helper()
+		records := map[string]protocol.ConversationProvider{}
 		d.await("provider and composer use both selected lane models", func() bool {
-			p := d.provider(providers.CheapRouterProviderID)
-			if p == nil || !p.Enabled || len(p.Models) != 2 ||
-				!slices.ContainsFunc(p.Models, func(m protocol.ConversationModel) bool { return m.ID == claude }) ||
-				!slices.ContainsFunc(p.Models, func(m protocol.ConversationModel) bool { return m.ID == codex }) {
-				return false
-			}
-			var shown []string
-			for _, m := range d.runtime.App.Data.Models {
-				if name, ok := strings.CutPrefix(m.ID, p.ID.String()+"/"); ok {
-					shown = append(shown, name)
+			for lane, model := range map[string]string{core.LaneClaude: claude, core.LaneCodex: codex} {
+				p := d.provider(providers.CheapRouterLaneID(lane))
+				if p == nil || !p.Enabled || len(p.Models) != 1 || p.Models[0].ID != model {
+					return false
 				}
+				shown := false
+				for _, m := range d.runtime.App.Data.Models {
+					if m.ID == modelKey(p.ID, model) {
+						shown = true
+					}
+				}
+				if !shown {
+					return false
+				}
+				records[model] = *p
 			}
-			return len(shown) == 2 && slices.Contains(shown, claude) && slices.Contains(shown, codex)
+			return true
 		})
-		return d.gateway(true)
+		return records
 	}
-	checkKey := func(p protocol.ConversationProvider, model, want string) {
+	checkKey := func(records map[string]protocol.ConversationProvider, model, want string) {
 		t.Helper()
-		key, ok := detail[protocol.Secret](d.do(protocol.Command{Kind: "read_provider_key", Data: protocol.CommandReadProviderKeyPayload{
-			Provider: p.ID, ExpectedRevision: p.Revision}}).Data)
-		if !ok {
-			t.Fatal("the saved provider did not return its key")
-		}
-		resolved, _ := providers.ResolveCheapRouterKey(key.Expose(), model, "")
-		if resolved != want {
-			t.Fatalf("model %s did not use its selected lane key", model)
+		p := records[model]
+		key, ok := detail[protocol.Secret](d.do(protocol.Command{Kind: "read_provider_key", Data: protocol.CommandReadProviderKeyPayload{Provider: p.ID, ExpectedRevision: p.Revision}}).Data)
+		if !ok || key.Expose() != want {
+			t.Fatalf("wrong scoped key for %s", model)
 		}
 	}
 
@@ -912,7 +914,7 @@ func TestCheapSidebarAccountAndGroupSwitchEndToEnd(t *testing.T) {
 		return !d.account().SwitchingGroup && strings.Contains(d.account().GroupError, "fixture refused provider write")
 	})
 	bindings(1, 4)
-	if after := d.gateway(true); !reflect.DeepEqual(after, provider) {
+	if after := routes("claude-sonnet-4-6", "gpt-5-mini"); !reflect.DeepEqual(after, provider) {
 		t.Fatal("provider refusal changed the active provider")
 	}
 
@@ -950,7 +952,7 @@ func TestCheapSidebarAccountAndGroupSwitchEndToEnd(t *testing.T) {
 	if attempted.Load() || d.account().LaneBindings[core.LaneClaude] != 1 || d.account().LaneBindings[core.LaneCodex] != 4 {
 		t.Fatal("failed account persistence attempted to change the working route")
 	}
-	if after := d.gateway(true); !reflect.DeepEqual(after, provider) {
+	if after := routes("claude-sonnet-4-6", "gpt-5-mini"); !reflect.DeepEqual(after, provider) {
 		t.Fatal("failed account persistence changed the active provider")
 	}
 	for _, fixture := range []string{blocker, path} {
@@ -1051,19 +1053,13 @@ func TestCheapLoginAutoBindsUnboundLanesAndIsolatesFailure(t *testing.T) {
 		}
 	}
 
-	provider := d.gateway(true)
-	secret, _ := detail[protocol.Secret](d.do(protocol.Command{
-		Kind: "read_provider_key",
-		Data: protocol.CommandReadProviderKeyPayload{Provider: provider.ID, ExpectedRevision: provider.Revision},
-	}).Data)
-	for modelID, wantKey := range map[string]string{
-		"claude-sonnet-4-6": "sk-group-11-reused",
-		"gpt-5":             "sk-group-21-minted",
-		"deepseek-r1":       "sk-group-41-minted",
-	} {
-		gotKey, _ := providers.ResolveCheapRouterKey(secret.Expose(), modelID, "")
-		if gotKey != wantKey {
-			t.Errorf("ResolveCheapRouterKey(%q) = %q, want %q", modelID, gotKey, wantKey)
+	for lane, want := range map[string]string{core.LaneClaude: "sk-group-11-reused", core.LaneCodex: "sk-group-21-minted", core.LaneDomestic: "sk-group-41-minted"} {
+		id := providers.CheapRouterLaneID(lane)
+		d.await("bound provider", func() bool { p := d.provider(id); return p != nil && p.Enabled })
+		p := d.provider(id)
+		secret, ok := detail[protocol.Secret](d.do(protocol.Command{Kind: "read_provider_key", Data: protocol.CommandReadProviderKeyPayload{Provider: p.ID, ExpectedRevision: p.Revision}}).Data)
+		if !ok || secret.Expose() != want {
+			t.Fatalf("wrong scoped credential for lane %s", lane)
 		}
 	}
 	d.await("composer model selector refreshes with auto-bound lane models", func() bool {
@@ -1159,4 +1155,82 @@ func TestCheapAutoBindPreservesBindingsAndRespectsManualClearUntilNextLogin(t *t
 	if got := d.account().LaneBindings; !maps.Equal(got, map[string]int64{core.LaneClaude: 11, core.LaneCodex: 21}) {
 		t.Fatalf("next login LaneBindings = %v, want {anthropic:11 openai:21}", got)
 	}
+}
+
+func TestCheapManagedProvidersProjectSharedModelByBoundGroup(t *testing.T) {
+	gateway := newCheapGateway(t)
+	gateway.groupsBody = `{"code":0,"data":[{"id":11,"name":"Google group","platform":"gemini"},{"id":22,"name":"Claude group","platform":"anthropic"},{"id":33,"name":"OpenAI group","platform":"openai","supports_responses":true}]}`
+	gateway.catalogBody = fmt.Sprintf(`{"code":0,"data":{"base_url":%q,"items":[{"model":"shared-model","best_group":{"id":22},"other_groups":[{"group":{"id":33}},{"group":{"id":11}}]}]}}`, gateway.URL+"/proxy/v1")
+	cases := []struct {
+		lane, group, path string
+		gid               int64
+		api               protocol.ConversationModelApi
+	}{
+		{core.LaneClaude, "Google group", "/proxy/v1beta", 11, protocol.ConversationModelApiGemini},
+		{core.LaneGemini, "Claude group", "/proxy/v1/messages", 22, protocol.ConversationModelApiAnthropic},
+		{core.LaneCodex, "OpenAI group", "/proxy/v1/responses", 33, protocol.ConversationModelApiResponses},
+	}
+	d := openCheapDesktop(t, func(d *cheapDesktop) {
+		// An earlier version left its aggregate record behind. Do not repurpose
+		// that identity for a particular lane.
+		d.saveGateway(gateway.URL)
+		c := core.Credentials{AccessToken: cheapTestAccess, RefreshToken: cheapTestRefresh, ExpiresAt: time.Now().Add(time.Hour).Unix(), Endpoint: gateway.URL, LaneBindings: map[string]core.LaneBinding{}}
+		for _, tc := range cases {
+			c.LaneBindings[tc.lane] = core.LaneBinding{GroupID: tc.gid}
+		}
+		store, err := core.NewStore(d.profile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Save(c); err != nil {
+			t.Fatal(err)
+		}
+	})
+	d.await("three scoped offers in composer", func() bool {
+		if d.account().Stage != cheapauthui.Ready || d.account().ModelCount != 3 {
+			return false
+		}
+		for _, tc := range cases {
+			key := modelKey(providers.CheapRouterLaneID(tc.lane), "shared-model")
+			found := false
+			for _, m := range d.runtime.App.Data.Models {
+				if m.ID == key && m.Group != nil && m.Group.GroupName == tc.group {
+					found = true
+				}
+			}
+			if !found {
+				return false
+			}
+		}
+		return true
+	})
+	d.gateway(false)
+	for _, tc := range cases {
+		p := d.provider(providers.CheapRouterLaneID(tc.lane))
+		if p == nil || !p.Enabled || p.Api != tc.api || p.Endpoint != gateway.URL+tc.path {
+			t.Fatalf("incorrect persisted provider for %s: %+v", tc.lane, p)
+		}
+		secret, ok := detail[protocol.Secret](d.do(protocol.Command{Kind: "read_provider_key", Data: protocol.CommandReadProviderKeyPayload{Provider: p.ID, ExpectedRevision: p.Revision}}).Data)
+		if !ok || secret.Expose() != fmt.Sprintf("sk-group-%d-minted", tc.gid) {
+			t.Fatalf("wrong group key for %s", tc.lane)
+		}
+	}
+	d.account().SelectLaneGroup(core.LaneGemini, nil)
+	d.await("unbound Gemini record disabled", func() bool {
+		p := d.provider(providers.CheapRouterLaneID(core.LaneGemini))
+		return !d.account().SwitchingGroup && p != nil && !p.Enabled && d.account().ModelCount == 2
+	})
+	d.account().Logout()
+	d.await("all managed records disabled", func() bool {
+		if d.account().Stage != cheapauthui.SignedOut || d.account().LoggingOut {
+			return false
+		}
+		for _, p := range d.controller.Snapshot().Providers {
+			if providers.IsCheapRouterProvider(p.ID) && p.Enabled {
+				return false
+			}
+		}
+		return true
+	})
+	d.untouched("after scoped provider cleanup")
 }

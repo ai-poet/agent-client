@@ -114,8 +114,8 @@ func (r *Runtime) projectModels() {
 			key := modelKey(p.ID, m.ID)
 			limits, contextEstimated := nodeproviders.ResolveModelLimits(p.Api, m, nodeproviders.ModelLimits{})
 			v := composer.Model{ID: key, Name: name, Provider: p.Name, Reasoning: m.Reasoning, Family: composerModelVendor(p, m), ContextWindow: limits.Context, ContextUnknown: contextEstimated, DefaultEffort: effortName(m.DefaultEffort), Score: r.measuredScore(key, m.DefaultEffort)}
-			if p.ID == nodeproviders.CheapRouterProviderID {
-				v.Group = cheapHints.forModel(m.ID, m.Platform)
+			if nodeproviders.IsCheapRouterProvider(p.ID) {
+				v.Group = cheapHints.forModel(p.ID, m.ID, m.Platform)
 			}
 			for _, e := range m.Efforts {
 				v.Efforts = append(v.Efforts, effortName(e))
@@ -159,6 +159,7 @@ func (r *Runtime) projectModels() {
 type cheapGroupHintProjector struct {
 	state            *cheapauthui.State
 	groupsByID       map[int64]core.Group
+	laneByProvider   map[protocol.ProviderID]string
 	modelLanes       map[string]string
 	bestGroupByModel map[string]core.GroupRef
 }
@@ -178,6 +179,10 @@ func (r *Runtime) cheapModelGroupHints() *cheapGroupHintProjector {
 		}
 	}
 	var modelLanes map[string]string
+	laneByProvider := make(map[protocol.ProviderID]string, len(state.LaneBindings))
+	for lane := range state.LaneBindings {
+		laneByProvider[nodeproviders.CheapRouterLaneID(lane)] = lane
+	}
 	if len(state.LaneBindings) > 0 && len(state.Catalog) > 0 {
 		_, modelLanes = core.SelectCatalogForBindings(state.Catalog, state.LaneBindings, state.Groups)
 	}
@@ -193,17 +198,24 @@ func (r *Runtime) cheapModelGroupHints() *cheapGroupHintProjector {
 	return &cheapGroupHintProjector{
 		state:            state,
 		groupsByID:       groupsByID,
+		laneByProvider:   laneByProvider,
 		modelLanes:       modelLanes,
 		bestGroupByModel: bestByModel,
 	}
 }
 
-func (p *cheapGroupHintProjector) forModel(modelID, platform string) *composer.ModelGroupHint {
+func (p *cheapGroupHintProjector) forModel(provider protocol.ProviderID, modelID, platform string) *composer.ModelGroupHint {
 	if p == nil || p.state == nil {
 		return nil
 	}
 	key := strings.ToLower(strings.TrimSpace(modelID))
-	lane := p.modelLanes[key]
+	lane := p.laneByProvider[provider]
+	if lane == "" {
+		if provider != nodeproviders.CheapRouterProviderID {
+			return nil // The lane is not part of this account's current bindings.
+		}
+		lane = p.modelLanes[key]
+	}
 	if lane == "" {
 		lane = core.ModelLane(core.Model{ID: modelID, Platform: platform})
 	}
@@ -442,10 +454,12 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 	ctx.Models = r.offeredModels(cv.ID, ctx.Models)
 	// A group switch or lane unbind may remove a draft's model. Do not rewrite an
 	// admitted conversation or a captured draft submission.
-	if provider, oldModelID, _ := strings.Cut(comp.Model, "/"); provider == nodeproviders.CheapRouterProviderID.String() &&
+	providerKey, oldModelID, _ := strings.Cut(comp.Model, "/")
+	previousProvider, _ := protocol.ParseProviderID(providerKey)
+	if nodeproviders.IsCheapRouterProvider(previousProvider) &&
 		unsentDraft(cv) && !r.draftSubmitted(cv) && r.controller.Connected() &&
 		!slices.ContainsFunc(ctx.Models, func(m composer.Model) bool { return m.ID == comp.Model }) {
-		prevFamily := composerModelVendor(protocol.ConversationProvider{ID: nodeproviders.CheapRouterProviderID}, protocol.ConversationModel{ID: oldModelID})
+		prevFamily := composerModelVendor(protocol.ConversationProvider{ID: previousProvider}, protocol.ConversationModel{ID: oldModelID})
 		comp.Model, comp.Features = "", map[string]string{}
 		r.defaultComposerForFamily(comp, prevFamily)
 	}

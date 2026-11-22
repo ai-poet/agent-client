@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -275,6 +276,10 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 		statusAttempted := false
 		if !cheapAuthRejected(accountErr) && ctx.Err() == nil {
 			groups, groupsErr = account.service.AvailableGroups(ctx)
+			// Do not downgrade established routes after a failed directory read.
+			if groupsErr != nil && len(account.service.LaneBindings()) > 0 && gatewayErr == nil {
+				gatewayErr = groupsErr
+			}
 			if !cheapAuthRejected(groupsErr) && ctx.Err() == nil && gatewayErr == nil {
 				gateway, gatewayErr = account.service.GatewayWithGroups(ctx, groups)
 				if gatewayErr == nil && len(groups) > 0 {
@@ -300,7 +305,7 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 							_ = account.service.RestoreLaneBinding(ctx, lane, nil, false)
 						}
 					} else if len(autoResult.Bound) > 0 {
-						if _, _, providerErr := providers.CheapRouterProvider(updated); providerErr != nil {
+						if _, providerErr := providers.CheapRouterProviders(updated); providerErr != nil {
 							slog.Warn("cheaprouter auto-bind provider invalid, keeping base gateway", "error", providerErr.Error())
 							for lane := range autoResult.Bound {
 								_ = account.service.RestoreLaneBinding(ctx, lane, nil, false)
@@ -424,30 +429,69 @@ func cheapAuthRejected(err error) bool {
 func (r *Runtime) saveCheapGateway(ctx context.Context, account *cheapAuthRuntime, generation *cheapAuthGeneration, gateway core.Gateway) (int, error) {
 	account.effects.Lock()
 	defer account.effects.Unlock()
+	var settled protocol.ProviderID
 	if pending := account.pending; pending != nil {
 		output, err := r.resolveCheapProvider(ctx, account)
-		if err != nil || pending.generation == generation {
-			if err != nil {
-				return 0, err
-			}
-			provider, ok := detail[protocol.ConversationProvider](output.Data)
-			if !ok {
-				return 0, errors.New("provider detail is missing")
-			}
-			return len(provider.Models), nil
+		if err != nil {
+			return 0, err
+		}
+		if p, ok := detail[protocol.ConversationProvider](output.Data); ok && pending.generation == generation {
+			settled = p.ID
 		}
 	}
-
-	provider, secret, err := providers.CheapRouterProvider(gateway)
+	routes, err := providers.CheapRouterProviders(gateway)
 	if err != nil {
 		return 0, err
 	}
-	err = r.saveCheapProvider(ctx, account, generation, provider, secret)
-	return len(provider.Models), err
+	count, _, err := r.applyCheapRoutes(ctx, account, generation, routes, protocol.ProviderID{}, settled)
+	return count, err
+}
+
+// applyCheapRoutes reconciles managed records only. A manual lane change need
+// not resave another lane's credential. Disable obsolete records rather than
+// deleting identities referenced by existing sessions and admitted tasks.
+func (r *Runtime) applyCheapRoutes(ctx context.Context, account *cheapAuthRuntime, generation *cheapAuthGeneration, routes []providers.CheapRouterRoute, changed, settled protocol.ProviderID) (count int, wrote bool, err error) {
+	list, err := r.readCheapProviders(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	keep := make(map[protocol.ProviderID]bool, len(routes))
+	for _, route := range routes {
+		id := route.Provider.ID
+		count += len(route.Provider.Models)
+		keep[id] = true
+		if settled == id {
+			continue
+		}
+		if changed != (protocol.ProviderID{}) && id != changed && id != providers.CheapRouterProviderID &&
+			slices.ContainsFunc(list, func(p protocol.ConversationProvider) bool { return p.ID == id && p.Enabled }) {
+			continue
+		}
+		if err := r.saveCheapProvider(ctx, account, generation, route.Provider, route.Secret); err != nil {
+			return 0, wrote, err
+		}
+		wrote = true
+	}
+	for _, p := range list {
+		if !providers.IsCheapRouterProvider(p.ID) || !p.Enabled || keep[p.ID] {
+			continue
+		}
+		if err := r.updateCheapProvider(ctx, account, generation, p.ID, func(existing *protocol.ConversationProvider) *protocol.CommandSaveProviderPayload {
+			if existing == nil || !existing.Enabled {
+				return nil
+			}
+			existing.Enabled = false
+			return &protocol.CommandSaveProviderPayload{Provider: *existing, ExpectedRevision: existing.Revision}
+		}); err != nil {
+			return 0, wrote, err
+		}
+		wrote = true
+	}
+	return count, wrote, nil
 }
 
 func (r *Runtime) saveCheapProvider(ctx context.Context, account *cheapAuthRuntime, generation *cheapAuthGeneration, provider protocol.ConversationProvider, secret *protocol.Secret) error {
-	err := r.updateCheapProvider(ctx, account, generation, func(existing *protocol.ConversationProvider) *protocol.CommandSaveProviderPayload {
+	err := r.updateCheapProvider(ctx, account, generation, provider.ID, func(existing *protocol.ConversationProvider) *protocol.CommandSaveProviderPayload {
 		provider.Revision = 0
 		if existing != nil {
 			provider.Revision = existing.Revision
@@ -467,11 +511,18 @@ func (r *Runtime) saveCheapProvider(ctx context.Context, account *cheapAuthRunti
 // provider at its current revision; nil leaves the provider as it is. Another
 // window's sync or an edit in Settings can move the revision between the read
 // and the write: the change is then made once more, to what is stored now.
-func (r *Runtime) updateCheapProvider(ctx context.Context, account *cheapAuthRuntime, generation *cheapAuthGeneration, next func(existing *protocol.ConversationProvider) *protocol.CommandSaveProviderPayload) error {
+func (r *Runtime) updateCheapProvider(ctx context.Context, account *cheapAuthRuntime, generation *cheapAuthGeneration, id protocol.ProviderID, next func(existing *protocol.ConversationProvider) *protocol.CommandSaveProviderPayload) error {
 	for reread := false; ; reread = true {
-		existing, err := r.readCheapProvider(ctx)
+		list, err := r.readCheapProviders(ctx)
 		if err != nil {
 			return err
+		}
+		var existing *protocol.ConversationProvider
+		for i := range list {
+			if list[i].ID == id {
+				existing = &list[i]
+				break
+			}
 		}
 		input := next(existing)
 		if input == nil {
@@ -484,7 +535,7 @@ func (r *Runtime) updateCheapProvider(ctx context.Context, account *cheapAuthRun
 	}
 }
 
-func (r *Runtime) readCheapProvider(ctx context.Context) (*protocol.ConversationProvider, error) {
+func (r *Runtime) readCheapProviders(ctx context.Context) ([]protocol.ConversationProvider, error) {
 	// A previous write can have completed before its event reaches Snapshot.
 	output, err := r.controller.Do(ctx, protocol.Command{Kind: "list_providers"})
 	if err != nil {
@@ -494,12 +545,7 @@ func (r *Runtime) readCheapProvider(ctx context.Context) (*protocol.Conversation
 	if !ok {
 		return nil, errors.New("provider list is missing")
 	}
-	for _, provider := range list {
-		if provider.ID == providers.CheapRouterProviderID {
-			return &provider, nil
-		}
-	}
-	return nil, nil
+	return list, nil
 }
 
 func (r *Runtime) writeCheapProvider(ctx context.Context, account *cheapAuthRuntime, generation *cheapAuthGeneration, input protocol.CommandSaveProviderPayload) error {
@@ -574,7 +620,7 @@ func (r *Runtime) bindCheapLaneGroup(account *cheapAuthRuntime, generation *chea
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	provider, secret, err := providers.CheapRouterProvider(gateway)
+	routes, err := providers.CheapRouterProviders(gateway)
 	if err != nil {
 		return 0, nil, nil, err
 	}
@@ -586,7 +632,12 @@ func (r *Runtime) bindCheapLaneGroup(account *cheapAuthRuntime, generation *chea
 	if err := account.service.SetLaneBinding(ctx, lane, targetBinding); err != nil {
 		return 0, nil, nil, err
 	}
-	if err := r.saveCheapProvider(ctx, account, generation, provider, secret); err != nil {
+	count, wrote, err := r.applyCheapRoutes(ctx, account, generation, routes, providers.CheapRouterLaneID(lane), protocol.ProviderID{})
+	if err != nil {
+		// Sync reconciles partial writes; rolling back only the local binding would diverge.
+		if wrote {
+			return 0, nil, nil, err
+		}
 		if account.pending != nil {
 			account.pending.binding = binding
 			return 0, nil, nil, err
@@ -596,7 +647,7 @@ func (r *Runtime) bindCheapLaneGroup(account *cheapAuthRuntime, generation *chea
 		}
 		return 0, nil, nil, errors.Join(err, restoreCheapGroup(r.ctx, account, binding))
 	}
-	return len(provider.Models), gateway.Catalog, account.service.LaneBindings(), nil
+	return count, gateway.Catalog, account.service.LaneBindings(), nil
 }
 
 func (r *Runtime) bindCheapGroup(account *cheapAuthRuntime, generation *cheapAuthGeneration, target *int64) (int, error) {
@@ -612,7 +663,7 @@ func (r *Runtime) bindCheapGroup(account *cheapAuthRuntime, generation *cheapAut
 	if err != nil {
 		return 0, err
 	}
-	provider, secret, err := providers.CheapRouterProvider(gateway)
+	routes, err := providers.CheapRouterProviders(gateway)
 	if err != nil {
 		return 0, err
 	}
@@ -620,7 +671,11 @@ func (r *Runtime) bindCheapGroup(account *cheapAuthRuntime, generation *cheapAut
 	if err := account.service.SetGroup(ctx, target); err != nil {
 		return 0, err
 	}
-	if err := r.saveCheapProvider(ctx, account, generation, provider, secret); err != nil {
+	count, wrote, err := r.applyCheapRoutes(ctx, account, generation, routes, protocol.ProviderID{}, protocol.ProviderID{})
+	if err != nil {
+		if wrote {
+			return 0, err
+		}
 		if account.pending != nil {
 			account.pending.binding = binding
 			return 0, err
@@ -630,7 +685,7 @@ func (r *Runtime) bindCheapGroup(account *cheapAuthRuntime, generation *cheapAut
 		}
 		return 0, errors.Join(err, restoreCheapGroup(r.ctx, account, binding))
 	}
-	return len(provider.Models), nil
+	return count, nil
 }
 
 func (r *Runtime) logoutCheapAuth() {
@@ -773,6 +828,7 @@ func (r *Runtime) selectCheapLaneGroup(lane string, groupID *int64) {
 			account.state.Stage = cheapauthui.Ready
 			account.state.Failure = ""
 			r.syncImageStudioCatalog()
+			r.projectModels()
 			r.project()
 			label := core.LaneDisplayName(lane)
 			if target == nil {
@@ -849,14 +905,8 @@ func (r *Runtime) disableCheapGateway(account *cheapAuthRuntime, generation *che
 			return err // An admitted enable may still be running.
 		}
 	}
-	// Disable only CheapRouter; do not alter other providers or captured tasks.
-	return r.updateCheapProvider(ctx, account, generation, func(existing *protocol.ConversationProvider) *protocol.CommandSaveProviderPayload {
-		if existing == nil || !existing.Enabled {
-			return nil
-		}
-		existing.Enabled = false
-		return &protocol.CommandSaveProviderPayload{Provider: *existing, ExpectedRevision: existing.Revision}
-	})
+	_, _, err := r.applyCheapRoutes(ctx, account, generation, nil, protocol.ProviderID{}, protocol.ProviderID{})
+	return err
 }
 
 type cheapProviderSaveError struct {

@@ -738,7 +738,7 @@ func readGateway(ctx context.Context, client *Client, credentials Credentials) (
 }
 
 func readGatewayWithGroups(ctx context.Context, client *Client, credentials Credentials, groups []Group) (Gateway, error) {
-	if len(credentials.LaneBindings) == 0 && credentials.GroupID != nil {
+	if len(credentials.LaneBindings) == 0 && credentials.GroupID != nil && !slices.ContainsFunc(groups, func(g Group) bool { return g.ID == *credentials.GroupID }) {
 		return readGatewayForGroup(ctx, client, credentials, credentials.GroupID)
 	}
 	token := credentials.AccessToken
@@ -805,6 +805,7 @@ func buildGatewayForBindings(
 		laneGroupIDs[lane] = binding.GroupID
 	}
 
+	lanes := boundGatewayLanes(catalog.Items, laneGroupIDs, groups)
 	models, modelLanes := SelectCatalogForBindings(catalog.Items, laneGroupIDs, groups)
 	fallbackKey := accountKey(*keys, bridgeKey)
 	if fallbackKey == "" {
@@ -827,6 +828,7 @@ func buildGatewayForBindings(
 		BaseURL:      baseURL,
 		APIKey:       fallbackKey,
 		LaneKeys:     laneKeys,
+		Lanes:        lanes,
 		ModelLanes:   modelLanes,
 		Models:       models,
 		Catalog:      catalog.Items,

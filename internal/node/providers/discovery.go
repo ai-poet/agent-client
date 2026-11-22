@@ -39,6 +39,19 @@ func discover(ctx context.Context, provider protocol.ConversationProvider, secre
 	if err != nil {
 		return catalog, err
 	}
+	// Managed lane records expose the public request endpoint, not the
+	// SDK/discovery base. List models as a sibling of that endpoint.
+	scoped := IsCheapRouterProvider(provider.ID) && provider.ID != CheapRouterProviderID
+	if scoped {
+		switch provider.Api {
+		case protocol.ConversationModelApiAnthropic:
+			root.Path = strings.TrimSuffix(root.Path, "/messages")
+		case protocol.ConversationModelApiResponses:
+			root.Path = strings.TrimSuffix(root.Path, "/responses")
+		case protocol.ConversationModelApiChatCompletions:
+			root.Path = strings.TrimSuffix(root.Path, "/chat/completions")
+		}
+	}
 	candidates := []url.URL{*root}
 	path := strings.TrimRight(root.Path, "/")
 	if provider.Api == protocol.ConversationModelApiAnthropic {
@@ -83,6 +96,9 @@ func discover(ctx context.Context, provider protocol.ConversationProvider, secre
 			return catalog, err
 		}
 		if found {
+			if scoped {
+				endpoint = provider.Endpoint
+			}
 			return protocol.ConversationDiscoveryCatalog{Endpoint: endpoint, Models: models}, nil
 		}
 	}

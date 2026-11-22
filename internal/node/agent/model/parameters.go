@@ -142,7 +142,7 @@ func requestParameters(binding Binding, call *fantasy.Call) *callParameters {
 				params.Body["reasoning_effort"] = providers.GoogleThinkingLevelForEffort(level)
 			case api == protocol.ConversationModelApiResponses:
 				params.Body["reasoning_effort"] = providers.OpenAIReasoningEffortForLevel(level, true)
-			case provider.ID == providers.CheapRouterProviderID:
+			case providers.IsCheapRouterProvider(provider.ID):
 				params.Body["reasoning_effort"] = level
 			case openai:
 				params.Body["reasoning_effort"] = providers.OpenAIReasoningEffortForLevel(level, false)

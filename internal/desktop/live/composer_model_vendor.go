@@ -36,7 +36,7 @@ func composerModelVendor(p protocol.ConversationProvider, m protocol.Conversatio
 	default:
 		return platform
 	}
-	if p.ID == providers.CheapRouterProviderID {
+	if providers.IsCheapRouterProvider(p.ID) {
 		return "other"
 	}
 	return modelFamily(p.Api)

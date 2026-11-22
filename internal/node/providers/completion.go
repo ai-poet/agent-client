@@ -11,7 +11,7 @@ import (
 // CompleteChannelModel adds the media capabilities of the specific channel.
 func CompleteChannelModel(provider protocol.ConversationProvider, model protocol.ConversationModel, reference *protocol.ConversationCatalogModel) protocol.ConversationModel {
 	completed := CompleteModel(model, reference, provider.Api)
-	if provider.ID == CheapRouterProviderID && !model.CustomCapabilities {
+	if IsCheapRouterProvider(provider.ID) && !model.CustomCapabilities {
 		// CheapRouterProvider sets its Rust-aligned reasoning ladder per model;
 		// keep that decision intact while still enriching vision/tools/generates.
 		completed.Reasoning = model.Reasoning

@@ -56,7 +56,7 @@ func NormalizeLane(platform string) string {
 		return ""
 	case "anthropic", "claude":
 		return LaneClaude
-	case "openai", "codex", "chatgpt", "azure-openai", "azure_open_ai":
+	case "openai", "gpt", "codex", "chatgpt", "azure-openai", "azure_open_ai":
 		return LaneCodex
 	case "gemini", "google", "google-ai", "google_ai", "google-ai-studio", "vertex", "vertex-ai":
 		return LaneGemini
@@ -500,4 +500,35 @@ func SelectCatalogForBindings(catalog []Model, bindings map[string]int64, groups
 		return catalog, nil
 	}
 	return selected, modelLanes
+}
+
+func boundGatewayLanes(catalog []Model, bindings map[string]int64, groups []Group) []GatewayLane {
+	var lanes []GatewayLane
+	for _, lane := range AvailableLanes(nil, nil, bindings) {
+		id := bindings[lane]
+		group := Group{ID: id}
+		for _, g := range groups {
+			if g.ID == id {
+				group = g
+				break
+			}
+		}
+		var offers []Model
+		for _, m := range catalog {
+			if m.ServesGroup(id) {
+				offers = append(offers, m)
+			}
+		}
+		if len(offers) == 0 {
+			// Silent groups advertise no explicit offers; only their own family
+			// is eligible, never the whole catalog.
+			for _, m := range catalog {
+				if ModelLane(m) == lane {
+					offers = append(offers, m)
+				}
+			}
+		}
+		lanes = append(lanes, GatewayLane{Lane: lane, Group: group, Models: offers})
+	}
+	return lanes
 }
