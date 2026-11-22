@@ -13,6 +13,7 @@
 - **创作工作台**：文生图 / 图生图，自动识别网关画图模型，也支持自定义画图接口（Base URL / Key / 模型）。
 - **两跳热更新**：兼容旧版客户端原地升级，之后的版本由 MyGo 内置更新器接管。
 - **旧版数据无损迁移**：首次启动只读检测旧版数据目录，先备份再按稳定 ID 导入。
+- **手机远控（可选）**：Android/iOS App 通过 iroh 直连你自己的 Host，配对后可查看会话、发消息、审批与传文件；不需要账号。
 
 ## 下载与更新
 
@@ -20,7 +21,19 @@
 - macOS（13+）：`CheapRouter-<ver>.dmg`（Apple silicon）/ `CheapRouter-<ver>-x86_64.dmg`（Intel）；命令行安装 `curl -fsSL https://s3.cheaprouter.cc/cheaprouter-releases/install-mac.sh | sh`
 - Windows（10 1809+）：`CheapRouter-<ver>-x86_64-Setup.exe` / `CheapRouter-<ver>-aarch64-Setup.exe`
 - 下载源为 `https://s3.cheaprouter.cc/cheaprouter-releases/`；应用内的「检查更新」走 MyGo 清单（`mygo/update-*.json`），验签后原地替换
+- Android 远控 App：Releases 里的 `CheapRouter-Harness-<ver>-android-arm64.apk`（自签名，安装时需允许未知来源）
 - 从 0.3.x 升级：首次由旧客户端的更新通道装到 0.4.x，之后由 MyGo 更新器接管
+
+## 手机远控
+
+手机端只做「连接自己的 Host」，不涉及账号、订阅或云端服务。
+
+1. **准备 Host**：在要远控的机器上运行 `cmd/sailry-host`（桌面端运行时自带的 Host 也可以），版本需与本仓库同一线（双方的线协议版本必须一致，否则握手会提示更新 Host）。
+2. **安装 App**：从 [Releases](https://github.com/ai-poet/cheaprouter-harness/releases/latest) 下载 `CheapRouter-Harness-<ver>-android-arm64.apk` 安装（自签名，需在系统里允许安装未知来源应用）。iOS 需在 macOS 上用 `apps/mobile` 的 Flutter 工程自行构建（需要 Apple 开发者账号与描述文件）。
+3. **配对**：在 Host 侧生成配对 ticket，在 App 里粘贴（或扫码）该 ticket，核对两端显示的短码后确认。
+4. **使用**：配对后即可浏览会话、打开会话查看执行轨迹、发消息、回答审批、传输文件；连接走 iroh P2P 加密链路，支持中继回退。
+
+App 源码在 `apps/mobile`（Flutter），Go 侧桥接在 `internal/mobile` 与 `cmd/sailry-mobile`（C ABI），构建说明见 [docs/mobile.md](docs/mobile.md)。Android 的 tag 构建会自动把签名 APK/AAB 挂到对应 Release；本地或 CI 调试可用 `Mobile Android Debug` workflow。
 
 ## 本地开发
 
@@ -129,13 +142,15 @@ Protocol (internal/protocol)  命令 / 事件 / 快照 / 错误码 / 线协议
 ├── go.mod / go.sum
 ├── bundled.go                 # 内置插件与主题资源嵌入
 ├── dev-desktop.sh             # 跨平台开发启动脚本
+├── apps/mobile/               # 手机远控 App（Flutter），包名 cc.cheaprouter.harness
 ├── cmd/
 │   ├── sailry-desktop/        # 桌面主入口、mygo.json、macOS/Windows 打包脚本
 │   ├── sailry-host/           # 无头 Host 服务
+│   ├── sailry-mobile/         # 移动端 C ABI 桥接（Go）
 │   ├── mygo-manifest/         # 第二跳更新归档与清单签名工具
 │   ├── gen-win-icon/          # Windows 多尺寸 .ico 生成
 │   └── update-model-catalog/  # 模型目录快照更新
-├── internal/                  # protocol / link / client / node / desktop 等
+├── internal/                  # protocol / link / client / node / desktop / mobile 等
 ├── native/                    # 原生库源码与构建脚本（iroh / turso / capture）
 ├── assets/                    # 品牌图标与内置资源
 ├── locales/                   # 多语言源文件（go generate 生成内嵌词典）
