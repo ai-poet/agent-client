@@ -2557,3 +2557,18 @@ pay_status_pending_message: 请在支付应用中完成付款
 pay_status_received_title: 已收到付款
 pay_status_updated_message: 等待下一次更新
 pay_stripe_hint: Stripe 支付将在浏览器中打开
+pay_popover_recharge: 充值
+pay_popover_plans: 套餐
+pay_cancel: 取消
+pay_estimated_credit: 预计到账 %{total}
+pay_estimated_credit_bonus: 预计到账 %{total}（含赠送 %{bonus}）
+pay_more_promos: 更多规则
+pay_hide_promos: 收起规则
+pay_chip_fee: 手续费 %{rate}%
+pay_chip_limit: 限 %{min}–%{max}
+pay_chip_remaining: 剩 %{amount}
+pay_chip_unavailable: 暂不可用
+pay_completed_check: 我已完成支付
+pay_checking_status: 正在查询支付状态…
+pay_not_paid_yet: 暂未检测到到账，请稍候或继续完成支付
+pay_countdown_remaining: 剩余 %{remaining}
