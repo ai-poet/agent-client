@@ -1,8 +1,9 @@
-# CheapRouter Desktop
+# CheapRouter Desktop · cheaprouter-harness
 
-基于 [Sailry](https://github.com/sailry/sailry-harness) 开发的 CheapRouter 桌面客户端：Go + [MyGo](https://github.com/egoist/mygo) 原生 GPU UI，无 Electron 壳。集成低价多模型网关、内置编码 Agent、创作工作台（AI 画图）与插件生态。
+[`ai-poet/cheaprouter-harness`](https://github.com/ai-poet/cheaprouter-harness) 是 CheapRouter 桌面客户端的源码仓库（Go 模块 `github.com/ai-poet/cheaprouter-harness`）。客户端本身叫 **CheapRouter Desktop**：Go + [MyGo](https://github.com/egoist/mygo) 原生 GPU UI，无 Electron 壳，集成低价多模型网关、内置编码 Agent、创作工作台（AI 画图）与插件生态。
 
 > 仓库派生自 [sailry/sailry-harness](https://github.com/sailry/sailry-harness)（Apache-2.0），归属声明见 [NOTICE](NOTICE) 与 [LICENSE](LICENSE)。
+> 更名自 `ai-poet/agent-client`，旧地址会自动重定向到本仓库。
 
 ## 特性
 
@@ -12,6 +13,14 @@
 - **创作工作台**：文生图 / 图生图，自动识别网关画图模型，也支持自定义画图接口（Base URL / Key / 模型）。
 - **两跳热更新**：兼容旧版客户端原地升级，之后的版本由 MyGo 内置更新器接管。
 - **旧版数据无损迁移**：首次启动只读检测旧版数据目录，先备份再按稳定 ID 导入。
+
+## 下载与更新
+
+- 最新版本：[Releases](https://github.com/ai-poet/cheaprouter-harness/releases/latest)，版本记录见 [CHANGELOG.md](CHANGELOG.md)
+- macOS（13+）：`CheapRouter-<ver>.dmg`（Apple silicon）/ `CheapRouter-<ver>-x86_64.dmg`（Intel）；命令行安装 `curl -fsSL https://s3.cheaprouter.cc/cheaprouter-releases/install-mac.sh | sh`
+- Windows（10 1809+）：`CheapRouter-<ver>-x86_64-Setup.exe` / `CheapRouter-<ver>-aarch64-Setup.exe`
+- 下载源为 `https://s3.cheaprouter.cc/cheaprouter-releases/`；应用内的「检查更新」走 MyGo 清单（`mygo/update-*.json`），验签后原地替换
+- 从 0.3.x 升级：首次由旧客户端的更新通道装到 0.4.x，之后由 MyGo 更新器接管
 
 ## 本地开发
 
@@ -81,7 +90,7 @@ CI 流水线见 [`.github/workflows/release.yml`](.github/workflows/release.yml)
 
 对象存储桶 `cheaprouter-releases`，两把独立 Ed25519 密钥：
 
-1. **第一跳（旧版 v0.3.x → MyGo v0.4.0+）**：macOS 保持 Bundle ID `sh.waku` 与递增 `CFBundleVersion`，由 `scripts/appcast.ts` 签发 `appcast.xml`；Windows 保持 Inno Setup `AppId`，由 `scripts/appcast-windows.ts` 签发 `appcast-windows-*.xml`。
+1. **第一跳（旧版 v0.3.x → MyGo v0.4.0+，v0.4.1 起修复 Windows 静默安装一闪即退）**：macOS 保持 Bundle ID `sh.waku` 与递增 `CFBundleVersion`，由 `scripts/appcast.ts` 签发 `appcast.xml`；Windows 保持 Inno Setup `AppId`，由 `scripts/appcast-windows.ts` 签发 `appcast-windows-*.xml`。
 2. **第二跳（MyGo → 后续版本）**：`cmd/mygo-manifest` 对四端 `.tar.gz` 的 SHA-256 做 Ed25519 签名，产出 `mygo/update-*.json`；客户端经 `internal/update` 拉取、验签并原子替换。上传顺序为先传不可变归档，再更新短缓存清单。
 
 ## 架构
