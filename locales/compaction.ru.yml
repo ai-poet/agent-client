@@ -1,3 +1,4 @@
+chat_compact_start_failed: Не удалось начать сжатие
 compact_auto_failed: "Сбой автоматического сжатия"
 compact_stage_history: "Этап · Сопоставление истории"
 compact_stage_budget: "Этап · Бюджет контекста"

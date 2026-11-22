@@ -587,6 +587,7 @@ background_result_waiting: Resultado no entregado
 chat_compact_cancelled: Compactación cancelada
 chat_compact_failed: Falló la compactación
 chat_compact_failed_paused: La compactación falló; compactación automática en pausa
+chat_compact_start_failed: No se pudo iniciar la compresión
 chat_compact_queued: Esperando a compactar
 chat_compact_unneeded: No se necesita compactación
 chat_compacted: Contexto compactado
@@ -619,6 +620,8 @@ chat_search: Buscar una conversación
 chat_search_result: Resultados de la búsqueda
 chat_status_unsynced: Estado no sincronizado
 chat_sync_failed: Falló la sincronización de conversación
+compact_reason_budget: Ningún segmento completo del historial cabe en el presupuesto del resumen
+compact_reason_request: Falló la solicitud de resumen al modelo
 compact_reason_unknown: No se registraron más detalles sobre este fallo
 composer_cache: Caché
 composer_compression_hint: 'Compactación de contexto: sin datos de tiempo de ejecución (vista previa de la interfaz de usuario)'

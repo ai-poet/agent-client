@@ -8,13 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/settings"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
-	"github.com/ai-poet/cheaprouter-harness/internal/link"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 func connectorTypeID(reference protocol.PluginReference, connector string) string {
@@ -603,13 +602,8 @@ func faultDetail(err error) string {
 
 // faultMessage is the host's reason for a fault, "" for any other error.
 func faultMessage(err error) string {
-	var fault *link.FaultError
-	if errors.As(err, &fault) {
-		return fault.Fault.Message
-	}
-	var pointer *protocol.Fault
-	if errors.As(err, &pointer) {
-		return pointer.Message
+	if fault := commandFault(err); fault != nil {
+		return fault.Message
 	}
 	return ""
 }

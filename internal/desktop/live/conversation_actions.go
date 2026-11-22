@@ -6,13 +6,13 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 func (x *conversationActions) state() (protocol.Session, protocol.ConversationSnapshot, bool) {
@@ -658,7 +658,9 @@ func (x *conversationActions) turn(command protocol.Command, done func(protocol.
 		} else {
 			delete(x.r.turnRetries, id)
 		}
-		if code := faultCode(err); err != nil && x.restore != nil && x.restoreDraft != composerFingerprint(x.comp) && code != protocol.ErrorCodeOutcomeUnknown {
+		if err != nil && command.Kind == "compact_context" {
+			reportCompactCommand(c, err)
+		} else if code := faultCode(err); err != nil && x.restore != nil && x.restoreDraft != composerFingerprint(x.comp) && code != protocol.ErrorCodeOutcomeUnknown {
 			x.restoreFailedDraft(c, err)
 		} else {
 			x.r.report(c, err, "session_changed")

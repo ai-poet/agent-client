@@ -1,3 +1,4 @@
+chat_compact_start_failed: 无法开始压缩
 compact_auto_failed: 自动压缩失败
 compact_stage_history: 阶段 · 历史匹配
 compact_stage_budget: 阶段 · 上下文预算

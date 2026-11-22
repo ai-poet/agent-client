@@ -587,6 +587,7 @@ background_result_waiting: Ergebnis nicht zugestellt
 chat_compact_cancelled: Verdichtung abgebrochen
 chat_compact_failed: Die Verdichtung ist fehlgeschlagen
 chat_compact_failed_paused: Komprimierung fehlgeschlagen, automatische Komprimierung pausiert
+chat_compact_start_failed: Komprimierung konnte nicht gestartet werden
 chat_compact_queued: Warten auf Kompaktierung
 chat_compact_unneeded: Verdichtung nicht erforderlich
 chat_compacted: Kontext komprimiert
@@ -619,6 +620,8 @@ chat_search: Unterhaltung durchsuchen
 chat_search_result: 'Suchergebnisse für:'
 chat_status_unsynced: Status nicht synchronisiert
 chat_sync_failed: Synchronisierung der Unterhaltung fehlgeschlagen
+compact_reason_budget: Kein vollständiger Verlaufsabschnitt passt in das Zusammenfassungsbudget
+compact_reason_request: Die Anfrage an das Zusammenfassungsmodell ist fehlgeschlagen
 compact_reason_unknown: Für diesen Fehler wurden keine weiteren Details aufgezeichnet
 composer_cache: Cache
 composer_compression_hint: 'Kontextkomprimierung: keine Laufzeitdaten (UI-Vorschau)'

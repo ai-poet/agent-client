@@ -834,18 +834,25 @@ func (r *Runtime) command(command protocol.Command, conflict string, done func(p
 	})
 }
 
-func faultCode(err error) protocol.ErrorCode {
+func commandFault(err error) *protocol.Fault {
 	var fault *link.FaultError
 	if errors.As(err, &fault) {
-		return fault.Fault.Code
+		return &fault.Fault
 	}
 	var pointer *protocol.Fault
 	if errors.As(err, &pointer) {
-		return pointer.Code
+		return pointer
 	}
 	var direct protocol.Fault
 	if errors.As(err, &direct) {
-		return direct.Code
+		return &direct
+	}
+	return nil
+}
+
+func faultCode(err error) protocol.ErrorCode {
+	if fault := commandFault(err); fault != nil {
+		return fault.Code
 	}
 	return ""
 }

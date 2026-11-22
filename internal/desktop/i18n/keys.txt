@@ -604,6 +604,7 @@ background_result_waiting
 chat_compact_cancelled
 chat_compact_failed
 chat_compact_failed_paused
+chat_compact_start_failed
 chat_compact_queued
 chat_compact_unneeded
 chat_compacted
@@ -636,6 +637,8 @@ chat_search
 chat_search_result
 chat_status_unsynced
 chat_sync_failed
+compact_reason_budget
+compact_reason_request
 compact_reason_unknown
 composer_cache
 composer_compression_hint

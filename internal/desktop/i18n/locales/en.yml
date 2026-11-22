@@ -587,6 +587,7 @@ background_result_waiting: Result not delivered
 chat_compact_cancelled: Compaction cancelled
 chat_compact_failed: Compaction failed
 chat_compact_failed_paused: Compaction failed, automatic compaction paused
+chat_compact_start_failed: Could not start compaction
 chat_compact_queued: Waiting to compact
 chat_compact_unneeded: Compaction not needed
 chat_compacted: Context compacted
@@ -619,6 +620,8 @@ chat_search: Search conversation
 chat_search_result: Search results
 chat_status_unsynced: Status not synced
 chat_sync_failed: Conversation sync failed
+compact_reason_budget: No complete history prefix fits the summary budget
+compact_reason_request: The summary model request failed
 compact_reason_unknown: No further details were recorded for this failure
 composer_cache: Cache
 composer_compression_hint: 'Context compaction: no runtime data (UI preview)'

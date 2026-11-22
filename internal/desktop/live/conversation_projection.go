@@ -321,9 +321,19 @@ func projectTranscript(state client.ConversationState, language string) ([]conve
 			// Search is work in the accepted layout, so it precedes the answer.
 			t.Reply.Blocks = append(t.Reply.Blocks, conversation.Block{Kind: conversation.SearchBlock, Text: entryText.String(), Sources: sources, Suggestions: searchSuggestions(*entry.SearchSuggestions)})
 		}
+		firstBlock := len(t.Reply.Blocks)
 		phase := projectParts(&t.Reply, entry.Parts, entry.ID, entry.Turn, entry.Branch, associations, started, launches, language, segmentFrom(t))
 		clocks.record(position, time.Time{}, phase)
 		if t.Compaction != nil {
+			if t.Compaction.State == conversation.CompactionFailed && t.Compaction.Cause == "" {
+				// A recorded failure can arrive before the run's terminal fault.
+				for _, block := range t.Reply.Blocks[firstBlock:] {
+					if block.Kind == conversation.ErrorBlock && block.Label == "chat_compact_failed" {
+						t.Compaction.Cause = block.Text
+						break
+					}
+				}
+			}
 			for _, part := range entry.Parts {
 				if part.Kind == "compaction" {
 					summarized[position] = true
@@ -936,7 +946,7 @@ func projectParts(reply *conversation.Reply, parts []protocol.ConversationPart, 
 					continue
 				}
 			}
-			projectResource(reply, part.Data, &compacting)
+			projectResource(reply, part.Data, &compacting, language)
 		}
 	}
 	return compacting
@@ -1191,7 +1201,7 @@ func projectCall(name string, summary *protocol.ToolDetailSummary, language stri
 	return call
 }
 
-func projectResource(reply *conversation.Reply, data any, compacting *time.Time) {
+func projectResource(reply *conversation.Reply, data any, compacting *time.Time, language string) {
 	var raw json.RawMessage
 	if v, ok := detail[json.RawMessage](data); ok {
 		raw = v
@@ -1244,10 +1254,7 @@ func projectResource(reply *conversation.Reply, data any, compacting *time.Time)
 		}
 		// A Node's value: a member a later build adds does not hide the failure.
 		if protocol.DecodeAs(protocol.PeerData, raw, &v) == nil {
-			message := ""
-			if v.Failure.Cause != nil {
-				message = *v.Failure.Cause
-			}
+			message := compactionFailureText(language, v.Failure)
 			label := "chat_compact_failed"
 			// The failure that paused automatic compaction says so, once.
 			if v.Failure.Paused {

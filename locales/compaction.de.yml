@@ -1,3 +1,4 @@
+chat_compact_start_failed: Komprimierung konnte nicht gestartet werden
 compact_auto_failed: "Automatische Komprimierung fehlgeschlagen"
 compact_stage_history: "Phase · Verlaufsabgleich"
 compact_stage_budget: "Phase · Kontextbudget"

@@ -587,6 +587,7 @@ background_result_waiting: Результат не доставлен
 chat_compact_cancelled: Уплотнение отменено
 chat_compact_failed: Уплотнение не удалось
 chat_compact_failed_paused: Сжатие не удалось, автоматическое сжатие приостановлено
+chat_compact_start_failed: Не удалось начать сжатие
 chat_compact_queued: Ожидание уплотнения
 chat_compact_unneeded: Уплотнение не требуется
 chat_compacted: Контекст уплотнён
@@ -619,6 +620,8 @@ chat_search: Поиск разговора
 chat_search_result: Поиск результатов
 chat_status_unsynced: Статус не синхронизирован
 chat_sync_failed: Синхронизация разговора не удалась
+compact_reason_budget: Ни один полный фрагмент истории не помещается в бюджет сводки
+compact_reason_request: Запрос сводки к модели завершился ошибкой
 compact_reason_unknown: Подробности этого сбоя не были записаны
 composer_cache: Кэш
 composer_compression_hint: 'Контекстное сжатие: отсутствие данных времени выполнения (предварительный просмотр интерфейса пользователя)'

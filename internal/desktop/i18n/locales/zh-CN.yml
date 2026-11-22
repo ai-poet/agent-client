@@ -587,6 +587,7 @@ background_result_waiting: 结果待送达
 chat_compact_cancelled: 压缩已取消
 chat_compact_failed: 压缩失败
 chat_compact_failed_paused: 压缩失败，已暂停自动压缩
+chat_compact_start_failed: 无法开始压缩
 chat_compact_queued: 等待压缩
 chat_compact_unneeded: 无需压缩
 chat_compacted: 上下文已压缩
@@ -619,6 +620,8 @@ chat_search: 搜索对话
 chat_search_result: 搜索结果
 chat_status_unsynced: 状态未同步
 chat_sync_failed: 会话同步失败
+compact_reason_budget: 没有完整历史片段符合摘要预算
+compact_reason_request: 摘要模型请求失败
 compact_reason_unknown: 此次失败未记录具体原因
 composer_cache: 缓存率
 composer_compression_hint: 上下文压缩进度：暂无运行数据（UI 预览）
