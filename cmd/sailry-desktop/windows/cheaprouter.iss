@@ -69,7 +69,7 @@ SetupMutex=CheapRouterSetup
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
 DisableReadyPage=yes
-UsePreviousAppDir=yes
+UsePreviousAppDir=no
 CloseApplications=force
 CloseApplicationsFilter=*.exe,*.dll
 RestartApplications=no
@@ -100,6 +100,42 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 Filename: "{app}\CheapRouter.exe"; Description: "{cm:LaunchProgram,CheapRouter}"; Flags: nowait postinstall
 
 [Code]
+var
+  PreviousDir: String;
+
+// The directory the installed build lives in, but only when this application
+// is still there: a leftover entry from an interrupted or redirected install
+// must not move the next install somewhere unexpected.
+function RecordedInstallDir(): String;
+var
+  Location: String;
+begin
+  Result := '';
+  if not RegQueryStringValue(HKCU,
+    'Software\Microsoft\Windows\CurrentVersion\Uninstall\{7DC6C35B-FA40-4A95-B37A-626BF64556C5}_is1',
+    'InstallLocation', Location) then
+    exit;
+  if Location = '' then
+    exit;
+  if FileExists(AddBackslash(Location) + 'CheapRouter.exe') or
+     FileExists(AddBackslash(Location) + 'waku.exe') then
+    Result := Location;
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  PreviousDir := RecordedInstallDir();
+  Result := True;
+end;
+
+procedure InitializeWizard();
+begin
+  // /DIR from the running updater wins; otherwise upgrade the copy in place.
+  if ExpandConstant('{param:DIR|}') = '' then
+    if PreviousDir <> '' then
+      WizardForm.DirEdit.Text := PreviousDir;
+end;
+
 procedure StopRunningProcess(const ImageName: String);
 var
   ResultCode: Integer;

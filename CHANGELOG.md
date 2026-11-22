@@ -15,6 +15,10 @@ Fixes the installer that exited immediately when 0.3.8 updated itself to 0.4.0.
 
   The Windows installer no longer ends the previous build with `taskkill /T`: 0.3.8 starts the setup from the running client, so `/T` killed the setup itself, leaving the update with no effect and the old build in place
 
+- Windows 安装器只在记录目录里确实还有本应用时才原地升级，避免遗留的安装记录把新装的位置带到别处
+
+  The Windows installer continues in a recorded directory only when this application is still there, so a leftover install record cannot move a fresh install somewhere unexpected
+
 ## [0.4.0](https://github.com/ai-poet/agent-client/releases/tag/v0.4.0) — 2026-11-21
 
 CheapRouter Desktop 从这一版起是 MyGo 原生客户端，旧的 Rust 客户端已移除，仓库只保留 Go 实现。
