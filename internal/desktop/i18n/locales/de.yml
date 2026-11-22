@@ -1626,6 +1626,8 @@ updates_downloading: '%{version} wird heruntergeladen'
 updates_ready_now: '%{version} ist bereit'
 updates_restart_now: Jetzt neu starten
 updates_later: Später
+updates_prompt_title: Neue Version verfügbar
+updates_download_install: Herunterladen und installieren
 updates_view: Anzeigen
 updates_download: Herunterladen
 updates_ready: '%{version} kann installiert werden'

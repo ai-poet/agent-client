@@ -25,22 +25,23 @@ type NativeUpdates struct {
 	relaunch      func()
 	nativeEnabled bool
 
-	mu       sync.Mutex
-	state    settings.UpdateState
-	found    *clientupdate.Update
-	foundVer string
-	copied   int64
-	total    int64
-	failure  *settings.UpdateFailure
-	current  bool
-	notices  []nativeUpdateNotice
-	cancel   context.CancelFunc
-	sequence uint64
-	closed   bool
-	started  bool
-	done     chan struct{}
-	workers  sync.WaitGroup
-	changed  func()
+	mu            sync.Mutex
+	state         settings.UpdateState
+	found         *clientupdate.Update
+	foundVer      string
+	copied        int64
+	total         int64
+	failure       *settings.UpdateFailure
+	promptPending bool // claimed by one focused window, never by manual checks
+	current       bool
+	notices       []nativeUpdateNotice
+	cancel        context.CancelFunc
+	sequence      uint64
+	closed        bool
+	started       bool
+	done          chan struct{}
+	workers       sync.WaitGroup
+	changed       func()
 }
 
 type nativeUpdateNotice struct {
@@ -128,16 +129,28 @@ func (n *NativeUpdates) Close() {
 	n.workers.Wait()
 }
 
-// Check starts a manual check whose outcome is visible in Settings and toasts.
+// Check starts a manual check whose outcome stays on the About page.
 func (n *NativeUpdates) Check() { n.check(false) }
 
 func (n *NativeUpdates) check(quiet bool) {
 	n.mu.Lock()
-	if n.closed || n.state == settings.UpdateChecking || n.state == settings.UpdateDownloading || n.state == settings.UpdateRestarting {
+	if n.closed || n.state == settings.UpdateChecking || n.state == settings.UpdateDownloading || n.state == settings.UpdateReady || n.state == settings.UpdateRestarting || (quiet && n.sequence != 0) {
 		n.mu.Unlock()
 		return
 	}
 	config := n.store.Config()
+	if quiet && !config.Automatic {
+		n.mu.Unlock()
+		return
+	}
+	if !quiet {
+		n.promptPending = false
+		if !n.saveDeferredLocked("") {
+			n.mu.Unlock()
+			n.changed()
+			return
+		}
+	}
 	if !config.Configured() || !n.nativeEnabled {
 		if !quiet {
 			cause := clientupdate.ErrUnavailable
@@ -149,7 +162,6 @@ func (n *NativeUpdates) check(quiet bool) {
 				}
 			}
 			n.failure = nativeFailure(cause)
-			n.notices = append(n.notices, nativeUpdateNotice{key: n.failure.Key, failure: true})
 		}
 		n.mu.Unlock()
 		n.changed()
@@ -179,34 +191,37 @@ func (n *NativeUpdates) check(quiet bool) {
 			n.mu.Unlock()
 			return
 		}
-		switch {
-		case err != nil:
-			n.state = n.restingLocked()
-			if quiet {
-				log.Printf("desktop update check: %v", err)
-			} else {
-				n.failLocked(err)
-			}
-		case found == nil:
-			n.found, n.foundVer = nil, ""
-			n.state, n.failure, n.current = settings.UpdateIdle, nil, true
-			if !quiet {
-				n.notices = append(n.notices, nativeUpdateNotice{key: "updates_current"})
-			}
-		default:
-			n.found, n.foundVer = found, found.Version
-			n.state, n.failure, n.current = settings.UpdateAvailable, nil, false
-			n.notices = append(n.notices, nativeUpdateNotice{key: "updates_available", version: found.Version})
-		}
+		n.checkedLocked(quiet, found, err)
 		n.mu.Unlock()
 		n.changed()
 	}()
 }
 
+func (n *NativeUpdates) checkedLocked(quiet bool, found *clientupdate.Update, err error) {
+	switch {
+	case err != nil:
+		n.state = n.restingLocked()
+		if quiet {
+			log.Printf("desktop update check: %v", err)
+		} else {
+			n.failure = nativeFailure(err)
+		}
+	case found == nil:
+		n.found, n.foundVer = nil, ""
+		n.state, n.failure, n.current = settings.UpdateIdle, nil, true
+	default:
+		n.found, n.foundVer = found, found.Version
+		n.state, n.failure, n.current = settings.UpdateAvailable, nil, false
+		n.promptPending = quiet && n.store.Config().DeferredVersion != found.Version
+	}
+}
+
 // Install downloads, verifies and installs the update found by Check.
-func (n *NativeUpdates) Install() {
+func (n *NativeUpdates) Install() { n.install(nil) }
+
+func (n *NativeUpdates) install(selected *clientupdate.Update) {
 	n.mu.Lock()
-	if n.closed || n.state != settings.UpdateAvailable || n.found == nil {
+	if n.closed || n.state != settings.UpdateAvailable || n.found == nil || (selected != nil && selected != n.found) {
 		n.mu.Unlock()
 		return
 	}
@@ -218,6 +233,7 @@ func (n *NativeUpdates) Install() {
 	n.sequence++
 	sequence := n.sequence
 	found := n.found
+	n.promptPending = false
 	n.state, n.failure = settings.UpdateDownloading, nil
 	n.copied, n.total = 0, 0
 	n.workers.Add(1)
@@ -304,6 +320,80 @@ func (n *NativeUpdates) SaveOptions(automatic, prereleases bool) {
 	}
 	n.mu.Unlock()
 	n.changed()
+}
+
+// The claimed release stays with its window. A later check or channel change
+// invalidates its actions even if the new feed offers the same version.
+func (n *NativeUpdates) prompt(selected *clientupdate.Update, focused bool) *clientupdate.Update {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.state != settings.UpdateAvailable || n.closed {
+		return nil
+	}
+	if selected == n.found && selected != nil {
+		return selected
+	}
+	if focused && n.promptPending {
+		n.promptPending = false
+		return n.found
+	}
+	return nil
+}
+
+func (n *NativeUpdates) later(selected *clientupdate.Update) bool {
+	n.mu.Lock()
+	ok := n.state != settings.UpdateAvailable || selected != n.found || n.saveDeferredLocked(selected.Version)
+	n.mu.Unlock()
+	n.changed()
+	return ok
+}
+
+func (n *NativeUpdates) dialog(focused func() bool) func(*ui.Context) {
+	var selected *clientupdate.Update
+	return func(c *ui.Context) {
+		selected = n.prompt(selected, focused == nil || focused())
+		if selected == nil {
+			return
+		}
+		found := selected
+		open := true
+		width, height := c.Size()
+		kit.Dialog(c.Key("update-prompt"), &open, func() {
+			ui.Text(c, i18n.T(c, "updates_prompt_title")).FontSize(18).FontWeight(600).Padding(0, 32, 0, 0)
+			ui.Text(c, i18n.T(c, "updates_available", "version", found.Version)).FontWeight(500)
+			if found.Notes != "" {
+				ui.Scroll(c.Key("notes")).Width(min(440, width-84)).MaxHeight(height / 3).Children(func() {
+					ui.Text(c, found.Notes)
+				})
+			}
+			ui.Row(c.Key("actions")).Justify(ui.End).Gap(8).Children(func() {
+				if kit.Secondary(c.Key("later"), i18n.T(c, "updates_later")).Clicked() {
+					open = false
+				}
+				kit.Primary(c.Key("install"), i18n.T(c, "updates_download_install"), false).OnClick(func() {
+					selected = nil
+					n.install(found)
+				})
+			})
+		})
+		if !open && selected != nil && n.later(found) {
+			selected = nil
+		}
+	}
+}
+
+func (n *NativeUpdates) saveDeferredLocked(version string) bool {
+	config := n.store.Config()
+	if config.DeferredVersion == version {
+		return true
+	}
+	config.DeferredVersion = version
+	if err := n.store.Save(config); err != nil {
+		n.failure = &settings.UpdateFailure{Key: "updates_save_failed", Detail: err.Error()}
+		n.notices = append(n.notices, nativeUpdateNotice{key: n.failure.Key, failure: true})
+		return false
+	}
+	return true
 }
 
 func (n *NativeUpdates) restingLocked() settings.UpdateState {

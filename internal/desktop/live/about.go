@@ -96,6 +96,7 @@ func (r *Runtime) SetUpdates(updates *Updates, focused func() bool, flush ...fun
 	}
 	if updates.Native != nil {
 		native := updates.Native
+		r.App.Hooks.UpdateDialog = native.dialog(focused)
 		m.UpdateActions = &settings.UpdateActions{Check: native.Check, Download: native.Install, Cancel: native.Cancel, Restart: native.Restart, SaveOptions: native.SaveOptions}
 		return
 	}

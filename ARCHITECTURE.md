@@ -1038,8 +1038,11 @@ the process-wide `live.NativeUpdates` service. The optional profile
 `update.json` supplies the platform manifest URL, public key and update
 preferences. An absent file uses build defaults and checks require a valid
 public key. An explicit empty configuration disables update requests.
-Settings › About owns manual checks, installation progress
-and restart. MyGo compares versions and verifies package signatures with the
+When the automatic launch check finds a newer release, one window presents
+its version and manifest notes. Later records the version in `update.json`;
+a different version can still prompt. A manual check clears that deferral
+without opening a dialog. Settings › About owns manual results, installation
+progress and restart. MyGo compares versions and verifies package signatures with the
 build's update trust configuration before installing. Update checks never
 replace or shut down a remote Host. `internal/shipped` verifies packaged native
 libraries against their seal; release loading is confined to packaged resources.

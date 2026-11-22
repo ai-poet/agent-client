@@ -1626,6 +1626,8 @@ updates_downloading: '%{version} をダウンロード中'
 updates_ready_now: '%{version} の準備ができました'
 updates_restart_now: 今すぐ再起動
 updates_later: 後で
+updates_prompt_title: 新しいバージョンがあります
+updates_download_install: ダウンロードしてインストール
 updates_view: 表示
 updates_download: ダウンロード
 updates_ready: '%{version} のインストール準備ができました'

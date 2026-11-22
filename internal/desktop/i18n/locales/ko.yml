@@ -1626,6 +1626,8 @@ updates_downloading: '%{version} 다운로드 중'
 updates_ready_now: '%{version} 준비됨'
 updates_restart_now: 지금 다시 시작
 updates_later: 나중에
+updates_prompt_title: 새 버전 사용 가능
+updates_download_install: 다운로드 및 설치
 updates_view: 보기
 updates_download: 다운로드
 updates_ready: '%{version} 설치 준비가 완료되었습니다'

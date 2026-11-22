@@ -70,11 +70,12 @@ func DefaultConfig() Config {
 // Automatic controls the quiet launch check; Prereleases selects MyGo's
 // prerelease channel.
 type Config struct {
-	FeedURL     string `json:"feed_url"`
-	PublicKey   string `json:"public_key"`
-	Enabled     bool   `json:"enabled"`
-	Automatic   bool   `json:"automatic"`
-	Prereleases bool   `json:"prereleases"`
+	FeedURL         string `json:"feed_url"`
+	PublicKey       string `json:"public_key"`
+	Enabled         bool   `json:"enabled"`
+	Automatic       bool   `json:"automatic"`
+	Prereleases     bool   `json:"prereleases"`
+	DeferredVersion string `json:"deferred_version,omitempty"`
 }
 
 // Validate rejects a partial or malformed source configuration. The empty

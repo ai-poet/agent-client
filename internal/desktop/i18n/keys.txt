@@ -1639,6 +1639,8 @@ updates_downloading
 updates_ready_now
 updates_restart_now
 updates_later
+updates_prompt_title
+updates_download_install
 updates_view
 updates_download
 updates_ready

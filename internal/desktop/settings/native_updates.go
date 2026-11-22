@@ -65,6 +65,11 @@ func nativeUpdates(c *ui.Context, m *Model) {
 				})
 			case u.State == UpdateAvailable:
 				status("available", i18n.T(c, "updates_available", "version", u.Version), m.Version, func() {
+					kit.Secondary(c.Key("check"), i18n.T(c, "updates_check")).OnClick(func() {
+						if a != nil && a.Check != nil {
+							a.Check()
+						}
+					})
 					iconButton(c, "install", nil, i18n.T(c, "updates_install"), true, false).OnClick(func() {
 						if a != nil && a.Download != nil {
 							a.Download()

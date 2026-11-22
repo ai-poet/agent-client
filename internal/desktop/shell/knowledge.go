@@ -4,11 +4,11 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
 )
 
 // Source is a knowledge citation's identity
@@ -153,6 +153,9 @@ func (a *App) overlays(c *ui.Context) {
 	a.searchOverlay(c)
 	a.knowledge(c)
 	a.downloadDialog(c)
+	if !a.sampled() && a.Hooks.UpdateDialog != nil {
+		a.Hooks.UpdateDialog(c)
+	}
 	a.welcome(c)
 	a.selectionDialog(c)
 	a.closeDialog(c)

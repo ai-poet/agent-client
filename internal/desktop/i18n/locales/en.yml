@@ -1626,6 +1626,8 @@ updates_downloading: Downloading %{version}
 updates_ready_now: '%{version} is ready'
 updates_restart_now: Restart now
 updates_later: Later
+updates_prompt_title: New version available
+updates_download_install: Download and install
 updates_view: View
 updates_download: Download
 updates_ready: '%{version} is ready to install'

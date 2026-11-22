@@ -1,1 +1,3 @@
 updates_ready: "%{version} 已下载，可以安装"
+updates_prompt_title: "发现新版本"
+updates_download_install: "下载并安装"

@@ -1626,6 +1626,8 @@ updates_downloading: 正在下載 %{version}
 updates_ready_now: '%{version} 已就緒'
 updates_restart_now: 立即重新啟動
 updates_later: 稍後
+updates_prompt_title: 發現新版本
+updates_download_install: 下載並安裝
 updates_view: 查看
 updates_download: 下載
 updates_ready: '%{version} 已下載，可以安裝'

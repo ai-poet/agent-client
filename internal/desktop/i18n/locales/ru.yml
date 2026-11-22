@@ -1626,6 +1626,8 @@ updates_downloading: Загрузка %{version}
 updates_ready_now: '%{version} готова'
 updates_restart_now: Перезапустить сейчас
 updates_later: Позже
+updates_prompt_title: Доступна новая версия
+updates_download_install: Скачать и установить
 updates_view: Открыть
 updates_download: Скачать
 updates_ready: '%{version} готова к установке'

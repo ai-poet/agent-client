@@ -20,6 +20,7 @@ type Hooks struct {
 	EditHost         func(string)
 	WorkspaceProject func() *panel.Project
 	DownloadDialog   func(*ui.Context)
+	UpdateDialog     func(*ui.Context)
 	PackageDialogs   func(*ui.Context)
 	// FilePreview draws the preview dialog of a file outside a
 	// conversation.

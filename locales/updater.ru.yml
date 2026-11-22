@@ -1,1 +1,3 @@
 updates_ready: "%{version} готова к установке"
+updates_prompt_title: "Доступна новая версия"
+updates_download_install: "Скачать и установить"
