@@ -844,6 +844,9 @@ func TestComposerSendRouting(t *testing.T) {
 		{"failure_retains_draft", "existing", "submit_turn", false, protocol.ErrorCodeUnavailable, false},
 		{"unknown_retains_request", "existing", "submit_turn", false, protocol.ErrorCodeOutcomeUnknown, false},
 		{"configuration_before_admission", "existing", "submit_turn", false, "", true},
+		{"compact_after_model_save", "existing", "compact_context", false, "", false},
+		{"compact_after_failed_model_save", "existing", "compact_context", false, "", false},
+		{"compact_after_credential_rotation", "existing", "compact_context", false, "", false},
 		{"team_before_admission", "existing", "submit_turn", false, "", false},
 		{"new_team_before_admission", "draft/1", "submit_turn", false, "", false},
 		{"uncertain_team_before_admission", "existing", "submit_turn", false, "", false},
@@ -868,6 +871,19 @@ func TestComposerSendRouting(t *testing.T) {
 			snapshot.Projects = []protocol.Project{{ID: project, Name: "Workspace", Path: "/fixture/project"}}
 			snapshot.Worktrees = []protocol.Worktree{{ID: worktree, Project: &project, Path: "/fixture/worktree", Main: true}}
 			snapshot.Providers = []protocol.ConversationProvider{{ID: provider, Revision: 7, Enabled: true, Name: "Provider", Api: "responses", Authentication: "api_key", Models: []protocol.ConversationModel{{ID: "fixture", DefaultEffort: protocol.Effort{Kind: "default"}}}}}
+			selectedProvider := provider
+			credential := protocol.CredentialRef{Node: node, ID: protocol.CredentialID{9}}
+			if row.kind == "compact_context" {
+				if row.name == "compact_after_credential_rotation" {
+					config.Credential = &protocol.CredentialRef{Node: node, ID: protocol.CredentialID{8}}
+					snapshot.Providers[0].Credential = &credential
+				} else {
+					selectedProvider = protocol.ProviderID{7}
+					other := snapshot.Providers[0]
+					other.ID, other.Credential = selectedProvider, &credential
+					snapshot.Providers = append(snapshot.Providers, other)
+				}
+			}
 			team := strings.Contains(row.name, "team_before_admission")
 			if team {
 				snapshot.Roles = []protocol.RoleProfile{{ID: protocol.RoleID{8}, Revision: 3, Key: "review", Name: "Review"}}
@@ -884,6 +900,17 @@ func TestComposerSendRouting(t *testing.T) {
 				}
 			}
 			transport := &conversationTestTransport{snapshot: snapshot, failure: row.failure}
+			if row.kind == "compact_context" {
+				transport.handle = func(request protocol.Request) (link.Response, bool) {
+					if row.name == "compact_after_failed_model_save" && request.Command.Kind == "set_session_config" {
+						return link.Response{Fault: &protocol.Fault{Code: protocol.ErrorCodeRevisionConflict, Message: "session changed"}}, true
+					}
+					if request.Command.Kind == "compact_context" {
+						return link.Response{Output: protocol.Output{Kind: "queued_turn", Data: protocol.DefaultQueuedTurn()}}, true
+					}
+					return link.Response{}, false
+				}
+			}
 			// based sends from a draft whose base worktree is created first.
 			lateAttachment := strings.HasSuffix(row.name, "keeps_later_attachment")
 			based, baseTree := strings.HasPrefix(row.name, "new_session_base_keeps_later_"), protocol.Worktree{ID: protocol.WorktreeID{4}, Project: &project, Path: "/fixture/base"}
@@ -1056,6 +1083,43 @@ func TestComposerSendRouting(t *testing.T) {
 					r.workers.Wait()
 					tester.Frame()
 				}
+			}
+			if row.kind == "compact_context" {
+				render(shown)
+				if selectedProvider != provider {
+					comp.Model = modelKey(selectedProvider, "fixture")
+					render(shown)
+					if !r.composerSaving[id] {
+						t.Fatal("explicit selection did not start its configuration save")
+					}
+				}
+				actions.compact("keep notes")
+				settle()
+				transport.mu.Lock()
+				defer transport.mu.Unlock()
+				saves, compacts := 0, 0
+				for _, request := range transport.requests {
+					switch p := request.Command.Data.(type) {
+					case protocol.CommandSetSessionConfigPayload:
+						saves++
+						if p.Config.Provider != selectedProvider || p.Config.Model != "fixture" || p.Config.Credential == nil || *p.Config.Credential != credential || p.ExpectedRevision != 6 {
+							t.Fatalf("wrong selection saved: %+v", p)
+						}
+					case protocol.CommandCompactContextPayload:
+						compacts++
+						if saves != 1 || p.Session != session || p.ExpectedRevision != 7 || p.Focus == nil || *p.Focus != "keep notes" {
+							t.Fatalf("compact did not follow the selected configuration: %+v", p)
+						}
+					}
+				}
+				want := 1
+				if row.name == "compact_after_failed_model_save" {
+					want = 0
+				}
+				if saves != 1 || compacts != want {
+					t.Fatalf("got %d saves and %d compactions; want 1 and %d", saves, compacts, want)
+				}
+				return
 			}
 			if row.running {
 				// A running conversation offers no edit, rewind or fork of its turn.

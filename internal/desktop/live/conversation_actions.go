@@ -138,13 +138,36 @@ func (x *conversationActions) compact(focus string) {
 	if x.readonly() {
 		return
 	}
-	if s, ok := x.r.session(x.cv.ID); ok {
-		payload := protocol.CommandCompactContextPayload{Session: s.ID, ExpectedRevision: s.Revision}
+	id := x.cv.ID
+	s, ok := x.r.session(id)
+	if !ok {
+		return
+	}
+	config := s.Config
+	selected, err := x.r.selectedComposerConfig(id, x.comp, x.r.offeredModels(id, x.r.models()))
+	switch {
+	case x.comp.Model != modelKey(s.Config.Provider, s.Config.Model) || x.r.composerSaving[id]:
+		if err != nil {
+			reportCompactCommand(x.c, err)
+			return
+		}
+		config = selected
+	case err == nil:
+		// A credential rotation doesn't change the selected model. Preserve all
+		// other session settings. If the retained model is unavailable, leave
+		// its diagnosis to the Node rather than choosing a replacement.
+		config.Credential = selected.Credential
+	}
+	x.r.withComposerConfig(s, config, func(current protocol.Session) {
+		if x.readonly() {
+			return
+		}
+		payload := protocol.CommandCompactContextPayload{Session: current.ID, ExpectedRevision: current.Revision}
 		if focus != "" {
 			payload.Focus = &focus
 		}
 		x.turn(protocol.Command{Kind: "compact_context", Data: payload}, nil)
-	}
+	})
 }
 
 // Decide sends the decision on a waiting approval of the conversation or of

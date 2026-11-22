@@ -11,12 +11,17 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-func (r *Runtime) composerKey(id string, c *composer.State) string {
+func (r *Runtime) selectedComposerConfig(id string, c *composer.State, models []composer.Model) (protocol.SessionConfig, error) {
 	effort := ""
-	if chosen := c.Chosen(r.models()); chosen.Reasoning {
+	if chosen := c.Chosen(models); chosen.Reasoning {
 		effort = c.EffortName(nil, chosen)
 	}
 	config, _, err := r.composerConfig(id, c, composer.Message{Model: c.Model, Mode: c.Mode, Permission: c.Permission, Features: c.Features, Effort: effort})
+	return config, err
+}
+
+func (r *Runtime) composerKey(id string, c *composer.State) string {
+	config, err := r.selectedComposerConfig(id, c, r.models())
 	if err != nil {
 		return ""
 	}
