@@ -451,7 +451,44 @@ func (r *Runtime) saveCheapGateway(ctx context.Context, account *cheapAuthRuntim
 		return 0, err
 	}
 	count, _, err := r.applyCheapRoutes(ctx, account, generation, routes, protocol.ProviderID{}, settled)
+	if err == nil {
+		r.followCheapRoutes(ctx, gateway.ModelLanes)
+	}
 	return count, err
+}
+
+// followCheapRoutes moves the sessions selected on the unbound route to the
+// lane that carries their model, once lanes replaced that route. Only the
+// provider reference changes. A session the lane cannot take as it is, or one
+// that changed meanwhile, follows when its conversation is next shown.
+func (r *Runtime) followCheapRoutes(ctx context.Context, lanes map[string]string) {
+	sessions := slices.DeleteFunc(r.controller.Snapshot().Sessions, func(session protocol.Session) bool {
+		return session.Config.Provider != providers.CheapRouterProviderID || session.Profile != nil || delegated(session)
+	})
+	if len(sessions) == 0 {
+		return
+	}
+	list, err := r.readCheapProviders(ctx)
+	if err != nil {
+		return
+	}
+	for _, session := range sessions {
+		config := session.Config
+		successor, ok := providers.CheapRouterSuccessor(config.Provider, config.Model, lanes, list)
+		if !ok {
+			continue
+		}
+		config.Provider, config.Credential = successor.ID, successor.Credential
+		if providers.ValidateSelection(successor, config) != nil {
+			continue
+		}
+		if _, err := r.controller.Do(ctx, protocol.Command{Kind: "set_session_config", Data: protocol.CommandSetSessionConfigPayload{Session: session.ID, ExpectedRevision: session.Revision, Config: config}}); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			slog.Warn("cheaprouter session stayed on the unbound route", "session", session.ID.String(), "error", err.Error())
+		}
+	}
 }
 
 // applyCheapRoutes reconciles managed records only. A manual lane change need
@@ -654,6 +691,7 @@ func (r *Runtime) bindCheapLaneGroup(account *cheapAuthRuntime, generation *chea
 		}
 		return 0, nil, nil, errors.Join(err, restoreCheapGroup(r.ctx, account, binding))
 	}
+	r.followCheapRoutes(ctx, gateway.ModelLanes)
 	return count, gateway.Catalog, account.service.LaneBindings(), nil
 }
 

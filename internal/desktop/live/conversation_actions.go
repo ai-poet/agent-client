@@ -144,6 +144,8 @@ func (x *conversationActions) compact(focus string) {
 		return
 	}
 	config := s.Config
+	// A selection of the replaced unbound route compacts on its model's lane.
+	x.r.followCheapSession(s, x.comp)
 	selected, err := x.r.selectedComposerConfig(id, x.comp, x.r.offeredModels(id, x.r.models()))
 	switch {
 	case x.comp.Model != modelKey(s.Config.Provider, s.Config.Model) || x.r.composerSaving[id]:

@@ -463,6 +463,15 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 		comp.Model, comp.Features = "", map[string]string{}
 		r.defaultComposerForFamily(comp, prevFamily)
 	}
+	// Lanes that replaced the unbound route keep its conversations on their
+	// model. Route reconciliation saves them itself while it runs.
+	if s, ok := r.session(cv.ID); ok && r.controller.Connected() && !delegated(s) && !r.composerSaving[cv.ID] && r.cheapRoutesSettled() &&
+		(r.teams == nil || r.teams.composers[cv.ID] == nil || !r.teams.composers[cv.ID].saving && r.teams.composers[cv.ID].pending == nil) &&
+		r.followCheapSession(s, comp) {
+		if config, err := r.selectedComposerConfig(cv.ID, comp, ctx.Models); err == nil {
+			r.saveComposerConfig(s, config, nil)
+		}
+	}
 	r.nameModelSources(c, cv.ID, ctx.Models)
 	ctx.MemberModels = r.memberModels(ctx.Models)
 	ctx.RecentModels = r.recentComposerModels(ctx.Models)
