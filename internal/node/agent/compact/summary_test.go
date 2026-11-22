@@ -105,6 +105,13 @@ func TestBoundMatchesStepwiseTrim(t *testing.T) {
 	}
 }
 
+func TestParseRejectsHeaderOnlyAfterBounding(t *testing.T) {
+	limit := tokens.Text((Summary{}).Render())
+	if _, err := Parse(`{"technical_concepts":["Disposable reference"]}`, limit); err == nil {
+		t.Fatal("bounding removed the only field but the handoff was accepted")
+	}
+}
+
 func TestParseStructuredAndLenientOutputs(t *testing.T) {
 	t.Run("accepted formats", func(t *testing.T) {
 		for _, tc := range []struct {
@@ -222,6 +229,7 @@ func TestParseStructuredAndLenientOutputs(t *testing.T) {
 			{"array document", "```json\n[\n{\"user_intent\":[\"Wrong\"]}\n]\n```"},
 			{"unfinished analysis", "<analysis>\n```json\n{\"user_intent\":[\"Private draft\"]}\n```"},
 			{"truncated json", "```json\n{\"user_intent\":[\"Keep\"],\"pending_tasks\":[\"Unfinished"},
+			{"truncated outer object with complete file entry", "```JSON\n{\"files\":[{\"path\":\"example.go\",\"summary\":\"Not the handoff\"},"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				if _, err := Parse(tc.input, 4000); err == nil {

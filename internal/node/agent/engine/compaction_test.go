@@ -245,6 +245,9 @@ func TestCompactionHandoff(t *testing.T) {
 				}
 				m := &scriptedModel{scripts: scripts}
 				f, x, binding, before := compactionFixture(t, m)
+				if row.reason == protocol.ConversationCompactionReasonTruncatedSummary {
+					binding.Provider.Models[0].Output = 64
+				}
 				visibleBefore := model.VisibleRecords(before.Records)
 				err := f.r.compact(x, binding, before, true)
 				if err == nil {
@@ -265,6 +268,21 @@ func TestCompactionHandoff(t *testing.T) {
 				}
 				if m.count() != 1+row.retries {
 					t.Fatalf("model calls = %d, want %d", m.count(), 1+row.retries)
+				}
+				if row.reason == protocol.ConversationCompactionReasonTruncatedSummary {
+					if max := m.calls[0].MaxOutputTokens; max == nil || *max != 64 {
+						t.Fatalf("small declared output limit was not sent: %v", max)
+					}
+				}
+				if row.retries == 1 {
+					correction := handoff.RetryInvalidOutput
+					if row.reason == protocol.ConversationCompactionReasonEmptySummary {
+						correction = handoff.RetryEmptyOutput
+					}
+					initial := m.calls[0].Prompt[1].Content[0].(fantasy.TextPart).Text
+					if got := m.calls[1].Prompt[1].Content[0].(fantasy.TextPart).Text; got != initial+"\n\n"+correction {
+						t.Fatalf("incorrect format correction: %q", got)
+					}
 				}
 				after := f.state()
 				if !reflect.DeepEqual(model.VisibleRecords(after.Records), visibleBefore) {
@@ -288,6 +306,34 @@ func TestCompactionHandoff(t *testing.T) {
 		}
 	})
 	t.Run("lenient extraction and format retry", func(t *testing.T) {
+		t.Run("empty completion retries and repeated manual request is a no-op", func(t *testing.T) {
+			m := &scriptedModel{scripts: []script{
+				response(finish()),
+				response(text("Handoff:\n~~~JsOn\n{\"GOALS\":\"Keep working\",\"NextStep\":\"Verify\"}\n~~~"), finish()),
+			}}
+			f, x, binding, before := compactionFixture(t, m)
+			if err := f.r.compact(x, binding, before, true); err != nil {
+				t.Fatal(err)
+			}
+			after := f.state()
+			if m.count() != 2 || len(after.Records) != len(before.Records)+3 {
+				t.Fatalf("calls=%d added records=%d", m.count(), len(after.Records)-len(before.Records))
+			}
+			checkpoint := after.Records[len(before.Records)+1]
+			summary, ok := checkpoint.Data.(*canonical.Compaction)
+			if !ok || summary.Boundary != before.Records[len(before.Records)-1].ID {
+				t.Fatal("manual fallback did not cover the short conversation")
+			}
+			if got := summary.Summary.Content[0].Data.(*canonical.TextContent).Text; got != "# Handoff Summary\n\n## Goal\n- Keep working\n\n## Next Steps\nVerify" {
+				t.Fatalf("unexpected rendered handoff: %q", got)
+			}
+			if err := f.r.compact(x, binding, after, true); err != nil {
+				t.Fatal(err)
+			}
+			if m.count() != 2 || !reflect.DeepEqual(after.Records, f.state().Records) {
+				t.Fatal("manual request without new material called the model or changed history")
+			}
+		})
 		t.Run("prose wrapped json succeeds without retry", func(t *testing.T) {
 			doc := "Here is the handoff summary:\n\n```\n{\n  \"goal\": \"Ship compaction fix\",\n  \"state\": \"Parser updated\",\n  \"nextSteps\": \"Run tests\"\n}\n```\n\nReady to continue."
 			m := &scriptedModel{scripts: []script{response(text(doc), finish())}}
