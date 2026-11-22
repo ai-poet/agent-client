@@ -3,6 +3,31 @@
 Release entries supply the corresponding GitHub Release notes. A version is
 released only after its entry is here.
 
+## [0.5.1](https://github.com/ai-poet/cheaprouter-harness/releases/tag/v0.5.1) — 2026-11-22
+
+加入移动端远控：用手机或平板连接你自己的 Host，查看会话、发消息、审批并跟进执行。
+
+Adds the mobile remote control: drive your own Host from a phone or tablet, read conversations, send messages, approve and follow execution.
+
+### 新增 / Added
+
+- 移动端远控 App（Flutter + 同一套 Go 线协议）：添加主机（ticket）→ 配对确认 → 会话列表与详情 → 发消息、审批与交互、文件传输；不含账号与云端订阅
+
+  A mobile remote control app (Flutter on the same Go wire protocol): add a host by ticket, confirm pairing, browse sessions and their conversations, send messages, answer approvals and transfer files; no account or cloud subscription
+
+- 桌面端与 Host 侧新增远控所需的会话投影导出（`WatchConversationView` 与 reference-rows 选项），桌面默认行为不变
+
+  The desktop and Host expose the conversation projection the remote app needs (`WatchConversationView` with reference rows); the desktop's own behaviour is unchanged
+
+- Android debug 构建可手动触发（`Mobile Android Debug` workflow）；iOS 需在 macOS 上用仓库脚本构建
+
+  The Android debug build runs from the `Mobile Android Debug` workflow; the iOS build uses the repository script on macOS
+
+### 说明 / Notes
+
+- 远控只在协议版本一致的 Host 之间生效；目标机器需运行本版本的 `sailry-host`（或桌面端自带的 Host）
+- 移动端包名 `cc.cheaprouter.harness`，显示名 CheapRouter Harness
+
 ## [0.5.0](https://github.com/ai-poet/cheaprouter-harness/releases/tag/v0.5.0) — 2026-11-22
 
 修复 macOS 每次启动重复弹出欢迎引导的问题，并将内置 Agent 提示词自称统一为 CheapRouter Harness。

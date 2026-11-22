@@ -1,0 +1,159 @@
+name: Mobile Android Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mobile-android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  android-release:
+    name: Signed Android APK and AAB (arm64-v8a)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      GOTOOLCHAIN: go1.27.3
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Verify release signing secrets
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_STORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::${name} secret is required to sign the Android build"
+              exit 1
+            fi
+          done
+
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.27.3
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Read pinned Flutter version
+        id: flutter-version
+        shell: bash
+        run: |
+          version=$(tr -d '[:space:]' < "$GITHUB_WORKSPACE/apps/mobile/.flutter-version")
+          case "$version" in '' | *[!0-9.]*) echo 'apps/mobile/.flutter-version names no version' >&2; exit 1 ;; esac
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e # v2.21.0
+        with:
+          flutter-version: ${{ steps.flutter-version.outputs.version }}
+          channel: stable
+          cache: true
+
+      - name: Install JDK 17
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK and NDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.0
+        with:
+          cmdline-tools-version: '15859902'
+          packages: platform-tools platforms;android-36 build-tools;36.0.0 ndk;28.2.13676358
+
+      - name: Configure Android NDK path
+        shell: bash
+        run: |
+          printf 'ANDROID_NDK_HOME=%s/ndk/28.2.13676358\n' "$ANDROID_HOME" >> "$GITHUB_ENV"
+
+      - name: Decode release keystore
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          keystore="$RUNNER_TEMP/cheaprouter-release.keystore"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore"
+          chmod 600 "$keystore"
+          printf 'ANDROID_KEYSTORE_PATH=%s\n' "$keystore" >> "$GITHUB_ENV"
+          printf 'ANDROID_STORE_PASSWORD=%s\n' "${{ secrets.ANDROID_STORE_PASSWORD }}" >> "$GITHUB_ENV"
+          printf 'ANDROID_KEY_ALIAS=%s\n' "${{ secrets.ANDROID_KEY_ALIAS }}" >> "$GITHUB_ENV"
+          printf 'ANDROID_KEY_PASSWORD=%s\n' "${{ secrets.ANDROID_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+          printf 'SAILRY_ANDROID_RELEASE=1\n' >> "$GITHUB_ENV"
+
+      - name: Flutter pub get and analyze
+        working-directory: apps/mobile
+        shell: bash
+        run: |
+          flutter pub get
+          flutter analyze
+
+      - name: Build signed APK and AAB
+        working-directory: apps/mobile
+        shell: bash
+        run: |
+          flutter build apk --release --no-pub --target-platform android-arm64
+          flutter build appbundle --release --no-pub --target-platform android-arm64
+
+      - name: Stage Android release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' apps/mobile/pubspec.yaml | head -1)
+          test -n "$version"
+          mkdir -p dist-android
+          cp apps/mobile/build/app/outputs/flutter-apk/app-release.apk "dist-android/CheapRouter-Harness-${version}-android-arm64.apk"
+          cp apps/mobile/build/app/outputs/bundle/release/app-release.aab "dist-android/CheapRouter-Harness-${version}-android-arm64.aab"
+          (cd dist-android && sha256sum *.apk *.aab > SHA256SUMS-android.txt)
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+        id: stage
+
+      - name: Verify the APK signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          "$apksigner" verify --print-certs dist-android/*.apk | head -20
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cheaprouter-harness-android-release
+          path: dist-android/*
+          if-no-files-found: error
+
+      - name: Attach the Android build to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The desktop pipeline creates the draft in parallel; wait for it so the
+          # APK always lands on the same release instead of racing ahead of it.
+          for attempt in $(seq 1 60); do
+            if gh release view "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "::error::release ${GITHUB_REF_NAME} did not appear within 20 minutes"
+              exit 1
+            fi
+            echo "waiting for release ${GITHUB_REF_NAME} (${attempt}/60)"
+            sleep 20
+          done
+          gh release upload "${GITHUB_REF_NAME}" dist-android/* --clobber --repo "$GITHUB_REPOSITORY"
