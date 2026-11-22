@@ -68,6 +68,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          # Gradle resolves the Kotlin plugin from Maven Central on every cold
+          # run; a cache keeps a rate-limited mirror from failing the release.
+          cache: gradle
 
       - name: Install Android SDK and NDK
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.0
@@ -106,8 +109,23 @@ jobs:
         working-directory: apps/mobile
         shell: bash
         run: |
-          flutter build apk --release --no-pub --target-platform android-arm64
-          flutter build appbundle --release --no-pub --target-platform android-arm64
+          set -uo pipefail
+          build() {
+            flutter build "$1" --release --no-pub --target-platform android-arm64
+          }
+          # Maven Central answers 429 on shared runners now and then; retry the
+          # whole Gradle resolve instead of failing the release on it.
+          for attempt in 1 2 3; do
+            if build apk && build appbundle; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Gradle could not resolve dependencies after 3 attempts"
+              exit 1
+            fi
+            echo "build attempt ${attempt} failed; retrying in 30s"
+            sleep 30
+          done
 
       - name: Stage Android release artifacts
         shell: bash
