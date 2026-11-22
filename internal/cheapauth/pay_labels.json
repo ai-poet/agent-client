@@ -1,0 +1,5 @@
+{
+  "en": {"Alipay":"Alipay","WeChat":"WeChat Pay","Network":"%s (%s)","Fixed":"Top up $%s+ and get $%s bonus","Percent":"Top up $%s+ and get %s%% bonus","Cap":" (up to $%s)"},
+  "zh": {"Alipay":"支付宝","WeChat":"微信支付","Network":"%s（%s）","Fixed":"充 $%s 送 $%s","Percent":"充 $%s 送 %s%%","Cap":"（最高 $%s）"},
+  "ja": {"Fixed":"$%s 以上のチャージで $%s 進呈","Percent":"$%s 以上のチャージで %s%% 進呈","Cap":"（上限 $%s）"}
+}
