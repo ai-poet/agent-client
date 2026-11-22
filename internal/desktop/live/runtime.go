@@ -170,6 +170,7 @@ type Runtime struct {
 	// composerOutgoing holds the captured input until its Node projection arrives:
 	// ordinary sends appear in the transcript, and queued input in the tray.
 	composerOutgoing map[string]*conversationOutgoing
+	queuedSends      map[protocol.SessionID]map[protocol.TurnID]*queuedSend
 	// guidanceSent is the guidance this desktop sent from the composer and
 	// has not seen settled, by conversation and turn: a message that did not
 	// join its recipient is reported once.
@@ -665,6 +666,7 @@ func (r *Runtime) pruneSessions(snapshot protocol.Snapshot) {
 	maps.DeleteFunc(r.composerSaving, func(id string, saving bool) bool { return !saving && gone(id) })
 	maps.DeleteFunc(r.conversationEdits, func(id string, _ conversationEdit) bool { return gone(id) })
 	maps.DeleteFunc(r.composerOutgoing, func(id string, _ *conversationOutgoing) bool { return gone(id) })
+	maps.DeleteFunc(r.queuedSends, func(id protocol.SessionID, _ map[protocol.TurnID]*queuedSend) bool { return !known[id] })
 	for id, retry := range r.turnRetries {
 		if !r.busy[retry.key] && gone(id) {
 			r.forgetTurnRetry(id)
