@@ -1,51 +1,58 @@
 package cheapauth
 
 import (
+	"strings"
+
 	core "github.com/ai-poet/cheaprouter-harness/internal/cheapauth"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 	"github.com/egoist/mygo/ui"
-	"strings"
 )
 
 func plansList(c *ui.Context, d *RechargeDialog) {
+	p := theme.Of(c)
 	if d.Busy && len(d.Plans) == 0 {
-		ui.Text(c, i18n.T(c, "plans_loading"))
+		ui.Row(c.Key("plans-loading")).Gap(8).AlignItems(ui.Center).Children(func() {
+			kit.Busy(c)
+			ui.Text(c, i18n.T(c, "plans_loading")).FontSize(13).TextColor(p.MutedForeground)
+		})
 		return
 	}
 	if len(d.Plans) == 0 {
 		if d.Message == "" {
-			ui.Text(c, i18n.T(c, "plans_empty"))
+			ui.Text(c, i18n.T(c, "plans_empty")).FontSize(13).TextColor(p.MutedForeground)
 		}
 		return
 	}
-	ui.Text(c, i18n.T(c, "plans_intro"))
-	for _, p := range d.Plans {
-		ui.Column(c.Key(p.ID)).FillWidth().Gap(6).Children(func() {
-			planSummary(c, p)
-			if p.Description != "" {
-				ui.Text(c, p.Description)
+	ui.Text(c, i18n.T(c, "plans_intro")).FontSize(12).TextColor(p.MutedForeground)
+	for _, plan := range d.Plans {
+		item := plan
+		ui.Column(c.Key(item.ID)).FillWidth().Padding(12).Radius(p.Radius).Border(1, p.Border).Background(p.Surface).Gap(6).Children(func() {
+			planSummary(c, item)
+			if item.Description != "" {
+				ui.Text(c, item.Description).FontSize(12).TextColor(p.MutedForeground)
 			}
-			for _, f := range p.Features {
-				ui.Text(c, f)
+			for _, f := range item.Features {
+				ui.Text(c, f).FontSize(12)
 			}
-			if p.Platform != "" {
-				ui.Text(c, i18n.T(c, "plans_for_cli", "cli", p.Platform))
+			if item.Platform != "" {
+				ui.Text(c, i18n.T(c, "plans_for_cli", "cli", item.Platform)).FontSize(12).TextColor(p.MutedForeground)
 			}
-			if p.RateMultiplier != nil {
-				ui.Text(c, i18n.T(c, "plans_rate", "rate", *p.RateMultiplier))
+			if item.RateMultiplier != nil {
+				ui.Text(c, i18n.T(c, "plans_rate", "rate", *item.RateMultiplier)).FontSize(12).TextColor(p.MutedForeground)
 			}
-			if len(p.SupportedModelScopes) > 0 {
-				ui.Text(c, i18n.T(c, "plans_scopes", "scopes", strings.Join(p.SupportedModelScopes, ", ")))
-			} else if p.DefaultMappedModel != "" {
-				ui.Text(c, i18n.T(c, "plans_default_model", "model", p.DefaultMappedModel))
+			if len(item.SupportedModelScopes) > 0 {
+				ui.Text(c, i18n.T(c, "plans_scopes", "scopes", strings.Join(item.SupportedModelScopes, ", "))).FontSize(12).TextColor(p.MutedForeground)
+			} else if item.DefaultMappedModel != "" {
+				ui.Text(c, i18n.T(c, "plans_default_model", "model", item.DefaultMappedModel)).FontSize(12).TextColor(p.MutedForeground)
 			}
 			label := "plans_buy"
-			if d.OwnedGroups[p.GroupID] {
+			if d.OwnedGroups[item.GroupID] {
 				label = "plans_renew"
-				ui.Text(c, i18n.T(c, "plans_current"))
+				kit.Badge(c, i18n.T(c, "plans_current"), kit.Info)
 			}
-			kit.Secondary(c.Key("choose"), i18n.T(c, label)).Disabled(d.ChoosePlan == nil || d.Busy).OnClick(func() { d.ChoosePlan(p) })
+			kit.Secondary(c.Key("choose"), i18n.T(c, label)).Disabled(d.ChoosePlan == nil || d.Busy).OnClick(func() { d.ChoosePlan(item) })
 		})
 	}
 }

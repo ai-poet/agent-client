@@ -17,8 +17,16 @@ import (
 	lobetheme "github.com/lobehub/lobe-mygo/pkg/theme"
 )
 
-// Page renders Settings → CheapRouter 账号.
+// Page renders Settings → CheapRouter 账号 together with its standalone
+// recharge overlay for callers outside the main shell.
 func Page(c *ui.Context, state *State) {
+	PageContent(c, state)
+	RechargeOverlay(c, state)
+}
+
+// PageContent renders Settings → CheapRouter 账号 without mounting the
+// recharge overlay, for hosts that mount RechargeOverlay at the shell layer.
+func PageContent(c *ui.Context, state *State) {
 	if state == nil {
 		kit.Result(c, kit.ResultProps{Title: "CheapRouter 账号不可用", SubTitle: "请重启应用后重试", Card: true})
 		return
@@ -33,11 +41,6 @@ func Page(c *ui.Context, state *State) {
 				Children(func() { content(c, state) })
 		})
 	})
-	if state.SignedIn() && state.Recharge != nil {
-		owner := ui.Local(ui.Box(c.Key("payment-owner")).Absolute().Size(0, 0), "owner", func() dialogOwner { return dialogOwner{} })
-		owner.state, owner.dialog = state, state.Recharge
-		rechargeView(c, state.Recharge)
-	}
 }
 
 func content(c *ui.Context, state *State) {

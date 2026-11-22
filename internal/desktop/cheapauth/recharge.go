@@ -5,10 +5,12 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	core "github.com/ai-poet/cheaprouter-harness/internal/cheapauth"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -24,21 +26,32 @@ type RechargeDialog struct {
 	BindPlan                      func()
 	BindLane, Expiry              string
 	Amount, Method                string
-	Busy                          bool
+	Busy, CheckingStatus          bool
 	OrderID, PayURL, CheckoutData string
+	Deadline                      time.Time
 	QR                            *image.NRGBA
 	HelpImage                     *ui.Bitmap
 	Status                        *core.OrderStatus
 	// OrderSummary is the localized service-confirmed price and credit.
-	OrderSummary, Message                                    string
-	Terminal                                                 bool
-	Submit                                                   func(amount float64, method string)
-	Close, Retry, CancelOrder, OpenCenter, BrowsePlans, Back func()
-	Redeem                                                   func(string)
-	RedeemCode                                               string
+	OrderSummary, Message                                       string
+	Terminal                                                    bool
+	Submit                                                      func(amount float64, method string)
+	CheckStatus                                                 func()
+	Close, Retry, CancelOrder, OpenCenter, BrowsePlans, Back    func()
+	Redeem                                                      func(string)
+	RedeemCode                                                  string
+	stableNotice, confirmCancel, promosExpanded, redeemExpanded bool
+	qrImage                                                     bitmapCache
+}
 
-	stableNotice, confirmCancel bool
-	qrImage                     bitmapCache
+// RechargeOverlay mounts the active recharge or plan dialog while state is
+// signed in. Unmounting detaches the sheet without cancelling an admitted order.
+func RechargeOverlay(c *ui.Context, state *State) {
+	if state != nil && state.SignedIn() && state.Recharge != nil {
+		owner := ui.Local(ui.Box(c.Key("payment-owner")).Absolute().Size(0, 0), "owner", func() dialogOwner { return dialogOwner{} })
+		owner.state, owner.dialog = state, state.Recharge
+		rechargeView(c, state.Recharge)
+	}
 }
 
 type bitmapCache struct {
@@ -77,6 +90,29 @@ func (d *RechargeDialog) offered(method string) bool {
 	}
 	m := strings.ToLower(strings.TrimSpace(method))
 	return strings.HasPrefix(m, "alipay") || strings.HasPrefix(m, "wxpay") || core.IsStripe(method)
+}
+
+func (d *RechargeDialog) methodAvailable(method string) bool {
+	if d == nil || d.Config == nil || !d.offered(method) {
+		return false
+	}
+	if limit, ok := d.Config.MethodLimits[method]; ok && !limit.Available {
+		return false
+	}
+	return true
+}
+
+// FirstAvailableMethod returns the first offered payment method that is currently available.
+func (d *RechargeDialog) FirstAvailableMethod() string {
+	if d == nil || d.Config == nil {
+		return ""
+	}
+	for _, method := range d.Config.EnabledPaymentTypes {
+		if d.methodAvailable(method) {
+			return method
+		}
+	}
+	return ""
 }
 
 func parseAmount(raw string) (float64, bool) {
@@ -147,33 +183,39 @@ func (d *RechargeDialog) proceed(lang string, confirmed bool) {
 	d.Submit(amount, d.Method)
 }
 func rechargeView(c *ui.Context, d *RechargeDialog) {
+	p := theme.Of(c)
 	title := i18n.T(c, "recharge_open")
 	if d.Listing || d.Plan != nil {
 		title = i18n.T(c, "pay_plan_title")
+	}
+	if d.Config != nil && d.OrderID == "" && d.Method == "" {
+		d.Method = d.FirstAvailableMethod()
 	}
 	w, h := c.Size()
 	open := true
 	creating := d.Busy && !d.Listing && d.Config != nil && d.OrderID == ""
 	body := func() {
 		ui.Text(c, title).FontSize(16).FontWeight(600).PaddingEnd(32)
-		ui.Scroll(c.Key("payment-body")).MaxHeight(max(100, h*0.9-180)).Gap(8).Children(func() {
+		ui.Scroll(c.Key("payment-body")).MaxHeight(max(120, h*0.9-180)).Gap(14).Children(func() {
 			switch {
 			case d.Listing:
 				plansList(c, d)
 			case d.Activated && d.Plan != nil:
-				ui.Text(c, i18n.T(c, "plans_activated_title", "plan", d.Plan.Name)).FontWeight(600)
-				if d.Expiry != "" {
-					ui.Text(c, d.Expiry)
-				} else {
-					ui.Text(c, i18n.T(c, "plans_syncing"))
-				}
-				if d.BindPlan != nil {
-					ui.Text(c, i18n.T(c, "plans_use_for_cli_hint", "cli", d.BindLane))
-					kit.Secondary(c.Key("bind-plan"), i18n.T(c, "plans_use_for_cli", "cli", d.BindLane)).Disabled(d.Busy).OnClick(d.BindPlan)
-				}
-				if d.Close != nil {
-					kit.Secondary(c.Key("done"), i18n.T(c, "plans_done")).OnClick(d.Close)
-				}
+				ui.Column(c.Key("plan-activated")).Gap(8).Children(func() {
+					ui.Text(c, i18n.T(c, "plans_activated_title", "plan", d.Plan.Name)).FontSize(14).FontWeight(600)
+					if d.Expiry != "" {
+						ui.Text(c, d.Expiry).FontSize(13).TextColor(p.MutedForeground)
+					} else {
+						ui.Text(c, i18n.T(c, "plans_syncing")).FontSize(13).TextColor(p.MutedForeground)
+					}
+					if d.BindPlan != nil {
+						ui.Text(c, i18n.T(c, "plans_use_for_cli_hint", "cli", d.BindLane)).FontSize(12).TextColor(p.MutedForeground)
+						kit.Primary(c.Key("bind-plan"), i18n.T(c, "plans_use_for_cli", "cli", d.BindLane), d.Busy).OnClick(d.BindPlan)
+					}
+					if d.Close != nil {
+						kit.Secondary(c.Key("done"), i18n.T(c, "plans_done")).OnClick(d.Close)
+					}
+				})
 			case d.OrderID != "":
 				orderView(c, d)
 			case d.stableNotice:
@@ -181,10 +223,17 @@ func rechargeView(c *ui.Context, d *RechargeDialog) {
 			case d.Config != nil && (d.Submit != nil || d.Message == ""):
 				rechargeForm(c, d)
 			case d.Busy:
-				ui.Text(c, i18n.T(c, "recharge_loading"))
+				ui.Row(c.Key("recharge-loading")).Gap(8).AlignItems(ui.Center).Children(func() {
+					kit.Busy(c)
+					ui.Text(c, i18n.T(c, "recharge_loading")).FontSize(13).TextColor(p.MutedForeground)
+				})
 			}
 			if d.Message != "" {
-				ui.Text(c, d.Message).Selectable()
+				msgColor := p.Danger
+				if d.Message == i18n.T(c, "pay_not_paid_yet") {
+					msgColor = p.MutedForeground
+				}
+				ui.Text(c, d.Message).FontSize(12).TextColor(msgColor).Selectable()
 			}
 			if d.OpenCenter != nil && !d.Listing && !d.Activated && (d.Config == nil && !d.Busy || d.OrderID != "" && d.PayURL == "" && d.QR == nil || d.Submit == nil && d.OrderID == "") {
 				kit.Secondary(c.Key("pay-center"), i18n.T(c, "pay_open_full_center")).Disabled(d.Busy).OnClick(d.OpenCenter)
@@ -200,16 +249,16 @@ func rechargeView(c *ui.Context, d *RechargeDialog) {
 			kit.Secondary(c.Key("back"), i18n.T(c, "pay_back_to_form")).Disabled(d.Busy).OnClick(d.Back)
 		}
 		if d.Config != nil && !d.Activated && !d.Listing && !d.stableNotice && (d.Plan != nil || !d.Config.BalanceDisabled) && d.OrderID == "" && d.Submit != nil {
-			label := i18n.T(c, "pay_continue")
-			if d.Busy {
-				label = i18n.T(c, "pay_creating_order")
-			} else if core.IsStripe(d.Method) {
-				label = i18n.T(c, "pay_open_full_center")
-			}
-			if d.Plan != nil && !d.Busy && !core.IsStripe(d.Method) {
-				label = i18n.T(c, "pay_plan_pay_cta", "amount", cny(planCharge(d)))
-			}
-			kit.PrimaryBusy(c.Key("submit-recharge"), label, d.Busy || d.Method == "", d.Busy).OnClick(func() { d.proceed(c.Locale(), false) })
+			label := formPayLabel(c, d)
+			ui.Row(c.Key("recharge-footer")).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+				if d.Close != nil {
+					kit.Secondary(c.Key("cancel-recharge"), i18n.T(c, "pay_cancel")).Disabled(d.Busy).OnClick(d.Close)
+				}
+				kit.PrimaryBusy(c.Key("submit-recharge"), label, d.Busy || d.Method == "", d.Busy).Grow(1).OnClick(func() { d.proceed(c.Locale(), false) })
+			})
+		}
+		if d.OrderID != "" && !d.Activated && !orderClosed(d) && (d.CancelOrder != nil || d.CheckStatus != nil) {
+			orderFooter(c, d)
 		}
 	}
 	var panel ui.Element
@@ -218,24 +267,45 @@ func rechargeView(c *ui.Context, d *RechargeDialog) {
 	} else {
 		panel = kit.Dialog(c.Key("recharge-dialog"), &open, body)
 	}
-	panel.Width(min(440, w-40)).Label(title)
+	panel.Width(min(400, w-40)).Label(title)
 	if !open && !creating && d.Close != nil {
 		d.Close()
 	}
 }
 
-func stablecoinView(c *ui.Context, d *RechargeDialog) {
-	token := core.StablecoinToken(d.Method)
-	ui.Text(c, i18n.T(c, "pay_stablecoin_title", "token", token)).FontWeight(600)
-	ui.Text(c, i18n.T(c, "pay_stablecoin_direct", "token", token))
-	if network := core.StablecoinNetwork(d.Method); network != "" {
-		ui.Text(c, i18n.T(c, "pay_stablecoin_network", "network", network))
-	} else {
-		ui.Text(c, i18n.T(c, "pay_stablecoin_network_unknown"))
+func formPayLabel(c *ui.Context, d *RechargeDialog) string {
+	if d.Busy {
+		return i18n.T(c, "pay_creating_order")
 	}
-	ui.Text(c, i18n.T(c, "pay_stablecoin_warning"))
-	kit.Secondary(c.Key("stable-back"), i18n.T(c, "pay_back_to_form")).OnClick(func() { d.stableNotice = false })
-	kit.PrimaryBusy(c.Key("stable-confirm"), i18n.T(c, "pay_stablecoin_confirm"), d.Busy, d.Busy).OnClick(func() { d.proceed(c.Locale(), true) })
+	if core.IsStripe(d.Method) {
+		return i18n.T(c, "pay_open_full_center")
+	}
+	if d.Plan != nil {
+		return i18n.T(c, "pay_plan_pay_cta", "amount", cny(planCharge(d)))
+	}
+	if amount, ok := balanceChargeText(d); ok {
+		return i18n.T(c, "pay_plan_pay_cta", "amount", amount)
+	}
+	return i18n.T(c, "pay_continue")
+}
+
+func stablecoinView(c *ui.Context, d *RechargeDialog) {
+	p := theme.Of(c)
+	token := core.StablecoinToken(d.Method)
+	ui.Column(c.Key("stablecoin-notice")).Gap(10).Children(func() {
+		ui.Text(c, i18n.T(c, "pay_stablecoin_title", "token", token)).FontSize(14).FontWeight(600)
+		ui.Text(c, i18n.T(c, "pay_stablecoin_direct", "token", token)).FontSize(13).TextColor(p.MutedForeground)
+		if network := core.StablecoinNetwork(d.Method); network != "" {
+			ui.Text(c, i18n.T(c, "pay_stablecoin_network", "network", network)).FontSize(13).FontWeight(500)
+		} else {
+			ui.Text(c, i18n.T(c, "pay_stablecoin_network_unknown")).FontSize(13).FontWeight(500)
+		}
+		ui.Text(c, i18n.T(c, "pay_stablecoin_warning")).FontSize(12).TextColor(p.Warning)
+		ui.Row(c.Key("stablecoin-actions")).FillWidth().Gap(8).Children(func() {
+			kit.Secondary(c.Key("stable-back"), i18n.T(c, "pay_back_to_form")).OnClick(func() { d.stableNotice = false })
+			kit.PrimaryBusy(c.Key("stable-confirm"), i18n.T(c, "pay_stablecoin_confirm"), d.Busy, d.Busy).Grow(1).OnClick(func() { d.proceed(c.Locale(), true) })
+		})
+	})
 }
 
 func paymentHelp(c *ui.Context, d *RechargeDialog) {
@@ -243,11 +313,14 @@ func paymentHelp(c *ui.Context, d *RechargeDialog) {
 	if help == "" && d.HelpImage == nil {
 		return
 	}
-	ui.Text(c, i18n.T(c, "pay_help_title")).FontWeight(600)
-	if help != "" {
-		ui.Text(c, help).Selectable()
-	}
-	if d.HelpImage != nil {
-		ui.Image(c.Key("help-image"), d.HelpImage).Size(250, 160).Fit(ui.Contain)
-	}
+	p := theme.Of(c)
+	ui.Column(c.Key("payment-help")).Gap(6).Children(func() {
+		ui.Text(c, i18n.T(c, "pay_help_title")).FontSize(12).FontWeight(600).TextColor(p.MutedForeground)
+		if help != "" {
+			ui.Text(c, help).FontSize(12).TextColor(p.MutedForeground).Selectable()
+		}
+		if d.HelpImage != nil {
+			ui.Image(c.Key("help-image"), d.HelpImage).Size(250, 160).Fit(ui.Contain)
+		}
+	})
 }
