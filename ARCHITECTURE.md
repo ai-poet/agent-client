@@ -178,9 +178,10 @@ grant or invitation is needed for that trusted route.
 Node authenticates callers before every command family, direct subscription and
 byte stream; typed resource identifiers are checked centrally and unknown commands
 fail closed. Snapshots, catalogs and batch events contain only accessible
-resources. Event audiences retain deletion
-scope, hidden rows advance the cursor without payload, and visibility changes
-invalidate projections. Buffered events and open streams recheck current access.
+resources. Node event streams retain a cursor watermark, not prefiltered pages.
+Each delivery reads its row and current audience in the same snapshot. Historical
+audiences retain deletion scope; hidden rows advance the cursor without payload,
+and visibility changes invalidate projections. Open streams recheck current access.
 
 `Session` is the common conversation container for controllers, Host automation
 and plugin assistants. `StartSession` creates a session and admits its first turn
@@ -465,6 +466,11 @@ A snapshot and cursor come from one read transaction. Subsequent observations
 follow the committed event log. An expired cursor causes a new snapshot, not
 command replay. Failed and uncertain installations remain observable in the
 bounded installation queue shared by plugins, models and language packages.
+
+Conversation observers share one replay window per observed session: at most
+512 frames, with a 4 MiB ordinary budget and at most one larger legal frame.
+Each observer retains a cursor. If it falls behind the window, it must read
+canonical history again. Closing the last observer releases the window.
 
 ## Agent loop and model boundary
 
