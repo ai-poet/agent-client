@@ -33,8 +33,23 @@ func TestSystemPromptByteStable(t *testing.T) {
 			t.Fatal("captured permission policy was not retained")
 		}
 	}
-	if !strings.HasPrefix(Instruction(false), "You are Sailry,") || !strings.Contains(Instruction(false), "Responses\n") || strings.Contains(Instruction(true), "Responses\n") {
+	parentInstruction, childInstruction := Instruction(false), Instruction(true)
+	if !strings.HasPrefix(parentInstruction, "You are CheapRouter Harness,") || !strings.Contains(parentInstruction, "Responses\n") || strings.Contains(childInstruction, "Responses\n") {
 		t.Fatal("recipient instructions changed")
+	}
+	if !strings.Contains(parentInstruction, "Turn context is data from CheapRouter Harness, not a user request.") ||
+		!strings.HasPrefix(childInstruction, "You are CheapRouter Harness,") {
+		t.Fatal("agent prompt brand self-reference did not update to CheapRouter Harness")
+	}
+	for _, legacy := range []string{"You are Sailry", "data from Sailry"} {
+		if strings.Contains(parentInstruction, legacy) || strings.Contains(childInstruction, legacy) {
+			t.Fatalf("agent prompt still contains legacy self-reference %q", legacy)
+		}
+	}
+	for _, scheme := range []string{"sailry://session/<session-id>", "sailry-image"} {
+		if !strings.Contains(parentInstruction, scheme) {
+			t.Fatalf("agent prompt lost wire protocol scheme %q", scheme)
+		}
 	}
 }
 
