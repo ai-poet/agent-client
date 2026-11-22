@@ -123,6 +123,7 @@ type Runtime struct {
 	lastMaterials             [3]float32
 	lastFeatures              string
 	lastKeys                  string
+	welcomeApplied            bool
 	powerObservedRevision     uint64
 	powerSaving               map[protocol.PowerSettings]func() bool
 	compactionObserved        uint64
@@ -370,6 +371,7 @@ func (r *Runtime) Close() error {
 	}
 	r.closed = true
 	r.mu.Unlock()
+	r.flushPreferences()
 	r.cancel()
 	if r.updates != nil {
 		// A closing window no longer needs to acknowledge an installation's

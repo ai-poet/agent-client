@@ -46,7 +46,9 @@ func View(c *ui.Context, g *Guide, picker func()) {
 			})
 			ui.Column(c.Key("picker")).FillWidth().Padding(20, 28, 26, 28).Children(picker)
 		})
-		x := kit.IconButton(c.Key("close"), icons.Close, i18n.T(c, "close"), 32, false).TextColor(theme.Welcome.Text).OnClick(func() { g.Open = false })
+		x := kit.IconButton(c.Key("close"), icons.Close, i18n.T(c, "close"), 32, false).TextColor(theme.Welcome.Text).OnClick(func() {
+			g.Open, g.Seen = false, true
+		})
 		x.Absolute().Top(12).Right(12)
 	})
 	if panel != (ui.Element{}) {
