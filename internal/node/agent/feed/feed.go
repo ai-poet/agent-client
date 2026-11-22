@@ -13,12 +13,9 @@ import (
 )
 
 const (
-	maxFinalized     = 4096
-	maxRetained      = 512
-	maxRetainedBytes = 4 * 1024 * 1024
-	maxDraftBytes    = 2 * 1024 * 1024
-	partOverhead     = 34
-	liveCapacity     = 64
+	maxFinalized  = 4096
+	maxDraftBytes = 2 * 1024 * 1024
+	partOverhead  = 34
 )
 
 type Hub struct {
@@ -37,33 +34,25 @@ type sessionFeed struct {
 	finalized      map[string]bool
 	finalizedOrder []string
 	bytes          int
-	retained       []retainedFrame
-	retainedBytes  int
+	replay         replay
 	background     map[string]protocol.ConversationBackgroundTask
 	observers      map[*Subscription]struct{}
-}
-
-type retainedFrame struct {
-	frame protocol.ConversationFrame
-	bytes int
 }
 
 func New(node protocol.NodeID) *Hub {
 	return &Hub{node: node, sessions: make(map[protocol.SessionID]*sessionFeed)}
 }
 func newSession() *sessionFeed {
-	return &sessionFeed{finalized: map[string]bool{}, background: map[string]protocol.ConversationBackgroundTask{}, observers: map[*Subscription]struct{}{}}
+	return &sessionFeed{finalized: map[string]bool{}, observers: map[*Subscription]struct{}{}}
 }
 
 // accept lets the active turn stream again and forgets its committed entries;
 // seal drops every later delta.
 func (f *sessionFeed) accept() { f.finalized, f.finalizedOrder = map[string]bool{}, nil }
 func (f *sessionFeed) seal()   { f.finalized, f.finalizedOrder = nil, nil }
-func (h *Hub) prune() {
-	for id, f := range h.sessions {
-		if f.active == nil && len(f.observers) == 0 {
-			delete(h.sessions, id)
-		}
+func (h *Hub) releaseIdle(id protocol.SessionID, f *sessionFeed) {
+	if f.active == nil && len(f.observers) == 0 {
+		delete(h.sessions, id)
 	}
 }
 
@@ -94,10 +83,9 @@ func (h *Hub) Reset(id protocol.SessionID) {
 		f.sequence++
 		f.drafts = nil
 		f.bytes = 0
-		f.retained = nil
-		f.retainedBytes = 0
+		f.replay = replay{}
 		clear(f.background)
-		f.broadcast(protocol.Update{Kind: "reset_required"})
+		f.notify()
 	}
 }
 
@@ -113,13 +101,11 @@ func (h *Hub) Seal(id protocol.SessionID, turn protocol.TurnID) {
 
 // Publish accepts a committed change. Delta uses its separate bounded path.
 func (h *Hub) Publish(id protocol.SessionID, change protocol.ConversationChange) {
-	change = copyValue(change)
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.prune()
 	f := h.sessions[id]
-	run, starts := payload[protocol.ConversationRun](change.Data)
-	starts = change.Kind == "run" && starts && run.Status == protocol.ConversationStatusRunning
+	run, isRun := payload[protocol.ConversationRun](change.Data)
+	starts := change.Kind == "run" && isRun && run.Status == protocol.ConversationStatusRunning
 	if f == nil {
 		if !starts {
 			return
@@ -127,12 +113,13 @@ func (h *Hub) Publish(id protocol.SessionID, change protocol.ConversationChange)
 		f = newSession()
 		h.sessions[id] = f
 	}
+	var key metadataKey
+	draftCount := len(f.drafts)
 	switch change.Kind {
 	case "run":
-		if run.Status == protocol.ConversationStatusRunning {
-			if f.active == nil || *f.active != run.Turn {
-				f.accept()
-			}
+		key = metadataKey{kind: "run", turn: run.Turn}
+		if run.Status == protocol.ConversationStatusRunning && (f.active == nil || *f.active != run.Turn) {
+			f.accept()
 			turn := run.Turn
 			f.active = &turn
 		}
@@ -146,15 +133,24 @@ func (h *Hub) Publish(id protocol.SessionID, change protocol.ConversationChange)
 				f.accept()
 			}
 		}
+	case "queue":
+		key = metadataKey{kind: "queue"}
 	case "entry", "revealed", "hidden":
 		var turn protocol.TurnID
 		var entryID string
+		var affectsInput bool
 		if change.Kind == "hidden" {
 			v, _ := payload[protocol.ConversationChangeHiddenPayload](change.Data)
 			turn, entryID = v.Turn, v.ID
+			affectsInput = true
 		} else {
 			v, _ := payload[protocol.ConversationEntry](change.Data)
 			turn, entryID = v.Turn, v.ID
+			affectsInput = v.Author == "user"
+		}
+		if affectsInput {
+			// A canonical user entry can replace the projected sent input.
+			delete(f.replay.metadata, metadataKey{kind: "run", turn: turn})
 		}
 		f.drafts = slices.DeleteFunc(f.drafts, func(d protocol.ConversationDraft) bool { return d.Turn == turn && d.ID == entryID })
 		if f.active != nil && *f.active == turn && f.finalized != nil && !f.finalized[entryID] {
@@ -164,29 +160,37 @@ func (h *Hub) Publish(id protocol.SessionID, change protocol.ConversationChange)
 			f.finalizedOrder = append(f.finalizedOrder, entryID)
 			if len(f.finalizedOrder) > maxFinalized {
 				delete(f.finalized, f.finalizedOrder[0])
+				clear(f.finalizedOrder[:1])
 				f.finalizedOrder = f.finalizedOrder[1:]
 			}
 		}
-	case "delta":
-		panic("conversation deltas require the bounded path")
 	case "background":
 		task, _ := payload[protocol.ConversationBackgroundTask](change.Data)
 		if previous, ok := f.background[task.ID]; ok && reflect.DeepEqual(previous, task) {
 			return
 		}
-		f.background[task.ID] = task
+		if f.background == nil {
+			f.background = make(map[string]protocol.ConversationBackgroundTask)
+		}
+		f.background[task.ID] = copyValue(task)
+	case "delta":
+		panic("conversation deltas require the bounded path")
 	}
-	f.bytes = 0
-	for _, draft := range f.drafts {
-		for _, part := range draft.Parts {
-			f.bytes += partBytes(part)
+	if len(f.drafts) != draftCount {
+		f.bytes = 0
+		for _, draft := range f.drafts {
+			for _, part := range draft.Parts {
+				f.bytes += partBytes(part)
+			}
 		}
 	}
-	h.send(id, f, change)
+	f.publish(change, key)
+	h.releaseIdle(id, f)
 }
 
 func (h *Hub) Delta(id protocol.SessionID, draft protocol.ConversationDraft) error {
-	draft = copyValue(draft)
+	body := encodeChange(protocol.ConversationChange{Kind: "delta", Data: draft})
+	draft = *decodeChange(body).Data.(*protocol.ConversationDraft)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	f := h.sessions[id]
@@ -235,7 +239,7 @@ func (h *Hub) Delta(id protocol.SessionID, draft protocol.ConversationDraft) err
 		}
 	}
 	f.bytes += bytes
-	h.send(id, f, protocol.ConversationChange{Kind: "delta", Data: draft})
+	f.advance(body, metadataKey{})
 	return nil
 }
 
@@ -248,35 +252,44 @@ func partBytes(part protocol.ConversationPart) int {
 	return len(body) + partOverhead - 2
 }
 
-func (h *Hub) send(id protocol.SessionID, f *sessionFeed, change protocol.ConversationChange) {
-	f.sequence++
-	frame := protocol.ConversationFrame{Node: h.node, Session: id, Sequence: f.sequence, Change: change}
-	encoded, err := json.Marshal(frame)
+func encodeChange(change protocol.ConversationChange) []byte {
+	body, err := json.Marshal(change)
 	if err != nil {
 		panic(err)
 	}
-	bytes := len(encoded)
-	if bytes <= maxRetainedBytes {
-		for len(f.retained) >= maxRetained || f.retainedBytes+bytes > maxRetainedBytes {
-			f.retainedBytes -= f.retained[0].bytes
-			f.retained = f.retained[1:]
-		}
-		f.retained = append(f.retained, retainedFrame{frame, bytes})
-		f.retainedBytes += bytes
-	} else {
-		f.retained = nil
-		f.retainedBytes = 0
-	}
-	f.broadcast(protocol.Update{Kind: "conversation_frame", Data: frame})
+	return body
 }
 
-func (f *sessionFeed) broadcast(update protocol.Update) {
-	for observer := range f.observers {
-		if len(observer.queue) == liveCapacity {
-			observer.queue = observer.queue[1:]
-			observer.lagged = true
+func decodeChange(body []byte) protocol.ConversationChange {
+	var change protocol.ConversationChange
+	if err := json.Unmarshal(body, &change); err != nil {
+		panic(err)
+	}
+	return change
+}
+
+func (f *sessionFeed) publish(change protocol.ConversationChange, key metadataKey) {
+	var body []byte
+	if len(f.observers) != 0 {
+		body = encodeChange(change)
+		if key.kind != "" && f.replay.duplicate(key, body) {
+			return
 		}
-		observer.queue = append(observer.queue, update)
+	}
+	f.advance(body, key)
+}
+
+func (f *sessionFeed) advance(body []byte, key metadataKey) {
+	f.sequence++
+	// New observers read a fresh durable snapshot at this sequence.
+	if len(f.observers) != 0 {
+		f.replay.append(f.sequence, body, key)
+		f.notify()
+	}
+}
+
+func (f *sessionFeed) notify() {
+	for observer := range f.observers {
 		select {
 		case observer.wake <- struct{}{}:
 		default:
@@ -295,7 +308,6 @@ type Reserved struct {
 func (h *Hub) Reserve(id protocol.SessionID, closed <-chan struct{}) *Reserved {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.prune()
 	f := h.sessions[id]
 	if f == nil {
 		f = newSession()
@@ -303,18 +315,28 @@ func (h *Hub) Reserve(id protocol.SessionID, closed <-chan struct{}) *Reserved {
 	}
 	stream := &Subscription{hub: h, session: id, sequence: f.sequence, wake: make(chan struct{}, 1), closed: make(chan struct{}), nodeClosed: closed}
 	f.observers[stream] = struct{}{}
+	// A fitted snapshot need not contain every run. Do not hide its first
+	// authoritative publication behind a frame older than the reservation.
+	clear(f.replay.metadata)
 	return &Reserved{Sequence: f.sequence, Drafts: copyValue(f.drafts), subscription: stream}
 }
 func (r *Reserved) Close() error { return r.subscription.Close() }
 
 // Subscribe receives a history page already fitted with room for these drafts.
 func (r *Reserved) Subscribe(snapshot protocol.ConversationSnapshot) link.Subscription {
-	snapshot.Node = r.subscription.hub.node
+	s := r.subscription
+	snapshot.Node = s.hub.node
 	snapshot.Sequence = r.Sequence
 	snapshot.Drafts = r.Drafts
 	value := protocol.Update{Kind: "conversation_snapshot", Data: snapshot}
-	r.subscription.initial = &value
-	return r.subscription
+	s.hub.mu.Lock()
+	defer s.hub.mu.Unlock()
+	select {
+	case <-s.closed:
+	default:
+		s.initial = &value
+	}
+	return s
 }
 
 type Subscription struct {
@@ -322,104 +344,74 @@ type Subscription struct {
 	session    protocol.SessionID
 	sequence   uint64
 	initial    *protocol.Update
-	queue      []protocol.Update
-	pending    []protocol.ConversationFrame
-	lagged     bool
 	wake       chan struct{}
 	closed     chan struct{}
 	nodeClosed <-chan struct{}
-	close      sync.Once
 	next       sync.Mutex
 }
 
 func (s *Subscription) Close() error {
-	s.close.Do(func() {
-		s.hub.mu.Lock()
-		defer s.hub.mu.Unlock()
-		if f := s.hub.sessions[s.session]; f != nil {
-			delete(f.observers, s)
-		}
-		close(s.closed)
-	})
+	s.hub.mu.Lock()
+	defer s.hub.mu.Unlock()
+	s.closeLocked()
 	return nil
 }
+
+func (s *Subscription) closeLocked() {
+	select {
+	case <-s.closed:
+		return
+	default:
+	}
+	f := s.hub.sessions[s.session]
+	delete(f.observers, s)
+	if len(f.observers) == 0 {
+		f.replay, f.background = replay{}, nil
+	}
+	s.hub.releaseIdle(s.session, f)
+	s.initial = nil
+	close(s.closed)
+}
+
 func unavailable() error {
 	return &protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "conversation subscription is unavailable"}
 }
-func (s *Subscription) resume() bool {
-	f := s.hub.sessions[s.session]
-	if f == nil {
-		return false
-	}
-	var pending []protocol.ConversationFrame
-	for _, item := range f.retained {
-		if item.frame.Sequence > s.sequence {
-			pending = append(pending, item.frame)
-		}
-	}
-	if s.sequence != f.sequence && (len(pending) == 0 || pending[0].Sequence != s.sequence+1 || pending[len(pending)-1].Sequence != f.sequence) {
-		return false
-	}
-	s.pending = pending
-	s.queue = nil
-	s.lagged = false
-	return true
-}
+
 func (s *Subscription) Next(ctx context.Context) (protocol.Update, error) {
 	s.next.Lock()
 	defer s.next.Unlock()
-	select {
-	case <-s.closed:
-		return protocol.Update{}, unavailable()
-	case <-s.nodeClosed:
-		return protocol.Update{}, unavailable()
-	default:
-	}
-	if s.initial != nil {
-		value := *s.initial
-		s.initial = nil
-		return value, nil
-	}
 	for {
 		s.hub.mu.Lock()
-		if len(s.pending) > 0 {
-			frame := s.pending[0]
-			s.pending = s.pending[1:]
-			s.sequence = frame.Sequence
+		select {
+		case <-s.closed:
 			s.hub.mu.Unlock()
-			return protocol.Update{Kind: "conversation_frame", Data: copyValue(frame)}, nil
+			return protocol.Update{}, unavailable()
+		case <-s.nodeClosed:
+			s.closeLocked()
+			s.hub.mu.Unlock()
+			return protocol.Update{}, unavailable()
+		default:
 		}
-		if s.lagged {
-			ok := s.resume()
+		if s.initial != nil {
+			value := *s.initial
+			s.initial = nil
 			s.hub.mu.Unlock()
-			if !ok {
+			return value, nil
+		}
+		if f := s.hub.sessions[s.session]; s.sequence != f.sequence {
+			sequence := s.sequence + 1
+			body := f.replay.at(sequence)
+			if body == nil {
+				// This cursor cannot continue. The client must reserve again
+				// and read canonical history; do not stream a broken suffix.
+				s.closeLocked()
+				s.hub.mu.Unlock()
 				return protocol.Update{Kind: "reset_required"}, nil
 			}
-			continue
-		}
-		if len(s.queue) > 0 {
-			update := s.queue[0]
-			s.queue = s.queue[1:]
-			if update.Kind != "conversation_frame" {
-				s.hub.mu.Unlock()
-				return copyValue(update), nil
-			}
-			frame, _ := payload[protocol.ConversationFrame](update.Data)
-			if frame.Sequence <= s.sequence {
-				s.hub.mu.Unlock()
-				continue
-			}
-			if frame.Sequence == s.sequence+1 {
-				s.sequence = frame.Sequence
-				s.hub.mu.Unlock()
-				return copyValue(update), nil
-			}
-			ok := s.resume()
+			s.sequence = sequence
 			s.hub.mu.Unlock()
-			if !ok {
-				return protocol.Update{Kind: "reset_required"}, nil
-			}
-			continue
+			frame := &protocol.ConversationFrame{Node: s.hub.node, Session: s.session, Sequence: sequence, Change: decodeChange(body)}
+			return protocol.Update{Kind: "conversation_frame", Data: frame}, nil
 		}
 		s.hub.mu.Unlock()
 		select {
@@ -428,6 +420,7 @@ func (s *Subscription) Next(ctx context.Context) (protocol.Update, error) {
 		case <-s.closed:
 			return protocol.Update{}, unavailable()
 		case <-s.nodeClosed:
+			_ = s.Close()
 			return protocol.Update{}, unavailable()
 		case <-s.wake:
 		}
