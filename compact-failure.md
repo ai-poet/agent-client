@@ -44,6 +44,7 @@
 ## 验证记录
 
 - Linux，Go 1.27.3，`CGO_ENABLED=0`。`go generate ./internal/desktop/i18n`、`go build ./...`、`go vet ./...` 均退出 0。
+- 四个指定包最终全部通过：`internal/desktop/live`（269.563 s）、`internal/node/agent/engine`（71.084 s）、`internal/node/agent/compact`（缓存复用，前次 0.934 s）、`internal/desktop/i18n`（0.751 s）。首轮 `TestCatalogKeys/SourceKeys` 检出了两个未嵌入的原因键，补入 `keys.txt` 并重新生成后通过；中文回退测试直接校验译文，而不只是比较键。
 - 修复前对照：用 Go overlay 临时换回基线 `98e2feb15` 的命令回调和解析器，不切分支。相同测试中，`TestComposerSendRouting/composer_parity_commands` 在中文窗口看到了「操作失败，请重试」而非 Node 消息；上述两项解析器断言也都检出了错误成功。
 - 桌面新增 `TestCompactionFaultKeepsEngineMessage`、`TestCompactionResourceExplainsMissingRunFault`、`TestCompactLogMessage`，分别检查原文与标题、历史记录有无 cause 的行为、常见敏感信息不写入日志。扩展已有的 `TestComposerSendRouting/composer_parity_commands`，实际输入 `/compact`，检查拒绝后没有兜底文案。
 - 未运行全仓测试、真实模型或用户的开发配置；脚本化响应只能验证上述路径，不能归因到某个真实供应商。
