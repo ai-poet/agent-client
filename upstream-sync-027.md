@@ -2,6 +2,8 @@
 
 基线 `main@a7200abf1`，上游范围 `a285ba78a..b179f97fc`。只同步可独立验证的核心修复，不升级发布版本、协议或包指针。
 
+**结果：64 条中移植 13 条，跳过 51 条。** 必须 9 条，移植 9 条；可选 18 条，移植 4 条；不相关 37 条，全部跳过。每条移植单独提交；分类和最终验证报告不计入上游条数。
+
 ## 移植前分类
 
 | # | 上游提交 | 分类 | 决定 | 理由 |
@@ -19,7 +21,7 @@
 | 11 | [`8ea8d764c`](https://github.com/sailry/sailry-harness/commit/8ea8d764c0b56223144df1fff0d18fe244f1ff00) | 不相关 | 跳过 | 仅上调上游统计插件指针，fork 内置包不是该 Gitlink。 |
 | 12 | [`abc5adf58`](https://github.com/sailry/sailry-harness/commit/abc5adf580f160f9594c5a516d825a77852cccd9) | 可选 | 跳过 | 键帽与快捷键录制是设置呈现改版。 |
 | 13 | [`60f3a1cc1`](https://github.com/sailry/sailry-harness/commit/60f3a1cc1cff0a27b872d9744b6d09f4286ec1aa) | 不相关 | 跳过 | 几何锚点测试针对未采用的发送交接布局。 |
-| 14 | [`94b28ef51`](https://github.com/sailry/sailry-harness/commit/94b28ef51db5986b63f56758cb7d859df358c8c2) | 必须 | 选择 | 预取时过滤会永久丢失在交付前重新取得权限的事件，应按交付时权限读取。 |
+| 14 | [`94b28ef51`](https://github.com/sailry/sailry-harness/commit/94b28ef51db5986b63f56758cb7d859df358c8c2) | 必须 | 选择 | 预取整页会让未来行的损坏提前阻断有效事件；按游标交付时读取并检查当前权限。 |
 | 15 | [`f6f633449`](https://github.com/sailry/sailry-harness/commit/f6f6334496c81e236f6cd0bc8c563f906fe5050b) | 可选 | 跳过 | 单独提交前导计划改变工具批处理、审批顺序与提示词。 |
 | 16 | [`4170270d8`](https://github.com/sailry/sailry-harness/commit/4170270d8ee0f805413e203ab8e5685e86c4c4ea) | 可选 | 跳过 | 上下文压力与证据回读策略成套改变模型看到的历史。 |
 | 17 | [`ff363f3cb`](https://github.com/sailry/sailry-harness/commit/ff363f3cb466b72520427e4bb4a199cc20960ed2) | 可选 | 选择 | 仅同步实际采用的事件交付等边界说明，不宣称已有上游计费与上下文策略。 |
@@ -32,7 +34,7 @@
 | 24 | [`b0ea0d0fe`](https://github.com/sailry/sailry-harness/commit/b0ea0d0fe263d53e1d7acf6e949cf2b3a2f37ba0) | 不相关 | 跳过 | 针对未移植的键帽录制器和费率设置补焦点、译文。 |
 | 25 | [`1dce101b8`](https://github.com/sailry/sailry-harness/commit/1dce101b8497e6d48fe7f458277acbfcca89df3b) | 不相关 | 跳过 | 依赖第 9、13 项的托盘投影和几何锚点，不重做 fork 的桌面发送区。 |
 | 26 | [`61a6a804f`](https://github.com/sailry/sailry-harness/commit/61a6a804f8bc1db1ec69cc6678b9ee1b846e7e72) | 可选 | 跳过 | 窗口偏好合并与 Windows 模态窗口诊断不属于核心同步。 |
-| 27 | [`2bf61ec85`](https://github.com/sailry/sailry-harness/commit/2bf61ec85dc825a86ecd71644fdb9d372e24778f) | 必须 | 选择 | 连续拨号失败不应耗尽所有通用重试，TLS 证据也不应在收到 HTTP 响应时丢失。 |
+| 27 | [`2bf61ec85`](https://github.com/sailry/sailry-harness/commit/2bf61ec85dc825a86ecd71644fdb9d372e24778f) | 必须 | 选择 | 连续拨号失败不应耗尽所有通用重试，也不能将握手证书错误误记为 HTTP 响应。 |
 | 28 | [`1ade277d9`](https://github.com/sailry/sailry-harness/commit/1ade277d9250d7d950b480b254714b8c599a2bc6) | 不相关 | 迁移 | 新增 Git/SSH fault 原因并改变远程可见错误过滤，停止整条。 |
 | 29 | [`1928527f4`](https://github.com/sailry/sailry-harness/commit/1928527f401c2a7d7e8f61ecaa4cc54af3e692aa) | 可选 | 跳过 | 本地命令报告还涉及服务发现故障分类，不改变 fork 提供商的公开诊断。 |
 | 30 | [`9319b5f7a`](https://github.com/sailry/sailry-harness/commit/9319b5f7a6c4e403d429aebdc45b9d57c5001647) | 可选 | 跳过 | 原生浏览器地址栏草稿同步是面板交互修复，非本轮核心边界。 |
@@ -70,3 +72,41 @@
 | 62 | [`0c7e4f089`](https://github.com/sailry/sailry-harness/commit/0c7e4f0893bd769448c8ca6b24bce2bb24e24d21) | 不相关 | 迁移 | 新增 provider directory 请求和分页快照，不替换 CheapRouter 的按分组目录。 |
 | 63 | [`62ad7680b`](https://github.com/sailry/sailry-harness/commit/62ad7680b4d8bf3a07a3f9c9cd486f9d4e1f13a8) | 可选 | 跳过 | 可见分栏刷新和菜单依赖不同的桌面布局，保留现有工作台。 |
 | 64 | [`b179f97fc`](https://github.com/sailry/sailry-harness/commit/b179f97fc8ae24535c50a07dcbf12736b952fe1d) | 不相关 | 跳过 | fork 未采用完整协议、移动端或上游发布物，不声明 Sailry 0.2.7 兼容版本。 |
+
+## 实际移植与逐提交构建
+
+| 上游 SHA | 本地 SHA | 摘要 | 构建 |
+|---|---|---|---|
+| `754f34af9` | `e4334fe8f` | 在同一会话的观察者间共享有界回放 | 通过 |
+| `94b28ef51` | `ed639fc8e` | 在交付时读取并授权单条事件 | 通过 |
+| `ff363f3cb` | `05217b8df` | 说明事件授权与共享会话回放边界 | 通过 |
+| `09f4afab3` | `b78e40ce4` | 查询会话资产时跳过无关工具载荷 | 通过 |
+| `82bb6d8ca` | `38cc3d160` | 跳过不含资产的纯文本工具展示 | 通过 |
+| `2bf61ec85` | `5b388efeb` | 限制连续拨号重试并保留传输证据 | 通过 |
+| `f3dedffe7` | `d0517a2c2` | 区分插件证书故障并限制代理拨号重试 | 通过 |
+| `d25807201` | `42493a727` | 在停止与恢复时同步队列修订和待发送状态 | 通过 |
+| `363e72f39` | `e0f02f9c2` | 按来源和种类区分同名引用 | 通过 |
+| `02dd31cc2` | `5a50888a8` | 保留显式缓存断点并稳定工具错误顺序 | 通过 |
+| `51878d2df` | `ba23dfd6e` | 限制超时恢复并禁止完成后重放 | 通过 |
+| `34cb3fa7a` | `516e64869` | 从父执行释放已收集的前台子任务 | 通过 |
+| `90b5fd8b2` | `558e5f70b` | 防止按截断列表删除工作树并正确处理目录取消 | 通过 |
+
+## 适配与架构迁移
+
+- 事件读取保留本地身份来源、订阅结束前的权限复查和既有 reset/cursor；共享回放保留 fork 的后台任务帧，落后者单独恢复。资产查询仍按 256 条／4 MiB 扫描，保留 fork 的 MIME 和 Markdown 制品规则。
+- 模型重试沿用 fork 的首输出判定、HTTP/1.1 回退、分组协议和传输选择。缓存补丁只保留显式输入标记，不生成新的标记；测试验证本地 `instructions` 及 MCP 错误格式，没有把上游格式带入生产代码。
+- 队列恢复只追踪原持久请求，未替换 lane、Ask User 或发送区布局。子任务收集删除父执行中的引用；本地通过 `context.WithCancel(parent)` 建立取消链，没有上游 detached 子任务的 `stopParent` 回调需要移植。
+- `internal/core/files_directory.go` 只在目录读取边界复用已有 `fileControl.check`；没有改变基础类型。与 `main` 对比，`internal/protocol`、`internal/cheapauth`（含充值）、`internal/imagestudio`、`internal/node/providers`、插件与主题均无差异。
+- **需要架构迁移，整条停止（7 条）**：#6 渠道成本与用量、#28 Git/SSH 远程 fault、#38 资产增量分页、#49 缓存写入统计、#50 有序输入观测、#61 完整请求吞吐率、#62 提供商目录。上述条目未移植实现或新字段。#41 涉及工具上下文授权策略，不是线格式扩展，也未引入。其余跳过原因见逐条分类表。
+
+## 验证
+
+环境：Linux amd64；先 `unset GOROOT`，再 `export GOTOOLCHAIN=go1.27.3 CGO_ENABLED=0`。
+
+- 基线构建和 vet 通过。每条移植提交后执行 `go build ./...`，13/13 通过；集成后 `go vet ./...` 退出 0，无诊断。
+- 在 Client、Desktop composer/live、Node、engine/feed/model、files/git/store 共 10 个包内，用 `go test -p 3 -run` 运行本分支新增的全部 44 个顶层回归测试，以及命中的 4 个既有兼容性测试，48/48 通过。涵盖共享回放与大帧、逐事件授权、资产过滤、SSL/TCP/524、工具回执、停止恢复、重复引用和工作树删除。桌面引用选择器使用 MyGo Tester 输入并选择同名行，不代表物理桌面验收。
+- 另运行 `go test ./internal/core ./internal/node/agent/feed ./internal/node/files ./internal/node/git ./internal/node/providers ./internal/cheapauth ./internal/imagestudio`，含测试的 6 个包通过；`imagestudio` 无测试文件。
+- Store 基准单次运行（`-benchtime=1x`）：128 条事件从预取再复查的 256 次行过滤降到交付时 128 次，事务数从 129 降到 128。三种资产载荷基准均通过；不据此宣称端到端延迟收益。
+- 适配时发现并修正了测试夹具的订阅包装器、模型上下文探测、请求及错误格式、文件检查签名差异，以上是修正后的结果。按要求未跑全量 `go test ./...`，未调用真实模型、未做跨平台验收。
+
+分支从 `a7200abf1` 创建；不合并 `main`，不更新同步水印。
