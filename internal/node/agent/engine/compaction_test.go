@@ -18,6 +18,26 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
+func TestCompactionWithoutProviderCapture(t *testing.T) {
+	f := newFixture(t, &scriptedModel{})
+	out := f.command("compact_context", &protocol.CommandCompactContextPayload{Session: f.session.ID, ExpectedRevision: f.session.Revision})
+	turn := out.Data.(protocol.QueuedTurn).ID
+	if err := f.db.Node.Write(f.ctx, func(db *sql.Conn) error {
+		if _, err := db.ExecContext(f.ctx, "UPDATE agent_runs SET provider='null' WHERE turn=?1", turn.String()); err != nil {
+			return err
+		}
+		_, err := db.ExecContext(f.ctx, "DELETE FROM providers WHERE id=?1", f.session.Config.Provider.String())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.start()
+	run := f.waitRun(turn, protocol.ConversationStatusFailed)
+	if run.Error == nil || run.Error.ConfigurationReason() != protocol.ConfigurationProviderMissing || run.Error.Code != protocol.ErrorCodeNotConfigured || run.Error.Message != "Select an available model before compacting this conversation." {
+		t.Fatalf("compaction fault = %+v", run.Error)
+	}
+}
+
 func TestCompactionHandoff(t *testing.T) {
 	t.Run("structured candidates", func(t *testing.T) {
 		for _, row := range []struct {
