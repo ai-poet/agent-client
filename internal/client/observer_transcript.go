@@ -23,14 +23,15 @@ type TranscriptInput struct {
 }
 
 type transcriptRow struct {
-	Source       toolReference             `json:"source"`
-	Draft        bool                      `json:"draft"`
-	End          int                       `json:"end"`
-	Part         protocol.ConversationPart `json:"part"`
-	TextOffset   int                       `json:"text_offset"`
-	TextLast     bool                      `json:"text_last"`
-	Continuation bool                      `json:"continuation"`
-	Work         bool                      `json:"work"`
+	Source       toolReference              `json:"source"`
+	Draft        bool                       `json:"draft"`
+	End          int                        `json:"end"`            // Exclusive source part index.
+	Part         *protocol.ConversationPart `json:"part,omitempty"` // Overrides the source parts when set.
+	TextOffset   int                        `json:"text_offset"`
+	TextLast     bool                       `json:"text_last"`
+	Continuation bool                       `json:"continuation"`
+	Work         bool                       `json:"work"`
+	kind         string
 	sequence     uint64
 }
 
@@ -85,7 +86,7 @@ func projectGuidance(page protocol.ConversationPage) map[string]string {
 	return value
 }
 
-func projectTranscript(snapshot protocol.ConversationSnapshot, calls []ToolCall, guidance map[string]string) ([]protocol.TurnID, map[string]protocol.TurnID, map[string]any) {
+func projectTranscript(snapshot protocol.ConversationSnapshot, calls []ToolCall, guidance map[string]string, referenceRows bool) ([]protocol.TurnID, map[string]protocol.TurnID, map[string]any) {
 	page := snapshot.Page
 	runs := slices.Clone(page.Runs)
 	slices.SortFunc(runs, func(left, right protocol.ConversationRun) int {
@@ -117,35 +118,65 @@ func projectTranscript(snapshot protocol.ConversationSnapshot, calls []ToolCall,
 	owners := map[string]protocol.TurnID{}
 	segments := map[string]any{}
 	inputs := TranscriptInputs(page)
+	sources := indexTranscriptSources(snapshot, calls)
 	for _, run := range runs {
 		owner := run.Turn
 		if run.Joined != nil && known[*run.Joined] {
 			owner = *run.Joined
 		}
 		owners[run.Turn.String()] = owner
-		if owner != run.Turn || guidance[run.Turn.String()] == "pending" || !visibleTranscriptRun(snapshot, run) {
+		if owner != run.Turn || guidance[run.Turn.String()] == "pending" || !visibleTranscriptRun(sources, run) {
 			continue
 		}
 		timeline = append(timeline, run.Turn)
-		segments[run.Turn.String()] = transcriptSegments(snapshot, calls, guidance, run.Turn, inputs[run.Turn])
+		segments[run.Turn.String()] = transcriptSegments(page, sources, guidance, run, inputs[run.Turn], referenceRows)
 	}
 	return timeline, owners, segments
 }
 
-func visibleTranscriptRun(snapshot protocol.ConversationSnapshot, run protocol.ConversationRun) bool {
+type transcriptSources struct {
+	entries map[protocol.TurnID][]*protocol.ConversationEntry
+	byID    map[string]*protocol.ConversationEntry
+	drafts  map[protocol.TurnID][]*protocol.ConversationDraft
+	calls   map[protocol.TurnID]map[toolReference]*ToolCall
+}
+
+func indexTranscriptSources(snapshot protocol.ConversationSnapshot, calls []ToolCall) transcriptSources {
+	s := transcriptSources{
+		entries: make(map[protocol.TurnID][]*protocol.ConversationEntry), byID: make(map[string]*protocol.ConversationEntry, len(snapshot.Page.Entries)),
+		drafts: make(map[protocol.TurnID][]*protocol.ConversationDraft), calls: make(map[protocol.TurnID]map[toolReference]*ToolCall),
+	}
+	for i := range snapshot.Page.Entries {
+		entry := &snapshot.Page.Entries[i]
+		s.entries[entry.Turn] = append(s.entries[entry.Turn], entry)
+		s.byID[entry.ID] = entry
+	}
+	for i := range snapshot.Drafts {
+		draft := &snapshot.Drafts[i]
+		s.drafts[draft.Turn] = append(s.drafts[draft.Turn], draft)
+	}
+	for i := range calls {
+		call := &calls[i]
+		if s.calls[call.Turn] == nil {
+			s.calls[call.Turn] = make(map[toolReference]*ToolCall)
+		}
+		s.calls[call.Turn][call.Source] = call
+	}
+	return s
+}
+
+func visibleTranscriptRun(sources transcriptSources, run protocol.ConversationRun) bool {
 	if run.Continuation == nil || run.Status != "continued" {
 		return true
 	}
 	parts := []protocol.ConversationPart{}
-	for _, entry := range snapshot.Page.Entries {
-		if entry.Turn == run.Turn && entry.Author != "user" {
+	for _, entry := range sources.entries[run.Turn] {
+		if entry.Author != "user" {
 			parts = append(parts, entry.Parts...)
 		}
 	}
-	for _, draft := range snapshot.Drafts {
-		if draft.Turn == run.Turn {
-			parts = append(parts, draft.Parts...)
-		}
+	for _, draft := range sources.drafts[run.Turn] {
+		parts = append(parts, draft.Parts...)
 	}
 	for _, part := range parts {
 		if part.Kind == "text" || part.Kind == "thinking" {
@@ -252,15 +283,15 @@ func TranscriptInputs(page protocol.ConversationPage) map[protocol.TurnID][]Tran
 	return inputs
 }
 
-func transcriptSegments(snapshot protocol.ConversationSnapshot, calls []ToolCall, guidance map[string]string, turn protocol.TurnID, inputs []TranscriptInput) []transcriptSegment {
-	rows := collectTranscriptRows(snapshot, calls, turn)
+func transcriptSegments(page protocol.ConversationPage, sources transcriptSources, guidance map[string]string, run protocol.ConversationRun, inputs []TranscriptInput, referenceRows bool) []transcriptSegment {
+	rows := collectTranscriptRows(sources, run.Turn, referenceRows)
 	segments := []transcriptSegment{}
 	current := emptySegment()
 	claimed := []TranscriptInput{}
 	cursor := 0
 	for _, input := range inputs {
 		switch {
-		case input.Turn == turn:
+		case input.Turn == run.Turn:
 			current.Inputs = append(current.Inputs, input)
 		case !input.Canonical:
 			claimed = append(claimed, input)
@@ -278,17 +309,28 @@ func transcriptSegments(snapshot protocol.ConversationSnapshot, calls []ToolCall
 	}
 	current.Rows = append(current.Rows, rows[cursor:]...)
 	current.Inputs = append(current.Inputs, claimed...)
-	current.Waiting = waitingChildren(snapshot, calls, guidance, turn, current.Rows)
+	if run.Kind == "task" && run.Status == "running" {
+		current.Waiting = waitingChildren(page, sources, guidance, run.Turn, current.Rows)
+	}
 	return append(segments, current)
 }
 
-func collectTranscriptRows(snapshot protocol.ConversationSnapshot, calls []ToolCall, turn protocol.TurnID) []transcriptRow {
-	selected := map[toolReference]ToolCall{}
-	for _, call := range calls {
-		if call.Turn == turn {
-			selected[call.Source] = call
-		}
+func inlineTranscriptText(parts []protocol.ConversationPart) string {
+	first, _ := payload[string](parts[0].Data)
+	if len(parts) == 1 {
+		return first
 	}
+	var text strings.Builder
+	text.WriteString(first)
+	for _, part := range parts[1:] {
+		next, _ := payload[string](part.Data)
+		text.WriteString(next)
+	}
+	return text.String()
+}
+
+func collectTranscriptRows(sources transcriptSources, turn protocol.TurnID, referenceRows bool) []transcriptRow {
+	selected := sources.calls[turn]
 	rows := []transcriptRow{}
 	retries := map[string]int{}
 	appendParts := func(id string, parts []protocol.ConversationPart, sequence uint64, draft bool) {
@@ -303,21 +345,27 @@ func collectTranscriptRows(snapshot protocol.ConversationSnapshot, calls []ToolC
 			part := parts[index]
 			index++
 			row := transcriptRow{
-				Source: toolReference{Entry: id, Index: uint64(start)}, Draft: draft, End: index, Part: part, TextOffset: offset,
-				Continuation: start > 0 && parts[start-1].Kind == "image" && part.Kind == "image", sequence: sequence,
+				Source: toolReference{Entry: id, Index: uint64(start)}, Draft: draft, End: index, TextOffset: offset,
+				Continuation: start > 0 && parts[start-1].Kind == "image" && part.Kind == "image", kind: part.Kind, sequence: sequence,
 			}
 			if part.Kind == "text" || part.Kind == "thinking" {
-				text, _ := payload[string](part.Data)
 				for index < len(parts) && parts[index].Kind == part.Kind {
-					next, _ := payload[string](parts[index].Data)
-					text += next
 					index++
 				}
 				row.End, row.TextLast = index, lastText >= start && lastText < index
-				row.Part.Data = text
+				sources := parts[start:index]
+				if !referenceRows {
+					part.Data = inlineTranscriptText(sources)
+					sources = []protocol.ConversationPart{part}
+				}
 				if part.Kind == "text" {
-					offset += utf8.RuneCountInString(text)
-					if strings.TrimSpace(text) == "" {
+					visible := false
+					for _, source := range sources {
+						text, _ := payload[string](source.Data)
+						offset += utf8.RuneCountInString(text)
+						visible = visible || strings.TrimSpace(text) != ""
+					}
+					if !visible {
 						continue
 					}
 				}
@@ -327,7 +375,8 @@ func collectTranscriptRows(snapshot protocol.ConversationSnapshot, calls []ToolC
 				if result, err := payload[protocol.ConversationPartToolResultPayload](part.Data); err == nil {
 					for _, image := range result.Images {
 						imageRow := row
-						imageRow.Part = protocol.ConversationPart{Kind: "image", Data: image}
+						imageRow.kind = "image"
+						imageRow.Part = &protocol.ConversationPart{Kind: "image", Data: image}
 						imageRow.TextOffset, imageRow.TextLast, imageRow.Continuation, imageRow.Work = offset, false, false, false
 						rows = append(rows, imageRow)
 					}
@@ -337,17 +386,12 @@ func collectTranscriptRows(snapshot protocol.ConversationSnapshot, calls []ToolC
 				}
 			}
 			if part.Kind == "tool_call" || part.Kind == "tool_result" {
-				if !matched || toolHidden(call) {
+				if !matched || toolHidden(*call) {
 					continue
 				}
 				if call.Name == "compact_context" && call.Summary != nil && call.Summary.SummaryID != nil {
-					hasSummary := false
-					for _, entry := range snapshot.Page.Entries {
-						if entry.ID == *call.Summary.SummaryID {
-							hasSummary = slices.ContainsFunc(entry.Parts, func(part protocol.ConversationPart) bool { return part.Kind == "compaction" })
-						}
-					}
-					if hasSummary {
+					entry := sources.byID[*call.Summary.SummaryID]
+					if entry != nil && slices.ContainsFunc(entry.Parts, func(part protocol.ConversationPart) bool { return part.Kind == "compaction" }) {
 						continue
 					}
 				}
@@ -359,35 +403,35 @@ func collectTranscriptRows(snapshot protocol.ConversationSnapshot, calls []ToolC
 				}
 				if value.Type == "model_retry" && value.ID != "" && !value.Fallback {
 					if position, exists := retries[value.ID]; exists {
-						rows[position].Part = part
+						override := part
+						rows[position].Part = &override
 						continue
 					}
 					retries[value.ID] = len(rows)
 				}
 			}
 			row.Work = workPart(part)
+			if !referenceRows {
+				row.Part = new(part)
+			}
 			rows = append(rows, row)
 		}
 	}
-	for _, entry := range snapshot.Page.Entries {
-		if entry.Turn == turn && entry.Author != "user" {
+	for _, entry := range sources.entries[turn] {
+		if entry.Author != "user" {
 			appendParts(entry.ID, entry.Parts, entry.Sequence, false)
 		}
 	}
-	for _, draft := range snapshot.Drafts {
-		if draft.Turn == turn && draft.Author != "user" {
+	for _, draft := range sources.drafts[turn] {
+		if draft.Author != "user" {
 			appendParts(draft.ID, draft.Parts, 0, true)
 		}
 	}
 	return rows
 }
 
-func waitingChildren(snapshot protocol.ConversationSnapshot, calls []ToolCall, guidance map[string]string, turn protocol.TurnID, rows []transcriptRow) *int {
-	page := snapshot.Page
-	running := slices.ContainsFunc(page.Runs, func(run protocol.ConversationRun) bool {
-		return run.Turn == turn && run.Kind == "task" && run.Status == "running"
-	})
-	if !running || slices.ContainsFunc(snapshot.Drafts, func(draft protocol.ConversationDraft) bool { return draft.Turn == turn && draft.Author != "user" }) ||
+func waitingChildren(page protocol.ConversationPage, sources transcriptSources, guidance map[string]string, turn protocol.TurnID, rows []transcriptRow) *int {
+	if slices.ContainsFunc(sources.drafts[turn], func(draft *protocol.ConversationDraft) bool { return draft.Author != "user" }) ||
 		slices.ContainsFunc(page.Approvals, func(item protocol.ConversationApproval) bool { return item.Turn == turn && item.State == "pending" }) ||
 		slices.ContainsFunc(page.Questions, func(item protocol.ConversationQuestion) bool {
 			return item.Turn == turn && item.State.Kind == "pending"
@@ -419,19 +463,10 @@ func waitingChildren(snapshot protocol.ConversationSnapshot, calls []ToolCall, g
 		if row.Draft {
 			return nil
 		}
-		switch row.Part.Kind {
+		switch row.kind {
 		case "tool_call":
-			found := false
-			for _, call := range calls {
-				if call.Turn == turn && call.Source == row.Source {
-					if call.State == "waiting" || call.State == "running" {
-						return nil
-					}
-					found = true
-					break
-				}
-			}
-			if !found {
+			call := sources.calls[turn][row.Source]
+			if call == nil || call.State == "waiting" || call.State == "running" {
 				return nil
 			}
 			settled = true
@@ -458,13 +493,11 @@ func waitingChildren(snapshot protocol.ConversationSnapshot, calls []ToolCall, g
 			continue
 		}
 		background := false
-		for _, entry := range page.Entries {
-			if entry.Turn == child.Origin.Turn && entry.ID == child.Origin.Entry && child.Origin.Index < uint64(len(entry.Parts)) {
-				part := entry.Parts[child.Origin.Index]
-				if part.Kind == "tool_call" {
-					if call, err := payload[protocol.ConversationPartToolCallPayload](part.Data); err == nil && call.Summary != nil {
-						background = call.Summary.Delegation.Background
-					}
+		if entry := sources.byID[child.Origin.Entry]; entry != nil && entry.Turn == child.Origin.Turn && child.Origin.Index < uint64(len(entry.Parts)) {
+			part := entry.Parts[child.Origin.Index]
+			if part.Kind == "tool_call" {
+				if call, err := payload[protocol.ConversationPartToolCallPayload](part.Data); err == nil && call.Summary != nil {
+					background = call.Summary.Delegation.Background
 				}
 			}
 		}
