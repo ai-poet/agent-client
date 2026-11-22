@@ -51,6 +51,9 @@ func TestExplicitCollectionDoesNotRedeliverForegroundResult(t *testing.T) {
 	if err := f.r.runTools(parent, f.state(), []canonical.ToolRequest{wait}); err != nil {
 		t.Fatal(err)
 	}
+	if len(parent.foreground) != 0 {
+		t.Fatal("parent retained the collected foreground child")
+	}
 	parent.foregroundSteered = false
 	if delivered, err := f.r.foregroundStep(parent); err != nil || delivered {
 		t.Fatalf("collected foreground result was delivered again: %t, %v", delivered, err)
