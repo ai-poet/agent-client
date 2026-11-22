@@ -30,8 +30,21 @@ pick() {
 case "$arch" in
   x86_64)
     url=$(pick 'url="[^"]*-x86_64\.zip"')
-    # Releases before 0.4.0 only shipped an arm64 zip.
-    [ -n "$url" ] || url=$(pick 'url="[^"]*\.zip"')
+    if [ -z "$url" ]; then
+      # The appcast only lists the arm64 build. The Intel zip ships next to it
+      # as <name>-x86_64.zip, so probe that before falling back.
+      arm=$(pick 'url="[^"]*\.zip"')
+      case "$arm" in
+        *.zip)
+          candidate="${arm%.zip}-x86_64.zip"
+          if curl -fsI "$candidate" >/dev/null 2>&1; then
+            url=$candidate
+          else
+            url=$arm
+          fi
+          ;;
+      esac
+    fi
     ;;
   *)
     # Apple silicon builds carry no architecture suffix in their file name.
