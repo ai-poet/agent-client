@@ -1087,6 +1087,9 @@ func TestComposerSendRouting(t *testing.T) {
 			if row.kind == "compact_context" {
 				render(shown)
 				if selectedProvider != provider {
+					// Keep the save result pending on the UI thread until compact
+					// has registered its waiter, even with the in-memory transport.
+					hold = true
 					comp.Model = modelKey(selectedProvider, "fixture")
 					render(shown)
 					if !r.composerSaving[id] {
@@ -1094,6 +1097,7 @@ func TestComposerSendRouting(t *testing.T) {
 					}
 				}
 				actions.compact("keep notes")
+				hold = false
 				settle()
 				transport.mu.Lock()
 				defer transport.mu.Unlock()

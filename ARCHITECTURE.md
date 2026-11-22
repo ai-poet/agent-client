@@ -242,6 +242,10 @@ capture when the source changes. Execution resolves that captured credential
 even after the channel selects a newer key. Plugin-backed authentication checks
 the current installation's availability while loading its captured package and
 settings; changing a package does not replace an existing account's binding.
+Manual compaction waits for the composer's model selection to be saved before
+admission. If its stored provider snapshot is missing or unreadable at claim,
+the Node can reconstruct it only for the same provider and model still selected
+by the session. A valid snapshot is never replaced by a later lane selection.
 
 Each bound CheapRouter lane has its own managed provider ID, group key and
 model offers. Two groups may serve the same model: the composer selects the
