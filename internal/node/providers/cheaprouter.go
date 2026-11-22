@@ -71,7 +71,14 @@ func CheapRouterProviders(g cheapauth.Gateway) ([]CheapRouterRoute, error) {
 		case cheapauth.LaneGemini:
 			api, path = protocol.ConversationModelApiGemini, "/v1beta"
 		case cheapauth.LaneCodex:
-			if lane.Group.SupportsResponses {
+			domestic := cheapauth.NormalizeLane(lane.Lane) == cheapauth.LaneDomestic ||
+				cheapauth.GroupLane(lane.Group, lane.Models) == cheapauth.LaneDomestic
+			if lane.Group.SupportsResponses == cheapauth.ResponsesSupportSupported ||
+				(!domestic && lane.Group.SupportsResponses == cheapauth.ResponsesSupportUnset) {
+				api, path = protocol.ConversationModelApiResponses, "/v1/responses"
+			}
+		case cheapauth.LaneGrok:
+			if lane.Group.SupportsResponses != cheapauth.ResponsesSupportUnsupported {
 				api, path = protocol.ConversationModelApiResponses, "/v1/responses"
 			}
 		}

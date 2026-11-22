@@ -246,9 +246,10 @@ settings; changing a package does not replace an existing account's binding.
 Each bound CheapRouter lane has its own managed provider ID, group key and
 model offers. Two groups may serve the same model: the composer selects the
 pair of provider and model IDs. The bound group's `platform`, not the lane
-label or the model name, selects the wire protocol. OpenAI-family groups use
-Responses only if their directory entry advertises `supports_responses: true`;
-otherwise they use Chat Completions, as do unknown platforms. The original
+vendor or model name, selects the wire protocol. OpenAI-family and Grok groups
+default to Responses (`/v1/responses`) and fall back to Chat Completions when
+their directory entry explicitly declares `supports_responses: false`; domestic
+and unknown platforms use Chat Completions. The original
 account ID remains the unbound route and is never reused as a lane ID.
 
 A model sign-in is durable once its credential is saved. The Node publishes that

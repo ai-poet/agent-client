@@ -89,23 +89,25 @@ func TestCheapRouterProviderUsesInjectedGatewayAndAPIKey(t *testing.T) {
 func TestCheapRouterBoundLaneRequests(t *testing.T) {
 	cases := []struct {
 		lane, platform, model, kind, path, header, field string
+		supports                                         cheapauth.ResponsesSupport
 		api                                              protocol.ConversationModelApi
 	}{
-		{cheapauth.LaneClaude, "anthropic", "claude-test", "anthropic", "/v1/messages", "x-api-key", "messages", protocol.ConversationModelApiAnthropic},
-		{cheapauth.LaneCodex, "openai", "gpt-test", "responses", "/v1/responses", "Authorization", "input", protocol.ConversationModelApiResponses},
-		{cheapauth.LaneCodex, "gpt", "gpt-alias", "responses", "/v1/responses", "Authorization", "input", protocol.ConversationModelApiResponses},
-		{cheapauth.LaneGemini, "gemini", "gemini-test", "google", "/v1beta/models/gemini-test:streamGenerateContent?alt=sse", "x-goog-api-key", "contents", protocol.ConversationModelApiGemini},
-		{cheapauth.LaneClaude, "google", "claude-sonnet-4-6", "google", "/v1beta/models/claude-sonnet-4-6:streamGenerateContent?alt=sse", "x-goog-api-key", "contents", protocol.ConversationModelApiGemini},
-		{cheapauth.LaneDomestic, "openai", "deepseek-test", "chat", "/v1/chat/completions", "Authorization", "messages", protocol.ConversationModelApiChatCompletions},
-		{cheapauth.LaneGrok, "grok", "grok-test", "chat", "/v1/chat/completions", "Authorization", "messages", protocol.ConversationModelApiChatCompletions},
-		{"future", "unknown", "future-model", "chat", "/v1/chat/completions", "Authorization", "messages", protocol.ConversationModelApiChatCompletions},
+		{cheapauth.LaneClaude, "anthropic", "claude-test", "anthropic", "/v1/messages", "x-api-key", "messages", cheapauth.ResponsesSupportUnset, protocol.ConversationModelApiAnthropic},
+		{cheapauth.LaneCodex, "openai", "gpt-test", "responses", "/v1/responses", "Authorization", "input", cheapauth.ResponsesSupportUnset, protocol.ConversationModelApiResponses},
+		{cheapauth.LaneCodex, "gpt", "gpt-alias", "responses", "/v1/responses", "Authorization", "input", cheapauth.ResponsesSupportUnset, protocol.ConversationModelApiResponses},
+		{cheapauth.LaneCodex, "openai", "gpt-chat-only", "chat", "/v1/chat/completions", "Authorization", "messages", cheapauth.ResponsesSupportUnsupported, protocol.ConversationModelApiChatCompletions},
+		{cheapauth.LaneGemini, "gemini", "gemini-test", "google", "/v1beta/models/gemini-test:streamGenerateContent?alt=sse", "x-goog-api-key", "contents", cheapauth.ResponsesSupportUnset, protocol.ConversationModelApiGemini},
+		{cheapauth.LaneClaude, "google", "claude-sonnet-4-6", "google", "/v1beta/models/claude-sonnet-4-6:streamGenerateContent?alt=sse", "x-goog-api-key", "contents", cheapauth.ResponsesSupportUnset, protocol.ConversationModelApiGemini},
+		{cheapauth.LaneDomestic, "openai", "deepseek-test", "chat", "/v1/chat/completions", "Authorization", "messages", cheapauth.ResponsesSupportUnset, protocol.ConversationModelApiChatCompletions},
+		{cheapauth.LaneGrok, "grok", "grok-test", "responses", "/v1/responses", "Authorization", "input", cheapauth.ResponsesSupportUnset, protocol.ConversationModelApiResponses},
+		{"future", "unknown", "future-model", "chat", "/v1/chat/completions", "Authorization", "messages", cheapauth.ResponsesSupportUnset, protocol.ConversationModelApiChatCompletions},
 		// A Claude lane bound to a composite group does not speak Anthropic.
-		{cheapauth.LaneClaude, "composite", "claude-alias", "chat", "/v1/chat/completions", "Authorization", "messages", protocol.ConversationModelApiChatCompletions},
+		{cheapauth.LaneClaude, "composite", "claude-alias", "chat", "/v1/chat/completions", "Authorization", "messages", cheapauth.ResponsesSupportUnset, protocol.ConversationModelApiChatCompletions},
 	}
 	for _, tt := range cases {
 		server := serverFixture(t, string(fixture(t, tt.kind+"-text.sse")))
 		gateway := cheapauth.Gateway{BaseURL: server.URL + "/prefix/v1/", LaneKeys: map[string]string{tt.lane: tt.lane + "-key"}, Lanes: []cheapauth.GatewayLane{{
-			Lane: tt.lane, Group: cheapauth.Group{ID: 1, Platform: tt.platform, SupportsResponses: tt.lane == cheapauth.LaneCodex}, Models: []cheapauth.Model{{ID: tt.model, ContextWindow: 128000}},
+			Lane: tt.lane, Group: cheapauth.Group{ID: 1, Platform: tt.platform, SupportsResponses: tt.supports}, Models: []cheapauth.Model{{ID: tt.model, ContextWindow: 128000}},
 		}}}
 		routes, err := providers.CheapRouterProviders(gateway)
 		if err != nil || len(routes) != 1 {
