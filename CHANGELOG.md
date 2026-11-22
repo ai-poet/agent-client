@@ -3,6 +3,22 @@
 Release entries supply the corresponding GitHub Release notes. A version is
 released only after its entry is here.
 
+## [0.5.0](https://github.com/ai-poet/cheaprouter-harness/releases/tag/v0.5.0) — 2026-11-22
+
+修复 macOS 每次启动重复弹出欢迎引导的问题，并将内置 Agent 提示词自称统一为 CheapRouter Harness。
+
+Fixes the welcome guide reopening on every macOS launch and updates the built-in Agent prompt identity to CheapRouter Harness.
+
+### 修复 / Fixed
+
+- 欢迎引导只出现一次：点击右上角关闭按钮不再漏记已读状态，首启迁移写入偏好不再覆盖引导状态，退出前同步落盘偏好，修复 macOS 每次启动重复弹引导的问题
+
+  The welcome guide now appears once: clicking its close button records the dismissed state, first-launch migration no longer resets it when writing preferences, and pending preference edits flush synchronously on window close, fixing the macOS repeat-onboarding bug
+
+- 内置 Agent 提示词的品牌自称改为 CheapRouter Harness，保留既有 `sailry://` 与 `sailry-image` 协议前缀不变
+
+  Updated the built-in Agent prompt self-reference from Sailry to CheapRouter Harness while keeping existing `sailry://` and `sailry-image` wire protocol schemes intact
+
 ## [0.4.3](https://github.com/ai-poet/cheaprouter-harness/releases/tag/v0.4.3) — 2026-11-22
 
 按分组使用原生接口协议、充值收进账号弹层，并修复旧会话压缩失败。
