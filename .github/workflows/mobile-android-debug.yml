@@ -1,0 +1,91 @@
+name: Mobile Android Debug
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-android-debug-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-debug:
+    name: Android Debug APK (arm64-v8a)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GOTOOLCHAIN: go1.27.3
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.27.3
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Read pinned Flutter version
+        id: flutter-version
+        shell: bash
+        run: |
+          version=$(tr -d '[:space:]' < "$GITHUB_WORKSPACE/apps/mobile/.flutter-version")
+          case "$version" in '' | *[!0-9.]*) echo 'apps/mobile/.flutter-version names no version' >&2; exit 1 ;; esac
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e # v2.21.0
+        with:
+          flutter-version: ${{ steps.flutter-version.outputs.version }}
+          channel: stable
+          cache: true
+
+      - name: Install JDK 17
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK and NDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.0
+        with:
+          cmdline-tools-version: '15859902'
+          packages: platform-tools platforms;android-36 build-tools;36.0.0 ndk;28.2.13676358
+
+      - name: Configure Android NDK path
+        shell: bash
+        run: |
+          printf 'ANDROID_NDK_HOME=%s/ndk/28.2.13676358\n' "$ANDROID_HOME" >> "$GITHUB_ENV"
+
+      - name: Run Go client and mobile tests
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          unset GOROOT
+          go test ./internal/client/... ./internal/mobile/...
+
+      - name: Flutter pub get, analyze, and test
+        working-directory: apps/mobile
+        shell: bash
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+
+      - name: Build Android debug APK
+        working-directory: apps/mobile
+        shell: bash
+        run: |
+          flutter build apk --debug --no-pub --target-platform android-arm64
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cheaprouter-harness-android-arm64-debug
+          path: apps/mobile/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
