@@ -222,6 +222,9 @@ func TestApprovalsAndQuestion(t *testing.T) {
 		}
 		return n
 	}
+	// Compare with neither popover open, not with the choice's custom field.
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
 	closed := fields()
 	clickButton(t, tt, i18n.In("en", "approval_live_count", "count", 2))
 	snapshot(t, tt, "approvals")

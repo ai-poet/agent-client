@@ -242,9 +242,6 @@ func answerQuestion(w *window) error {
 		return fmt.Errorf("fixture has no pending question")
 	}
 	question := cv.Waiting.Question.ID
-	if err := w.button(label("question_reply")); err != nil {
-		return err
-	}
 	if err := w.advance(time.Second); err != nil {
 		return err
 	}
@@ -267,7 +264,7 @@ func answerQuestion(w *window) error {
 	if _, open := w.tester.AccessByRole(ui.RoleButton, label("interaction_submit")); open {
 		return fmt.Errorf("question submit remained after answering")
 	}
-	w.evidence("assertion", fmt.Sprintf("Opened %q, chose Use the spinner, and Submit removed the pending question and its popover", question))
+	w.evidence("assertion", fmt.Sprintf("Question %q opened without a click; chose Use the spinner and Submit removed the pending question and its popover", question))
 	return nil
 }
 

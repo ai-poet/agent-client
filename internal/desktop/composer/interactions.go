@@ -6,11 +6,11 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
 )
 
 // This file holds the composer's interactions: the approvals and the question
@@ -230,13 +230,14 @@ type interaction struct {
 	// offered are the approvals the popover has opened for, or first showed
 	// with: a request that arrives opens it once, and closing it keeps it
 	// closed.
-	offered map[string]bool
-	asked   string // the question the draft is for
-	chosen  int
-	choices map[int]*bool
-	other   bool
-	text    string
-	fields  []fieldDraft
+	offered     map[string]bool
+	asked       string // the question the draft is for
+	focusChoice bool   // enter the choice panel once, not on every frame
+	chosen      int
+	choices     map[int]*bool
+	other       bool
+	text        string
+	fields      []fieldDraft
 }
 
 // fieldDraft is what the user entered in a form field. An optional field
@@ -289,17 +290,14 @@ func place(c *ui.Context, panel, anchor ui.Element, gap float32) {
 // offer opens a request's popover when the request arrives while the
 // composer shows, an approval's or the question's, so a run does not wait
 // behind a capsule nobody pressed; the other popover closes, so one shows
-// at a time and no draft is lost. The requests a composer first shows with
-// stay behind their capsule: a popover opening by itself over a window just
-// opened, or a dialog, would take the first click meant for something else.
-// It runs every frame, also with no request, so the first one to arrive is
-// known as new.
-func (s *State) offer(list []Approval, question *Ask) {
+// at a time and no draft is lost. A pending choice is actionable even in
+// the first projection; other initial requests stay behind their capsules.
+func (s *State) offer(c *ui.Context, waiting Interactions) {
 	first := s.in.offered == nil
 	if first {
 		s.in.offered = map[string]bool{}
 	}
-	for i, a := range list {
+	for i, a := range waiting.Approvals {
 		if a.Receipt || s.in.offered[a.ID] {
 			continue
 		}
@@ -310,12 +308,21 @@ func (s *State) offer(list []Approval, question *Ask) {
 			s.in.approvals, s.in.question, s.in.at = true, false, i
 		}
 	}
-	// A question's ID is kept apart from the approvals' by its prefix.
-	if question != nil && !s.in.offered["question/"+question.ID] {
-		s.in.offered["question/"+question.ID] = true
-		if !first {
-			s.in.question, s.in.approvals, s.in.receipts = true, false, false
-		}
+	for _, receipt := range waiting.QuestionReceipts {
+		s.in.offered["question/"+receipt.ID] = true
+	}
+	q := waiting.Question
+	if q == nil || q.ID != s.in.asked {
+		s.in.question = false
+	}
+	if q == nil || s.in.offered["question/"+q.ID] {
+		return
+	}
+	choice := q.Kind == AskChoice && len(q.Options) > 0
+	s.in.offered["question/"+q.ID] = true
+	if (!first || choice) && !q.Busy && !q.Retry && q.Check == nil {
+		s.in.question, s.in.approvals, s.in.receipts = true, false, false
+		s.in.focusChoice = choice && !c.FocusTakesText()
 	}
 }
 
@@ -528,11 +535,19 @@ func (s *State) ask(c *ui.Context, q *Ask, actions Actions) {
 		}
 	}
 	locked := q.Disabled || q.Busy || q.Retry || q.Check != nil
+	submitAnswer := func() {
+		if a := s.answer(q); a != nil {
+			actions.Answer(q.ID, *a)
+		}
+	}
 	label := i18n.T(c, "question_reply")
-	trigger := capsule(c.Key("question"), label, in.question).OnClick(func() { in.question = !in.question })
+	trigger := capsule(c.Key("question"), label, in.question).OnClick(func() {
+		in.question = !in.question
+		in.focusChoice = in.question
+	})
 	place(c, kit.Popover(c, trigger, &in.question, func() {
 		_, height := c.Size()
-		ui.Scroll(c).Gap(16).MaxHeight(max(min(height/2, 420), 160)).Shrink(1).Children(func() {
+		ui.Scroll(c.Key(q.ID)).Gap(16).MaxHeight(max(min(height/2, 420), 160)).Shrink(1).Children(func() {
 			prompt := q.Prompt
 			if q.Kind == AskPlan {
 				prompt = i18n.T(c, "plan_execute_confirm")
@@ -556,40 +571,7 @@ func (s *State) ask(c *ui.Context, q *Ask, actions Actions) {
 					})
 				})
 			default:
-				other := len(q.Options) // the index of Other
-				ui.Themed(c, &t).Background(ui.Transparent).Children(func() {
-					if q.Multi {
-						ui.Column(c).Gap(12).Children(func() {
-							for i, o := range q.Options {
-								b, ok := in.choices[i]
-								if !ok {
-									b = new(bool)
-									in.choices[i] = b
-								}
-								ui.Checkbox(c.Key(i), b, o).Disabled(locked)
-							}
-							if q.Other {
-								ui.Checkbox(c.Key("other"), &in.other, i18n.T(c, "question_other")).Disabled(locked)
-							}
-						})
-					} else if len(q.Options) > 0 {
-						ui.RadioGroup(c, func() {
-							for i, o := range q.Options {
-								ui.Radio(c.Key(i), &in.chosen, i, o).Disabled(locked)
-							}
-							if q.Other {
-								ui.Radio(c.Key("other"), &in.chosen, other, i18n.T(c, "question_other")).Disabled(locked)
-							}
-						}).Gap(12).Label(q.Prompt)
-						in.other = in.chosen == other
-					}
-				})
-				if q.Other || len(q.Options) == 0 {
-					ui.TextAreaBase(c.Key("answer"), &in.text).Label(i18n.T(c, "interaction_input")).
-						Placeholder(i18n.T(c, "interaction_input")).PlaceholderColor(p.MutedForeground).
-						Lines(1, 4).FontSize(14).Padding(8).Radius(p.Radius).Border(1, p.Border).
-						Disabled(locked || len(q.Options) > 0 && !in.other)
-				}
+				s.choiceInputs(c, &t, q, locked, submitAnswer)
 			}
 		})
 		answer := s.answer(q)
@@ -625,12 +607,90 @@ func (s *State) ask(c *ui.Context, q *Ask, actions Actions) {
 						q.Check()
 						return
 					}
-					if a := s.answer(q); a != nil {
-						actions.Answer(q.ID, *a)
-					}
+					submitAnswer()
 				})
 		})
 	}), trigger, 16)
+	in.focusChoice = false
+}
+
+// choiceInputs leaves toggle and arrow navigation to MyGo. Enter belongs to
+// the focused option, not to the window or the composer behind the popover.
+func (s *State) choiceInputs(c *ui.Context, t *ui.Theme, q *Ask, locked bool, submit func()) {
+	p := theme.Of(c)
+	in := &s.in
+	other := len(q.Options) // the index of Other
+	focusOther := false
+	option := func(row ui.Element, i int) {
+		row.Disabled(locked)
+		if locked {
+			return
+		}
+		if in.focusChoice && i == 0 {
+			row.Focus()
+		}
+		if i == other && row.Changed() && (in.other || !q.Multi) {
+			focusOther = true
+		}
+		if !row.Shortcut(0, ui.KeyEnter) {
+			return
+		}
+		if !q.Multi {
+			in.chosen, in.other = i, i == other
+		}
+		if i == other {
+			in.other, focusOther = true, true
+			return
+		}
+		submit()
+	}
+	ui.Themed(c, t).Background(ui.Transparent).Children(func() {
+		if q.Multi {
+			ui.Column(c).Gap(12).FocusGroup(ui.Vertical).Children(func() {
+				for i, o := range q.Options {
+					b, ok := in.choices[i]
+					if !ok {
+						b = new(bool)
+						in.choices[i] = b
+					}
+					option(ui.Checkbox(c.Key(i), b, o), i)
+				}
+				if q.Other {
+					option(ui.Checkbox(c.Key("other"), &in.other, i18n.T(c, "question_other")), other)
+				}
+			})
+		} else if len(q.Options) > 0 {
+			ui.RadioGroup(c, func() {
+				for i, o := range q.Options {
+					option(ui.Radio(c.Key(i), &in.chosen, i, o), i)
+				}
+				if q.Other {
+					option(ui.Radio(c.Key("other"), &in.chosen, other, i18n.T(c, "question_other")), other)
+				}
+			}).Gap(12).Label(q.Prompt)
+			in.other = in.chosen == other
+		}
+	})
+	if q.Other || len(q.Options) == 0 {
+		input := ui.TextAreaBase(c.Key("answer"), &in.text).Label(i18n.T(c, "interaction_input")).
+			Placeholder(i18n.T(c, "interaction_input")).PlaceholderColor(p.MutedForeground).
+			Lines(1, 4).FontSize(14).Padding(8).Radius(p.Radius).Border(1, p.Border).
+			Disabled(locked || len(q.Options) > 0 && !in.other)
+		if focusOther {
+			input.Focus()
+		}
+		if other > 0 && in.other && !locked {
+			composing := input.Composing()
+			input.OnTextKey(func(k ui.TextKey) bool {
+				if composing || k.Mods != 0 || k.Key != ui.KeyEnter {
+					return false
+				}
+				in.text = k.Text()
+				submit()
+				return true
+			})
+		}
+	}
 }
 
 // field is one form field: its title, marked when required and a checkbox
