@@ -163,6 +163,7 @@ func apiError(op string, status int, wrapped envelope) error {
 	}
 }
 
+// Exchange redeems a one-time login code on the login origin.
 func (c *Client) Exchange(ctx context.Context, code, verifier string) (Credentials, error) {
 	var session DesktopSession
 	err := c.do(ctx, http.MethodPost, "/auth/desktop-session/exchange", "", map[string]string{
@@ -356,6 +357,35 @@ func (c *Client) UsageStats(ctx context.Context, accessToken, period string) (Us
 	return stats, err
 }
 
+// PublicCustomEndpoints reads the service's unauthenticated public custom
+// endpoints list from GET /api/v1/settings/public, tolerating null or absent
+// custom_endpoints fields.
+func (c *Client) PublicCustomEndpoints(ctx context.Context) ([]PublicEndpoint, error) {
+	reqCtx := ctx
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		reqCtx, cancel = context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+	}
+	data, status, err := c.doData(reqCtx, http.MethodGet, "/settings/public", "", nil)
+	if err != nil {
+		return nil, err
+	}
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		return nil, nil
+	}
+	var settings struct {
+		CustomEndpoints []PublicEndpoint `json:"custom_endpoints"`
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, &AuthError{Kind: ErrorResponse, Op: "/settings/public", Status: status}
+	}
+	return settings.CustomEndpoints, nil
+}
+
+// Refresh renews the session on the login origin. Callers must invoke this on
+// the login client, never on a switched gateway node.
 func (c *Client) Refresh(ctx context.Context, current Credentials) (Credentials, error) {
 	var pair TokenPair
 	err := c.do(ctx, http.MethodPost, "/auth/refresh", "", map[string]string{"refresh_token": current.RefreshToken}, &pair)
@@ -373,6 +403,8 @@ func (c *Client) Refresh(ctx context.Context, current Credentials) (Credentials,
 	return current, nil
 }
 
+// Logout revokes the refresh token on the login origin. Callers must invoke
+// this on the login client, never on a switched gateway node.
 func (c *Client) Logout(ctx context.Context, refreshToken string) error {
 	return c.do(ctx, http.MethodPost, "/auth/logout", "", map[string]string{"refresh_token": refreshToken}, nil)
 }

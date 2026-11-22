@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log/slog"
 	"maps"
+	"net/http"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -16,8 +18,10 @@ import (
 type Service struct {
 	mu          sync.Mutex
 	store       *Store
-	client      *Client
+	originStore *GatewayOriginStore
+	client      *Client // always bound to credentials.Endpoint (the login origin)
 	credentials *Credentials
+	probeKey    string // last resolved gateway key in memory for speed tests
 	now         func() time.Time
 }
 
@@ -28,12 +32,19 @@ type Service struct {
 // clear from disk.
 var credentialLock sync.Mutex
 
+// gatewayOriginLock serializes gateway-origin.json mutations across windows.
+var gatewayOriginLock sync.Mutex
+
 func NewService(profileDir string) (*Service, error) {
 	store, err := NewStore(profileDir)
 	if err != nil {
 		return nil, err
 	}
-	return &Service{store: store, now: time.Now}, nil
+	originStore, err := NewGatewayOriginStore(profileDir)
+	if err != nil {
+		return nil, err
+	}
+	return &Service{store: store, originStore: originStore, now: time.Now}, nil
 }
 
 // Restore loads the saved account without making network requests.
@@ -72,6 +83,8 @@ func (s *Service) Endpoint() string {
 	return s.credentials.Endpoint
 }
 
+// StartLogin begins a browser loopback sign-in on endpoint. Authentication
+// (login, callback validation, code exchange) always stays on this login origin.
 func (s *Service) StartLogin(ctx context.Context, endpoint string) (*LoginFlow, error) {
 	client, err := NewClient(endpoint, nil)
 	if err != nil {
@@ -82,7 +95,7 @@ func (s *Service) StartLogin(ctx context.Context, endpoint string) (*LoginFlow, 
 }
 
 // StartManualLogin skips loopback for environments where the user already
-// knows browser-to-loopback delivery is unavailable.
+// knows browser-to-loopback delivery is unavailable. Stays on the login origin.
 func (s *Service) StartManualLogin(endpoint string) (*LoginFlow, error) {
 	client, err := NewClient(endpoint, nil)
 	if err != nil {
@@ -121,6 +134,9 @@ func (s *Service) AccessToken(ctx context.Context) (string, error) {
 	return credentials.AccessToken, err
 }
 
+// session returns the current credentials and the login-origin client after
+// refreshing tokens if needed. Token refresh always uses the login origin
+// (credentials.Endpoint) and never a switched gateway node.
 func (s *Service) session(ctx context.Context) (Credentials, *Client, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -138,6 +154,311 @@ func (s *Service) session(ctx context.Context) (Credentials, *Client, error) {
 		}
 	}
 	return *s.credentials, s.client, nil
+}
+
+// gatewayOrigin resolves the effective business API origin from the profile's
+// gateway-origin.json without rewriting the stored login endpoint.
+func (s *Service) gatewayOrigin(loginEndpoint string) (origin string, overridden bool) {
+	store := s.originStore
+	if store == nil && s.store != nil {
+		store, _ = NewGatewayOriginStore(filepath.Dir(s.store.Path()))
+	}
+	if store == nil {
+		return loginEndpoint, false
+	}
+	cfg := store.Load()
+	if selected := cfg.SelectedOrigin(); selected != "" {
+		return selected, true
+	}
+	return loginEndpoint, false
+}
+
+// apiSession renews credentials on the login origin via session(ctx), then
+// returns a business API client bound to gatewayOrigin(credentials.Endpoint).
+// All business APIs (account, catalog, groups, keys, usage, payment, images)
+// use this client; authentication (login, callback, exchange, refresh, logout)
+// remains on the login origin client.
+func (s *Service) apiSession(ctx context.Context) (Credentials, *Client, bool, error) {
+	credentials, loginClient, err := s.session(ctx)
+	if err != nil {
+		return Credentials{}, nil, false, err
+	}
+	origin, overridden := s.gatewayOrigin(credentials.Endpoint)
+	if origin == "" || origin == loginClient.Endpoint() {
+		return credentials, loginClient, overridden, nil
+	}
+	apiClient, err := NewClient(origin, loginClient.http)
+	if err != nil {
+		return Credentials{}, nil, false, err
+	}
+	apiClient.now = s.now
+	return credentials, apiClient, overridden, nil
+}
+
+// GatewayOriginConfig returns the persisted gateway node configuration for this
+// profile, falling back to defaults when missing or corrupt.
+func (s *Service) GatewayOriginConfig() GatewayOriginConfig {
+	store := s.originStore
+	if store == nil && s.store != nil {
+		store, _ = NewGatewayOriginStore(filepath.Dir(s.store.Path()))
+	}
+	if store == nil {
+		return DefaultGatewayOriginConfig()
+	}
+	return store.Load()
+}
+
+// SaveGatewayOriginConfig persists cfg atomically with 0600 permissions.
+func (s *Service) SaveGatewayOriginConfig(cfg GatewayOriginConfig) error {
+	store := s.originStore
+	if store == nil && s.store != nil {
+		store, _ = NewGatewayOriginStore(filepath.Dir(s.store.Path()))
+	}
+	if store == nil {
+		return &AuthError{Kind: ErrorStorage, Op: "gateway_origin"}
+	}
+	gatewayOriginLock.Lock()
+	defer gatewayOriginLock.Unlock()
+	return store.Save(cfg)
+}
+
+// GatewayOrigin returns the business origin currently in effect (selected
+// gateway origin when explicitly chosen, otherwise the login endpoint when
+// signed in or the built-in primary when signed out).
+func (s *Service) GatewayOrigin() string {
+	login := s.Endpoint()
+	if login != "" {
+		origin, _ := s.gatewayOrigin(login)
+		return origin
+	}
+	return s.GatewayOriginConfig().Origin()
+}
+
+// AddGatewayOrigin validates and appends a user-supplied candidate origin.
+func (s *Service) AddGatewayOrigin(raw string) (GatewayOriginConfig, bool, error) {
+	gatewayOriginLock.Lock()
+	defer gatewayOriginLock.Unlock()
+	cfg := s.GatewayOriginConfig()
+	added, err := cfg.Add(raw)
+	if err != nil || !added {
+		return cfg, added, err
+	}
+	if err := s.saveOriginUnlocked(cfg); err != nil {
+		return cfg, false, err
+	}
+	return cfg, true, nil
+}
+
+// RemoveGatewayOrigin removes a user-added candidate origin and returns whether
+// the active routed origin changed.
+func (s *Service) RemoveGatewayOrigin(origin string) (GatewayOriginConfig, bool, error) {
+	gatewayOriginLock.Lock()
+	defer gatewayOriginLock.Unlock()
+	cfg := s.GatewayOriginConfig()
+	prev := cfg.Origin()
+	cfg.Remove(origin)
+	if err := s.saveOriginUnlocked(cfg); err != nil {
+		return cfg, false, err
+	}
+	return cfg, cfg.Origin() != prev, nil
+}
+
+// SelectGatewayOrigin switches business traffic to origin (without touching
+// credentials.Endpoint) and returns whether the active origin changed.
+func (s *Service) SelectGatewayOrigin(origin string) (GatewayOriginConfig, bool, error) {
+	gatewayOriginLock.Lock()
+	defer gatewayOriginLock.Unlock()
+	cfg := s.GatewayOriginConfig()
+	prev := cfg.Origin()
+	normalized, err := NormalizeGatewayURL(origin)
+	if err != nil {
+		return cfg, false, err
+	}
+	if prev == normalized {
+		// Re-picking the active node cancels any pending return from a fallback.
+		if cfg.FallbackFrom != nil {
+			cfg.FallbackFrom = nil
+			if err := s.saveOriginUnlocked(cfg); err != nil {
+				return cfg, false, err
+			}
+		}
+		return cfg, false, nil
+	}
+	if err := cfg.Select(normalized); err != nil {
+		return cfg, false, err
+	}
+	if err := s.saveOriginUnlocked(cfg); err != nil {
+		return cfg, false, err
+	}
+	return cfg, true, nil
+}
+
+// FallBackGatewayOrigin switches away from an unreachable origin while
+// remembering it in fallback_from so traffic can return once it recovers.
+func (s *Service) FallBackGatewayOrigin(origin string) (GatewayOriginConfig, error) {
+	gatewayOriginLock.Lock()
+	defer gatewayOriginLock.Unlock()
+	cfg := s.GatewayOriginConfig()
+	if err := cfg.FallBack(origin); err != nil {
+		return cfg, err
+	}
+	if err := s.saveOriginUnlocked(cfg); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
+}
+
+// SetGatewayOriginAutoSelect toggles auto_select and persists the config.
+func (s *Service) SetGatewayOriginAutoSelect(on bool) (GatewayOriginConfig, error) {
+	gatewayOriginLock.Lock()
+	defer gatewayOriginLock.Unlock()
+	cfg := s.GatewayOriginConfig()
+	cfg.AutoSelect = on
+	if err := s.saveOriginUnlocked(cfg); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
+}
+
+func (s *Service) saveOriginUnlocked(cfg GatewayOriginConfig) error {
+	store := s.originStore
+	if store == nil && s.store != nil {
+		store, _ = NewGatewayOriginStore(filepath.Dir(s.store.Path()))
+	}
+	if store == nil {
+		return &AuthError{Kind: ErrorStorage, Op: "gateway_origin"}
+	}
+	return store.Save(cfg)
+}
+
+// RefreshServerNodes fetches GET /api/v1/settings/public when the cached
+// server_nodes list has expired (TTL 6 hours) or when force is true. It tries
+// the login endpoint first and falls back to the currently routed origin so
+// nodes remain refreshable when the primary is unreachable.
+func (s *Service) RefreshServerNodes(ctx context.Context, force bool) (GatewayOriginConfig, bool, error) {
+	cfg := s.GatewayOriginConfig()
+	now := s.now().Unix()
+	if !force && !cfg.ServerNodesDue(now) {
+		return cfg, false, nil
+	}
+
+	s.mu.Lock()
+	var loginEndpoint string
+	var httpClient *http.Client
+	if s.credentials != nil {
+		loginEndpoint = s.credentials.Endpoint
+	}
+	if s.client != nil {
+		httpClient = s.client.http
+	}
+	s.mu.Unlock()
+
+	var origins []string
+	if loginEndpoint != "" {
+		origins = append(origins, loginEndpoint)
+	}
+	if routed := cfg.Origin(); routed != "" && !slices.Contains(origins, routed) {
+		origins = append(origins, routed)
+	}
+	if len(origins) == 0 {
+		return cfg, false, &AuthError{Kind: ErrorResponse, Op: "/settings/public"}
+	}
+
+	var listed []PublicEndpoint
+	var lastErr error
+	fetched := false
+	for _, origin := range origins {
+		client, err := NewClient(origin, httpClient)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		client.now = s.now
+		items, err := client.PublicCustomEndpoints(ctx)
+		if err == nil {
+			listed = items
+			fetched = true
+			break
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			return cfg, false, ctx.Err()
+		}
+	}
+	if !fetched {
+		return cfg, false, lastErr
+	}
+
+	gatewayOriginLock.Lock()
+	defer gatewayOriginLock.Unlock()
+	latest := s.GatewayOriginConfig()
+	prevOrigin := latest.Origin()
+	latest.AdoptServerNodes(listed, s.now().Unix())
+	if err := s.saveOriginUnlocked(latest); err != nil {
+		return latest, false, err
+	}
+	return latest, latest.Origin() != prevOrigin, nil
+}
+
+// TestGatewayOrigins concurrently measures every effective candidate origin
+// using the signed-in account's gateway key.
+func (s *Service) TestGatewayOrigins(ctx context.Context, timeoutSecs int) ([]CandidateResult, error) {
+	providerKind, key, httpClient, ok := s.resolveProbeTarget()
+	if !ok {
+		// Try fetching keys once in case the session was established without an
+		// inline api_key and no lane binding has cached its key yet.
+		if creds, apiClient, _, err := s.apiSession(ctx); err == nil {
+			if page, err := apiClient.Keys(ctx, creds.AccessToken); err == nil {
+				if k := accountKey(page, creds.APIKey); k != "" {
+					s.mu.Lock()
+					s.probeKey = k
+					s.mu.Unlock()
+					providerKind, key, httpClient, ok = "codex", k, apiClient.http, true
+				}
+			}
+		}
+	}
+	if !ok {
+		return nil, ErrNoGatewayKey
+	}
+	cfg := s.GatewayOriginConfig()
+	return TestCandidates(ctx, providerKind, cfg.EffectiveCandidates(), key, timeoutSecs, httpClient), nil
+}
+
+func (s *Service) resolveProbeTarget() (providerKind, key string, httpClient *http.Client, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.client != nil {
+		httpClient = s.client.http
+	}
+	if s.credentials == nil {
+		return "", "", httpClient, false
+	}
+	if kind, k, found := ProbeTarget(*s.credentials); found {
+		return kind, k, httpClient, true
+	}
+	if k := strings.TrimSpace(s.probeKey); k != "" {
+		return "codex", k, httpClient, true
+	}
+	return "", "", httpClient, false
+}
+
+func (s *Service) rememberProbeKey(gateway Gateway) {
+	key := strings.TrimSpace(gateway.APIKey)
+	if key == "" {
+		for _, lane := range CanonicalLanes {
+			if k := strings.TrimSpace(gateway.LaneKeys[lane]); k != "" {
+				key = k
+				break
+			}
+		}
+	}
+	if key == "" {
+		return
+	}
+	s.mu.Lock()
+	s.probeKey = key
+	s.mu.Unlock()
 }
 
 // adoptLocked takes over what another window stored since this Service last
@@ -171,7 +492,8 @@ func (s *Service) adoptLocked() error {
 	return nil
 }
 
-// Refresh forces renewal and persists the rotated pair before returning.
+// Refresh forces renewal on the login origin (credentials.Endpoint) and
+// persists the rotated pair before returning. Never routed to a gateway node.
 func (s *Service) Refresh(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -208,17 +530,26 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 }
 
 func (s *Service) Account(ctx context.Context) (User, error) {
-	credentials, client, err := s.session(ctx)
+	credentials, client, _, err := s.apiSession(ctx)
 	if err != nil {
 		return User{}, err
 	}
 	return client.Me(ctx, credentials.AccessToken)
 }
 
+// UsageStats fetches account consumption from the active gateway origin.
+func (s *Service) UsageStats(ctx context.Context, period string) (UsageStats, error) {
+	credentials, client, _, err := s.apiSession(ctx)
+	if err != nil {
+		return UsageStats{}, err
+	}
+	return client.UsageStats(ctx, credentials.AccessToken, period)
+}
+
 // ReadSetup shares one credential snapshot across both reads, so an optional
 // account failure cannot trigger a second refresh or prevent gateway setup.
 func (s *Service) ReadSetup(ctx context.Context) (User, error, Gateway, error) {
-	credentials, client, err := s.session(ctx)
+	credentials, client, overridden, err := s.apiSession(ctx)
 	if err != nil {
 		return User{}, nil, Gateway{}, err
 	}
@@ -226,7 +557,10 @@ func (s *Service) ReadSetup(ctx context.Context) (User, error, Gateway, error) {
 	if errors.Is(accountErr, ErrUnauthorized) || ctx.Err() != nil {
 		return user, accountErr, Gateway{}, ctx.Err()
 	}
-	gateway, gatewayErr := readGateway(ctx, client, credentials)
+	gateway, gatewayErr := readGateway(ctx, client, credentials, overridden)
+	if gatewayErr == nil {
+		s.rememberProbeKey(gateway)
+	}
 	return user, accountErr, gateway, gatewayErr
 }
 
@@ -244,11 +578,15 @@ func (s *Service) Gateway(ctx context.Context) (Gateway, error) {
 // keys for all bound lanes, using groups to classify legacy bindings and silent
 // groups.
 func (s *Service) GatewayWithGroups(ctx context.Context, groups []Group) (Gateway, error) {
-	credentials, client, err := s.session(ctx)
+	credentials, client, overridden, err := s.apiSession(ctx)
 	if err != nil {
 		return Gateway{}, err
 	}
-	return readGatewayWithGroups(ctx, client, credentials, groups)
+	gateway, err := readGatewayWithGroups(ctx, client, credentials, groups, overridden)
+	if err == nil {
+		s.rememberProbeKey(gateway)
+	}
+	return gateway, err
 }
 
 // GatewayForGroup fetches a fresh model catalog and ensures an active gateway
@@ -256,18 +594,22 @@ func (s *Service) GatewayWithGroups(ctx context.Context, groups []Group) (Gatewa
 // ensure_key_for_group semantics: reuses an active key bound to groupID before
 // minting one.
 func (s *Service) GatewayForGroup(ctx context.Context, groupID *int64) (Gateway, error) {
-	credentials, client, err := s.session(ctx)
+	credentials, client, overridden, err := s.apiSession(ctx)
 	if err != nil {
 		return Gateway{}, err
 	}
-	return readGatewayForGroup(ctx, client, credentials, groupID)
+	gateway, err := readGatewayForGroup(ctx, client, credentials, groupID, overridden)
+	if err == nil {
+		s.rememberProbeKey(gateway)
+	}
+	return gateway, err
 }
 
 // GatewayForLaneChange previews and prepares a single lane's group switch or
 // unbind without modifying persisted credentials. When groupID is non-nil it
 // reuses an active key for that group before minting one (ensure_key_for_group).
 func (s *Service) GatewayForLaneChange(ctx context.Context, lane string, groupID *int64, groups []Group) (Gateway, *LaneBinding, error) {
-	credentials, client, err := s.session(ctx)
+	credentials, client, overridden, err := s.apiSession(ctx)
 	if err != nil {
 		return Gateway{}, nil, err
 	}
@@ -296,10 +638,11 @@ func (s *Service) GatewayForLaneChange(ctx context.Context, lane string, groupID
 	} else {
 		delete(nextBindings, laneKey)
 	}
-	gateway, err := buildGatewayForBindings(ctx, client, token, credentials.APIKey, catalog, &keys, nextBindings, groups)
+	gateway, err := buildGatewayForBindings(ctx, client, token, credentials.APIKey, catalog, &keys, nextBindings, groups, overridden)
 	if err != nil {
 		return Gateway{}, nil, err
 	}
+	s.rememberProbeKey(gateway)
 	return gateway, target, nil
 }
 
@@ -333,7 +676,7 @@ func (s *Service) AutoBindUnboundLanes(
 		result.Skipped = append(result.Skipped, CanonicalLanes...)
 		return Gateway{}, result, nil
 	}
-	credentials, client, err := s.session(ctx)
+	credentials, client, overridden, err := s.apiSession(ctx)
 	if err != nil {
 		return Gateway{}, result, err
 	}
@@ -440,16 +783,17 @@ func (s *Service) AutoBindUnboundLanes(
 	if len(result.Bound) == 0 {
 		return Gateway{}, result, nil
 	}
-	gateway, err := buildGatewayForBindings(ctx, client, token, credentials.APIKey, resolvedCatalog, &keys, currentBindings, groups)
+	gateway, err := buildGatewayForBindings(ctx, client, token, credentials.APIKey, resolvedCatalog, &keys, currentBindings, groups, overridden)
 	if err != nil {
 		return Gateway{}, result, err
 	}
+	s.rememberProbeKey(gateway)
 	return gateway, result, nil
 }
 
 // AvailableGroups returns the routing groups available to the signed-in account.
 func (s *Service) AvailableGroups(ctx context.Context) ([]Group, error) {
-	credentials, client, err := s.session(ctx)
+	credentials, client, _, err := s.apiSession(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -458,7 +802,7 @@ func (s *Service) AvailableGroups(ctx context.Context) ([]Group, error) {
 
 // GroupStatuses returns upstream availability and health from GET /group-status.
 func (s *Service) GroupStatuses(ctx context.Context) ([]GroupStatus, error) {
-	credentials, client, err := s.session(ctx)
+	credentials, client, _, err := s.apiSession(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -672,7 +1016,7 @@ func (s *Service) ImageRouteCandidates(catalog []Model, model string) []ImageGro
 // (or the account default key when groupID is nil), minting one if necessary.
 // The returned key must only be used in background HTTP calls.
 func (s *Service) ImageRouteKey(ctx context.Context, groupID *int64) (string, string, error) {
-	credentials, client, err := s.session(ctx)
+	credentials, client, _, err := s.apiSession(ctx)
 	if err != nil {
 		return "", "", err
 	}
@@ -733,13 +1077,13 @@ func (s *Service) RememberImageGroup(ctx context.Context, model string, groupID 
 	return nil
 }
 
-func readGateway(ctx context.Context, client *Client, credentials Credentials) (Gateway, error) {
-	return readGatewayWithGroups(ctx, client, credentials, nil)
+func readGateway(ctx context.Context, client *Client, credentials Credentials, overrideBaseURL bool) (Gateway, error) {
+	return readGatewayWithGroups(ctx, client, credentials, nil, overrideBaseURL)
 }
 
-func readGatewayWithGroups(ctx context.Context, client *Client, credentials Credentials, groups []Group) (Gateway, error) {
+func readGatewayWithGroups(ctx context.Context, client *Client, credentials Credentials, groups []Group, overrideBaseURL bool) (Gateway, error) {
 	if len(credentials.LaneBindings) == 0 && credentials.GroupID != nil && !slices.ContainsFunc(groups, func(g Group) bool { return g.ID == *credentials.GroupID }) {
-		return readGatewayForGroup(ctx, client, credentials, credentials.GroupID)
+		return readGatewayForGroup(ctx, client, credentials, credentials.GroupID, overrideBaseURL)
 	}
 	token := credentials.AccessToken
 	catalog, err := client.ModelCatalog(ctx, token)
@@ -751,7 +1095,20 @@ func readGatewayWithGroups(ctx context.Context, client *Client, credentials Cred
 		return Gateway{}, err
 	}
 	bindings := effectiveLaneBindings(credentials, groups, catalog.Items)
-	return buildGatewayForBindings(ctx, client, token, credentials.APIKey, catalog, &keys, bindings, groups)
+	return buildGatewayForBindings(ctx, client, token, credentials.APIKey, catalog, &keys, bindings, groups, overrideBaseURL)
+}
+
+func resolveGatewayBaseURL(client *Client, catalogBaseURL string, overrideBaseURL bool) string {
+	// When the user has explicitly selected a gateway node, model requests must
+	// go to that node rather than a hardcoded primary base_url from the catalog.
+	if overrideBaseURL {
+		return client.Endpoint() + "/v1"
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(catalogBaseURL), "/")
+	if baseURL == "" {
+		baseURL = client.Endpoint() + "/v1"
+	}
+	return baseURL
 }
 
 func buildGatewayForBindings(
@@ -762,11 +1119,9 @@ func buildGatewayForBindings(
 	keys *KeyPage,
 	bindings map[string]LaneBinding,
 	groups []Group,
+	overrideBaseURL bool,
 ) (Gateway, error) {
-	baseURL := strings.TrimRight(strings.TrimSpace(catalog.BaseURL), "/")
-	if baseURL == "" {
-		baseURL = client.Endpoint() + "/v1"
-	}
+	baseURL := resolveGatewayBaseURL(client, catalog.BaseURL, overrideBaseURL)
 	if len(bindings) == 0 {
 		key := accountKey(*keys, bridgeKey)
 		if key == "" {
@@ -836,7 +1191,7 @@ func buildGatewayForBindings(
 	}, nil
 }
 
-func readGatewayForGroup(ctx context.Context, client *Client, credentials Credentials, groupID *int64) (Gateway, error) {
+func readGatewayForGroup(ctx context.Context, client *Client, credentials Credentials, groupID *int64, overrideBaseURL bool) (Gateway, error) {
 	token, bridgeKey := credentials.AccessToken, credentials.APIKey
 	catalog, err := client.ModelCatalog(ctx, token)
 	if err != nil {
@@ -865,10 +1220,7 @@ func readGatewayForGroup(ctx context.Context, client *Client, credentials Creden
 		}
 	}
 	models := filterCatalogModelsForGroup(catalog.Items, groupID)
-	baseURL := strings.TrimRight(strings.TrimSpace(catalog.BaseURL), "/")
-	if baseURL == "" {
-		baseURL = client.Endpoint() + "/v1"
-	}
+	baseURL := resolveGatewayBaseURL(client, catalog.BaseURL, overrideBaseURL)
 	return Gateway{BaseURL: baseURL, APIKey: key, Models: models, Catalog: catalog.Items, GroupID: cloneInt64Ptr(groupID)}, nil
 }
 
@@ -1063,7 +1415,8 @@ func accountKey(page KeyPage, bridgeKey string) string {
 }
 
 // Logout always clears local credentials, even when remote revocation cannot
-// be reached. The returned error is sanitized by Client/Store.
+// be reached. Revocation always hits the login origin (s.client / credentials.Endpoint),
+// never a switched gateway node. The returned error is sanitized by Client/Store.
 func (s *Service) Logout(ctx context.Context) error {
 	s.mu.Lock()
 	credentialLock.Lock()
@@ -1090,6 +1443,6 @@ func (s *Service) Invalidate() error {
 }
 
 func (s *Service) clearLocked() error {
-	s.credentials, s.client = nil, nil
+	s.credentials, s.client, s.probeKey = nil, nil, ""
 	return s.store.Clear()
 }
