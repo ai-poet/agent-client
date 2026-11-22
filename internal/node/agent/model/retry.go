@@ -29,6 +29,8 @@ type Attempt struct {
 	FirstToken     *time.Time
 	Usage          canonical.Usage
 	Failure        *Failure
+	// RetryLimit is the last resend allowed if the current failure streak continues.
+	RetryLimit uint64
 	// RetryDelay is the wait before the next attempt; nil on the last attempt.
 	RetryDelay        *time.Duration
 	Status            *uint16
@@ -85,7 +87,6 @@ const MainRetries = 9
 // Run uses reset to discard provisional output before replaying an interrupted attempt.
 // Without it, main output that escaped to the consumer cannot be retried safely.
 func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.Call, purpose Purpose, timer clock.Clock, observe func(Attempt) error, yield func(fantasy.StreamPart) bool, reset func()) error {
-	retries := uint64(MainRetries)
 	buffered := purpose == SummaryPurpose
 	schedule := newRetryPolicy()
 	requestID, requestStarted := protocol.NewRequestID().String(), timer.Now()
@@ -103,12 +104,13 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 		if err := ctx.Err(); err != nil {
 			return Classify(err)
 		}
-		attempt := Attempt{RequestID: requestID, RequestStarted: requestStarted, Index: index, Started: timer.Now()}
+		attempt := Attempt{RequestID: requestID, RequestStarted: requestStarted, Index: index, Started: timer.Now(), RetryLimit: MainRetries}
 		owner, cancel := context.WithCancel(ctx)
+		firstOutputTimer := schedule.firstOutputTimer(attempt.Started, cancel)
 		owner, capture := captureAttempt(owner, call, timer, attempt.Started)
 		stream, err := nextModel.Stream(owner, call)
 		var pending []fantasy.StreamPart
-		escaped, finished, released := false, false, false
+		streamed, escaped, finished, released := false, false, false, false
 		if err == nil && stream != nil {
 			for part := range stream {
 				attempt.Usage = mergeUsage(attempt.Usage, PartUsage(part))
@@ -123,7 +125,14 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 				if metadata, ok := part.ProviderMetadata[responseMetadataKey].(*responseMetadata); ok {
 					attempt.Status = metadata.Status
 				}
-				if attempt.FirstToken == nil && outputPart(part) {
+				firstOutput := attempt.FirstToken == nil && outputPart(part)
+				if firstOutputTimer != nil && (firstOutput || part.Type == fantasy.StreamPartTypeFinish) {
+					if !firstOutputTimer.Stop() {
+						break
+					}
+					firstOutputTimer = nil
+				}
+				if firstOutput {
 					first := timer.Now()
 					attempt.FirstToken = &first
 				}
@@ -134,6 +143,7 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 					}
 					break
 				}
+				streamed = true
 				if part.Type == fantasy.StreamPartTypeFinish {
 					finished = true
 				}
@@ -149,11 +159,12 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 				}
 			}
 		}
+		waitExhausted := firstOutputTimer != nil && !firstOutputTimer.Stop() && !released
 		if err == nil && !finished {
 			err = io.ErrUnexpectedEOF
 		}
 		if ctx.Err() != nil {
-			err = ctx.Err()
+			err, waitExhausted = ctx.Err(), false
 		}
 		cancel()
 		if releaseFallback != nil {
@@ -162,16 +173,25 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 		}
 		attempt.Finished = timer.Now()
 		capture.apply(&attempt)
-		exhausted, waitExhausted := false, false
+		exhausted := false
 		if err != nil {
 			attempt.Failure = Classify(err, secrets...)
+			if waitExhausted {
+				if attempt.Failure.Kind == Cancelled || attempt.Failure.truncated {
+					attempt.Failure = &Failure{Kind: Network, Message: "Model retry timed out waiting for output after HTTP 524"}
+				}
+				waitExhausted = attempt.Failure.Retryable()
+			}
 			if attempt.Failure.status != nil {
 				attempt.Status = attempt.Failure.status
 			}
-			if !released && (!escaped || reset != nil) && attempt.Failure.Retryable() && ctx.Err() == nil {
-				if index >= retries {
+			committed := finished && !buffered && yield != nil
+			canReplay := !released && !committed && (!escaped || reset != nil)
+			if !waitExhausted && canReplay && attempt.Failure.Retryable() && ctx.Err() == nil {
+				attempt.RetryLimit = schedule.limit(purpose, attempt, streamed)
+				if index >= attempt.RetryLimit {
 					exhausted = true
-				} else if delay, allowed := schedule.next(attempt.Failure, timer.Now()); allowed {
+				} else if delay, allowed := schedule.next(ctx, attempt, timer.Now()); allowed {
 					attempt.RetryDelay = &delay
 				} else {
 					waitExhausted = true
@@ -201,20 +221,23 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 			}
 			return nil
 		}
-		if attempt.RetryDelay == nil {
-			if exhausted || waitExhausted {
-				// Observations retain the provider failure. Only the terminal
-				// result names the exhausted recovery for the turn's final fault.
-				failure := *attempt.Failure
-				failure.Exhausted, failure.WaitExhausted = exhausted, waitExhausted
-				return &failure
+		if attempt.RetryDelay != nil {
+			ready, waitErr := schedule.wait(ctx, timer, attempt)
+			if waitErr != nil {
+				return Classify(waitErr)
 			}
+			waitExhausted = !ready
+		}
+		if exhausted || waitExhausted {
+			// Observations retain the provider failure. Only the terminal
+			// result names the exhausted recovery for the turn's final fault.
+			failure := *attempt.Failure
+			failure.Exhausted, failure.WaitExhausted = exhausted, waitExhausted
+			return &failure
+		}
+		if attempt.RetryDelay == nil {
 			return attempt.Failure
 		}
-		if err := timer.Sleep(ctx, *attempt.RetryDelay); err != nil {
-			return Classify(err)
-		}
-		schedule.waited += *attempt.RetryDelay
 		if sdk != nil && attempt.Failure.Kind == Network && http2ProtocolFailure(err) {
 			// Spend one admitted retry on HTTP/1.1 without pinning an HTTP/2-only origin to it.
 			if fallback, release := sdk.http1Fallback(); fallback != nil {

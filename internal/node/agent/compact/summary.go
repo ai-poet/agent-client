@@ -98,7 +98,7 @@ func Parse(text string, limit uint64) (Summary, error) {
 			continue
 		}
 		summary.Bound(limit)
-		if tokens.Text(summary.Render()) > limit {
+		if summary.empty() || tokens.Text(summary.Render()) > limit {
 			continue
 		}
 		return summary, nil
@@ -314,6 +314,11 @@ func embeddedObjects(text string, allowInline bool) []string {
 		}
 		candidate := object(text[i:])
 		if candidate == "" {
+			// Do not promote a nested field of an incomplete JSON object
+			// (for example a complete file entry in a truncated handoff).
+			if strings.HasPrefix(strings.TrimSpace(text[i+1:]), `"`) {
+				break
+			}
 			continue
 		}
 		end := i + len(candidate)

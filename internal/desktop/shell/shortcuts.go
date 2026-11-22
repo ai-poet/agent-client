@@ -1,11 +1,11 @@
 package shell
 
 import (
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panes"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/settings"
+	"github.com/egoist/mygo/ui"
 )
 
 // Shortcut is a key of the window: its id, label and default key, as the
@@ -136,7 +136,8 @@ func (a *App) Do(id string) {
 // file opens, known the frame it opens in, or any modal dialog Kit built
 // in the last frame (a.modal), wherever in the window it was opened.
 func (a *App) dialog() bool {
-	return a.modal || a.search.open || a.reading != nil && a.reading.open || a.Sidebar.Editing() || a.Welcome.Open || a.selected.open
+	return a.modal || a.search.open || a.reading != nil && a.reading.open || a.Sidebar.Editing() || a.Welcome.Open || a.selected.open ||
+		(a.Settings.CheapRouter != nil && a.Settings.CheapRouter.Recharge != nil)
 }
 
 // closeFocused is Close Tab of the menu: ⌘W of the pane the focus is in

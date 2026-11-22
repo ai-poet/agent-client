@@ -604,6 +604,7 @@ background_result_waiting
 chat_compact_cancelled
 chat_compact_failed
 chat_compact_failed_paused
+chat_compact_start_failed
 chat_compact_queued
 chat_compact_unneeded
 chat_compacted
@@ -636,6 +637,8 @@ chat_search
 chat_search_result
 chat_status_unsynced
 chat_sync_failed
+compact_reason_budget
+compact_reason_request
 compact_reason_unknown
 composer_cache
 composer_compression_hint
@@ -2578,3 +2581,18 @@ pay_status_pending_message
 pay_status_received_title
 pay_status_updated_message
 pay_stripe_hint
+pay_popover_recharge
+pay_popover_plans
+pay_cancel
+pay_estimated_credit
+pay_estimated_credit_bonus
+pay_more_promos
+pay_hide_promos
+pay_chip_fee
+pay_chip_limit
+pay_chip_remaining
+pay_chip_unavailable
+pay_completed_check
+pay_checking_status
+pay_not_paid_yet
+pay_countdown_remaining

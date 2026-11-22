@@ -178,9 +178,10 @@ grant or invitation is needed for that trusted route.
 Node authenticates callers before every command family, direct subscription and
 byte stream; typed resource identifiers are checked centrally and unknown commands
 fail closed. Snapshots, catalogs and batch events contain only accessible
-resources. Event audiences retain deletion
-scope, hidden rows advance the cursor without payload, and visibility changes
-invalidate projections. Buffered events and open streams recheck current access.
+resources. Node event streams retain a cursor watermark, not prefiltered pages.
+Each delivery reads its row and current audience in the same snapshot. Historical
+audiences retain deletion scope; hidden rows advance the cursor without payload,
+and visibility changes invalidate projections. Open streams recheck current access.
 
 `Session` is the common conversation container for controllers, Host automation
 and plugin assistants. `StartSession` creates a session and admits its first turn
@@ -241,13 +242,18 @@ capture when the source changes. Execution resolves that captured credential
 even after the channel selects a newer key. Plugin-backed authentication checks
 the current installation's availability while loading its captured package and
 settings; changing a package does not replace an existing account's binding.
+Manual compaction waits for the composer's model selection to be saved before
+admission. If its stored provider snapshot is missing or unreadable at claim,
+the Node can reconstruct it only for the same provider and model still selected
+by the session. A valid snapshot is never replaced by a later lane selection.
 
 Each bound CheapRouter lane has its own managed provider ID, group key and
 model offers. Two groups may serve the same model: the composer selects the
 pair of provider and model IDs. The bound group's `platform`, not the lane
-label or the model name, selects the wire protocol. OpenAI-family groups use
-Responses only if their directory entry advertises `supports_responses: true`;
-otherwise they use Chat Completions, as do unknown platforms. The original
+vendor or model name, selects the wire protocol. OpenAI-family and Grok groups
+default to Responses (`/v1/responses`) and fall back to Chat Completions when
+their directory entry explicitly declares `supports_responses: false`; domestic
+and unknown platforms use Chat Completions. The original
 account ID remains the unbound route and is never reused as a lane ID.
 
 A model sign-in is durable once its credential is saved. The Node publishes that
@@ -465,6 +471,11 @@ A snapshot and cursor come from one read transaction. Subsequent observations
 follow the committed event log. An expired cursor causes a new snapshot, not
 command replay. Failed and uncertain installations remain observable in the
 bounded installation queue shared by plugins, models and language packages.
+
+Conversation observers share one replay window per observed session: at most
+512 frames, with a 4 MiB ordinary budget and at most one larger legal frame.
+Each observer retains a cursor. If it falls behind the window, it must read
+canonical history again. Closing the last observer releases the window.
 
 ## Agent loop and model boundary
 

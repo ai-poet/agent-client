@@ -267,6 +267,19 @@ func composerParityCommands(t *testing.T) {
 		t.Fatalf("/compact was sent as a message or left its draft %q", r.App.Composer(session.String()).Draft)
 	}
 
+	// An admission fault has no transcript turn. Its toast must show the cause.
+	failing = "compact_context"
+	if err := tester.Click(text("composer")); err != nil {
+		t.Fatal(err)
+	}
+	tester.Type("/compact")
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	settle()
+	if len(sent("compact_context")) != 2 || !tester.HasText(text("chat_compact_start_failed")) || !tester.HasText("fixture failure") || tester.HasText(text("chat_action_failed")) {
+		t.Fatalf("missing /compact admission diagnostic: %q", tester.Texts())
+	}
+
 	// Send now on a queued row guides the running turn with it; the Host
 	// left it queued, which the user is told.
 	press(text("queue_send_now"), 0)

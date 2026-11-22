@@ -39,6 +39,44 @@ func IsCheapRouterProvider(id protocol.ProviderID) bool {
 	return id == CheapRouterProviderID || (id[6] == 0x80 && bytes.Equal(id[:6], CheapRouterProviderID[:6]))
 }
 
+// CheapRouterSuccessor is the lane provider a selection of the unbound route
+// follows after lanes replaced that route and reconciliation disabled it.
+// lanes is the account's routing table by lower-cased model ID; a model it does
+// not list goes through its own lane, as the unbound route's key bundle
+// resolved it. The successor is enabled and offers the model. A lane provider
+// has no successor, a removed unbound route stays removed, and another lane
+// never stands in for one that is unbound or signed out.
+func CheapRouterSuccessor(provider protocol.ProviderID, model string, lanes map[string]string, current []protocol.ConversationProvider) (protocol.ConversationProvider, bool) {
+	if provider != CheapRouterProviderID {
+		return protocol.ConversationProvider{}, false
+	}
+	offers := func(p protocol.ConversationProvider) int {
+		return slices.IndexFunc(p.Models, func(m protocol.ConversationModel) bool { return m.ID == model })
+	}
+	retired := slices.IndexFunc(current, func(p protocol.ConversationProvider) bool { return p.ID == provider })
+	if retired < 0 || current[retired].Enabled {
+		return protocol.ConversationProvider{}, false
+	}
+	lane := strings.TrimSpace(lanes[strings.ToLower(strings.TrimSpace(model))])
+	if lane == "" {
+		platform := ""
+		if index := offers(current[retired]); index >= 0 {
+			platform = current[retired].Models[index].Platform
+		}
+		lane = cheapauth.ModelLane(cheapauth.Model{ID: model, Platform: platform})
+	}
+	if lane == "" {
+		return protocol.ConversationProvider{}, false
+	}
+	id := CheapRouterLaneID(lane)
+	for _, p := range current {
+		if p.ID == id && p.Enabled && offers(p) >= 0 {
+			return p, true
+		}
+	}
+	return protocol.ConversationProvider{}, false
+}
+
 var errCheapRouterNoChat = invalid("CheapRouter model catalog has no chat models")
 
 type CheapRouterRoute struct {
@@ -71,7 +109,14 @@ func CheapRouterProviders(g cheapauth.Gateway) ([]CheapRouterRoute, error) {
 		case cheapauth.LaneGemini:
 			api, path = protocol.ConversationModelApiGemini, "/v1beta"
 		case cheapauth.LaneCodex:
-			if lane.Group.SupportsResponses {
+			domestic := cheapauth.NormalizeLane(lane.Lane) == cheapauth.LaneDomestic ||
+				cheapauth.GroupLane(lane.Group, lane.Models) == cheapauth.LaneDomestic
+			if lane.Group.SupportsResponses == cheapauth.ResponsesSupportSupported ||
+				(!domestic && lane.Group.SupportsResponses == cheapauth.ResponsesSupportUnset) {
+				api, path = protocol.ConversationModelApiResponses, "/v1/responses"
+			}
+		case cheapauth.LaneGrok:
+			if lane.Group.SupportsResponses != cheapauth.ResponsesSupportUnsupported {
 				api, path = protocol.ConversationModelApiResponses, "/v1/responses"
 			}
 		}

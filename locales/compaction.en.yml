@@ -1,3 +1,4 @@
+chat_compact_start_failed: Could not start compaction
 compact_auto_failed: Automatic compaction failed
 compact_stage_history: Stage · History matching
 compact_stage_budget: Stage · Context budget

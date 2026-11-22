@@ -16,16 +16,19 @@ var topicPolicies = map[string]accessPolicy{
 	"status": accessPersonal, "installations": accessDevice, "scoped_installations": accessPersonal, "browser": accessDevice, "connector_login": accessDevice, "provider_login": accessDevice, "connections": accessPersonal, "python": accessMachine,
 }
 
+func (node *Node) authenticatedUser(ctx context.Context, db *sql.Conn, caller protocol.NodeID) (protocol.User, error) {
+	captured, _ := ctx.Value(capturedDispatchKey{}).(bool)
+	if caller == node.ID() || captured {
+		return store.CurrentUser(ctx, db)
+	}
+	return store.CallerUser(ctx, db, node.ID(), caller)
+}
+
 func (node *Node) authenticate(ctx context.Context, caller protocol.NodeID) (context.Context, error) {
 	var user protocol.User
 	err := node.profile.Store.Node.Read(ctx, func(db *sql.Conn) error {
 		var err error
-		captured, _ := ctx.Value(capturedDispatchKey{}).(bool)
-		if caller == node.ID() || captured {
-			user, err = store.CurrentUser(ctx, db)
-		} else {
-			user, err = store.CallerUser(ctx, db, node.ID(), caller)
-		}
+		user, err = node.authenticatedUser(ctx, db, caller)
 		return err
 	})
 	if err != nil {
@@ -34,28 +37,23 @@ func (node *Node) authenticate(ctx context.Context, caller protocol.NodeID) (con
 	return store.WithUser(ctx, user), nil
 }
 func (node *Node) authorizeTopic(ctx context.Context, caller protocol.NodeID, topic protocol.Topic) (context.Context, error) {
-	ctx, err := node.authenticate(ctx, caller)
-	if err != nil {
-		return nil, err
-	}
-	policy, ok := topicPolicies[topic.Kind]
-	if !ok {
-		return nil, permissionDenied()
-	}
-	err = node.profile.Store.Node.Read(ctx, func(db *sql.Conn) error {
-		user, err := store.CurrentUser(ctx, db)
+	var verified context.Context
+	err := node.profile.Store.Node.Read(ctx, func(db *sql.Conn) error {
+		user, err := node.authenticatedUser(ctx, db, caller)
 		if err != nil {
 			return err
 		}
-		if user.State != "active" {
+		policy, ok := topicPolicies[topic.Kind]
+		if !ok || user.State != "active" {
 			return permissionDenied()
 		}
 		if policy == accessMachine && !user.Administrator {
 			return permissionDenied()
 		}
-		return authorizeResourceValue(ctx, db, reflect.ValueOf(topic.Data))
+		verified = store.WithUser(ctx, user)
+		return authorizeResourceValue(verified, db, reflect.ValueOf(topic.Data))
 	})
-	return ctx, nodeFault(err)
+	return verified, nodeFault(err)
 }
 
 type accessObservation struct {
@@ -114,12 +112,16 @@ func (node *Node) Subscribe(ctx context.Context, caller protocol.NodeID, topic p
 	if err != nil {
 		return nil, err
 	}
+	return node.trackSubscription(verified, caller, topic, source), nil
+}
+
+func (node *Node) trackSubscription(verified context.Context, caller protocol.NodeID, topic protocol.Topic, source link.Subscription) *authorizedSubscription {
 	user := userFromContext(verified)
 	check := func(next context.Context) error {
 		_, err := node.authorizeTopic(store.WithUser(next, user), caller, topic)
 		return err
 	}
-	return &authorizedSubscription{accessObservation: node.observeAccess(check, source.Close), source: source}, nil
+	return &authorizedSubscription{accessObservation: node.observeAccess(check, source.Close), source: source}
 }
 func (value *authorizedSubscription) Next(ctx context.Context) (protocol.Update, error) {
 	value.next.Lock()

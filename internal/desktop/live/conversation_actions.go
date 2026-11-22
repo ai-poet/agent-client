@@ -6,13 +6,13 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 func (x *conversationActions) state() (protocol.Session, protocol.ConversationSnapshot, bool) {
@@ -45,12 +45,7 @@ func (x *conversationActions) queued(id string) (protocol.ConversationPending, b
 	if !ok {
 		return protocol.ConversationPending{}, false
 	}
-	for _, p := range state.Page.Queue.Items {
-		if p.Turn.String() == id {
-			return p, true
-		}
-	}
-	return protocol.ConversationPending{}, false
+	return pendingQueueItem(state.Page.Queue, id)
 }
 func acceptsGuidance(run protocol.ConversationRun) bool {
 	return run.Kind == protocol.ConversationRunKindTask && run.Status == protocol.ConversationStatusRunning
@@ -60,19 +55,29 @@ func (x *conversationActions) SendQueued(id string) {
 	if x.readonly() {
 		return
 	}
-	item, ok := x.queued(id)
+	session, state, ok := x.state()
 	if !ok {
 		return
 	}
-	if run, active := x.activeRun(); active && !item.Notice && item.Kind == protocol.ConversationRunKindTask {
+	page := state.Page
+	item, ok := pendingQueueItem(page.Queue, id)
+	if !ok {
+		return
+	}
+	x.r.reconcileQueuedSends(session.ID, page.Queue)
+	if x.r.queuedSends[session.ID][item.Turn] != nil {
+		x.r.sendQueuedTurn(session.ID, page.Queue.Revision, item)
+		return
+	}
+	if run, active := activeConversationRun(page); active && !page.Queue.Paused && run.Status != protocol.ConversationStatusStopping && !item.Notice && item.Kind == protocol.ConversationRunKindTask {
 		if !acceptsGuidance(run) {
 			kit.Toast(x.c, kit.Conflict, i18n.T(x.c, "session_changed"))
 			return
 		}
 		x.queueCommand(protocol.Command{Kind: "guide_queued_turn", Data: protocol.CommandGuideQueuedTurnPayload{Turn: item.Turn, Recipient: run.Turn, ExpectedRevision: item.Revision}})
-	} else {
-		x.queueCommand(protocol.Command{Kind: "send_queued_turn", Data: protocol.CommandSendQueuedTurnPayload{Turn: item.Turn, ExpectedRevision: item.Revision}})
+		return
 	}
+	x.r.sendQueuedTurn(session.ID, page.Queue.Revision, item)
 }
 
 // A subagent's session is read-only, but its queue tray still withdraws
@@ -133,13 +138,38 @@ func (x *conversationActions) compact(focus string) {
 	if x.readonly() {
 		return
 	}
-	if s, ok := x.r.session(x.cv.ID); ok {
-		payload := protocol.CommandCompactContextPayload{Session: s.ID, ExpectedRevision: s.Revision}
+	id := x.cv.ID
+	s, ok := x.r.session(id)
+	if !ok {
+		return
+	}
+	config := s.Config
+	// A selection of the replaced unbound route compacts on its model's lane.
+	x.r.followCheapSession(s, x.comp)
+	selected, err := x.r.selectedComposerConfig(id, x.comp, x.r.offeredModels(id, x.r.models()))
+	switch {
+	case x.comp.Model != modelKey(s.Config.Provider, s.Config.Model) || x.r.composerSaving[id]:
+		if err != nil {
+			reportCompactCommand(x.c, err)
+			return
+		}
+		config = selected
+	case err == nil:
+		// A credential rotation doesn't change the selected model. Preserve all
+		// other session settings. If the retained model is unavailable, leave
+		// its diagnosis to the Node rather than choosing a replacement.
+		config.Credential = selected.Credential
+	}
+	x.r.withComposerConfig(s, config, func(current protocol.Session) {
+		if x.readonly() {
+			return
+		}
+		payload := protocol.CommandCompactContextPayload{Session: current.ID, ExpectedRevision: current.Revision}
 		if focus != "" {
 			payload.Focus = &focus
 		}
 		x.turn(protocol.Command{Kind: "compact_context", Data: payload}, nil)
-	}
+	})
 }
 
 // Decide sends the decision on a waiting approval of the conversation or of
@@ -653,7 +683,9 @@ func (x *conversationActions) turn(command protocol.Command, done func(protocol.
 		} else {
 			delete(x.r.turnRetries, id)
 		}
-		if code := faultCode(err); err != nil && x.restore != nil && x.restoreDraft != composerFingerprint(x.comp) && code != protocol.ErrorCodeOutcomeUnknown {
+		if err != nil && command.Kind == "compact_context" {
+			reportCompactCommand(c, err)
+		} else if code := faultCode(err); err != nil && x.restore != nil && x.restoreDraft != composerFingerprint(x.comp) && code != protocol.ErrorCodeOutcomeUnknown {
 			x.restoreFailedDraft(c, err)
 		} else {
 			x.r.report(c, err, "session_changed")

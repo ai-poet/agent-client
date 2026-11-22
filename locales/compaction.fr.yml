@@ -1,3 +1,4 @@
+chat_compact_start_failed: Impossible de lancer la compression
 compact_auto_failed: "Échec de la compression automatique"
 compact_stage_history: "Étape · Correspondance de l’historique"
 compact_stage_budget: "Étape · Budget du contexte"

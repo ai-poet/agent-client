@@ -175,39 +175,7 @@ func captureTurnSettings(ctx context.Context, db *sql.Conn, node protocol.NodeID
 	if err := validateConfig(ctx, db, node, session.Config); err != nil {
 		return settings, err
 	}
-	var selectedProvider *protocol.ConversationProvider
-	if session.Profile != nil {
-		// A forwarded session runs on the provider its source Node captured.
-		selectedProvider = &session.Profile.Provider
-	} else {
-		config, err := readProviderConfiguration(ctx, db, session.Config.Provider)
-		if err != nil {
-			return settings, err
-		}
-		if config != nil && config.Provider != nil {
-			if !config.Listed {
-				return settings, protocol.NewConfigurationFault(protocol.ConfigurationProviderRemoved, "model provider is unavailable")
-			}
-			selectedProvider = config.Provider
-		}
-	}
-	if selectedProvider == nil {
-		return settings, protocol.NewConfigurationFault(protocol.ConfigurationProviderMissing, "model provider is unavailable")
-	}
-	if !selectedProvider.Enabled {
-		return settings, protocol.NewConfigurationFault(protocol.ConfigurationProviderDisabled, "model provider is unavailable")
-	}
-	var selected bool
-	for _, model := range selectedProvider.Models {
-		if model.ID == session.Config.Model {
-			selected = true
-			break
-		}
-	}
-	if !selected {
-		return settings, invalid("selected model is not configured on provider")
-	}
-	captured, err := captureTurnProvider(ctx, db, *selectedProvider, value.Config.Model)
+	captured, err := captureSessionProvider(ctx, db, session, kind)
 	if err != nil {
 		return settings, err
 	}
@@ -234,6 +202,44 @@ func captureTurnSettings(ctx context.Context, db *sql.Conn, node protocol.NodeID
 	}
 	settings.media, err = encode(assignments)
 	return settings, err
+}
+
+const compactionModelUnavailable = "Select an available model before compacting this conversation."
+
+func captureSessionProvider(ctx context.Context, db *sql.Conn, session protocol.Session, kind protocol.ConversationRunKind) (*protocol.ConversationProvider, error) {
+	message := "model provider is unavailable"
+	if kind == protocol.ConversationRunKindCompaction {
+		message = compactionModelUnavailable
+	}
+	var provider *protocol.ConversationProvider
+	if session.Profile != nil {
+		// A forwarded session runs on the provider its source Node captured.
+		provider = &session.Profile.Provider
+	} else {
+		config, err := readProviderConfiguration(ctx, db, session.Config.Provider)
+		if err != nil {
+			return nil, err
+		}
+		if config != nil && config.Provider != nil {
+			if !config.Listed {
+				return nil, protocol.NewConfigurationFault(protocol.ConfigurationProviderRemoved, message)
+			}
+			provider = config.Provider
+		}
+	}
+	if provider == nil {
+		return nil, protocol.NewConfigurationFault(protocol.ConfigurationProviderMissing, message)
+	}
+	if !provider.Enabled {
+		return nil, protocol.NewConfigurationFault(protocol.ConfigurationProviderDisabled, message)
+	}
+	for _, model := range provider.Models {
+		if model.ID == session.Config.Model {
+			captured, err := captureTurnProvider(ctx, db, *provider, model.ID)
+			return &captured, err
+		}
+	}
+	return nil, invalid("selected model is not configured on provider")
 }
 
 // readTurnSettings reads the settings an admitted turn froze.
@@ -400,6 +406,7 @@ func claimAgentInvocation(ctx context.Context, db *sql.Conn, turn protocol.TurnI
 	if err != nil {
 		return nil, nil, err
 	}
+	current := session
 	session.Config = queued.Turn.Config
 	session.Revision = queued.Turn.Revision
 	session.Worktree = run.Worktree
@@ -428,7 +435,31 @@ func claimAgentInvocation(ctx context.Context, db *sql.Conn, turn protocol.TurnI
 	if err = json.Unmarshal(hookSettings, &inv.Hooks); err != nil {
 		return nil, nil, err
 	}
-	if err = json.Unmarshal(provider, &inv.Provider); err != nil {
+	err = json.Unmarshal(provider, &inv.Provider)
+	if run.Kind == protocol.ConversationRunKindCompaction && (err != nil || inv.Provider == nil) {
+		// Repair only a missing/unreadable snapshot. A newer selection (even
+		// the same model on a different lane) cannot stand in for this turn.
+		if current.Config.Provider != session.Config.Provider || current.Config.Model != session.Config.Model {
+			err = fault(protocol.ErrorCodeNotConfigured, compactionModelUnavailable)
+		} else {
+			inv.Provider, err = captureSessionProvider(ctx, db, current, run.Kind)
+			if err == nil && inv.Provider.ID != session.Config.Provider {
+				err = fault(protocol.ErrorCodeNotConfigured, compactionModelUnavailable)
+			}
+		}
+		if err != nil {
+			// A compaction has no user input to retain when its claim fails.
+			if _, dropErr := db.ExecContext(ctx, "DELETE FROM agent_pending WHERE turn=?1", turn.String()); dropErr != nil {
+				return nil, nil, dropErr
+			}
+			return rejectInvocationCapture(ctx, db, turn, err, now)
+		}
+		provider, err = encode(inv.Provider)
+		if err == nil {
+			_, err = db.ExecContext(ctx, "UPDATE agent_runs SET provider=?2 WHERE turn=?1", turn.String(), provider)
+		}
+	}
+	if err != nil {
 		return nil, nil, err
 	}
 	for _, reference := range inv.Turn.Plugins {
@@ -575,6 +606,12 @@ func FinishTurn(ctx context.Context, db *sql.Conn, turn protocol.TurnID, status 
 		return run, nil, err
 	}
 	if err = putAgentRun(ctx, db, run); err != nil {
+		return run, nil, err
+	}
+	// Queue membership depends on run status, not just pending rows. An input
+	// stopped before its first save reappears here even if Stop already paused
+	// the queue or a later submission resumed it.
+	if err = bumpQueue(ctx, db, run.Session); err != nil {
 		return run, nil, err
 	}
 	closed := "cancelled"

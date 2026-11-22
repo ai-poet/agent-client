@@ -23,7 +23,7 @@ func TestRechargeWindowOrderLifecycle(t *testing.T) {
 		case "/pay/api/orders/my":
 			fmt.Fprint(w, `{"user":{"id":7,"balance":12.5},"summary":{"pending":0}}`)
 		case "/pay/api/user":
-			fmt.Fprint(w, `{"config":{"enabledPaymentTypes":["wxpay"],"minAmount":1,"maxAmount":1000,"maxPendingOrders":3}}`)
+			fmt.Fprint(w, `{"config":{"enabledPaymentTypes":["alipay","wxpay"],"minAmount":1,"maxAmount":1000,"maxPendingOrders":3,"methodLimits":{"alipay":{"available":false},"wxpay":{"available":true}}}}`)
 		case "/pay/api/subscription-plans":
 			fmt.Fprint(w, `{"plans":[{"id":"monthly","groupId":2,"name":"Monthly","price":25,"validityDays":1,"validityUnit":"month"}]}`)
 		case "/api/v1/subscriptions/progress":
@@ -67,12 +67,22 @@ func TestRechargeWindowOrderLifecycle(t *testing.T) {
 	buy := func() *accountui.RechargeDialog {
 		d.click(tr("recharge_open"))
 		d.await("payment form", func() bool { return d.account().Recharge != nil && d.account().Recharge.Config != nil })
-		d.click(tr("pay_continue"))
+		if got := d.account().Recharge.Method; got != "wxpay" {
+			t.Fatalf("default method = %q, want wxpay (skipping unavailable alipay)", got)
+		}
+		d.click(i18n.In("zh-CN", "pay_plan_pay_cta", "amount", "$10.00"))
 		d.await("order QR", func() bool { return d.account().Recharge.QR != nil })
 		return d.account().Recharge
 	}
 	order := buy()
-	d.await("automatic order poll", func() bool { return polls.Load() > 0 })
+	if len(d.tester.OpenedURLs()) != 0 {
+		t.Fatalf("weixin:// QR payload was opened as browser URL: %v", d.tester.OpenedURLs())
+	}
+	d.click(tr("pay_completed_check"))
+	d.await("not-paid feedback after manual check", func() bool {
+		return !order.CheckingStatus && order.Message == tr("pay_not_paid_yet")
+	})
+	d.await("automatic order poll", func() bool { return polls.Load() > 1 })
 	order.CancelOrder()
 	d.await("cancelled status", func() bool { return order.Terminal })
 	if order.Status.Status != "CANCELLED" || cancels.Load() != 1 {

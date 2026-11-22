@@ -4,6 +4,7 @@ import (
 	"image"
 	"slices"
 	"testing"
+	"time"
 
 	core "github.com/ai-poet/cheaprouter-harness/internal/cheapauth"
 	"github.com/egoist/mygo/ui"
@@ -11,8 +12,15 @@ import (
 
 func TestRechargeDraftAndOrder(t *testing.T) {
 	state := &State{Stage: GatewayFailed, AccountFailure: "Gateway unreachable"}
-	d := &RechargeDialog{Config: &core.PayConfig{MinAmount: 5, MaxAmount: 50, MaxPendingOrders: 3, MaxDailyAmount: 100,
-		EnabledPaymentTypes: []string{"wxpay", "stripe_card", "alipay"}}}
+	rem := 30.0
+	d := &RechargeDialog{Config: &core.PayConfig{
+		MinAmount: 5, MaxAmount: 50, MaxPendingOrders: 3, MaxDailyAmount: 100,
+		EnabledPaymentTypes: []string{"wxpay", "stripe_card", "alipay"},
+		MethodLimits: map[string]core.MethodLimit{
+			"wxpay":  {Available: true, SingleMin: 5, SingleMax: 50, Remaining: &rem},
+			"alipay": {Available: true, SingleMin: 5, SingleMax: 50, FeeRate: 2},
+		},
+	}}
 	state.OpenRecharge = func() { state.Recharge = d }
 	d.Close = func() { state.Recharge = nil }
 	calls := 0
@@ -23,18 +31,28 @@ func TestRechargeDraftAndOrder(t *testing.T) {
 		calls++
 		d.Busy = true
 	}
+	checks := 0
+	d.CheckStatus = func() { checks++ }
 	tt := accountTester(state)
 	tt.SetLocale("en")
 	loginClick(t, tt, "Add funds")
 	tt.Frame()
-	for _, label := range []string{"Credits -- · range $5.00 – $50.00", "Max daily credited balance $100.00"} {
+
+	dialog := loginControl(t, tt, ui.RoleDialog, "Add funds")
+	if dialog.Bounds.W < 360 || dialog.Bounds.W > 420 {
+		t.Fatalf("recharge dialog width = %v, want 360..420", dialog.Bounds.W)
+	}
+	for _, label := range []string{"Estimated credit --", "$5–$50 · Left $30", "Fee 2% · $5–$50", "Cancel"} {
 		if !tt.HasText(label) {
-			t.Errorf("missing limit %q", label)
+			t.Errorf("missing expected form text %q; texts=%q", label, tt.Texts())
 		}
 	}
 	first := loginControl(t, tt, ui.RoleToggleButton, "WeChat Pay")
 	stripe := loginControl(t, tt, ui.RoleToggleButton, "Stripe")
 	last := loginControl(t, tt, ui.RoleToggleButton, "Alipay")
+	if !first.Checked {
+		t.Fatal("first available payment method was not selected by default")
+	}
 	if stripe.Disabled || first.Bounds.X >= stripe.Bounds.X || stripe.Bounds.X >= last.Bounds.X {
 		t.Fatal("method order or Stripe availability differs from configuration")
 	}
@@ -42,7 +60,13 @@ func TestRechargeDraftAndOrder(t *testing.T) {
 	for _, amount := range []string{"", "x", "NaN", "4", "51"} {
 		d.Amount = amount
 		tt.Frame()
-		loginClick(t, tt, "Continue to payment")
+		cta := "Continue to payment"
+		if amount == "4" {
+			cta = "Pay $4.08"
+		} else if amount == "51" {
+			cta = "Pay $52.02"
+		}
+		loginClick(t, tt, cta)
 		tt.Frame()
 		if calls != 0 || (d.Message != "Enter a valid amount" && d.Message != "Amount must be between $5 and $50") {
 			t.Fatalf("invalid amount %q: %q", amount, d.Message)
@@ -53,10 +77,10 @@ func TestRechargeDraftAndOrder(t *testing.T) {
 	field := loginControl(t, tt, ui.RoleTextField, "Amount (USD)").Bounds
 	tt.ClickAt(field.X+field.W/2, field.Y+field.H/2)
 	tt.Type("12")
-	if !tt.HasText("Estimated charge $12.00") {
-		t.Fatal("estimate did not follow the entered amount")
+	if !tt.HasText("Estimated credit $12.00") || !tt.HasText("Pay $12.24") {
+		t.Fatalf("summary or pay CTA did not follow entered amount and fee: %q", tt.Texts())
 	}
-	loginClick(t, tt, "Continue to payment")
+	loginClick(t, tt, "Pay $12.24")
 	tt.Frame()
 	if calls != 1 || !loginControl(t, tt, ui.RoleButton, "Creating order…").Disabled {
 		t.Fatal("order creation did not lock the draft")
@@ -67,11 +91,16 @@ func TestRechargeDraftAndOrder(t *testing.T) {
 		t.Fatal("creation dismissed by Escape")
 	}
 	d.Busy, d.OrderID, d.PayURL = false, "order-7", "https://example.com/checkout"
+	d.Status = &core.OrderStatus{ID: "order-7", Status: "PENDING", ExpiresAt: time.Now().Add(3 * time.Minute).UTC().Format(time.RFC3339)}
 	d.QR = image.NewNRGBA(image.Rect(0, 0, 32, 32))
 	d.Message = "Awaiting payment."
 	tt.Frame()
-	if !tt.HasText("Order: order-7") || !tt.HasText(d.Message) || !tt.HasText("Scan to pay") || tt.HasText("Continue to payment") {
-		t.Fatal("payment view does not identify the existing order")
+	if !tt.HasText("Order: order-7") || !tt.HasText(d.Message) || !tt.HasText("Scan to pay") || !tt.HasText("I've completed payment") || tt.HasText("Pay $12.24") {
+		t.Fatalf("payment view does not identify the existing order: %q", tt.Texts())
+	}
+	loginClick(t, tt, "I've completed payment")
+	if checks != 1 {
+		t.Fatalf("CheckStatus calls = %d, want 1", checks)
 	}
 	loginClick(t, tt, "Open payment page")
 	if !slices.Equal(tt.OpenedURLs(), []string{d.PayURL}) || calls != 1 {
@@ -80,6 +109,41 @@ func TestRechargeDraftAndOrder(t *testing.T) {
 	loginClick(t, tt, "Close")
 	if state.Recharge != nil {
 		t.Fatal("order dialog did not close")
+	}
+}
+
+func TestRechargeCancelButtonClosesForm(t *testing.T) {
+	state := &State{Stage: Ready}
+	d := &RechargeDialog{
+		Amount: "10",
+		Config: &core.PayConfig{
+			MinAmount: 1, MaxAmount: 100, MaxPendingOrders: 2,
+			EnabledPaymentTypes: []string{"wxpay", "alipay"},
+			MethodLimits: map[string]core.MethodLimit{
+				"wxpay":  {Available: false},
+				"alipay": {Available: true, SingleMin: 1, SingleMax: 100},
+			},
+		},
+		Submit: func(float64, string) {},
+	}
+	d.Close = func() { state.Recharge = nil }
+	state.Recharge = d
+	tt := accountTester(state)
+	tt.SetLocale("en")
+	tt.Frame()
+	if d.Method != "alipay" {
+		t.Fatalf("default method = %q, want alipay (skipping unavailable wxpay)", d.Method)
+	}
+	if !loginControl(t, tt, ui.RoleToggleButton, "WeChat Pay").Disabled {
+		t.Fatal("unavailable payment method chip should be disabled")
+	}
+	if !tt.HasText("Unavailable") {
+		t.Fatalf("unavailable chip missing label: %q", tt.Texts())
+	}
+	loginClick(t, tt, "Cancel")
+	tt.Frame()
+	if state.Recharge != nil {
+		t.Fatal("Cancel button did not close recharge dialog")
 	}
 }
 
@@ -149,14 +213,19 @@ func TestMethodAdmissionAndConfirmation(t *testing.T) {
 }
 
 func TestClosedOrPaidOrderNeverOffersCheckout(t *testing.T) {
-	d := &RechargeDialog{OrderID: "id-9", PayURL: "https://example.com/pay", CancelOrder: func() { t.Fatal("unexpected cancel") }}
+	d := &RechargeDialog{
+		OrderID:     "id-9",
+		PayURL:      "https://example.com/pay",
+		CancelOrder: func() { t.Fatal("unexpected cancel") },
+		CheckStatus: func() { t.Fatal("unexpected check") },
+	}
 	tt := accountTester(&State{Stage: Ready, Recharge: d})
 	tt.SetLocale("en")
 	for _, s := range []core.OrderStatus{{Status: "EXPIRED"}, {Status: "CANCELLED"}, {Status: "FAILED"}, {Status: "PAID", PaymentSuccess: true}, {Status: "COMPLETED", RechargeSuccess: true}} {
 		d.Status = &s
 		tt.Frame()
-		if tt.HasText("Open payment page") || tt.HasText("Cancel order") {
-			t.Errorf("%s order can still be paid or cancelled", s.Status)
+		if tt.HasText("Open payment page") || tt.HasText("Cancel order") || tt.HasText("I've completed payment") {
+			t.Errorf("%s order can still be paid, checked or cancelled", s.Status)
 		}
 	}
 }
@@ -172,10 +241,33 @@ func TestPromotionBannerUsesOnlyEarnableTiersForEstimate(t *testing.T) {
 	}}
 	tt := accountTester(&State{Stage: Ready, Recharge: d})
 	tt.SetLocale("en")
-	for _, label := range []string{"Top up $10+ and get 20% bonus (up to $3)", "Top up $10+ and get $30 bonus (unavailable)", "Promotion bonus (Member offer) +$3.00", "Total credited (USD) $23.00"} {
+	tt.Frame()
+
+	// Single-line summary shows earnable total + bonus; promotion rules stay collapsed by default.
+	if !tt.HasText("Estimated credit $23.00 (incl. $3.00 bonus)") {
+		t.Fatalf("missing estimated credit bonus summary: %q", tt.Texts())
+	}
+	if !tt.HasText("More rules") {
+		t.Fatalf("missing collapsed promo rules toggle: %q", tt.Texts())
+	}
+	if tt.HasText("Top up $10+ and get 20% bonus (up to $3)") {
+		t.Fatalf("promotion rules should be collapsed by default: %q", tt.Texts())
+	}
+
+	// Expanding shows all promotion rules including unavailable ones.
+	loginClick(t, tt, "More rules")
+	tt.Frame()
+	for _, label := range []string{"Hide rules", "Top up $10+ and get 20% bonus (up to $3)", "Top up $10+ and get $30 bonus (unavailable)"} {
 		if !tt.HasText(label) {
-			t.Errorf("missing promotion text %q", label)
+			t.Errorf("missing expanded promotion text %q: %q", label, tt.Texts())
 		}
+	}
+
+	// Collapsing hides them again.
+	loginClick(t, tt, "Hide rules")
+	tt.Frame()
+	if tt.HasText("Top up $10+ and get 20% bonus (up to $3)") {
+		t.Fatalf("promotion rules did not collapse: %q", tt.Texts())
 	}
 }
 

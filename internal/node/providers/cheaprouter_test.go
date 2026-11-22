@@ -142,3 +142,212 @@ func TestCheapRouterProviderStructuredErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestCheapRouterProvidersDefaultProtocolRouting(t *testing.T) {
+	cases := []struct {
+		name     string
+		lane     string
+		group    cheapauth.Group
+		model    string
+		wantAPI  protocol.ConversationModelApi
+		wantPath string
+	}{
+		{
+			name:     "claude stays anthropic",
+			lane:     cheapauth.LaneClaude,
+			group:    cheapauth.Group{ID: 1, Platform: "anthropic"},
+			model:    "claude-sonnet-4-6",
+			wantAPI:  protocol.ConversationModelApiAnthropic,
+			wantPath: "/v1/messages",
+		},
+		{
+			name:     "gemini stays gemini",
+			lane:     cheapauth.LaneGemini,
+			group:    cheapauth.Group{ID: 2, Platform: "gemini"},
+			model:    "gemini-2.5-pro",
+			wantAPI:  protocol.ConversationModelApiGemini,
+			wantPath: "/v1beta",
+		},
+		{
+			name:     "vertex alias stays gemini",
+			lane:     cheapauth.LaneGemini,
+			group:    cheapauth.Group{ID: 3, Platform: "vertex"},
+			model:    "gemini-2.5-pro",
+			wantAPI:  protocol.ConversationModelApiGemini,
+			wantPath: "/v1beta",
+		},
+		{
+			name:     "openai unset defaults to responses",
+			lane:     cheapauth.LaneCodex,
+			group:    cheapauth.Group{ID: 4, Platform: "openai"},
+			model:    "gpt-5",
+			wantAPI:  protocol.ConversationModelApiResponses,
+			wantPath: "/v1/responses",
+		},
+		{
+			name:     "codex alias unset defaults to responses",
+			lane:     cheapauth.LaneCodex,
+			group:    cheapauth.Group{ID: 5, Platform: "codex"},
+			model:    "gpt-5-codex",
+			wantAPI:  protocol.ConversationModelApiResponses,
+			wantPath: "/v1/responses",
+		},
+		{
+			name:     "azure-openai unset defaults to responses",
+			lane:     cheapauth.LaneCodex,
+			group:    cheapauth.Group{ID: 6, Platform: "azure-openai"},
+			model:    "gpt-5",
+			wantAPI:  protocol.ConversationModelApiResponses,
+			wantPath: "/v1/responses",
+		},
+		{
+			name:     "openai explicit false falls back to chat completions",
+			lane:     cheapauth.LaneCodex,
+			group:    cheapauth.Group{ID: 7, Platform: "openai", SupportsResponses: cheapauth.ResponsesSupportUnsupported},
+			model:    "gpt-5",
+			wantAPI:  protocol.ConversationModelApiChatCompletions,
+			wantPath: "/v1/chat/completions",
+		},
+		{
+			name:     "openai explicit true uses responses",
+			lane:     cheapauth.LaneCodex,
+			group:    cheapauth.Group{ID: 8, Platform: "openai", SupportsResponses: cheapauth.ResponsesSupportSupported},
+			model:    "gpt-5",
+			wantAPI:  protocol.ConversationModelApiResponses,
+			wantPath: "/v1/responses",
+		},
+		{
+			name:     "grok unset defaults to responses",
+			lane:     cheapauth.LaneGrok,
+			group:    cheapauth.Group{ID: 9, Platform: "grok"},
+			model:    "grok-4",
+			wantAPI:  protocol.ConversationModelApiResponses,
+			wantPath: "/v1/responses",
+		},
+		{
+			name:     "xai alias unset defaults to responses",
+			lane:     cheapauth.LaneGrok,
+			group:    cheapauth.Group{ID: 10, Platform: "xai"},
+			model:    "grok-4",
+			wantAPI:  protocol.ConversationModelApiResponses,
+			wantPath: "/v1/responses",
+		},
+		{
+			name:     "grok explicit false falls back to chat completions",
+			lane:     cheapauth.LaneGrok,
+			group:    cheapauth.Group{ID: 11, Platform: "grok", SupportsResponses: cheapauth.ResponsesSupportUnsupported},
+			model:    "grok-4",
+			wantAPI:  protocol.ConversationModelApiChatCompletions,
+			wantPath: "/v1/chat/completions",
+		},
+		{
+			name:     "domestic platform uses chat completions",
+			lane:     cheapauth.LaneDomestic,
+			group:    cheapauth.Group{ID: 12, Platform: "deepseek"},
+			model:    "deepseek-r1",
+			wantAPI:  protocol.ConversationModelApiChatCompletions,
+			wantPath: "/v1/chat/completions",
+		},
+		{
+			name:     "domestic lane on openai platform defaults to chat completions",
+			lane:     cheapauth.LaneDomestic,
+			group:    cheapauth.Group{ID: 13, Name: "国模高速组", Platform: "openai"},
+			model:    "deepseek-r1",
+			wantAPI:  protocol.ConversationModelApiChatCompletions,
+			wantPath: "/v1/chat/completions",
+		},
+		{
+			name:     "unknown platform falls back to chat completions",
+			lane:     "future",
+			group:    cheapauth.Group{ID: 14, Platform: "unknown-vendor"},
+			model:    "future-model",
+			wantAPI:  protocol.ConversationModelApiChatCompletions,
+			wantPath: "/v1/chat/completions",
+		},
+		{
+			name:     "composite platform falls back to chat completions",
+			lane:     cheapauth.LaneClaude,
+			group:    cheapauth.Group{ID: 15, Platform: "composite"},
+			model:    "claude-alias",
+			wantAPI:  protocol.ConversationModelApiChatCompletions,
+			wantPath: "/v1/chat/completions",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			routes, err := CheapRouterProviders(cheapauth.Gateway{
+				BaseURL:  "https://cheaprouter.cc/proxy/v1/",
+				LaneKeys: map[string]string{tc.lane: "sk-lane-key"},
+				Lanes: []cheapauth.GatewayLane{{
+					Lane:   tc.lane,
+					Group:  tc.group,
+					Models: []cheapauth.Model{{ID: tc.model, ContextWindow: 128000}},
+				}},
+			})
+			if err != nil {
+				t.Fatalf("CheapRouterProviders failed: %v", err)
+			}
+			if len(routes) != 1 {
+				t.Fatalf("routes = %d, want 1", len(routes))
+			}
+			got := routes[0].Provider
+			wantEndpoint := "https://cheaprouter.cc/proxy" + tc.wantPath
+			if got.Api != tc.wantAPI || got.Endpoint != wantEndpoint {
+				t.Fatalf("got (api=%s, endpoint=%s), want (api=%s, endpoint=%s)", got.Api, got.Endpoint, tc.wantAPI, wantEndpoint)
+			}
+		})
+	}
+}
+
+func TestCheapRouterSuccessor(t *testing.T) {
+	offer := func(id protocol.ProviderID, enabled bool, models ...protocol.ConversationModel) protocol.ConversationProvider {
+		return protocol.ConversationProvider{ID: id, Enabled: enabled, Models: models}
+	}
+	model := func(id, platform string) protocol.ConversationModel {
+		return protocol.ConversationModel{ID: id, Platform: platform}
+	}
+	claude, codex := CheapRouterLaneID(cheapauth.LaneClaude), CheapRouterLaneID(cheapauth.LaneCodex)
+	sonnet, shared, custom := model("claude-sonnet-4-6", ""), model("shared-model", ""), model("custom-model", "anthropic")
+	retired := offer(CheapRouterProviderID, false, sonnet, shared, custom)
+	for _, tc := range []struct {
+		name     string
+		provider protocol.ProviderID
+		model    string
+		lanes    map[string]string
+		current  []protocol.ConversationProvider
+		want     protocol.ProviderID
+	}{
+		{name: "routing table lane", provider: CheapRouterProviderID, model: "shared-model", lanes: map[string]string{"shared-model": cheapauth.LaneCodex},
+			current: []protocol.ConversationProvider{retired, offer(claude, true, shared), offer(codex, true, shared)}, want: codex},
+		{name: "own lane without a table entry", provider: CheapRouterProviderID, model: "claude-sonnet-4-6",
+			current: []protocol.ConversationProvider{retired, offer(codex, true, sonnet), offer(claude, true, sonnet)}, want: claude},
+		{name: "own lane by the saved platform", provider: CheapRouterProviderID, model: "custom-model",
+			current: []protocol.ConversationProvider{retired, offer(claude, true, custom)}, want: claude},
+		{name: "model without a lane", provider: CheapRouterProviderID, model: "shared-model",
+			current: []protocol.ConversationProvider{retired, offer(claude, true, shared), offer(codex, true, shared)}},
+		{name: "unbound lane keeps its model from another lane", provider: CheapRouterProviderID, model: "claude-sonnet-4-6",
+			current: []protocol.ConversationProvider{retired, offer(claude, false, sonnet), offer(codex, true, sonnet)}},
+		{name: "disabled table lane keeps its model from another lane", provider: CheapRouterProviderID, model: "shared-model", lanes: map[string]string{"shared-model": cheapauth.LaneCodex},
+			current: []protocol.ConversationProvider{retired, offer(claude, true, shared), offer(codex, false, shared)}},
+		{name: "lane without the model", provider: CheapRouterProviderID, model: "claude-sonnet-4-6",
+			current: []protocol.ConversationProvider{retired, offer(claude, true, shared), offer(codex, true, sonnet)}},
+		{name: "table lane without the model", provider: CheapRouterProviderID, model: "shared-model", lanes: map[string]string{"shared-model": cheapauth.LaneCodex},
+			current: []protocol.ConversationProvider{retired, offer(claude, true, shared), offer(codex, true, sonnet)}},
+		{name: "unbound route still serves", provider: CheapRouterProviderID, model: "claude-sonnet-4-6",
+			current: []protocol.ConversationProvider{offer(CheapRouterProviderID, true, sonnet), offer(claude, true, sonnet)}},
+		{name: "removed unbound route", provider: CheapRouterProviderID, model: "claude-sonnet-4-6",
+			current: []protocol.ConversationProvider{offer(claude, true, sonnet)}},
+		{name: "lane provider has no successor", provider: claude, model: "claude-sonnet-4-6",
+			current: []protocol.ConversationProvider{retired, offer(claude, false, sonnet), offer(codex, true, sonnet)}},
+		{name: "another provider with the model", provider: protocol.ProviderID{1}, model: "claude-sonnet-4-6",
+			current: []protocol.ConversationProvider{offer(claude, true, sonnet)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := CheapRouterSuccessor(tc.provider, tc.model, tc.lanes, tc.current)
+			if ok != (tc.want != protocol.ProviderID{}) || got.ID != tc.want {
+				t.Fatalf("successor = %s, %t; want %s", got.ID, ok, tc.want)
+			}
+		})
+	}
+}

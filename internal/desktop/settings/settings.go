@@ -133,7 +133,7 @@ func Title(c *ui.Context, s *State) string {
 // description over its groups (SettingsPage).
 func Page(c *ui.Context, s *State, d *preview.Data, look Look) {
 	if s.Section == CheapAccount {
-		cheapauthui.Page(c, s.CheapRouter)
+		cheapauthui.PageContent(c, s.CheapRouter)
 		return
 	}
 	if s.Section == ImageAPI {

@@ -463,6 +463,15 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 		comp.Model, comp.Features = "", map[string]string{}
 		r.defaultComposerForFamily(comp, prevFamily)
 	}
+	// Lanes that replaced the unbound route keep its conversations on their
+	// model. Route reconciliation saves them itself while it runs.
+	if s, ok := r.session(cv.ID); ok && r.controller.Connected() && !delegated(s) && !r.composerSaving[cv.ID] && r.cheapRoutesSettled() &&
+		(r.teams == nil || r.teams.composers[cv.ID] == nil || !r.teams.composers[cv.ID].saving && r.teams.composers[cv.ID].pending == nil) &&
+		r.followCheapSession(s, comp) {
+		if config, err := r.selectedComposerConfig(cv.ID, comp, ctx.Models); err == nil {
+			r.saveComposerConfig(s, config, nil)
+		}
+	}
 	r.nameModelSources(c, cv.ID, ctx.Models)
 	ctx.MemberModels = r.memberModels(ctx.Models)
 	ctx.RecentModels = r.recentComposerModels(ctx.Models)
@@ -511,12 +520,8 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 	ctx.References, ctx.Commands = r.references(cv, comp)
 	comp.Running = cv.Running()
 	// Keep model controls durable without treating UI-only location edits as config.
-	selectedEffort := ""
-	if chosen := comp.Chosen(ctx.Models); chosen.Reasoning {
-		selectedEffort = comp.EffortName(nil, chosen)
-	}
 	teamUnsettled := r.teams != nil && r.teams.composers[cv.ID] != nil && (r.teams.composers[cv.ID].saving || r.teams.composers[cv.ID].pending != nil)
-	config, _, err := r.composerConfig(cv.ID, comp, composer.Message{Model: comp.Model, Mode: comp.Mode, Permission: comp.Permission, Features: comp.Features, Effort: selectedEffort})
+	config, err := r.selectedComposerConfig(cv.ID, comp, ctx.Models)
 	// A new turn needs a configured model and no creation under way; the
 	// running reply's guidance uses that turn's.
 	outgoing := r.composerOutgoing[cv.ID]

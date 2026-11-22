@@ -24,7 +24,6 @@ type delegatedChild struct {
 	cancel    context.CancelFunc
 	started   bool
 	released  bool
-	delivered bool
 	successor *delegatedChild
 	// A queued successor owns its predecessor's commands even before it starts.
 	commandsInherited bool
@@ -321,9 +320,6 @@ func (r *Runtime) foregroundStep(x *execution) (bool, error) {
 		}
 		pending := false
 		for _, child := range children {
-			if child.delivered {
-				continue
-			}
 			var state store.ChildState
 			unlock := r.LockPublication()
 			r.mu.Lock()
@@ -386,15 +382,13 @@ func (r *Runtime) consumeChild(x *execution, session protocol.SessionID, turn *p
 func (r *Runtime) markCollectedChild(x *execution, session protocol.SessionID, turn *protocol.TurnID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, child := range x.foreground {
+	x.foreground = slices.DeleteFunc(x.foreground, func(child *delegatedChild) bool {
 		current := child
 		for current.successor != nil {
 			current = current.successor
 		}
-		if child.session == session && turn != nil && current.turn == *turn {
-			child.delivered = true
-		}
-	}
+		return child.session == session && turn != nil && current.turn == *turn
+	})
 }
 
 // stopChildren cancels every child of the turn's session, foreground or
@@ -427,13 +421,9 @@ func (r *Runtime) cancelForeground(x *execution) bool {
 	children := slices.Clone(x.foreground)
 	r.mu.Unlock()
 	var ids []string
-	var stopped []*delegatedChild
 	for _, child := range children {
-		if !child.delivered {
-			child.cancel()
-			ids = append(ids, child.session.String())
-			stopped = append(stopped, child)
-		}
+		child.cancel()
+		ids = append(ids, child.session.String())
 	}
 	if len(ids) > 0 {
 		value := &canonical.Note{Note: canonical.OperationNote{Kind: "subagents_cancelled", Data: &canonical.SubagentsCancelled{Sessions: ids}}}
@@ -442,7 +432,7 @@ func (r *Runtime) cancelForeground(x *execution) bool {
 		record.Metadata.Runtime = &canonical.Runtime{Notes: &canonical.OperationNotes{CancelledSubagents: ids}}
 		_ = r.save(context.WithoutCancel(x.ctx), x.inv.Session.ID, record)
 	}
-	settled := r.settleChildren(x, stopped)
+	settled := r.settleChildren(x, children)
 	r.Wake()
 	return settled
 }

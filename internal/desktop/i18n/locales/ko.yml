@@ -587,6 +587,7 @@ background_result_waiting: 결과가 전달되지 않음
 chat_compact_cancelled: 압축 취소됨
 chat_compact_failed: 압축 실패
 chat_compact_failed_paused: 압축에 실패하여 자동 압축이 일시 중지됨
+chat_compact_start_failed: 압축을 시작할 수 없습니다
 chat_compact_queued: 압축을 기다리는 중
 chat_compact_unneeded: 압축이 필요하지 않음
 chat_compacted: 컨텍스트 압축됨
@@ -619,6 +620,8 @@ chat_search: 대화 검색
 chat_search_result: 검색 결과
 chat_status_unsynced: 상태가 동기화되지 않음
 chat_sync_failed: 대화 동기화 실패
+compact_reason_budget: 요약 용량에 맞는 완전한 기록 구간이 없습니다
+compact_reason_request: 요약 모델 요청이 실패했습니다
 compact_reason_unknown: 이 오류의 자세한 원인은 기록되지 않았습니다
 composer_cache: 캐시
 composer_compression_hint: '컨텍스트 압축: 런타임 데이터 없음(UI 미리보기)'
@@ -2557,3 +2560,18 @@ pay_status_pending_message: Complete the payment in your payment app
 pay_status_received_title: Payment received
 pay_status_updated_message: Waiting for the next update
 pay_stripe_hint: Stripe checkout opens in your browser
+pay_popover_recharge: Top up
+pay_popover_plans: Plans
+pay_cancel: Cancel
+pay_estimated_credit: Estimated credit %{total}
+pay_estimated_credit_bonus: Estimated credit %{total} (incl. %{bonus} bonus)
+pay_more_promos: More rules
+pay_hide_promos: Hide rules
+pay_chip_fee: Fee %{rate}%
+pay_chip_limit: '%{min}–%{max}'
+pay_chip_remaining: Left %{amount}
+pay_chip_unavailable: Unavailable
+pay_completed_check: I've completed payment
+pay_checking_status: Checking payment status…
+pay_not_paid_yet: Payment not confirmed yet; please wait or finish checkout
+pay_countdown_remaining: '%{remaining} left'

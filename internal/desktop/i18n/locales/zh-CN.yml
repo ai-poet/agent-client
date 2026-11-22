@@ -587,6 +587,7 @@ background_result_waiting: 结果待送达
 chat_compact_cancelled: 压缩已取消
 chat_compact_failed: 压缩失败
 chat_compact_failed_paused: 压缩失败，已暂停自动压缩
+chat_compact_start_failed: 无法开始压缩
 chat_compact_queued: 等待压缩
 chat_compact_unneeded: 无需压缩
 chat_compacted: 上下文已压缩
@@ -619,6 +620,8 @@ chat_search: 搜索对话
 chat_search_result: 搜索结果
 chat_status_unsynced: 状态未同步
 chat_sync_failed: 会话同步失败
+compact_reason_budget: 没有完整历史片段符合摘要预算
+compact_reason_request: 摘要模型请求失败
 compact_reason_unknown: 此次失败未记录具体原因
 composer_cache: 缓存率
 composer_compression_hint: 上下文压缩进度：暂无运行数据（UI 预览）
@@ -2557,3 +2560,18 @@ pay_status_pending_message: 请在支付应用中完成付款
 pay_status_received_title: 已收到付款
 pay_status_updated_message: 等待下一次更新
 pay_stripe_hint: Stripe 支付将在浏览器中打开
+pay_popover_recharge: 充值
+pay_popover_plans: 套餐
+pay_cancel: 取消
+pay_estimated_credit: 预计到账 %{total}
+pay_estimated_credit_bonus: 预计到账 %{total}（含赠送 %{bonus}）
+pay_more_promos: 更多规则
+pay_hide_promos: 收起规则
+pay_chip_fee: 手续费 %{rate}%
+pay_chip_limit: 限 %{min}–%{max}
+pay_chip_remaining: 剩 %{amount}
+pay_chip_unavailable: 暂不可用
+pay_completed_check: 我已完成支付
+pay_checking_status: 正在查询支付状态…
+pay_not_paid_yet: 暂未检测到到账，请稍候或继续完成支付
+pay_countdown_remaining: 剩余 %{remaining}

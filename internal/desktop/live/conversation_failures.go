@@ -1,10 +1,13 @@
 package live
 
 import (
+	"log"
 	"strings"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 // The i18n keys of what the Node reports without copy of its own: why a run
@@ -56,6 +59,10 @@ func failureKey(fault protocol.Fault) string {
 		return "turn_cancelled"
 	case protocol.ErrorCodeOutcomeUnknown:
 		return "chat_execution_unknown"
+	}
+	// A summary validation fault also carries model_request/invalid_response.
+	if strings.HasPrefix(fault.Message, "Compaction failed:") {
+		return "chat_compact_failed"
 	}
 	if reason, ok := recoveryStop(&fault); ok {
 		return stopKey(reason)
@@ -109,6 +116,53 @@ func failureKey(fault protocol.Fault) string {
 		return "turn_failed"
 	}
 	return "chat_action_failed"
+}
+
+// A rejected compact_context never creates a turn to hold its error block.
+func reportCompactCommand(c *ui.Context, err error) {
+	fault := commandFault(err)
+	key, kind, message := "chat_compact_start_failed", "error", ""
+	if fault != nil {
+		message = fault.Message
+		// Log the Node's diagnostic, not the request (which may contain private focus text).
+		log.Printf("compact_context: code=%s message=%q", fault.Code, compactLogMessage(message))
+		switch fault.Code {
+		case protocol.ErrorCodeConflict, protocol.ErrorCodeRevisionConflict:
+			key, kind = "session_changed", "warning"
+		case protocol.ErrorCodeOutcomeUnknown:
+			key, kind = "chat_action_unknown", "warning"
+		default:
+			if message == "resource host is offline" {
+				key = "resource_offline_action"
+			}
+		}
+	}
+	c.AddToast(ui.Toast{Type: kind, Title: i18n.T(c, key), Description: message, Timeout: kit.ToastDuration(c)})
+}
+
+// Provider diagnostics normally arrive redacted by the Node. Do not persist
+// a peer-supplied diagnostic that looks like a credential or request URL.
+func compactLogMessage(message string) string {
+	lower := strings.ToLower(message)
+	for _, marker := range []string{"authorization:", "bearer ", "basic ", "sk-", "api_key", "api-key", "apikey", "token=", "token:", "token\"", "password", "secret", "cookie", "://"} {
+		if strings.Contains(lower, marker) {
+			return "[redacted]"
+		}
+	}
+	return message
+}
+
+func compactionFailureText(language string, failure protocol.ConversationCompactionFailure) string {
+	if failure.Cause != nil && strings.TrimSpace(*failure.Cause) != "" {
+		return *failure.Cause
+	}
+	switch {
+	case failure.Reason == protocol.ConversationCompactionReasonNoFittingPrefix:
+		return i18n.In(language, "compact_reason_budget")
+	case failure.Stage == protocol.ConversationCompactionStageRequest && failure.Reason == protocol.ConversationCompactionReasonRequestFailed:
+		return i18n.In(language, "compact_reason_request")
+	}
+	return i18n.In(language, "compact_reason_unknown")
 }
 
 // coreTool is a built-in tool's label key and icon; "" for the rest, whose

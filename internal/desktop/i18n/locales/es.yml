@@ -587,6 +587,7 @@ background_result_waiting: Resultado no entregado
 chat_compact_cancelled: Compactación cancelada
 chat_compact_failed: Falló la compactación
 chat_compact_failed_paused: La compactación falló; compactación automática en pausa
+chat_compact_start_failed: No se pudo iniciar la compresión
 chat_compact_queued: Esperando a compactar
 chat_compact_unneeded: No se necesita compactación
 chat_compacted: Contexto compactado
@@ -619,6 +620,8 @@ chat_search: Buscar una conversación
 chat_search_result: Resultados de la búsqueda
 chat_status_unsynced: Estado no sincronizado
 chat_sync_failed: Falló la sincronización de conversación
+compact_reason_budget: Ningún segmento completo del historial cabe en el presupuesto del resumen
+compact_reason_request: Falló la solicitud de resumen al modelo
 compact_reason_unknown: No se registraron más detalles sobre este fallo
 composer_cache: Caché
 composer_compression_hint: 'Compactación de contexto: sin datos de tiempo de ejecución (vista previa de la interfaz de usuario)'
@@ -2557,3 +2560,18 @@ pay_status_pending_message: Complete the payment in your payment app
 pay_status_received_title: Payment received
 pay_status_updated_message: Waiting for the next update
 pay_stripe_hint: Stripe checkout opens in your browser
+pay_popover_recharge: Top up
+pay_popover_plans: Plans
+pay_cancel: Cancel
+pay_estimated_credit: Estimated credit %{total}
+pay_estimated_credit_bonus: Estimated credit %{total} (incl. %{bonus} bonus)
+pay_more_promos: More rules
+pay_hide_promos: Hide rules
+pay_chip_fee: Fee %{rate}%
+pay_chip_limit: '%{min}–%{max}'
+pay_chip_remaining: Left %{amount}
+pay_chip_unavailable: Unavailable
+pay_completed_check: I've completed payment
+pay_checking_status: Checking payment status…
+pay_not_paid_yet: Payment not confirmed yet; please wait or finish checkout
+pay_countdown_remaining: '%{remaining} left'

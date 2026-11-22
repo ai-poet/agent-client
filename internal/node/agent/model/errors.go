@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,10 +43,11 @@ type Failure struct {
 	// the provider failure, including when a summary records why it failed.
 	Exhausted bool
 	// WaitExhausted distinguishes the cumulative wait budget from the attempt limit.
-	WaitExhausted bool
-	retryAfter    []string
-	retryAfterMs  *uint64
-	overloaded    bool
+	WaitExhausted  bool
+	retryAfter     []string
+	retryAfterMs   *uint64
+	overloaded     bool
+	tcpDialTimeout bool
 	// A transport EOF can recover; other invalid responses remain permanent.
 	truncated bool
 }
@@ -103,6 +105,9 @@ func (f *Failure) retainResponseHints(err error) {
 	if errors.As(err, &response) {
 		f.status = response.status
 		f.retryAfter = slices.Clone(response.retryAfter)
+	}
+	if f.status != nil || len(f.retryAfter) > 0 || f.retryAfterMs != nil {
+		f.tcpDialTimeout = false
 	}
 	f.overloaded = f.Retryable() && (f.overloaded || f.Kind == RateLimited || f.status != nil && *f.status == 529)
 }
@@ -219,6 +224,9 @@ func Classify(err error, secrets ...protocol.Secret) *Failure {
 	case http2ProtocolFailure(err) || errors.As(err, &network) || errors.Is(err, context.DeadlineExceeded):
 		f.Kind = Network
 	}
+	if f.Kind == Network && (provider == nil || provider.StatusCode == 0 && len(provider.ResponseBody) == 0 && len(provider.ResponseHeaders) == 0) {
+		f.tcpDialTimeout = isTCPDialTimeout(err)
+	}
 	if f.Kind == InvalidResponse && errors.Is(err, io.ErrUnexpectedEOF) {
 		f.truncated = true
 		f.Message = "Model stream ended before a completion event"
@@ -231,9 +239,29 @@ func Classify(err error, secrets ...protocol.Secret) *Failure {
 	return f
 }
 
+func isTCPDialTimeout(err error) bool {
+	op, ok := errors.AsType[*net.OpError](err)
+	if ok && op != nil && op.Op == "proxyconnect" && op.Net == "tcp" {
+		op, ok = op.Err.(*net.OpError)
+	}
+	if !ok || op == nil || op.Op != "dial" || (op.Net != "tcp" && op.Net != "tcp4" && op.Net != "tcp6") {
+		return false
+	}
+	// DNS failures from DialContext do not have a resolved TCP address.
+	address, ok := op.Addr.(*net.TCPAddr)
+	return ok && address != nil && op.Timeout()
+}
+
+func certificateVerificationFailure(err error, secrets ...protocol.Secret) *Failure {
+	if certificate, ok := errors.AsType[*tls.CertificateVerificationError](err); ok && certificate != nil {
+		return &Failure{Kind: InvalidRequest, Message: "model connection failed: " + transportCause(certificate, secrets...)}
+	}
+	return nil
+}
+
 // transportCause is a transport error's own text, without the request URL a
 // url.Error repeats, on one line of at most 200 characters.
-func transportCause(err error) string {
+func transportCause(err error, secrets ...protocol.Secret) string {
 	if err == nil {
 		return ""
 	}
@@ -241,7 +269,7 @@ func transportCause(err error) string {
 	if errors.As(err, &request) {
 		err = request.Err
 	}
-	text := strings.Join(strings.Fields(err.Error()), " ")
+	text := strings.Join(strings.Fields(safeDiagnostic(err.Error(), secrets)), " ")
 	if runes := []rune(text); len(runes) > 200 {
 		text = string(runes[:200]) + "…"
 	}

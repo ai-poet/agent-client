@@ -223,17 +223,82 @@ type KeyPage struct {
 	Total int64    `json:"total"`
 }
 
+// ResponsesSupport records a group's three-state /v1/responses declaration:
+// unset (omitted or null), explicitly supported, or explicitly unsupported.
+type ResponsesSupport uint8
+
+const (
+	ResponsesSupportUnset ResponsesSupport = iota
+	ResponsesSupportSupported
+	ResponsesSupportUnsupported
+)
+
+func (r *ResponsesSupport) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		*r = ResponsesSupportUnset
+		return nil
+	}
+	var b bool
+	if err := json.Unmarshal(data, &b); err == nil {
+		if b {
+			*r = ResponsesSupportSupported
+		} else {
+			*r = ResponsesSupportUnsupported
+		}
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		switch strings.ToLower(strings.TrimSpace(s)) {
+		case "true", "1":
+			*r = ResponsesSupportSupported
+			return nil
+		case "false", "0":
+			*r = ResponsesSupportUnsupported
+			return nil
+		default:
+			return fmt.Errorf("invalid supports_responses string %q", s)
+		}
+	}
+	var n int64
+	if err := json.Unmarshal(data, &n); err == nil {
+		switch n {
+		case 1:
+			*r = ResponsesSupportSupported
+			return nil
+		case 0:
+			*r = ResponsesSupportUnsupported
+			return nil
+		default:
+			return fmt.Errorf("invalid supports_responses number %d", n)
+		}
+	}
+	return fmt.Errorf("invalid supports_responses value %s", trimmed)
+}
+
+func (r ResponsesSupport) MarshalJSON() ([]byte, error) {
+	switch r {
+	case ResponsesSupportSupported:
+		return []byte("true"), nil
+	case ResponsesSupportUnsupported:
+		return []byte("false"), nil
+	default:
+		return []byte("null"), nil
+	}
+}
+
 // Group is one model routing group returned by GET /api/v1/groups/available.
 type Group struct {
-	ID                int64   `json:"id"`
-	Name              string  `json:"name"`
-	Description       string  `json:"description"`
-	Platform          string  `json:"platform"`
-	RateMultiplier    float64 `json:"rate_multiplier"`
-	Status            string  `json:"status"`
-	Category          string  `json:"category"`
-	SubscriptionType  string  `json:"subscription_type"`
-	SupportsResponses bool    `json:"supports_responses,omitempty"`
+	ID                int64            `json:"id"`
+	Name              string           `json:"name"`
+	Description       string           `json:"description"`
+	Platform          string           `json:"platform"`
+	RateMultiplier    float64          `json:"rate_multiplier"`
+	Status            string           `json:"status"`
+	Category          string           `json:"category"`
+	SubscriptionType  string           `json:"subscription_type"`
+	SupportsResponses ResponsesSupport `json:"supports_responses,omitempty"`
 }
 
 // IsSubscription reports whether the group bills against a subscription.

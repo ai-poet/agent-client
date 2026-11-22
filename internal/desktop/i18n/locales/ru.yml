@@ -587,6 +587,7 @@ background_result_waiting: Результат не доставлен
 chat_compact_cancelled: Уплотнение отменено
 chat_compact_failed: Уплотнение не удалось
 chat_compact_failed_paused: Сжатие не удалось, автоматическое сжатие приостановлено
+chat_compact_start_failed: Не удалось начать сжатие
 chat_compact_queued: Ожидание уплотнения
 chat_compact_unneeded: Уплотнение не требуется
 chat_compacted: Контекст уплотнён
@@ -619,6 +620,8 @@ chat_search: Поиск разговора
 chat_search_result: Поиск результатов
 chat_status_unsynced: Статус не синхронизирован
 chat_sync_failed: Синхронизация разговора не удалась
+compact_reason_budget: Ни один полный фрагмент истории не помещается в бюджет сводки
+compact_reason_request: Запрос сводки к модели завершился ошибкой
 compact_reason_unknown: Подробности этого сбоя не были записаны
 composer_cache: Кэш
 composer_compression_hint: 'Контекстное сжатие: отсутствие данных времени выполнения (предварительный просмотр интерфейса пользователя)'
@@ -2557,3 +2560,18 @@ pay_status_pending_message: Complete the payment in your payment app
 pay_status_received_title: Payment received
 pay_status_updated_message: Waiting for the next update
 pay_stripe_hint: Stripe checkout opens in your browser
+pay_popover_recharge: Top up
+pay_popover_plans: Plans
+pay_cancel: Cancel
+pay_estimated_credit: Estimated credit %{total}
+pay_estimated_credit_bonus: Estimated credit %{total} (incl. %{bonus} bonus)
+pay_more_promos: More rules
+pay_hide_promos: Hide rules
+pay_chip_fee: Fee %{rate}%
+pay_chip_limit: '%{min}–%{max}'
+pay_chip_remaining: Left %{amount}
+pay_chip_unavailable: Unavailable
+pay_completed_check: I've completed payment
+pay_checking_status: Checking payment status…
+pay_not_paid_yet: Payment not confirmed yet; please wait or finish checkout
+pay_countdown_remaining: '%{remaining} left'

@@ -1234,3 +1234,96 @@ func TestCheapManagedProvidersProjectSharedModelByBoundGroup(t *testing.T) {
 	})
 	d.untouched("after scoped provider cleanup")
 }
+
+// An earlier version kept every model on the unbound route. Lanes replaced
+// it, and each of its sessions follows its model to the lane that carries it.
+// A lane the user unbinds later keeps its sessions: another lane that offers
+// the same model never takes them.
+func TestCheapSessionsFollowTheLaneOfTheirModel(t *testing.T) {
+	gateway := newCheapGateway(t)
+	gateway.groupsBody = `{"code":0,"data":[` +
+		`{"id":11,"name":"Claude group","platform":"anthropic","status":"active"},` +
+		`{"id":21,"name":"Codex group","platform":"openai","status":"active"}` +
+		`]}`
+	gateway.catalogBody = `{"code":0,"data":{"items":[` +
+		`{"model":"claude-sonnet-4-6","billing_mode":"token","context_window":200000,"best_group":{"id":11}},` +
+		`{"model":"gpt-5","billing_mode":"token","context_window":128000,"best_group":{"id":21}},` +
+		`{"model":"shared-model","billing_mode":"token","context_window":128000,"best_group":{"id":21},"other_groups":[{"group":{"id":11}}]}` +
+		`]}}`
+	gateway.keysBody = `{"code":0,"data":{"items":[` +
+		`{"id":1,"key":"` + cheapTestKey + `","status":"active"},` +
+		`{"id":11,"key":"sk-group-11-active","group_id":11,"status":"active"},` +
+		`{"id":21,"key":"sk-group-21-active","group_id":21,"status":"active"}` +
+		`],"total":3}}`
+	claude, codex := providers.CheapRouterLaneID(core.LaneClaude), providers.CheapRouterLaneID(core.LaneCodex)
+	earlier := map[string]protocol.Session{}
+	d := openCheapDesktop(t, func(d *cheapDesktop) {
+		unbound, secret, err := providers.CheapRouterProvider(core.Gateway{BaseURL: gateway.URL + "/v1", APIKey: cheapTestKey, Models: []core.Model{
+			{ID: "claude-sonnet-4-6", ContextWindow: 200000}, {ID: "gpt-5", ContextWindow: 128000}, {ID: "shared-model", ContextWindow: 128000}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		unbound, _ = detail[protocol.ConversationProvider](d.do(protocol.Command{Kind: "save_provider", Data: protocol.CommandSaveProviderPayload{Provider: unbound, Secret: secret}}).Data)
+		for _, model := range unbound.Models {
+			config := protocol.DefaultSessionConfig()
+			config.Provider, config.Model, config.Credential, config.Effort = unbound.ID, model.ID, unbound.Credential, model.DefaultEffort
+			config.Mode, config.Permission = protocol.WorkModePlan, protocol.PermissionProject
+			earlier[model.ID], _ = detail[protocol.Session](d.do(protocol.Command{Kind: "create_session", Data: protocol.CommandCreateSessionPayload{Config: &config}}).Data)
+		}
+		store, err := core.NewStore(d.profile)
+		if err == nil {
+			err = store.Save(core.Credentials{AccessToken: cheapTestAccess, RefreshToken: cheapTestRefresh, ExpiresAt: time.Now().Add(time.Hour).Unix(), Endpoint: gateway.URL, APIKey: cheapTestKey,
+				LaneBindings: map[string]core.LaneBinding{core.LaneClaude: {GroupID: 11, APIKey: "sk-group-11-active"}, core.LaneCodex: {GroupID: 21, APIKey: "sk-group-21-active"}}})
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+	read := func(id protocol.SessionID) protocol.Session {
+		session, _ := detail[protocol.Session](d.do(protocol.Command{Kind: "read_session", Data: protocol.CommandReadSessionPayload{Session: id}}).Data)
+		return session
+	}
+	d.await("lanes to replace the unbound route", func() bool {
+		lanes := d.provider(claude) != nil && d.provider(codex) != nil && d.provider(claude).Enabled && d.provider(codex).Enabled
+		return d.account().Stage == cheapauthui.Ready && lanes
+	})
+	d.gateway(false)
+	// shared-model is offered by both lanes; the account routes it through Claude's group.
+	for model, lane := range map[string]protocol.ProviderID{"claude-sonnet-4-6": claude, "shared-model": claude, "gpt-5": codex} {
+		want := earlier[model].Config
+		want.Provider, want.Credential = lane, d.provider(lane).Credential
+		if got := read(earlier[model].ID); !reflect.DeepEqual(got.Config, want) {
+			t.Fatalf("%s session did not follow its lane:\n got %+v\nwant %+v", model, got.Config, want)
+		}
+	}
+	if own := read(d.session.ID); own.Revision != d.session.Revision {
+		t.Fatalf("the user's own session changed: %+v", own)
+	}
+
+	chosen := earlier["shared-model"].Config
+	chosen.Provider, chosen.Credential = codex, d.provider(codex).Credential
+	onCodex, _ := detail[protocol.Session](d.do(protocol.Command{Kind: "create_session", Data: protocol.CommandCreateSessionPayload{Config: &chosen}}).Data)
+	d.account().SelectLaneGroup(core.LaneCodex, nil)
+	d.await("the unbound Codex lane to be disabled", func() bool {
+		provider := d.provider(codex)
+		return !d.account().SwitchingGroup && provider != nil && !provider.Enabled
+	})
+	for _, session := range []protocol.Session{read(onCodex.ID), read(earlier["gpt-5"].ID)} {
+		if session.Config.Provider != codex {
+			t.Fatalf("%s session left its unbound lane for %s", session.Config.Model, session.Config.Provider)
+		}
+		for _, command := range []protocol.Command{
+			{Kind: "compact_context", Data: protocol.CommandCompactContextPayload{Session: session.ID, ExpectedRevision: session.Revision}},
+			{Kind: "submit_turn", Data: protocol.CommandSubmitTurnPayload{Session: session.ID, ExpectedRevision: session.Revision, Message: protocol.ConversationInput{Text: "control"}}},
+		} {
+			_, err := d.controller.Do(t.Context(), command)
+			wantMessage := "model provider is unavailable"
+			if command.Kind == "compact_context" {
+				wantMessage = "Select an available model before compacting this conversation."
+			}
+			if failure := commandFault(err); failure == nil || failure.Code != protocol.ErrorCodeNotConfigured || failure.ConfigurationReason() != protocol.ConfigurationProviderDisabled || failure.Message != wantMessage {
+				t.Fatalf("%s on the unbound lane: %v", command.Kind, err)
+			}
+		}
+	}
+}

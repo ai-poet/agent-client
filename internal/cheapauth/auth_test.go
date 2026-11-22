@@ -769,18 +769,53 @@ func TestAvailableGroupsAndEnsureKeyForGroup(t *testing.T) {
 	}
 }
 
-func TestGroupResponsesCapabilityNeedsBooleanEvidence(t *testing.T) {
+func TestGroupResponsesCapabilityTristateDecoding(t *testing.T) {
 	for _, tc := range []struct {
-		raw       string
-		want, bad bool
+		raw  string
+		want ResponsesSupport
+		bad  bool
 	}{
-		{`{}`, false, false}, {`{"supports_responses":false}`, false, false}, {`{"supports_responses":true}`, true, false},
-		{`{"supports_responses":"true"}`, false, true}, {`{"supports_responses":1}`, false, true},
+		{`{}`, ResponsesSupportUnset, false},
+		{`{"supports_responses":null}`, ResponsesSupportUnset, false},
+		{`{"supports_responses":false}`, ResponsesSupportUnsupported, false},
+		{`{"supports_responses":true}`, ResponsesSupportSupported, false},
+		{`{"supports_responses":"true"}`, ResponsesSupportSupported, false},
+		{`{"supports_responses":"TRUE"}`, ResponsesSupportSupported, false},
+		{`{"supports_responses":"false"}`, ResponsesSupportUnsupported, false},
+		{`{"supports_responses":1}`, ResponsesSupportSupported, false},
+		{`{"supports_responses":0}`, ResponsesSupportUnsupported, false},
+		{`{"supports_responses":"1"}`, ResponsesSupportSupported, false},
+		{`{"supports_responses":"0"}`, ResponsesSupportUnsupported, false},
+		{`{"supports_responses":"yes"}`, ResponsesSupportUnset, true},
+		{`{"supports_responses":""}`, ResponsesSupportUnset, true},
+		{`{"supports_responses":2}`, ResponsesSupportUnset, true},
+		{`{"supports_responses":-1}`, ResponsesSupportUnset, true},
+		{`{"supports_responses":1.5}`, ResponsesSupportUnset, true},
+		{`{"supports_responses":{}}`, ResponsesSupportUnset, true},
+		{`{"supports_responses":[]}`, ResponsesSupportUnset, true},
 	} {
 		var group Group
 		err := json.Unmarshal([]byte(tc.raw), &group)
-		if (err != nil) != tc.bad || group.SupportsResponses != tc.want {
-			t.Fatalf("decode %s: supports=%v err=%v", tc.raw, group.SupportsResponses, err)
+		if (err != nil) != tc.bad || (!tc.bad && group.SupportsResponses != tc.want) {
+			t.Fatalf("decode %s: supports=%v err=%v, want supports=%v bad=%v", tc.raw, group.SupportsResponses, err, tc.want, tc.bad)
+		}
+	}
+
+	for _, tc := range []struct {
+		state   ResponsesSupport
+		wantSub string
+		absent  bool
+	}{
+		{ResponsesSupportUnset, `"supports_responses"`, true},
+		{ResponsesSupportSupported, `"supports_responses":true`, false},
+		{ResponsesSupportUnsupported, `"supports_responses":false`, false},
+	} {
+		raw, err := json.Marshal(Group{ID: 1, SupportsResponses: tc.state})
+		if err != nil {
+			t.Fatalf("marshal %v: %v", tc.state, err)
+		}
+		if tc.absent == strings.Contains(string(raw), tc.wantSub) {
+			t.Fatalf("marshal %v = %s, want %q absent=%v", tc.state, raw, tc.wantSub, tc.absent)
 		}
 	}
 }

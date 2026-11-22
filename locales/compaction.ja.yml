@@ -1,3 +1,4 @@
+chat_compact_start_failed: 圧縮を開始できませんでした
 compact_auto_failed: "自動圧縮に失敗しました"
 compact_stage_history: "段階 · 履歴の照合"
 compact_stage_budget: "段階 · コンテキスト容量"

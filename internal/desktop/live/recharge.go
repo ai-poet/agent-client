@@ -59,6 +59,7 @@ func (r *Runtime) openPayment(plan *core.SubscriptionPlan, listing bool) {
 		}
 	}
 	s.Submit = s.submit
+	s.CheckStatus = s.checkStatus
 	s.CancelOrder = s.cancelOrder
 	s.OpenCenter = s.openCenter
 	s.Redeem = s.redeem
@@ -228,13 +229,7 @@ func (s *rechargeSession) load() {
 			}
 			s.pay, s.accountID, s.loadedToken = client, config.UserID, sha256.Sum256([]byte(token))
 			s.Config = &config
-			for _, method := range config.EnabledPaymentTypes {
-				m := strings.ToLower(strings.TrimSpace(method))
-				if s.Plan == nil || strings.HasPrefix(m, "alipay") || strings.HasPrefix(m, "wxpay") || core.IsStripe(m) {
-					s.Method = method
-					break
-				}
-			}
+			s.Method = s.FirstAvailableMethod()
 			if raw := config.HelpImageURL; raw != "" {
 				dir := filepath.Dir(filepath.Dir(s.Preferences.Path))
 				s.async(func() {
@@ -363,6 +358,7 @@ func rechargeQR(payload string) *image.NRGBA {
 func (s *rechargeSession) watch(deadline time.Time) {
 	ctx, stop := context.WithDeadline(s.ctx, deadline)
 	s.stopPoll = stop
+	s.Deadline = deadline
 	order := s.order
 	s.async(func() {
 		tick := time.NewTicker(time.Second)
@@ -400,8 +396,37 @@ func (s *rechargeSession) watch(deadline time.Time) {
 	})
 }
 
+func (s *rechargeSession) checkStatus() {
+	if !s.active() || s.Busy || s.CheckingStatus || s.Terminal || s.OrderID == "" || s.pay == nil {
+		return
+	}
+	s.CheckingStatus, s.Message = true, ""
+	order := s.order
+	s.async(func() {
+		status, err := s.pay.OrderStatus(s.ctx, order.OrderID, order.StatusAccessToken)
+		s.enqueue(func(c *ui.Context) {
+			if !s.active() {
+				return
+			}
+			s.CheckingStatus = false
+			if err != nil {
+				s.Message = err.Error()
+				return
+			}
+			s.applyStatus(c, status)
+			if !s.Terminal && !status.IsSettled() && !status.PaymentSuccess {
+				s.Message = i18n.T(c, "pay_not_paid_yet")
+			}
+		})
+	})
+}
+
 func (s *rechargeSession) applyStatus(c *ui.Context, status core.OrderStatus) {
-	s.Status, s.Message = &status, ""
+	keepNotPaid := !status.IsSettled() && !status.IsTerminal() && !status.PaymentSuccess && status.RechargeStatus != "failed" && s.Message == i18n.T(c, "pay_not_paid_yet")
+	s.Status = &status
+	if !keepNotPaid {
+		s.Message = ""
+	}
 	if !status.IsSettled() && !status.IsTerminal() && status.RechargeStatus != "failed" {
 		return
 	}

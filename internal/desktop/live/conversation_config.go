@@ -6,17 +6,24 @@ import (
 	"reflect"
 	"slices"
 
+	cheapauthui "github.com/ai-poet/cheaprouter-harness/internal/desktop/cheapauth"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
+	nodeproviders "github.com/ai-poet/cheaprouter-harness/internal/node/providers"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/egoist/mygo/ui"
 )
 
-func (r *Runtime) composerKey(id string, c *composer.State) string {
+func (r *Runtime) selectedComposerConfig(id string, c *composer.State, models []composer.Model) (protocol.SessionConfig, error) {
 	effort := ""
-	if chosen := c.Chosen(r.models()); chosen.Reasoning {
+	if chosen := c.Chosen(models); chosen.Reasoning {
 		effort = c.EffortName(nil, chosen)
 	}
 	config, _, err := r.composerConfig(id, c, composer.Message{Model: c.Model, Mode: c.Mode, Permission: c.Permission, Features: c.Features, Effort: effort})
+	return config, err
+}
+
+func (r *Runtime) composerKey(id string, c *composer.State) string {
+	config, err := r.selectedComposerConfig(id, c, r.models())
 	if err != nil {
 		return ""
 	}
@@ -65,6 +72,47 @@ func (r *Runtime) defaultComposerForFamily(c *composer.State, preferredFamily st
 			break
 		}
 	}
+}
+
+// followCheapSession keeps a conversation on its model after lanes replaced
+// the unbound CheapRouter route it was selected on. The composer moves to the
+// lane that carries the model, or to the lane route reconciliation already
+// saved for the session. It reports whether that lane is still to be saved.
+func (r *Runtime) followCheapSession(session protocol.Session, comp *composer.State) bool {
+	unbound := nodeproviders.CheapRouterProviderID
+	if r.parent != nil || session.Profile != nil || comp.Model != modelKey(unbound, session.Config.Model) {
+		return false
+	}
+	current := slices.DeleteFunc(slices.Clone(r.snapshot().Providers), func(p protocol.ConversationProvider) bool { return !r.listedProviderUsable(p) })
+	if session.Config.Provider != unbound {
+		retired := slices.ContainsFunc(current, func(p protocol.ConversationProvider) bool { return p.ID == unbound && !p.Enabled })
+		if retired && nodeproviders.IsCheapRouterProvider(session.Config.Provider) {
+			id := session.ID.String()
+			r.applyComposer(comp, session.Config)
+			r.composerObserved[id] = r.composerKey(id, comp)
+		}
+		return false
+	}
+	var lanes map[string]string
+	if hints := r.cheapModelGroupHints(); hints != nil {
+		lanes = hints.modelLanes
+	}
+	successor, ok := nodeproviders.CheapRouterSuccessor(unbound, session.Config.Model, lanes, current)
+	if !ok {
+		return false
+	}
+	config := session.Config
+	config.Provider, config.Credential = successor.ID, successor.Credential
+	r.applyComposer(comp, config)
+	return true
+}
+
+// cheapRoutesSettled reports that no route reconciliation is under way. Its
+// worker moves the sessions of a replaced route itself.
+func (r *Runtime) cheapRoutesSettled() bool {
+	account := r.cheapAuth
+	return account == nil || account.state == nil ||
+		account.state.Stage != cheapauthui.SyncingGateway && !account.state.SwitchingGroup && !account.state.LoggingOut
 }
 
 // A send waits for this controller's in-flight configuration save. A failed or
