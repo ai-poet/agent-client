@@ -84,7 +84,7 @@ func TestSidebarAccountFooterSignedOutAndSignedInPopover(t *testing.T) {
 	if refreshed != 1 {
 		t.Fatalf("opening signed-in popover called RefreshGroups %d times, want 1", refreshed)
 	}
-	for _, want := range []string{"Dev", "Pro", "余额 $12.50", "3 个模型", "Claude", "Claude 高速组", "Codex", "未绑定", "退出登录"} {
+	for _, want := range []string{"Dev", "Pro", "余额 $12.50", "充值", "套餐", "3 个模型", "Claude", "Claude 高速组", "Codex", "未绑定", "退出登录"} {
 		if !tt.HasText(want) {
 			t.Errorf("level-1 signed-in popover missing %q: %q", want, tt.Texts())
 		}
@@ -174,5 +174,110 @@ func TestSidebarAccountFooterSignedOutAndSignedInPopover(t *testing.T) {
 	tt.Frame()
 	if a.accountOpen || a.accountGroupLane != "" {
 		t.Fatal("second Escape should dismiss the account popover")
+	}
+}
+
+func TestSidebarAccountPopoverOpensRechargeAndPlansDirectly(t *testing.T) {
+	data := &viewmodel.Data{
+		Workspace: &viewmodel.Workspace{
+			Hosts: []viewmodel.Host{{ID: "local", Name: "local_host_name", Platform: "macos", Local: true}},
+		},
+		Projects: []*viewmodel.Project{{
+			ID: "proj-1", Host: "local", Name: "my-workspace", Path: "/tmp/my-workspace", Branch: "main",
+			Conversations: []*viewmodel.Conversation{{ID: "conv-1", Title: "Demo session"}},
+		}},
+	}
+	a := NewLive(data)
+	a.Sidebar.Selected = "conv-1"
+	state := cheapauthui.NewState()
+	state.Stage = cheapauthui.Ready
+	state.Account = core.User{Email: "dev@example.test", Username: "Dev", PlanName: "Pro", Balance: 18.5}
+	state.ModelCount = 2
+	a.Settings.CheapRouter = state
+
+	rechargeOpens, planOpens := 0, 0
+	state.OpenRecharge = func() {
+		rechargeOpens++
+		d := &cheapauthui.RechargeDialog{
+			Amount: "10",
+			Config: &core.PayConfig{
+				MinAmount: 5, MaxAmount: 200, MaxPendingOrders: 3,
+				EnabledPaymentTypes: []string{"alipay", "wxpay"},
+			},
+			Submit: func(float64, string) {},
+		}
+		d.Close = func() { state.Recharge = nil }
+		state.Recharge = d
+	}
+	state.OpenPlans = func() {
+		planOpens++
+		d := &cheapauthui.RechargeDialog{
+			Listing: true,
+			Plans:   []core.SubscriptionPlan{{ID: "pro-m", Name: "Pro Monthly", Price: 29, ValidityDays: 1, ValidityUnit: "month"}},
+		}
+		d.Close = func() { state.Recharge = nil }
+		state.Recharge = d
+	}
+
+	tt := ui.NewTesterWith(a.View, 1280, 820, ui.TesterOptions{Preferences: ui.Preferences{ReduceTransparency: true, ReduceMotion: true}})
+	tt.SetLocale("zh-CN")
+	tt.Frame()
+
+	openPopover := func() {
+		trigger, ok := tt.AccessByRole(ui.RoleButton, "dev@example.test")
+		if !ok {
+			t.Fatalf("missing signed-in footer trigger: %q", tt.Texts())
+		}
+		tt.ClickAt(trigger.Bounds.X+trigger.Bounds.W/2, trigger.Bounds.Y+trigger.Bounds.H/2)
+		tt.Frame()
+		tt.Frame()
+	}
+
+	// 1. Click "充值" inside avatar popover -> opens recharge dialog directly without leaving ConversationPage.
+	openPopover()
+	rechargeBtn, ok := tt.AccessByRole(ui.RoleButton, "充值")
+	if !ok || rechargeBtn.Disabled {
+		t.Fatalf("popover recharge button unavailable: found=%v disabled=%v texts=%q", ok, rechargeBtn.Disabled, tt.Texts())
+	}
+	tt.ClickAt(rechargeBtn.Bounds.X+rechargeBtn.Bounds.W/2, rechargeBtn.Bounds.Y+rechargeBtn.Bounds.H/2)
+	tt.Frame()
+	tt.Frame()
+	if rechargeOpens != 1 || a.accountOpen || a.Page != ConversationPage {
+		t.Fatalf("expected direct recharge dialog on ConversationPage: opens=%d accountOpen=%v page=%v", rechargeOpens, a.accountOpen, a.Page)
+	}
+	dlg, ok := tt.AccessByRole(ui.RoleDialog, "余额充值")
+	if !ok || dlg.Bounds.W < 360 || dlg.Bounds.W > 420 {
+		t.Fatalf("recharge dialog not shown or width out of 360..420: found=%v bounds=%+v", ok, dlg.Bounds)
+	}
+	for _, want := range []string{"预计到账 $10.00", "支付 $10.00", "取消"} {
+		if !tt.HasText(want) {
+			t.Errorf("recharge dialog missing %q: %q", want, tt.Texts())
+		}
+	}
+
+	cancelBtn, ok := tt.AccessByRole(ui.RoleButton, "取消")
+	if !ok {
+		t.Fatalf("missing Cancel button in recharge dialog: %q", tt.Texts())
+	}
+	tt.ClickAt(cancelBtn.Bounds.X+cancelBtn.Bounds.W/2, cancelBtn.Bounds.Y+cancelBtn.Bounds.H/2)
+	tt.Frame()
+	if state.Recharge != nil {
+		t.Fatal("Cancel did not close recharge dialog")
+	}
+
+	// 2. Click "套餐" inside avatar popover -> opens plans dialog directly without leaving ConversationPage.
+	openPopover()
+	plansBtn, ok := tt.AccessByRole(ui.RoleButton, "套餐")
+	if !ok || plansBtn.Disabled {
+		t.Fatalf("popover plans button unavailable: found=%v disabled=%v", ok, plansBtn.Disabled)
+	}
+	tt.ClickAt(plansBtn.Bounds.X+plansBtn.Bounds.W/2, plansBtn.Bounds.Y+plansBtn.Bounds.H/2)
+	tt.Frame()
+	tt.Frame()
+	if planOpens != 1 || a.accountOpen || a.Page != ConversationPage {
+		t.Fatalf("expected direct plans dialog on ConversationPage: opens=%d accountOpen=%v page=%v", planOpens, a.accountOpen, a.Page)
+	}
+	if !tt.HasText("Pro Monthly") {
+		t.Fatalf("plans dialog missing plan item: %q", tt.Texts())
 	}
 }

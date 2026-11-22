@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"strings"
 
+	cheapauthui "github.com/ai-poet/cheaprouter-harness/internal/desktop/cheapauth"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
@@ -157,6 +158,7 @@ func (a *App) overlays(c *ui.Context) {
 		a.Hooks.UpdateDialog(c)
 	}
 	a.welcome(c)
+	cheapauthui.RechargeOverlay(c, a.Settings.CheapRouter)
 	a.selectionDialog(c)
 	a.closeDialog(c)
 	// The file picker opens from other dialogs, so it is built after them.

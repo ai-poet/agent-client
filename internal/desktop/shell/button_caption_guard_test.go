@@ -98,9 +98,11 @@ func TestShellButtonCaptionsAppearOnce(t *testing.T) {
 		state.Account = core.User{Email: "guard@example.test", Username: "Guard", PlanName: "Pro", Balance: 5}
 		state.GroupsError = "加载失败"
 		state.RefreshGroups = func() {}
+		state.OpenRecharge = func() {}
+		state.OpenPlans = func() {}
 		a.accountGroupLane = ""
 		tt.Frame()
-		for _, label := range []string{"账号详情", "退出登录", "重试加载分组"} {
+		for _, label := range []string{"充值", "套餐", "账号详情", "退出登录", "重试加载分组"} {
 			if got := countText(tt.Texts(), label); got != 2 {
 				t.Fatalf("signed-in popover button %q appeared %d times (want 2): %q", label, got, tt.Texts())
 			}

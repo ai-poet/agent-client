@@ -7,6 +7,7 @@ import (
 
 	core "github.com/ai-poet/cheaprouter-harness/internal/cheapauth"
 	cheapauthui "github.com/ai-poet/cheaprouter-harness/internal/desktop/cheapauth"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/settings"
@@ -183,7 +184,7 @@ func (a *App) accountSignedInContent(c *ui.Context, state *cheapauthui.State) {
 
 	_, height := c.Size()
 	ui.Scroll(c.Key("signed-in-panel")).FillWidth().MaxHeight(max(0, height-74)).Padding(10).Gap(10).Children(func() {
-		ui.Column(c.Key("account-summary")).Padding(4).Gap(6).Children(func() {
+		ui.Column(c.Key("account-summary")).Padding(4).Gap(8).Children(func() {
 			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 				accountAvatar(c, p, state, 34)
 				ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(1).Children(func() {
@@ -198,13 +199,31 @@ func (a *App) accountSignedInContent(c *ui.Context, state *cheapauthui.State) {
 				})
 			})
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				if state.AccountFailure == "" {
+					ui.Textf(c, "余额 $%.2f", state.Account.Balance).FontSize(14).FontWeight(600).TextColor(p.PopoverForeground)
+				}
 				ui.Text(c, state.Account.PlanDisplay()).FontSize(12).FontWeight(500).Padding(2, 6).Radius(4).
 					Background(p.Muted).TextColor(p.PopoverForeground)
-				if state.AccountFailure == "" {
-					ui.Textf(c, "余额 $%.2f", state.Account.Balance).FontSize(12).TextColor(p.MutedForeground)
-				}
 				ui.Spacer(c)
 				ui.Textf(c, "%d 个模型", state.ModelCount).FontSize(12).TextColor(p.MutedForeground)
+			})
+			ui.Row(c.Key("account-payment-actions")).FillWidth().Gap(6).Children(func() {
+				kit.Primary(c.Key("popover-recharge"), i18n.T(c, "pay_popover_recharge"), state.LoggingOut || state.OpenRecharge == nil || state.Recharge != nil).
+					Grow(1).Height(32).OnClick(func() {
+					a.accountOpen = false
+					a.accountGroupLane = ""
+					if state.OpenRecharge != nil {
+						state.OpenRecharge()
+					}
+				})
+				kit.Secondary(c.Key("popover-plans"), i18n.T(c, "pay_popover_plans")).
+					Height(32).Disabled(state.LoggingOut || state.OpenPlans == nil || state.Recharge != nil).OnClick(func() {
+					a.accountOpen = false
+					a.accountGroupLane = ""
+					if state.OpenPlans != nil {
+						state.OpenPlans()
+					}
+				})
 			})
 		})
 
@@ -245,7 +264,7 @@ func (a *App) accountSignedInContent(c *ui.Context, state *cheapauthui.State) {
 					laneLabel := core.LaneDisplayName(lane)
 					boundGroup, hasBound := state.BoundGroup(lane)
 					open := a.accountGroupLane == lane
-					laneTrigger := ui.ButtonBase(c.Key("lane-menu-" + lane)).Label(laneLabel).FillWidth().Padding(6, 8).
+					laneTrigger := ui.ButtonBase(c.Key("lane-menu-"+lane)).Label(laneLabel).FillWidth().Padding(6, 8).
 						Radius(p.Radius).Cursor(ui.CursorPointer).
 						HasPopup(ui.PopupMenu).Expanded(open)
 					if hasBound {
