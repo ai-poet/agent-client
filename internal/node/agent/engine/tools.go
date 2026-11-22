@@ -21,6 +21,7 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 	"lukechampine.com/blake3"
 )
 
@@ -333,6 +334,9 @@ func (r *Runtime) runTools(x *execution, state store.AgentState, calls []canonic
 			continue
 		}
 		if err := tool.schema.Validate(arguments); err != nil {
+			if validation, ok := errors.AsType[*jsonschema.ValidationError](err); ok {
+				orderValidationErrors(validation)
+			}
 			results[i] = invalidTool(fmt.Sprintf("invalid tool arguments: %s", err))
 			continue
 		}
@@ -578,6 +582,25 @@ func logPanic(x *execution, operation, call string, value any) {
 func invalidTool(message string) ToolResult {
 	return ToolResult{Failure: &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: message}}
 }
+
+func orderValidationErrors(err *jsonschema.ValidationError) {
+	for _, cause := range err.Causes {
+		orderValidationErrors(cause)
+	}
+	switch detail := err.ErrorKind.(type) {
+	case *kind.AdditionalProperties:
+		slices.Sort(detail.Properties)
+	case *kind.Schema, *kind.Group, *kind.Reference, *kind.PropertyNames:
+		// These groups can collect causes in map order. Combinators keep their declared branch order.
+		slices.SortFunc(err.Causes, func(a, b *jsonschema.ValidationError) int {
+			if order := slices.Compare(a.InstanceLocation, b.InstanceLocation); order != 0 {
+				return order
+			}
+			return strings.Compare(a.Error(), b.Error())
+		})
+	}
+}
+
 func jsonTool(name, description, schema string, readOnly, concurrent bool, execute func(context.Context, canonical.ToolRequest) ToolResult) Tool {
 	var input map[string]any
 	if err := json.Unmarshal([]byte(schema), &input); err != nil {
