@@ -148,8 +148,9 @@ type App struct {
 	Settings          *settings.State
 	Messages          *conversation.State
 	ImageStudio       *imagestudio.State
-	accountOpen       bool
+	accountOpen      bool
 	accountGroupLane string
+	accountNodesOpen bool
 	// overviews are the session overview popovers by conversation, each
 	// opened by its conversation's own button (conversationActions); band
 	// is the header's main region as the activity strip fits into it

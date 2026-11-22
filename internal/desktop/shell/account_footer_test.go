@@ -281,3 +281,96 @@ func TestSidebarAccountPopoverOpensRechargeAndPlansDirectly(t *testing.T) {
 		t.Fatalf("plans dialog missing plan item: %q", tt.Texts())
 	}
 }
+
+func TestSidebarAccountPopoverGatewayOriginSubmenu(t *testing.T) {
+	data := &viewmodel.Data{
+		Workspace: &viewmodel.Workspace{
+			Hosts: []viewmodel.Host{{ID: "local", Name: "local_host_name", Platform: "macos", Local: true}},
+		},
+		Projects: []*viewmodel.Project{{
+			ID: "proj-1", Host: "local", Name: "my-workspace", Path: "/tmp/my-workspace", Branch: "main",
+			Conversations: []*viewmodel.Conversation{{ID: "conv-1", Title: "Demo session"}},
+		}},
+	}
+	a := NewLive(data)
+	a.Sidebar.Selected = "conv-1"
+	state := cheapauthui.NewState()
+	state.Stage = cheapauthui.Ready
+	state.Account = core.User{Email: "dev@example.test", Username: "Dev", PlanName: "Pro", Balance: 15}
+	state.ModelCount = 2
+	state.OriginResults = []core.CandidateResult{
+		{URL: core.PrimaryEndpoint, Result: &core.ProbeResult{LatencyMS: 210, Status: 200, Verdict: core.ProbeOK}},
+		{URL: core.CDNEndpoint, Result: &core.ProbeResult{LatencyMS: 65, Status: 200, Verdict: core.ProbeOK}},
+	}
+	var selected []string
+	tested := 0
+	state.SelectOrigin = func(origin string) { selected = append(selected, origin) }
+	state.TestOrigins = func() { tested++ }
+	state.SetOriginAuto = func(on bool) { state.OriginConfig.AutoSelect = on }
+	a.Settings.CheapRouter = state
+
+	tt := ui.NewTesterWith(a.View, 1280, 820, ui.TesterOptions{Preferences: ui.Preferences{ReduceTransparency: true, ReduceMotion: true}})
+	tt.SetLocale("zh-CN")
+	tt.Frame()
+
+	trigger, ok := tt.AccessByRole(ui.RoleButton, "dev@example.test")
+	if !ok {
+		t.Fatalf("missing signed-in trigger: %q", tt.Texts())
+	}
+	tt.ClickAt(trigger.Bounds.X+trigger.Bounds.W/2, trigger.Bounds.Y+trigger.Bounds.H/2)
+	tt.Frame()
+	tt.Frame()
+
+	originBtn, ok := tt.AccessByRole(ui.RoleButton, "API 节点")
+	if !ok {
+		t.Fatalf("signed-in popover missing API 节点 row: %q", tt.Texts())
+	}
+	tt.ClickAt(originBtn.Bounds.X+originBtn.Bounds.W/2, originBtn.Bounds.Y+originBtn.Bounds.H/2)
+	tt.Frame()
+	tt.Frame()
+	if !a.accountNodesOpen {
+		t.Fatal("clicking API 节点 did not open node submenu")
+	}
+	for _, want := range []string{"云端 API 节点", "CDN 加速节点", "65 ms", "主站（默认）", "210 ms", "全部测速", "管理节点…"} {
+		if !tt.HasText(want) {
+			t.Errorf("origin submenu missing %q: %q", want, tt.Texts())
+		}
+	}
+
+	// Click "全部测速" button in submenu.
+	testBtn, ok := tt.AccessByRole(ui.RoleButton, "全部测速")
+	if !ok {
+		t.Fatalf("origin submenu missing 全部测速 button: %q", tt.Texts())
+	}
+	tt.ClickAt(testBtn.Bounds.X+testBtn.Bounds.W/2, testBtn.Bounds.Y+testBtn.Bounds.H/2)
+	tt.Frame()
+	if tested != 1 {
+		t.Fatalf("TestOrigins calls = %d, want 1", tested)
+	}
+
+	// Select CDN node from submenu -> invokes SelectOrigin and closes submenu.
+	cdnBtn, ok := tt.AccessByRole(ui.RoleButton, "CDN 加速节点")
+	if !ok {
+		t.Fatalf("origin submenu missing CDN node row: %q", tt.Texts())
+	}
+	tt.ClickAt(cdnBtn.Bounds.X+cdnBtn.Bounds.W/2, cdnBtn.Bounds.Y+cdnBtn.Bounds.H/2)
+	tt.Frame()
+	tt.Frame()
+	if len(selected) != 1 || selected[0] != core.CDNEndpoint || a.accountNodesOpen {
+		t.Fatalf("selected = %v, accountNodesOpen = %v", selected, a.accountNodesOpen)
+	}
+
+	// Reopen submenu and click "管理节点…" -> opens Settings → CheapRouter 账号.
+	tt.ClickAt(originBtn.Bounds.X+originBtn.Bounds.W/2, originBtn.Bounds.Y+originBtn.Bounds.H/2)
+	tt.Frame()
+	tt.Frame()
+	manageBtn, ok := tt.AccessByRole(ui.RoleButton, "管理节点…")
+	if !ok {
+		t.Fatalf("origin submenu missing 管理节点… button: %q", tt.Texts())
+	}
+	tt.ClickAt(manageBtn.Bounds.X+manageBtn.Bounds.W/2, manageBtn.Bounds.Y+manageBtn.Bounds.H/2)
+	tt.Frame()
+	if a.Page != SettingsPage || a.accountOpen || a.accountNodesOpen {
+		t.Fatalf("管理节点… did not open SettingsPage cleanly: page=%v open=%v nodes=%v", a.Page, a.accountOpen, a.accountNodesOpen)
+	}
+}

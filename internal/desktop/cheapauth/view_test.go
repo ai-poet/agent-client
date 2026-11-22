@@ -287,6 +287,90 @@ func TestAccountPageCanCancelPendingLogin(t *testing.T) {
 	}
 }
 
+func TestAccountGatewayOriginsUI(t *testing.T) {
+	state := NewState()
+	state.Stage = Ready
+	state.Account = core.User{Username: "Demo", Email: "demo@example.test", PlanName: "Pro", Balance: 10}
+	state.ModelCount = 4
+	cfg := core.DefaultGatewayOriginConfig()
+	_, _ = cfg.Add("https://custom.example.org")
+	_ = cfg.FallBack(core.CDNEndpoint)
+	state.OriginConfig = cfg
+	state.OriginResults = []core.CandidateResult{
+		{URL: core.PrimaryEndpoint, Result: &core.ProbeResult{LatencyMS: 320, Status: 200, Verdict: core.ProbeOK}},
+		{URL: core.CDNEndpoint, Result: &core.ProbeResult{LatencyMS: 80, Status: 200, Verdict: core.ProbeOK}},
+		{URL: "https://custom.example.org", Result: &core.ProbeResult{Verdict: core.ProbeUnreachable}},
+	}
+
+	var selected, added, removed []string
+	tested := 0
+	var autoStates []bool
+	state.SelectOrigin = func(origin string) { selected = append(selected, origin) }
+	state.AddOrigin = func(raw string) {
+		added = append(added, raw)
+		state.OriginInput = ""
+	}
+	state.RemoveOrigin = func(origin string) { removed = append(removed, origin) }
+	state.TestOrigins = func() { tested++ }
+	state.SetOriginAuto = func(on bool) {
+		autoStates = append(autoStates, on)
+		state.OriginConfig.AutoSelect = on
+	}
+
+	tt := ui.NewTester(func(c *ui.Context) { Page(c, state) }, 960, 1200)
+	tt.SetLocale("zh-CN")
+	tt.Frame()
+	for _, want := range []string{
+		"云端 API 节点",
+		"CDN 加速节点",
+		"主站（默认）",
+		"自行添加",
+		"80 ms",
+		"320 ms",
+		"无法连通",
+		"使用中",
+		"全部测速",
+		"测速后自动选择最快节点",
+		"当前已临时从 " + core.PrimaryEndpoint + " 回退",
+	} {
+		if !tt.HasText(want) {
+			t.Errorf("missing %q in account gateway origins UI: %q", want, tt.Texts())
+		}
+	}
+
+	loginClick(t, tt, "全部测速")
+	if tested != 1 {
+		t.Fatalf("TestOrigins calls = %d, want 1", tested)
+	}
+
+	loginClick(t, tt, "移除")
+	if !slices.Equal(removed, []string{"https://custom.example.org"}) {
+		t.Fatalf("RemoveOrigin calls = %v", removed)
+	}
+
+	input := loginControl(t, tt, ui.RoleTextField, i18n.In("zh-CN", "gateway_origin_placeholder")).Bounds
+	tt.ClickAt(input.X+input.W/2, input.Y+input.H/2)
+	tt.Type("mirror2.example.org")
+	tt.Frame()
+	loginClick(t, tt, "添加域名")
+	if !slices.Equal(added, []string{"mirror2.example.org"}) {
+		t.Fatalf("AddOrigin calls = %v", added)
+	}
+
+	sw := loginControl(t, tt, ui.RoleSwitch, "测速后自动选择最快节点").Bounds
+	tt.ClickAt(sw.X+sw.W/2, sw.Y+sw.H/2)
+	tt.Frame()
+	if !slices.Equal(autoStates, []bool{true}) {
+		t.Fatalf("SetOriginAuto calls = %v, want [true]", autoStates)
+	}
+
+	// Clicking "使用" picks an inactive node (the first non-active node in sorted order is PrimaryEndpoint).
+	loginClick(t, tt, "使用")
+	if !slices.Equal(selected, []string{core.PrimaryEndpoint}) {
+		t.Fatalf("SelectOrigin calls = %v, want [%s]", selected, core.PrimaryEndpoint)
+	}
+}
+
 func TestLoginSnapshots(t *testing.T) {
 	dir := os.Getenv("SAILRY_LOGIN_SNAPSHOTS")
 	if dir == "" {
