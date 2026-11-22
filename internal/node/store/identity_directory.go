@@ -8,7 +8,7 @@ import (
 	"errors"
 	"sort"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func SaveIdentityDirectory(ctx context.Context, db *sql.Conn, hosts []protocol.DirectoryHost) error {

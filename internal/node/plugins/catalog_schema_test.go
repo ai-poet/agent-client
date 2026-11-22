@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	sailry "github.com/ai-poet/agent-client"
+	sailry "github.com/ai-poet/cheaprouter-harness"
 )
 
 func TestBundledCatalogMatchesPublishedSchema(t *testing.T) {

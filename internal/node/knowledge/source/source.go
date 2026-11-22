@@ -11,9 +11,9 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/ai-poet/agent-client/internal/node/knowledge"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/knowledge"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // Stat is the metadata witness that lets an unchanged file skip extraction.

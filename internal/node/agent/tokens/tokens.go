@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
 	loader "github.com/pkoukk/tiktoken-go-loader"
 )
 

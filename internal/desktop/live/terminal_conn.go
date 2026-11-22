@@ -4,7 +4,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	myterminal "github.com/egoist/mygo/plugins/terminal"
 	"github.com/egoist/mygo/ui"
 )

@@ -3,7 +3,7 @@ package plugins
 import (
 	"encoding/json"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func ComposerStatistics(statistics *protocol.ConversationStatistics) (json.RawMessage, error) {

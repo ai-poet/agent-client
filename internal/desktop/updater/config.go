@@ -18,7 +18,7 @@ import (
 const (
 	// Releases and Downloads are the official release source.
 	Releases    = "https://api.github.com/repos/sailry/sailry-harness/releases"
-	Downloads   = "https://github.com/ai-poet/agent-client/releases/download"
+	Downloads   = "https://github.com/ai-poet/cheaprouter-harness/releases/download"
 	maxManifest = 1024 * 1024
 	maxArchive  = 2 * 1024 * 1024 * 1024
 )

@@ -14,10 +14,10 @@ import (
 	"testing"
 	"unicode"
 
-	"github.com/ai-poet/agent-client/internal/desktop/composer"
-	cv "github.com/ai-poet/agent-client/internal/desktop/conversation"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/icons"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
+	cv "github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
 )
 
 // viewPackages are the packages whose types make a conversation's view

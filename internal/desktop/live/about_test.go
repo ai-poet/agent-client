@@ -6,14 +6,14 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/panel"
-	"github.com/ai-poet/agent-client/internal/desktop/settings"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
-	"github.com/ai-poet/agent-client/internal/desktop/updater"
-	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/settings"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/updater"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func TestUpdateDocumentLock(t *testing.T) {

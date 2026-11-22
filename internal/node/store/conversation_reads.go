@@ -12,8 +12,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/MoeForge/moego/base64"
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func HydrateCanonicalPayload(ctx context.Context, db *sql.Conn, payload canonical.Payload) (json.RawMessage, error) {

@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/composer"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/preview"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
 )
 
 // owner is a composer's owner that counts what the queue's rows ask of it.

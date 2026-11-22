@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	core "github.com/ai-poet/agent-client/internal/cheapauth"
+	core "github.com/ai-poet/cheaprouter-harness/internal/cheapauth"
 )
 
 type Stage uint8

@@ -2,8 +2,8 @@ package shell
 
 import (
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/onboarding"
-	"github.com/ai-poet/agent-client/internal/desktop/settings"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/onboarding"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/settings"
 )
 
 // welcome is the welcome guide over the window (Shell::open_welcome). A

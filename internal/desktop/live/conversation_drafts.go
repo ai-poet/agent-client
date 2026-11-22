@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/desktop/panes"
-	"github.com/ai-poet/agent-client/internal/desktop/shell"
-	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panes"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/shell"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // A draft is a conversation of the desktop alone until its first send creates

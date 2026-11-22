@@ -1,8 +1,8 @@
 package live
 
 import (
-	"github.com/ai-poet/agent-client/internal/desktop/icons"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 )
 
 // modelOptions are the models of the Node's enabled providers as

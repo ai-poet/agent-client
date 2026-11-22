@@ -5,12 +5,12 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/client"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/shell"
-	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
-	"github.com/ai-poet/agent-client/internal/node/knowledge"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/shell"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/knowledge"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // testKnowledgeViewer covers the citation a link asks for, the answers the

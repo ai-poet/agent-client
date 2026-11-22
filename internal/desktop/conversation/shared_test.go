@@ -5,10 +5,10 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/conversation"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 )
 
 // pair shows two conversations side by side on one State, as a split or a

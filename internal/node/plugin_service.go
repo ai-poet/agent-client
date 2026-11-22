@@ -10,14 +10,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/node/admission"
-	"github.com/ai-poet/agent-client/internal/node/installations"
-	"github.com/ai-poet/agent-client/internal/node/mcp"
-	"github.com/ai-poet/agent-client/internal/node/plugins"
-	"github.com/ai-poet/agent-client/internal/node/program"
-	"github.com/ai-poet/agent-client/internal/node/python"
-	"github.com/ai-poet/agent-client/internal/node/store"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/admission"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/installations"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/mcp"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/program"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/python"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 type pluginInvocation struct {

@@ -3,8 +3,8 @@ package live
 import (
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // The i18n keys of what the Node reports without copy of its own: why a run

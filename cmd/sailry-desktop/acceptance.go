@@ -12,15 +12,15 @@ import (
 	"syscall"
 
 	"github.com/egoist/mygo"
-	core "github.com/ai-poet/agent-client/internal/acceptance"
-	"github.com/ai-poet/agent-client/internal/client"
-	profile "github.com/ai-poet/agent-client/internal/core"
-	desktop "github.com/ai-poet/agent-client/internal/desktop/acceptance"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/kit/crychic"
-	"github.com/ai-poet/agent-client/internal/hostctl"
-	"github.com/ai-poet/agent-client/internal/link"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	core "github.com/ai-poet/cheaprouter-harness/internal/acceptance"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	profile "github.com/ai-poet/cheaprouter-harness/internal/core"
+	desktop "github.com/ai-poet/cheaprouter-harness/internal/desktop/acceptance"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit/crychic"
+	"github.com/ai-poet/cheaprouter-harness/internal/hostctl"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 type acceptanceEvent struct {

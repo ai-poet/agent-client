@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func contributionFixture(t *testing.T, declarations string) (*Registry, protocol.PluginReference, ContributionHooks) {

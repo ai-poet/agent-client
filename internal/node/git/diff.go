@@ -16,8 +16,8 @@ import (
 	fdiff "github.com/go-git/go-git/v5/plumbing/format/diff"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	udiff "github.com/go-git/go-git/v5/utils/diff"
-	"github.com/ai-poet/agent-client/internal/core"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 

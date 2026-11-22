@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/client"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/preferences"
-	"github.com/ai-poet/agent-client/internal/desktop/shell"
-	"github.com/ai-poet/agent-client/internal/link"
-	"github.com/ai-poet/agent-client/internal/node"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preferences"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/shell"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/node"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // railPagesCountingTransport counts the directory listings and the file

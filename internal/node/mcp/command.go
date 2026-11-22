@@ -14,8 +14,8 @@ import (
 	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/ai-poet/agent-client/internal/node/program"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/program"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func stdioCommand(launch Launch) (*exec.Cmd, error) {

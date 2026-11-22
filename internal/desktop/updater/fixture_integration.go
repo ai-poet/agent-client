@@ -24,7 +24,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/MoeForge/moego/base64"
-	"github.com/ai-poet/agent-client/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
 )
 
 // FixtureTarget is the release target the fixture feed publishes for.

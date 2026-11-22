@@ -11,7 +11,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/shipped"
+	"github.com/ai-poet/cheaprouter-harness/internal/shipped"
 )
 
 // Read loads name from the user's resource directory, falling back to the

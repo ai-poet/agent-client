@@ -13,8 +13,8 @@ import (
 
 	"charm.land/fantasy"
 	acp "github.com/coder/acp-go-sdk"
-	"github.com/ai-poet/agent-client/internal/node/program"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/program"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // The Agent Client Protocol route uses a package's declared program as a

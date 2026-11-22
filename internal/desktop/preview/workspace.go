@@ -2,7 +2,7 @@ package preview
 
 import (
 	"fmt"
-	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 	"strings"
 	"time"
 )

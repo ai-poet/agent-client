@@ -7,8 +7,8 @@ import (
 	"errors"
 	"reflect"
 
-	"github.com/ai-poet/agent-client/internal/node/plugins"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const pluginMCPSchema = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/desktop/composer"
-	cv "github.com/ai-poet/agent-client/internal/desktop/conversation"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
+	cv "github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
 )
 
 // The demo's runs that wait on the user, one for each thing a run can wait

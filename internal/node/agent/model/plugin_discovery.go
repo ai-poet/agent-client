@@ -10,9 +10,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/ai-poet/agent-client/internal/node/plugins"
-	"github.com/ai-poet/agent-client/internal/node/providers"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/providers"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func DiscoverPlugin(ctx context.Context, binding Binding, capture PluginCapture) (protocol.ConversationDiscoveryCatalog, error) {

@@ -14,7 +14,7 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/go-git/gcfg"
 	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const maxFileIgnoreBytes = 1024 * 1024

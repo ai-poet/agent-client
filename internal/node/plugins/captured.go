@@ -5,8 +5,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/ai-poet/agent-client/internal/core"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func (manager *Manager) captured(ctx context.Context, reference protocol.PluginReference) ([]packageEntry, error) {

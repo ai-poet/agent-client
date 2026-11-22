@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
 )
 
 // Bounded at 100 MiB per application while retaining several days of

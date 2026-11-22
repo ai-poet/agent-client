@@ -19,7 +19,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // endpoints stands in for both remote endpoints: nothing leaves the process.
@@ -76,16 +76,16 @@ var crashTrace = "panic: open " + plantedPath + ": token " + plantedSecret + " [
 	"\tpanic: runtime error: invalid memory address or nil pointer dereference\n" +
 	"[signal SIGSEGV: segmentation violation code=0x2 addr=0x0 pc=0x1027a4c10]\n\n" +
 	"goroutine 1 [running, locked to thread]:\n" +
-	"github.com/ai-poet/agent-client/internal/desktop/shell.(*App).View(0x14000123456, {0x1400abcdef0, 0x1c})\n" +
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/shell.(*App).View(0x14000123456, {0x1400abcdef0, 0x1c})\n" +
 	"\t" + plantedPath + "/internal/desktop/shell/shell.go:231 +0x1c4\n" +
 	"main.run.func3({0x1, 0x2}, ...)\n" +
 	"\t/Users/planted/go/src/cmd/sailry-desktop/main.go:112 +0x58\n" +
 	"main.main()\n" +
 	"\t/Users/planted/go/src/cmd/sailry-desktop/main.go:33 +0x20\n\n" +
 	"goroutine 42 [chan receive, 3 minutes]:\n" +
-	"github.com/ai-poet/agent-client/internal/node.(*Node).serve(0x14000222222)\n" +
+	"github.com/ai-poet/cheaprouter-harness/internal/node.(*Node).serve(0x14000222222)\n" +
 	"\t/Users/planted/go/src/internal/node/node.go:300 +0x90\n" +
-	"created by github.com/ai-poet/agent-client/internal/node.Start in goroutine 1\n" +
+	"created by github.com/ai-poet/cheaprouter-harness/internal/node.Start in goroutine 1\n" +
 	"\t/Users/planted/go/src/internal/node/node.go:200 +0x44\n\n" +
 	"rax    0x" + plantedSecret + "\n"
 
@@ -270,10 +270,10 @@ func TestCountersAndInterfaceReports(t *testing.T) {
 		assertReduced(t, reduced)
 		want := "panic.nil_dereference\n" +
 			"goroutine 1 [running, locked to thread]\n" +
-			"github.com/ai-poet/agent-client/internal/desktop/shell.(*App).View:231\nmain.run.func3:112\nmain.main:33\n\n" +
+			"github.com/ai-poet/cheaprouter-harness/internal/desktop/shell.(*App).View:231\nmain.run.func3:112\nmain.main:33\n\n" +
 			"goroutine 42 [chan receive, 3 minutes]\n" +
-			"github.com/ai-poet/agent-client/internal/node.(*Node).serve:300\n" +
-			"created by github.com/ai-poet/agent-client/internal/node.Start:200\n"
+			"github.com/ai-poet/cheaprouter-harness/internal/node.(*Node).serve:300\n" +
+			"created by github.com/ai-poet/cheaprouter-harness/internal/node.Start:200\n"
 		if string(reduced) != want {
 			t.Fatalf("reduced trace:\n%s\nwant:\n%s", reduced, want)
 		}

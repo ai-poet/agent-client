@@ -3,7 +3,7 @@ package live
 import (
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/desktop/panel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
 )
 
 // conversationPanelsFrame keeps the conversations' right panels in step with

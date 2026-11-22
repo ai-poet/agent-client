@@ -22,8 +22,8 @@ import (
 
 	"github.com/MoeForge/moego/base64"
 	"github.com/egoist/mygo"
-	"github.com/ai-poet/agent-client/internal/client"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 //go:embed assets/*

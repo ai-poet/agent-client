@@ -2,7 +2,7 @@ package kit
 
 import (
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 )
 
 // Floating paints a floating panel (menus, selects, popovers, dialogs,

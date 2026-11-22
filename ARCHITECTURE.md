@@ -71,7 +71,7 @@ recovery. Native automatic backups belong to the local Node owner.
 
 ## Components and dependencies
 
-The Go module is `github.com/ai-poet/agent-client`.
+The Go module is `github.com/ai-poet/cheaprouter-harness`.
 
 | Component | Responsibility |
 | --- | --- |

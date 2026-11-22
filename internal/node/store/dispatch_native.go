@@ -1,6 +1,6 @@
 package store
 
-import "github.com/ai-poet/agent-client/internal/protocol"
+import "github.com/ai-poet/cheaprouter-harness/internal/protocol"
 
 func dispatchNativeHandler(handler protocol.DispatchHandler) error {
 	if handler.Name != "profile-backup" || handler.Source.Package != dispatchNativeOwner ||

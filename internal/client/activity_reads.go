@@ -3,7 +3,7 @@ package client
 import (
 	"context"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func (client *Client) ReadActivityCatalog(ctx context.Context, scope protocol.PluginContext) (protocol.ActivityCatalog, error) {

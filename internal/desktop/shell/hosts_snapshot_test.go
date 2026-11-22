@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/host"
-	"github.com/ai-poet/agent-client/internal/desktop/preview"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/host"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
 )
 
 // The host page's review sheets, written only when $SAILRY_SNAPSHOTS names a

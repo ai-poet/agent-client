@@ -14,8 +14,8 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/egoist/mygo/netproxy"
-	"github.com/ai-poet/agent-client/internal/node/plugins"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const pluginRequestBytes = 32 * 1024 * 1024

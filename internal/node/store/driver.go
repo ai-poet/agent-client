@@ -11,8 +11,8 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/ai-poet/agent-client/internal/core"
-	"github.com/ai-poet/agent-client/internal/turso"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/turso"
 	"golang.org/x/sync/semaphore"
 )
 

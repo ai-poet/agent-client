@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // Shells discovers the shells a terminal can start on this Node, ordered by

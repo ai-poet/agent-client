@@ -19,7 +19,7 @@ if test "$task_update" = 1 && test -n "$task_network_mode"; then
   echo 'Network options apply to new installations; edit an existing Host network through its controller' >&2
   exit 1
 fi
-task_repository=https://github.com/ai-poet/agent-client
+task_repository=https://github.com/ai-poet/cheaprouter-harness
 if test -z "$task_version"; then
   task_version="$(curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
     https://api.github.com/repos/sailry/sailry-harness/releases?per_page=1 | \

@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/desktop/preview"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // TestEditorChecks groups the project editor's pure checks; each case keeps its own fixture.

@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	core "github.com/ai-poet/agent-client/internal/acceptance"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/preview"
-	"github.com/ai-poet/agent-client/internal/desktop/shell"
+	core "github.com/ai-poet/cheaprouter-harness/internal/acceptance"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/shell"
 	"github.com/egoist/mygo/ui"
 )
 

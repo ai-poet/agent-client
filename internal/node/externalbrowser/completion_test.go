@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // The operation completes while Done is still open. Its first Err check then

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	bundled "github.com/ai-poet/agent-client"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	bundled "github.com/ai-poet/cheaprouter-harness"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func scriptTestBundle(source string) ScriptBundle {

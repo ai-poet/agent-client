@@ -6,12 +6,12 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/icons"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/preview"
-	"github.com/ai-poet/agent-client/internal/desktop/sidebar"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/sidebar"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 )
 
 // NoticeAge is a notice's age as the activity centre writes it: an i18n key

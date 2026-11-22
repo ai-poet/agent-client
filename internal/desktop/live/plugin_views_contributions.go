@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo/ui"
-	desktopplugins "github.com/ai-poet/agent-client/internal/desktop/plugins"
-	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	desktopplugins "github.com/ai-poet/cheaprouter-harness/internal/desktop/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 type pluginContributionOwner struct {

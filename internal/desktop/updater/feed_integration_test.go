@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
 )
 
 // TestUpdaterLocalFeed installs a release from a local feed signed with a

@@ -6,14 +6,14 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/composer"
-	"github.com/ai-poet/agent-client/internal/desktop/conversation"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/panel"
-	"github.com/ai-poet/agent-client/internal/desktop/preview"
-	"github.com/ai-poet/agent-client/internal/desktop/sidebar"
-	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/sidebar"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 )
 
 // Demo mode (Settings, Experimental) shows the demo conversations in place of

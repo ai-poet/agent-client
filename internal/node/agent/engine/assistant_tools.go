@@ -3,9 +3,9 @@ package engine
 import (
 	"slices"
 
-	"github.com/ai-poet/agent-client/internal/node/agent/operations"
-	"github.com/ai-poet/agent-client/internal/node/mcp"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/operations"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/mcp"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // assistantBuiltins are the native tools an assistant declaration may name.

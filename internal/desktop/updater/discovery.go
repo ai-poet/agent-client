@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
-	"github.com/ai-poet/agent-client/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
 )
 
 // GitHub discovery is untrusted; only the signed catalog admits an update.

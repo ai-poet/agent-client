@@ -2,7 +2,7 @@
 
 package host
 
-import "github.com/ai-poet/agent-client/internal/protocol"
+import "github.com/ai-poet/cheaprouter-harness/internal/protocol"
 
 // sampleGPUs lists no accelerator: gopsutil has no GPU sampler, and Linux
 // and Windows publish the load only through each vendor's own library or

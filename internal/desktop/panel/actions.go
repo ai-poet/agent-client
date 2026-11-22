@@ -6,7 +6,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
 	"github.com/egoist/mygo/ui/markdown"
-	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 )
 
 // Actions connects existing workspace controls to the live controller. Preview

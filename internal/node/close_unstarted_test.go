@@ -3,7 +3,7 @@ package node
 import (
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/node/knowledge/service"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/knowledge/service"
 )
 
 // A Node that was constructed but never started holds no knowledge service.

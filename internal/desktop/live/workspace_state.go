@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/panel"
-	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // WorkspaceNative delegates native file effects to the window's verified

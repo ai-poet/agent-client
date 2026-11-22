@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"io"
 
-	"github.com/ai-poet/agent-client/internal/node/plugins"
-	"github.com/ai-poet/agent-client/internal/node/store"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func (node *Node) pluginUpdateCurrent(ctx context.Context, name string, expected uint64) (*protocol.PluginInfo, error) {

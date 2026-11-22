@@ -8,7 +8,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"lukechampine.com/blake3"
 )
 

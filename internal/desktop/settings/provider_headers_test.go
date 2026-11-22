@@ -3,7 +3,7 @@ package settings
 import (
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/desktop/preview"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
 )
 
 func TestProviderOAuthSaveIgnoresHiddenKeyHeaderDraft(t *testing.T) {

@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/client"
-	"github.com/ai-poet/agent-client/internal/desktop/plugins"
-	"github.com/ai-poet/agent-client/internal/desktop/preferences"
-	"github.com/ai-poet/agent-client/internal/desktop/shell"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preferences"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/shell"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func TestAssistantElapsedClock(t *testing.T) {

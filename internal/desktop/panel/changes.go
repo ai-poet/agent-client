@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/desktop/preview"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
 )
 
 // The Git change list's rows, as the git plugin's changes.js builds them:

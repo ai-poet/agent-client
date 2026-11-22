@@ -10,8 +10,8 @@ import (
 
 	"github.com/egoist/mygo/plugins/loading"
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/icons"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 )
 
 // The loading marks have their sizes and the progress role, ask for frames

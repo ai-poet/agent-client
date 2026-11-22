@@ -1,6 +1,6 @@
 package acceptance
 
-import "github.com/ai-poet/agent-client/internal/protocol"
+import "github.com/ai-poet/cheaprouter-harness/internal/protocol"
 
 // IDs refer to the original session acceptance checklist. Suffixes identify
 // separate backend checks of one manual case; they do not claim UI coverage.

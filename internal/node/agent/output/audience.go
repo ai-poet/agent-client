@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
 )
 
 // Audience returns an independent record with user-only image and MCP content

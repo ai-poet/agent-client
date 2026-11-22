@@ -19,13 +19,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/link"
-	"github.com/ai-poet/agent-client/internal/node/agent/engine"
-	"github.com/ai-poet/agent-client/internal/node/agent/operations"
-	"github.com/ai-poet/agent-client/internal/node/logging"
-	"github.com/ai-poet/agent-client/internal/node/store"
-	"github.com/ai-poet/agent-client/internal/node/telemetry"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/engine"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/operations"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/telemetry"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func systemNodeFixture(t *testing.T, options Options) *Node {

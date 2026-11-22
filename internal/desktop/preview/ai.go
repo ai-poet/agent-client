@@ -1,6 +1,6 @@
 package preview
 
-import "github.com/ai-poet/agent-client/internal/desktop/viewmodel"
+import "github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 
 // The AI settings' preview data: providers, connectors, teams, plugins,
 // skills, the market, MCP servers and the model library, as a Node would

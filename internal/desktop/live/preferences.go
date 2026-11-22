@@ -6,15 +6,15 @@ import (
 	"slices"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/preferences"
-	"github.com/ai-poet/agent-client/internal/desktop/settings"
-	"github.com/ai-poet/agent-client/internal/desktop/shell"
-	"github.com/ai-poet/agent-client/internal/desktop/sidebar"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
-	"github.com/ai-poet/agent-client/internal/desktop/updater"
-	"github.com/ai-poet/agent-client/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preferences"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/settings"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/shell"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/sidebar"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/updater"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
 )
 
 var updateChannels = []string{"stable", "experience"}

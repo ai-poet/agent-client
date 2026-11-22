@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/link"
-	workspacegit "github.com/ai-poet/agent-client/internal/node/git"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	workspacegit "github.com/ai-poet/cheaprouter-harness/internal/node/git"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func TestWorkspaceWatch(t *testing.T) {

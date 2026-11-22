@@ -10,12 +10,12 @@ import (
 
 	"github.com/ELY-Open-Source/CrychicUI/code"
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/icons"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/kit/crychic"
-	"github.com/ai-poet/agent-client/internal/desktop/preview"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit/crychic"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 )
 
 // history is the commits, newest first, as a graph: CrychicUI's CommitGraph

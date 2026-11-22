@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/kaptinlin/jsonpointer"
-	"github.com/ai-poet/agent-client/internal/node/program"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/program"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 type connectorOutput struct {

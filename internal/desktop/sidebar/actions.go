@@ -2,10 +2,10 @@ package sidebar
 
 import (
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/conversation"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/picker"
-	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/picker"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 )
 
 // Actions injects controller operations without giving views backend ownership.

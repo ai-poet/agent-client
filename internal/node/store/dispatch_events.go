@@ -8,7 +8,7 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func publishDispatch(ctx context.Context, db *sql.Conn, event protocol.DispatchEvent, timestamp int64) ([]protocol.JobID, []string, error) {

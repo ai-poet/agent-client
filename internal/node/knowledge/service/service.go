@@ -9,10 +9,10 @@ import (
 	"github.com/jonboulle/clockwork"
 	"lukechampine.com/blake3"
 
-	"github.com/ai-poet/agent-client/internal/node/knowledge"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/knowledge"
 
-	"github.com/ai-poet/agent-client/internal/node/store"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // batch bounds the texts of one embedding call.

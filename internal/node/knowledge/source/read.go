@@ -11,9 +11,9 @@ import (
 
 	"lukechampine.com/blake3"
 
-	"github.com/ai-poet/agent-client/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // unavailable reports a file that could not be read as a transient failure,

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/ai-poet/agent-client/internal/node/providers"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/providers"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func ReadRoles(ctx context.Context, db *sql.Conn) ([]protocol.RoleProfile, error) {

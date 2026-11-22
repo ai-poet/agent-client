@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"reflect"
 
-	"github.com/ai-poet/agent-client/internal/node/plugins"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func SetPluginPinned(ctx context.Context, db *sql.Conn, name string, expectedRevision uint64, pinned bool) (protocol.PluginInfo, error) {

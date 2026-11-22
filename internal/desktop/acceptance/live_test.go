@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	core "github.com/ai-poet/agent-client/internal/acceptance"
-	"github.com/ai-poet/agent-client/internal/client"
-	"github.com/ai-poet/agent-client/internal/link"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	core "github.com/ai-poet/cheaprouter-harness/internal/acceptance"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // Encoding both sides keeps this fixture subject to the control socket's

@@ -9,8 +9,8 @@ import (
 	"unicode"
 
 	"github.com/Masterminds/semver/v3"
-	"github.com/ai-poet/agent-client/internal/link"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const ManifestSchema = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"

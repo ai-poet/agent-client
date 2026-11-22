@@ -4,9 +4,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/desktop/composer"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func projectApproval(approval protocol.ConversationApproval, call *protocol.ConversationPartToolCallPayload, locale string) composer.Approval {

@@ -5,10 +5,10 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
-	"github.com/ai-poet/agent-client/internal/node/agent/model"
-	"github.com/ai-poet/agent-client/internal/node/web"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/web"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func (node *Node) nativeSearch(ctx context.Context, request protocol.Request, binding model.Binding, turn *protocol.TurnID, input protocol.SearchRequest) (protocol.SearchPage, error) {

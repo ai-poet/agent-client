@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func agentInput(command protocol.Command) (protocol.ConversationInput, error) {

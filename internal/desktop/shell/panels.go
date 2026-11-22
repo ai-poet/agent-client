@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/desktop/panel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
 )
 
 // The right panel belongs to the conversation, as the reference's

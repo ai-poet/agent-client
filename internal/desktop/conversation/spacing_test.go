@@ -7,8 +7,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 	"github.com/egoist/mygo/ui"
 )
 

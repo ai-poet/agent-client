@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/ai-poet/agent-client/internal/migrate"
-	"github.com/ai-poet/agent-client/internal/node"
+	"github.com/ai-poet/cheaprouter-harness/internal/migrate"
+	"github.com/ai-poet/cheaprouter-harness/internal/node"
 )
 
 type desktopMigration struct {

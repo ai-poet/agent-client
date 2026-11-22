@@ -17,10 +17,10 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/chrome"
-	desktopplugins "github.com/ai-poet/agent-client/internal/desktop/plugins"
-	"github.com/ai-poet/agent-client/internal/link"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/chrome"
+	desktopplugins "github.com/ai-poet/cheaprouter-harness/internal/desktop/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // TestBrowserSettings drives the browser package's settings services with a

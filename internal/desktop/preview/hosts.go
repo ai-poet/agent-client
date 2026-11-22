@@ -4,7 +4,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/desktop/host"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/host"
 )
 
 // HostPages are the host pages' data over the dataset: each host's

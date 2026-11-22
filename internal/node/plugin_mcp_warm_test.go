@@ -8,10 +8,10 @@ import (
 	"testing"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/ai-poet/agent-client/internal/link"
-	"github.com/ai-poet/agent-client/internal/node/mcp"
-	"github.com/ai-poet/agent-client/internal/node/process"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/mcp"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/process"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // Over 1 s: the Node starts twice, and each start installs and verifies the

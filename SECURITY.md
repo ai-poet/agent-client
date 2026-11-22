@@ -1,6 +1,6 @@
 # Security policy
 
-Report suspected vulnerabilities through [GitHub's private vulnerability reporting](https://github.com/ai-poet/agent-client/security/advisories/new).
+Report suspected vulnerabilities through [GitHub's private vulnerability reporting](https://github.com/ai-poet/cheaprouter-harness/security/advisories/new).
 Do not publish vulnerability details in public issues, pull requests or discussions.
 
 Include the affected release or commit, operating system, potential impact and
@@ -12,5 +12,5 @@ Keep the report and investigation private while maintainers assess the issue and
 coordinate disclosure with you. Do not access or alter other people's data when
 investigating a possible vulnerability.
 
-Use [issues](https://github.com/ai-poet/agent-client/issues) for ordinary bugs and
+Use [issues](https://github.com/ai-poet/cheaprouter-harness/issues) for ordinary bugs and
 feature requests. Community conduct concerns follow the [code of conduct](CODE_OF_CONDUCT.md).

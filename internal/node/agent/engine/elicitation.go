@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
-	"github.com/ai-poet/agent-client/internal/node/store"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func (r *Runtime) Elicit(ctx context.Context, turn protocol.TurnID, parent canonical.ToolRequest, request *sdk.ElicitRequest) (*sdk.ElicitResult, error) {

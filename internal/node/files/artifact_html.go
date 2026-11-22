@@ -12,7 +12,7 @@ import (
 
 	"github.com/MoeForge/moego/base64"
 	"github.com/microcosm-cc/bluemonday"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
 )

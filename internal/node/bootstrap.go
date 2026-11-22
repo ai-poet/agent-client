@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/core"
-	"github.com/ai-poet/agent-client/internal/link"
-	"github.com/ai-poet/agent-client/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 )
 
 // Profile holds the shared Desktop and Host storage lifecycle.

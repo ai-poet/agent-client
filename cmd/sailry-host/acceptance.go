@@ -15,15 +15,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/acceptance"
-	"github.com/ai-poet/agent-client/internal/client"
-	"github.com/ai-poet/agent-client/internal/core"
-	"github.com/ai-poet/agent-client/internal/hostctl"
-	"github.com/ai-poet/agent-client/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/acceptance"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/hostctl"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
 
-	"github.com/ai-poet/agent-client/internal/node"
-	"github.com/ai-poet/agent-client/internal/node/telemetry"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/telemetry"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const acceptanceUsage = `Usage: sailry-host acceptance --data-dir <absolute test profile> [--start] [--suite quick|backend|ui|e2e|full|replay] [--provider <name or id> --model <id> [--effort <level>]] [--case <id> ...] [--timeout <duration>] [--report-dir <directory>] [--desktop <executable>] [--open-report]

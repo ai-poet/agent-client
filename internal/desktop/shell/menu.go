@@ -5,15 +5,15 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/settings"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/settings"
 )
 
 // Website and Feedback are the Help menu's pages.
 const (
 	Website  = "https://cheaprouter.cc"
-	Feedback = "https://github.com/ai-poet/agent-client/issues"
+	Feedback = "https://github.com/ai-poet/cheaprouter-harness/issues"
 )
 
 // Menu is the native app menu in lang: App, File, Edit, View, Window and

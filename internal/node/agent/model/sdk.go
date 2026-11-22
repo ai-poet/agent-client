@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
 	"github.com/egoist/mygo/netproxy"
 	"github.com/openai/openai-go/v3/packages/ssestream"
 )

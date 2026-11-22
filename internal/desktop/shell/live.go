@@ -1,15 +1,15 @@
 package shell
 
 import (
-	"github.com/ai-poet/agent-client/internal/desktop/composer"
-	"github.com/ai-poet/agent-client/internal/desktop/conversation"
-	"github.com/ai-poet/agent-client/internal/desktop/host"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/onboarding"
-	"github.com/ai-poet/agent-client/internal/desktop/panel"
-	"github.com/ai-poet/agent-client/internal/desktop/panes"
-	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/host"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/onboarding"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panes"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 	"github.com/egoist/mygo/ui"
 	"slices"
 )

@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/link"
-	"github.com/ai-poet/agent-client/internal/node/fswatch"
-	workspacegit "github.com/ai-poet/agent-client/internal/node/git"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/fswatch"
+	workspacegit "github.com/ai-poet/cheaprouter-harness/internal/node/git"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // workspaceWatches owns one recursive watch per worktree root, shared by the

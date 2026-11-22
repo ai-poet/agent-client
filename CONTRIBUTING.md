@@ -1,7 +1,7 @@
 # Contributing
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md) and [AGENTS.md](AGENTS.md) before changing
-code. The Go module and repository are `github.com/ai-poet/agent-client`.
+code. The Go module and repository are `github.com/ai-poet/cheaprouter-harness`.
 
 ## Scope
 
@@ -345,7 +345,7 @@ equals `link.ProductVersion`. Shipped files sit beside the executable, or in
 `Contents/Resources` of the macOS bundle, where every loader reads them.
 
 A release build is one linked with
-`-X github.com/ai-poet/agent-client/internal/core.Default=~/.sailry`
+`-X github.com/ai-poet/cheaprouter-harness/internal/core.Default=~/.sailry`
 (`MYGO_LDFLAGS` for `cmd/sailry-desktop`, `go build -ldflags` for
 `cmd/sailry-host`). It opens the release profile `~/.sailry` by default and
 loads the iroh and capture libraries only from its package, against the
@@ -444,7 +444,7 @@ are signed: the pinned runtimes keep the bytes their locks record, so the
 archive is not notarized. The release carries `install-host.sh`,
 `SHA256SUMS-installer`, the archives and one `SHA256SUMS-<triple>` each.
 The WSL installation downloads exactly those names
-from `https://github.com/ai-poet/agent-client/releases/download/v<version>/`,
+from `https://github.com/ai-poet/cheaprouter-harness/releases/download/v<version>/`,
 so they work once the draft release is published.
 `internal/node/host/deployment/SOURCE` records where the ported files come from.
 

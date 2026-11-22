@@ -5,8 +5,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/ai-poet/agent-client/internal/desktop/composer"
-	cv "github.com/ai-poet/agent-client/internal/desktop/conversation"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
+	cv "github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
 )
 
 // The demo's lumen-web project, an analytics dashboard: a team review that

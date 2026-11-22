@@ -13,13 +13,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/node/logging"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
 	"github.com/google/uuid"
 	"lukechampine.com/blake3"
 )
 
 const (
-	module          = "github.com/ai-poet/agent-client"
+	module          = "github.com/ai-poet/cheaprouter-harness"
 	reportTimeout   = 10 * time.Second
 	reportsInFlight = 32
 	keptBreadcrumbs = 50

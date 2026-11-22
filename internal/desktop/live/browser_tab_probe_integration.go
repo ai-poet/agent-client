@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
-	"github.com/ai-poet/agent-client/internal/client"
-	"github.com/ai-poet/agent-client/internal/desktop/panel"
-	"github.com/ai-poet/agent-client/internal/desktop/preferences"
-	"github.com/ai-poet/agent-client/internal/desktop/shell"
-	"github.com/ai-poet/agent-client/internal/link"
-	"github.com/ai-poet/agent-client/internal/node"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preferences"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/shell"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/node"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // BrowserTabProbe is the real App over a real Node, for a window with a real

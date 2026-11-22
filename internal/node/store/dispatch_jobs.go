@@ -8,8 +8,8 @@ import (
 	"errors"
 	"math"
 
-	dispatcher "github.com/ai-poet/agent-client/internal/node/dispatch"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	dispatcher "github.com/ai-poet/cheaprouter-harness/internal/node/dispatch"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func listDispatchJobs(ctx context.Context, db *sql.Conn, packageName string, before *uint64, limit uint16) (protocol.DispatchPage, error) {

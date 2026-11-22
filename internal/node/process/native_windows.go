@@ -13,7 +13,7 @@ import (
 	"unicode/utf16"
 	"unsafe"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"golang.org/x/sys/windows"
 )
 

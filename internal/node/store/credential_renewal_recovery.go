@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 
-	"github.com/ai-poet/agent-client/internal/node/providers"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/providers"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // RecoverCredentialRenewals never repeats an exchange whose response may have

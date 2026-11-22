@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/node"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/node"
 )
 
 // profileRestart switches the Desktop to a profile restored from a backup:

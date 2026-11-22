@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/cheapauth"
+	"github.com/ai-poet/cheaprouter-harness/internal/cheapauth"
 )
 
 const (

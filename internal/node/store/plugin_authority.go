@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/node/plugins"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func PluginRequestPackage(ctx context.Context, db *sql.Conn, node, caller protocol.NodeID, request protocol.Request, invocation *protocol.PluginInfo) (protocol.PluginInfo, error) {

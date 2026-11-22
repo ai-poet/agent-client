@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func admitCredentialClaim(ctx context.Context, db *sql.Conn, storage *Store, node, caller protocol.NodeID, session protocol.Session, now time.Time) (protocol.QueuedTurn, error) {

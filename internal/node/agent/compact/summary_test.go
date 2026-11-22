@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/node/agent/tokens"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/tokens"
 )
 
 func TestSummaryCapFollowsWindow(t *testing.T) {

@@ -1,6 +1,6 @@
 package store
 
-import "github.com/ai-poet/agent-client/internal/protocol"
+import "github.com/ai-poet/cheaprouter-harness/internal/protocol"
 
 // Package data and unlinked notices outlive the conversation that scheduled a
 // callback. The invocation retains its resource bounds; commands issued inside

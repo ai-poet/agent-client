@@ -3,7 +3,7 @@ package link
 import (
 	"context"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // Local is constructed by the Node owner; caller identity never comes from wire data.

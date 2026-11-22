@@ -2,7 +2,7 @@
 
 package core
 
-import "github.com/ai-poet/agent-client/internal/protocol"
+import "github.com/ai-poet/cheaprouter-harness/internal/protocol"
 
 func trashNative(string) (string, error) {
 	return "", fileFault(protocol.ErrorCodeUnavailable, "native Trash is unavailable on this platform")

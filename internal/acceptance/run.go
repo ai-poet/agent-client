@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/client"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const defaultCaseTimeout = 2 * time.Minute

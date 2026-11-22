@@ -3,9 +3,9 @@ package live
 import (
 	"context"
 
-	"github.com/ai-poet/agent-client/internal/client"
-	"github.com/ai-poet/agent-client/internal/link"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func (r *Runtime) confirmConnectionNetwork(ctx context.Context, node protocol.NodeID, selection protocol.NetworkSelection) error {

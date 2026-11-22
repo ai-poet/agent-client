@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // Environment returns the Node's terminal environment with the saved

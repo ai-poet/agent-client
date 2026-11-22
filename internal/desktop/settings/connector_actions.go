@@ -1,6 +1,6 @@
 package settings
 
-import "github.com/ai-poet/agent-client/internal/desktop/viewmodel"
+import "github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 
 // ConnectorDraft is a connector's editor as it is submitted. Update saves the
 // changed fields of an existing connection and authorizes again only when

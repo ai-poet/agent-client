@@ -9,7 +9,7 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 	idxfmt "github.com/go-git/go-git/v5/plumbing/format/index"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 type capturedChange struct {

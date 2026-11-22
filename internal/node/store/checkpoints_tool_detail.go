@@ -8,8 +8,8 @@ import (
 	"path"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/node/files"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/files"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // toolCheckpointDetail derives a single successful edit's display from its

@@ -1,6 +1,6 @@
 package dispatch
 
-import "github.com/ai-poet/agent-client/internal/protocol"
+import "github.com/ai-poet/cheaprouter-harness/internal/protocol"
 
 func TurnResult(run protocol.ConversationRun) (bool, error) {
 	var failure *protocol.Fault

@@ -6,9 +6,9 @@ package imagestudio
 import (
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/cheapauth"
-	core "github.com/ai-poet/agent-client/internal/imagestudio"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/cheapauth"
+	core "github.com/ai-poet/cheaprouter-harness/internal/imagestudio"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/egoist/mygo/ui"
 )
 

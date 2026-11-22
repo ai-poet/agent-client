@@ -11,7 +11,7 @@ Read [ARCHITECTURE.md](ARCHITECTURE.md) for the implemented system and
 - Use current code, schemas and accepted behavior as the baseline. Historical
   implementations and internal plans explain provenance; they do not constrain a
   new implementation or authorize restoring removed UI.
-- The module is `github.com/ai-poet/agent-client`. This checkout contains its
+- The module is `github.com/ai-poet/cheaprouter-harness`. This checkout contains its
   locale sources, SDK declarations and pinned official package submodules.
 - Keep architecture documentation consistent with code. Explain a non-obvious
   ownership decision where it applies, without copying plans into source comments.

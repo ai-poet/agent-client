@@ -12,9 +12,9 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/ai-poet/agent-client/internal/node/knowledge"
-	"github.com/ai-poet/agent-client/internal/node/plugins"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/knowledge"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // knowledgePackage resolves the plugin a request acts as. Admission already

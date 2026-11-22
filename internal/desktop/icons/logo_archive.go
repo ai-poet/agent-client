@@ -8,7 +8,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/appresources"
+	"github.com/ai-poet/cheaprouter-harness/internal/appresources"
 	"github.com/egoist/mygo/ui"
 )
 

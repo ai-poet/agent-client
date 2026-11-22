@@ -2,7 +2,7 @@ package settings
 
 import (
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 )
 
 // ChannelUsage is the account figure the packages enabled on the Node publish

@@ -8,13 +8,13 @@ import (
 	"strings"
 	"sync"
 
-	core "github.com/ai-poet/agent-client/internal/cheapauth"
-	"github.com/ai-poet/agent-client/internal/client"
-	cheapauthui "github.com/ai-poet/agent-client/internal/desktop/cheapauth"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/node/providers"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	core "github.com/ai-poet/cheaprouter-harness/internal/cheapauth"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	cheapauthui "github.com/ai-poet/cheaprouter-harness/internal/desktop/cheapauth"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/providers"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/egoist/mygo/ui"
 )
 

@@ -7,7 +7,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func NextChildGuidance(ctx context.Context, db *sql.Conn, recipient protocol.TurnID) (*protocol.ConversationRun, []protocol.Event, error) {

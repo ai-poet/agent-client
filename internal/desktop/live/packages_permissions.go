@@ -1,6 +1,6 @@
 package live
 
-import "github.com/ai-poet/agent-client/internal/protocol"
+import "github.com/ai-poet/cheaprouter-harness/internal/protocol"
 
 var packagePermissionLabels = map[protocol.PluginAction]string{
 	protocol.PluginActionReadArtifacts:          "market_permission_artifacts_read",

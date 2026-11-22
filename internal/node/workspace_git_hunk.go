@@ -3,7 +3,7 @@ package node
 import (
 	"context"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func (node *Node) applyManualGitHunk(ctx context.Context, root string, input protocol.CommandApplyGitHunkPayload) (protocol.Output, error) {

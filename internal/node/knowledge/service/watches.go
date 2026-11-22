@@ -8,8 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ai-poet/agent-client/internal/node/fswatch"
-	"github.com/ai-poet/agent-client/internal/node/knowledge/source"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/fswatch"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/knowledge/source"
 )
 
 type rules map[string][]source.Watch

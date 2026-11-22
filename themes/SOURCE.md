@@ -1,7 +1,7 @@
 # Source provenance
 
 The initial theme sources were extracted from the committed `themes/` directory
-of [sailry/sailry-harness](https://github.com/ai-poet/agent-client/tree/ea76c95e4dc40e5c3b7a279dd082f6eccc151cfd/themes)
+of [sailry/sailry-harness](https://github.com/ai-poet/cheaprouter-harness/tree/ea76c95e4dc40e5c3b7a279dd082f6eccc151cfd/themes)
 at commit `ea76c95e4dc40e5c3b7a279dd082f6eccc151cfd`.
 
 The three packages are `great-sage`, `ink-dragon` and `holographic-rhythm`.

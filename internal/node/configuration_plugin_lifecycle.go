@@ -1,6 +1,6 @@
 package node
 
-import "github.com/ai-poet/agent-client/internal/protocol"
+import "github.com/ai-poet/cheaprouter-harness/internal/protocol"
 
 // Configuration snapshots carry state rather than the source command. Compare
 // the receiver's committed settings capture so code and update preferences do

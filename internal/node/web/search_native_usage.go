@@ -5,8 +5,8 @@ import (
 	"math"
 	"net/http"
 
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func nativeAnthropicExecute(ctx, caller context.Context, search NativeSearch, client *http.Client, body map[string]any) (protocol.SearchPage, error) {

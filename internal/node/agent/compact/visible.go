@@ -1,8 +1,8 @@
 package compact
 
 import (
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
-	"github.com/ai-poet/agent-client/internal/node/agent/output"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/output"
 )
 
 // Visible projects summary membership and audiences without changing canonical

@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/ai-poet/agent-client/internal/node/agent/clock"
-	"github.com/ai-poet/agent-client/internal/node/agent/observation"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/clock"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/observation"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 type attemptCaptureKey struct{}

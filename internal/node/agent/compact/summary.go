@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/ai-poet/agent-client/internal/node/agent/tokens"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/tokens"
 )
 
 type File struct {

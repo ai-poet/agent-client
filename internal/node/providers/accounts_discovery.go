@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func accountDiscoveryRequest(ctx context.Context, provider protocol.ConversationProvider, secret *protocol.Secret) (*http.Request, error) {

@@ -6,9 +6,9 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/shell"
-	"github.com/ai-poet/agent-client/internal/node/logging"
-	"github.com/ai-poet/agent-client/internal/node/telemetry"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/shell"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/telemetry"
 )
 
 // interfaceReports keeps the interface's crash and hang traces beside the

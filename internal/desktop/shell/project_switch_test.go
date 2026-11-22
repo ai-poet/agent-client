@@ -3,7 +3,7 @@ package shell
 import (
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 )
 
 // On a project page the title's project opens a menu of the projects;

@@ -2,7 +2,7 @@ package kit
 
 import (
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 )
 
 // Settings building blocks: a page frame, groups with a header over a card of

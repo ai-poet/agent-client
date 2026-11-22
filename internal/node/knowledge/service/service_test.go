@@ -13,9 +13,9 @@ import (
 
 	"github.com/jonboulle/clockwork"
 
-	"github.com/ai-poet/agent-client/internal/node/knowledge"
-	"github.com/ai-poet/agent-client/internal/node/store"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/knowledge"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // harness is a service over a real profile store with a fake embedding

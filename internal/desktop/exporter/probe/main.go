@@ -14,8 +14,8 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo"
-	"github.com/ai-poet/agent-client/internal/client"
-	"github.com/ai-poet/agent-client/internal/desktop/exporter"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/exporter"
 )
 
 func main() {

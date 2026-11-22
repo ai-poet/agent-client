@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"reflect"
 
-	"github.com/ai-poet/agent-client/internal/node/admission"
-	"github.com/ai-poet/agent-client/internal/node/store"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/admission"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // Inspection retains the original request identity and status. When current

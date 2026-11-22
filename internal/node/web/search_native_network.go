@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/openai/openai-go/v3/packages/ssestream"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func nativeRequestFault(code protocol.ErrorCode, reason protocol.ModelFailure, message string, temporary bool) *searchFailure {

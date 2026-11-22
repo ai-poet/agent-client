@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	core "github.com/ai-poet/agent-client/internal/acceptance"
-	"github.com/ai-poet/agent-client/internal/client"
-	"github.com/ai-poet/agent-client/internal/desktop/live"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	core "github.com/ai-poet/cheaprouter-harness/internal/acceptance"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/live"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func TestSandboxRecordingPreservesApprovalAndRawCompletion(t *testing.T) {

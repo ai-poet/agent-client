@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // A role's and a team's icon may name a generated avatar by its seed; a

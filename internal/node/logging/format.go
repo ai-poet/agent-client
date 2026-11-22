@@ -11,7 +11,7 @@ import (
 	"unicode"
 
 	"github.com/Masterminds/semver/v3"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // File, remote and diagnostic records share this single field policy. Local

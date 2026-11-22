@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	cv "github.com/ai-poet/agent-client/internal/desktop/conversation"
+	cv "github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
 )
 
 // The preview's turns: a set of scenes that between them show every kind of
@@ -91,7 +91,7 @@ func edit(id string) cv.Turn {
 	for i := range 140 {
 		lines = append(lines, fmt.Sprintf("=== RUN   TestCase%03d\n--- PASS: TestCase%03d (0.00s)", i, i))
 	}
-	lines = append(lines, "PASS", "ok  \tgithub.com/ai-poet/agent-client/internal/desktop/conversation\t0.412s")
+	lines = append(lines, "PASS", "ok  \tgithub.com/ai-poet/cheaprouter-harness/internal/desktop/conversation\t0.412s")
 	run := call(id, "command", "Command", "command", "go test ./internal/conversation")
 	run.Output = &cv.Output{Text: strings.Join(lines, "\n"), Command: true}
 	r := done(cv.Completed, 38)

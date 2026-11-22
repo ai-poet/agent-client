@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/node/git"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/git"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // TestWorktreeManagerCommands sends a real Node the commands of the desktop

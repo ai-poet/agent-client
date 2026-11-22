@@ -7,9 +7,9 @@ import (
 	"sync"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/plugins"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 type pluginNativeArtifact struct {

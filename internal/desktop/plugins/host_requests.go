@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func (owner *Host) prepare(ctx context.Context, command protocol.Command) (json.RawMessage, error) {

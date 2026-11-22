@@ -2,7 +2,7 @@ package panel
 
 import (
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 )
 
 // The side list's width beside its document: 220 at first, dragged between

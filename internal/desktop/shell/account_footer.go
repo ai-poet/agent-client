@@ -5,12 +5,12 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	core "github.com/ai-poet/agent-client/internal/cheapauth"
-	cheapauthui "github.com/ai-poet/agent-client/internal/desktop/cheapauth"
-	"github.com/ai-poet/agent-client/internal/desktop/icons"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/settings"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	core "github.com/ai-poet/cheaprouter-harness/internal/cheapauth"
+	cheapauthui "github.com/ai-poet/cheaprouter-harness/internal/desktop/cheapauth"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/settings"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 	"github.com/egoist/mygo/ui"
 )
 

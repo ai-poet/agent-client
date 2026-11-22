@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/Masterminds/semver/v3"
-	"github.com/ai-poet/agent-client/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
 )
 
 const fixtureTarget = "aarch64-apple-darwin"

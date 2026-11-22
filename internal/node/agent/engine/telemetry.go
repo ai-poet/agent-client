@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/node/agent/model"
-	"github.com/ai-poet/agent-client/internal/node/agent/operations"
-	"github.com/ai-poet/agent-client/internal/node/telemetry"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/operations"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/telemetry"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // Anonymous usage counters: results, modes, tool and model names from the

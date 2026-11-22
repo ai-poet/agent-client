@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	core "github.com/ai-poet/agent-client/internal/acceptance"
-	"github.com/ai-poet/agent-client/internal/client"
-	"github.com/ai-poet/agent-client/internal/desktop/conversation"
-	"github.com/ai-poet/agent-client/internal/desktop/live"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	core "github.com/ai-poet/cheaprouter-harness/internal/acceptance"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/live"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const liveScope = "This is an explicitly requested Sailry acceptance case. Work only in this conversation's dedicated workspace. Do not access credentials, environment variables, system files, network, other sessions or user repositories. Do not install anything or delegate. Use only the tools named in the task. Keep the final reply brief unless the task requests a longer streaming sample.\n\n"

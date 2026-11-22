@@ -7,11 +7,11 @@ import (
 	"log/slog"
 	"maps"
 
-	"github.com/ai-poet/agent-client/internal/node/agent/engine"
-	"github.com/ai-poet/agent-client/internal/node/logging"
-	"github.com/ai-poet/agent-client/internal/node/plugins"
-	"github.com/ai-poet/agent-client/internal/node/store"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/engine"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // afterTurn calls each captured package's after_turn handler for an ended

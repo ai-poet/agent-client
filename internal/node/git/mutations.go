@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/storage/filesystem"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func (s *Service) CreateCommit(ctx context.Context, root string, input protocol.CommandCreateGitCommitPayload) (protocol.OutputGitCommitCreatedPayload, error) {

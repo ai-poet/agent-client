@@ -5,10 +5,10 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
-	"github.com/ai-poet/agent-client/internal/node/agent/operations"
-	"github.com/ai-poet/agent-client/internal/node/store"
-	"github.com/ai-poet/agent-client/internal/node/telemetry"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/operations"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/telemetry"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // TestCountedTools derives the counted built-ins from the tools a turn

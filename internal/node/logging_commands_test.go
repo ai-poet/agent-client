@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/node/admission"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/admission"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // Every registered command is recorded in full unless this package names it

@@ -16,8 +16,8 @@ import (
 	"time"
 
 	myterminal "github.com/egoist/mygo/plugins/terminal"
-	"github.com/ai-poet/agent-client/internal/link"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func TestTerminalMirrorIntegration(t *testing.T) {

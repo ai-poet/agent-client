@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/ai-poet/agent-client/internal/shipped"
+	"github.com/ai-poet/cheaprouter-harness/internal/shipped"
 )
 
 // LoadDefault loads the iroh library of the running program. A release

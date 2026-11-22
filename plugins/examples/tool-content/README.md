@@ -8,4 +8,4 @@ The manifest captures `presentation: "content"` for this package's `reports/repo
 
 The common native renderer supplies the table, diff, image viewer and expandable raw details. Model input, raw results and image bytes remain in authoritative conversation history. Disabling or removing the package does not remove existing results.
 
-See [the SDK contract](https://github.com/ai-poet/agent-client/blob/main/sdk/plugins.md#tool-message-content) for limits and fallback behavior. Existing progress operations and MCP elicitation use the native plan and question flows.
+See [the SDK contract](https://github.com/ai-poet/cheaprouter-harness/blob/main/sdk/plugins.md#tool-message-content) for limits and fallback behavior. Existing progress operations and MCP elicitation use the native plan and question flows.

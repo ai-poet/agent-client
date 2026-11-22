@@ -3,7 +3,7 @@ package dispatch
 import (
 	"math"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func First(timing protocol.DispatchTiming, timestamp int64) (int64, error) {

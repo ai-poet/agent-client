@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func CheckPluginPlanAction(ctx context.Context, db *sql.Conn, request protocol.Request, action protocol.PluginAction) error {

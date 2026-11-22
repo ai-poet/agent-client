@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func ReadTerminalSettings(ctx context.Context, db *sql.Conn) (protocol.TerminalSettings, error) {

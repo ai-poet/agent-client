@@ -5,7 +5,7 @@ package power
 import (
 	"sync"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // Backend is the system's idle-sleep request. Acquire and Release return the

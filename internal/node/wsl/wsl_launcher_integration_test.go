@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // TestWSLLauncher exercises the bounded launcher with a real POSIX shell.

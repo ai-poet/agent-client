@@ -5,9 +5,9 @@ import (
 	"math"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func (binding *NativeBinding) renderActivityButton(view *ui.Context, element NativeElement, identity string, props map[string]json.RawMessage, children func()) ui.Element {

@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const compressedFlag uint32 = 1 << 31

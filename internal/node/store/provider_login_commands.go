@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func StartSessionProvider(ctx context.Context, db *sql.Conn, draft protocol.ConversationStart) (protocol.ProviderID, error) {

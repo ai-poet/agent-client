@@ -9,7 +9,7 @@ import (
 	"sort"
 
 	"github.com/egoist/mygo/ui"
-	sailry "github.com/ai-poet/agent-client"
+	sailry "github.com/ai-poet/cheaprouter-harness"
 )
 
 // BuiltinID is the built-in default theme's identifier.

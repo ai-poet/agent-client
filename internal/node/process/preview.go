@@ -1,6 +1,6 @@
 package process
 
-import "github.com/ai-poet/agent-client/internal/protocol"
+import "github.com/ai-poet/cheaprouter-harness/internal/protocol"
 
 // Preview freezes bounded model metadata without changing the command capture.
 // Head is requested only for background snapshots, whose captures own the tail.

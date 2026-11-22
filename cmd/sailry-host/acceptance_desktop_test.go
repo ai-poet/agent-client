@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	core "github.com/ai-poet/agent-client/internal/acceptance"
+	core "github.com/ai-poet/cheaprouter-harness/internal/acceptance"
 )
 
 func acceptanceHelperArgs(mode string, paths ...string) []string {

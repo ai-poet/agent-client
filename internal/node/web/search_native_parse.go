@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func nativeResponsesParse(value map[string]any, now time.Time) (protocol.SearchPage, error) {

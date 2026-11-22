@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"math"
 
-	"github.com/ai-poet/agent-client/internal/node/python"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/python"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func ReadPythonSettings(ctx context.Context, db *sql.Conn) (protocol.PythonSettings, error) {

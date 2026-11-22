@@ -6,7 +6,7 @@ import (
 
 	"github.com/MoeForge/moejs"
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 )
 
 type nativeKeyCallbacks struct {

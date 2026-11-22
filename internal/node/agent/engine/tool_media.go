@@ -9,9 +9,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
-	"github.com/ai-poet/agent-client/internal/node/agent/model"
-	"github.com/ai-poet/agent-client/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 )
 
 // mediaOutputs are the Node outputs whose data object may declare inline_data.

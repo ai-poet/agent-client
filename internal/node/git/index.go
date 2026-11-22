@@ -12,8 +12,8 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	idxfmt "github.com/go-git/go-git/v5/plumbing/format/index"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/ai-poet/agent-client/internal/core"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"lukechampine.com/blake3"
 )
 

@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // ExportArchive captures verified immutable package content, including packages

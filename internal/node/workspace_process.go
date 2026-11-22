@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/node/hooks"
-	"github.com/ai-poet/agent-client/internal/node/process"
-	"github.com/ai-poet/agent-client/internal/node/store"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/hooks"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/process"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func (node *Node) turnHooks(ctx context.Context, inv *store.AgentInvocation) *hooks.Binding {

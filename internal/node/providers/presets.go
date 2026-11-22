@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/appresources"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/appresources"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const presetsURL = "https://sailry.dev/catalogs/model-presets.json"

@@ -11,8 +11,8 @@ import (
 	"github.com/firede/limu/diagram"
 	"github.com/firede/limu/diagram/pie"
 	"github.com/firede/limu/diagram/xychart"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 )
 
 // Data charts of a reply (content/visuals): a Mermaid xychart or pie is

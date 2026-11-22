@@ -8,9 +8,9 @@ import (
 	"io"
 	"path/filepath"
 
-	"github.com/ai-poet/agent-client/internal/client"
-	"github.com/ai-poet/agent-client/internal/core"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const FollowUsage = "Usage: sailry-host follow status|sync [--data-dir <profile>]\nWrites JSON; unknown outcomes retain the original request ID."

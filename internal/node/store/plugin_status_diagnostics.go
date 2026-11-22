@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func RecordPluginStatusDiagnostic(ctx context.Context, db *sql.Conn, report protocol.NotificationSystemSystemDiagnostic, timestamp int64) ([]protocol.Event, error) {

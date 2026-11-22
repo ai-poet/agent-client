@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
-	"github.com/ai-poet/agent-client/internal/node/agent/model"
-	"github.com/ai-poet/agent-client/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 )
 
 func compactionOverflow(t *testing.T, f *engineFixture, x *execution) store.AgentState {

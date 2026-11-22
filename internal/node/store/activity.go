@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func readActivity(ctx context.Context, db *sql.Conn, session protocol.SessionID) (protocol.ActivitySummary, error) {

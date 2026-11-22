@@ -6,7 +6,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/MoeForge/moego/base64"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func (manager *Manager) ReadDesktop(ctx context.Context, info protocol.PluginInfo, surface protocol.PluginDesktopSurface) (protocol.PluginDesktopBundle, error) {

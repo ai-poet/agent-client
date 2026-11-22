@@ -3,7 +3,7 @@ package conversation_test
 import (
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 )
 
 // checkMath is the headless smoke of math in a reply: every delimiter typesets a picture in light and dark, a

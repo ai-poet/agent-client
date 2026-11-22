@@ -11,7 +11,7 @@ import (
 	"reflect"
 	"time"
 
-	core "github.com/ai-poet/agent-client/internal/acceptance"
+	core "github.com/ai-poet/cheaprouter-harness/internal/acceptance"
 )
 
 func runAcceptanceChild(ctx context.Context, executable, directory, socket string, options core.Options, emit func(core.CaseResult)) error {

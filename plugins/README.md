@@ -1,8 +1,8 @@
 # Sailry plugins
 
 Official Sailry plugin packages and installable SDK examples. The application,
-Node runtime and [SDK contract](https://github.com/ai-poet/agent-client/blob/main/sdk/plugins.md)
-live in [sailry-harness](https://github.com/ai-poet/agent-client).
+Node runtime and [SDK contract](https://github.com/ai-poet/cheaprouter-harness/blob/main/sdk/plugins.md)
+live in [sailry-harness](https://github.com/ai-poet/cheaprouter-harness).
 
 Each top-level package is an ordinary Agent Plugins package with Sailry's v1
 extension manifest. `examples/` contains optional developer examples. Package
@@ -93,7 +93,7 @@ is a Git submodule that records a reviewed commit, not a symbolic link. Clone th
 application with its pinned submodules:
 
 ```sh
-git clone --recurse-submodules https://github.com/ai-poet/agent-client.git
+git clone --recurse-submodules https://github.com/ai-poet/cheaprouter-harness.git
 ```
 
 For an existing application checkout, run this from its root after pulling parent

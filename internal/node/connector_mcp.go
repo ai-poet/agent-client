@@ -15,11 +15,11 @@ import (
 
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
-	"github.com/ai-poet/agent-client/internal/node/authorization"
-	"github.com/ai-poet/agent-client/internal/node/mcp"
-	"github.com/ai-poet/agent-client/internal/node/plugins"
-	"github.com/ai-poet/agent-client/internal/node/store"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/authorization"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/mcp"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"golang.org/x/net/http/httpguts"
 	"golang.org/x/oauth2"
 )

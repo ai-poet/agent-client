@@ -123,9 +123,9 @@ IFS=. read -r version_major version_minor version_patch <<< "$bundle_version"
 bundle_build=$((10#$version_major * 1000000 + 10#$version_minor * 1000 + 10#$version_patch))
 
 revision=${SAILRY_REVISION:-$(git rev-parse HEAD)}
-telemetry=github.com/ai-poet/agent-client/internal/node/telemetry
-update_pkg=github.com/ai-poet/agent-client/internal/update
-flags="-X github.com/ai-poet/agent-client/internal/core.Default=~/.sailry"
+telemetry=github.com/ai-poet/cheaprouter-harness/internal/node/telemetry
+update_pkg=github.com/ai-poet/cheaprouter-harness/internal/update
+flags="-X github.com/ai-poet/cheaprouter-harness/internal/core.Default=~/.sailry"
 flags="$flags -X $telemetry.BuildRevision=$revision"
 test -z "${SAILRY_SENTRY_DSN:-}" || flags="$flags -X $telemetry.BuildDSN=$SAILRY_SENTRY_DSN"
 test -z "${SAILRY_TELEMETRY_KEY:-}" || flags="$flags -X $telemetry.BuildKey=$SAILRY_TELEMETRY_KEY"

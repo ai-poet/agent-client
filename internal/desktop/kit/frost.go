@@ -3,7 +3,7 @@ package kit
 import (
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/shader"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 )
 
 // frostShader is a backdrop blur that ends opaque: the blurred backdrop

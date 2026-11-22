@@ -10,12 +10,12 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
-	"github.com/ai-poet/agent-client/internal/node/agent/engine"
-	"github.com/ai-poet/agent-client/internal/node/agent/operations"
-	"github.com/ai-poet/agent-client/internal/node/mcp"
-	"github.com/ai-poet/agent-client/internal/node/store"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/engine"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/operations"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/mcp"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

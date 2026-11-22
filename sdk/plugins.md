@@ -1,6 +1,6 @@
 # Sailry plugin API v1
 
-This is the v1 plugin contract for `github.com/ai-poet/agent-client`. Node
+This is the v1 plugin contract for `github.com/ai-poet/cheaprouter-harness`. Node
 callbacks and Desktop entries run in the Go runtime; nothing described here
 executes in the `--preview` desktop.
 

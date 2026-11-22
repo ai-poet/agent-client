@@ -6,7 +6,7 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // ScopedOperation reports whether an operation manages the role catalog.

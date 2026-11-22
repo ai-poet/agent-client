@@ -13,8 +13,8 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/chrome"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/chrome"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // The browser package's settings page: whether browser tabs keep their

@@ -15,7 +15,7 @@ import (
 	"unicode"
 
 	"github.com/google/uuid"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // The demo's usage is a year of model responses over the demo's projects,

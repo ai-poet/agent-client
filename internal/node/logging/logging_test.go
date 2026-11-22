@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
 )
 
 func TestLogPrivacyFilter(t *testing.T) {

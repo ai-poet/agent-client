@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	"github.com/ai-poet/agent-client/internal/node/agent/model/anthropic"
-	"github.com/ai-poet/agent-client/internal/node/agent/model/google"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model/anthropic"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model/google"
 
 	"github.com/MoeForge/moego/base64"
 )

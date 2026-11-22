@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	cv "github.com/ai-poet/agent-client/internal/desktop/conversation"
+	cv "github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
 )
 
 // The demo's conversation actions change the conversation in memory: a turn

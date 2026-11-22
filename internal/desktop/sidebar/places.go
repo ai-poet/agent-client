@@ -4,7 +4,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/desktop/picker"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/picker"
 )
 
 // projectPlaces are the directories of the projects registered on host, for

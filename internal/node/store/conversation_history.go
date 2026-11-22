@@ -9,8 +9,8 @@ import (
 	"math"
 	"slices"
 
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const visibleCanonical = `CASE WHEN json_extract(e.body,'$.kind')='compaction' THEN 1 ELSE coalesce((SELECT json_extract(v.body,'$.user_visible') FROM agent_events v WHERE json_extract(v.body,'$.message')=json_extract(e.body,'$.id') AND json_extract(v.body,'$.kind')='operation' AND json_extract(v.body,'$.operation')='visibility' AND EXISTS(SELECT 1 FROM conversation_events visibility WHERE visibility.session=h.session AND visibility.sequence=v.sequence) ORDER BY v.sequence DESC LIMIT 1),json_extract(e.body,'$.metadata.runtime.user_visible'),1) END`

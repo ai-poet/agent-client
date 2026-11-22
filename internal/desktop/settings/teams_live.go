@@ -1,8 +1,8 @@
 package settings
 
 import (
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 )
 
 // TeamActions connects existing catalog editors to revision-checked writes.

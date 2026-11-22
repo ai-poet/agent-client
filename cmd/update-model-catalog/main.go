@@ -15,7 +15,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/node/providers"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/providers"
 )
 
 const maxCatalogBytes = 32 * 1024 * 1024

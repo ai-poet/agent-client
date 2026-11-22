@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const conversationDetailLimit = 64 * 1024 * 1024

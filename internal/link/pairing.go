@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/link/iroh"
-	"github.com/ai-poet/agent-client/internal/protocol"
-	"github.com/ai-poet/agent-client/internal/protocol/wire"
+	"github.com/ai-poet/cheaprouter-harness/internal/link/iroh"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol/wire"
 )
 
 const invitationLifetime = time.Minute

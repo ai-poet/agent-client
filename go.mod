@@ -1,4 +1,4 @@
-module github.com/ai-poet/agent-client
+module github.com/ai-poet/cheaprouter-harness
 
 go 1.27.3
 

@@ -2,6 +2,6 @@
 
 package files
 
-import "github.com/ai-poet/agent-client/internal/protocol"
+import "github.com/ai-poet/cheaprouter-harness/internal/protocol"
 
 func driveDetail(string) (string, *protocol.FileBrowserMedium) { return "", nil }

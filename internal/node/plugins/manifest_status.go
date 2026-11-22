@@ -3,7 +3,7 @@ package plugins
 import (
 	"slices"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // validateStatusExtension accepts every slot the contract names. Accepting a

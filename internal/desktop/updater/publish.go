@@ -18,7 +18,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/MoeForge/moego/base64"
-	"github.com/ai-poet/agent-client/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
 )
 
 // The publisher's side of the signed update-v1 format, run by the release

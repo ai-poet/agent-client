@@ -1,15 +1,15 @@
 package panel
 
 import (
-	"github.com/ai-poet/agent-client/internal/desktop/kit/kittest"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit/kittest"
 	"slices"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/preview"
-	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 )
 
 // TestTabsModel groups the pure tab and history model; each case keeps its own fixture.

@@ -6,12 +6,12 @@ import (
 
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/core"
-	"github.com/ai-poet/agent-client/internal/node/agent/operations"
-	"github.com/ai-poet/agent-client/internal/node/files"
-	"github.com/ai-poet/agent-client/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/operations"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/files"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func (node *Node) inspectWorkspaceFiles(ctx context.Context, request protocol.Request, root string, access core.FileAccess) (protocol.Output, error) {

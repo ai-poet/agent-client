@@ -3,7 +3,7 @@ package link
 import (
 	"context"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // Response is the final outcome of an admitted command.

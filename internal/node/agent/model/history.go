@@ -9,11 +9,11 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/MoeForge/moego/base64"
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
-	"github.com/ai-poet/agent-client/internal/node/agent/model/anthropic"
-	"github.com/ai-poet/agent-client/internal/node/agent/model/google"
-	"github.com/ai-poet/agent-client/internal/node/agent/output"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model/anthropic"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model/google"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/output"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // BuildProjectedCall consumes request records already filtered by output.Cache.Project.

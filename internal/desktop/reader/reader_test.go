@@ -12,8 +12,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/audio"
-	"github.com/ai-poet/agent-client/internal/link"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // TestReadAloud reads with a fake model voice, player and OS speech: the

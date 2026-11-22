@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	core "github.com/ai-poet/agent-client/internal/acceptance"
-	"github.com/ai-poet/agent-client/internal/desktop/conversation"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	core "github.com/ai-poet/cheaprouter-harness/internal/acceptance"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func liveFail(detail string) error { return &liveIssue{"failed", detail} }

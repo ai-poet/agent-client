@@ -7,9 +7,9 @@ import (
 	"errors"
 	"maps"
 
-	"github.com/ai-poet/agent-client/internal/node/plugins"
-	"github.com/ai-poet/agent-client/internal/node/providers"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/providers"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func exportProviderConfiguration(ctx context.Context, db *sql.Conn, _ ConfigurationExport) ([]protocol.ConfigurationFollowRecord, error) {

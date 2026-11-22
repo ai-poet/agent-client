@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
-	"github.com/ai-poet/agent-client/internal/desktop/panel"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // browserAutomation is invoked only by the typed browser adapter. Source the

@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/client"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const taskScope = "This is an explicitly requested Sailry acceptance case. Work only in this conversation's dedicated workspace. Do not access credentials, environment variables, system files, network, other sessions or user repositories. Do not install anything or delegate. Use only the tools named in the task. Run a shell command only if the task supplies its exact text; use workspace access. Keep the final reply brief unless the task explicitly requests a longer streaming sample.\n\n"

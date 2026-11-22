@@ -3,9 +3,9 @@ package live
 import (
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/cheapauth"
-	"github.com/ai-poet/agent-client/internal/node/providers"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/cheapauth"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/providers"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // A gateway can serve many vendors over one API (for example DeepSeek, GLM,

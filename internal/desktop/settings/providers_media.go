@@ -3,7 +3,7 @@ package settings
 import (
 	"slices"
 
-	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 )
 
 // imageGeneration keeps native image models on the images endpoint. A

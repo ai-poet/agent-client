@@ -11,17 +11,17 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/ai-poet/agent-client/internal/node/agent/clock"
-	"github.com/ai-poet/agent-client/internal/node/agent/feed"
-	"github.com/ai-poet/agent-client/internal/node/agent/model"
-	"github.com/ai-poet/agent-client/internal/node/agent/operations"
-	"github.com/ai-poet/agent-client/internal/node/agent/output"
-	"github.com/ai-poet/agent-client/internal/node/hooks"
-	"github.com/ai-poet/agent-client/internal/node/logging"
-	"github.com/ai-poet/agent-client/internal/node/python"
-	"github.com/ai-poet/agent-client/internal/node/store"
-	"github.com/ai-poet/agent-client/internal/node/telemetry"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/clock"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/feed"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/operations"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/output"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/hooks"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/python"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/telemetry"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // Options exposes the actual model and clock boundaries to deterministic tests.

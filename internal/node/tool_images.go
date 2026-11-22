@@ -2,7 +2,7 @@ package node
 
 import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/ai-poet/agent-client/internal/node/files"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/files"
 )
 
 // boundToolImages gives the images an MCP server returned, a computer-use

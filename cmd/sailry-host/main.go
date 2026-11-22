@@ -10,14 +10,14 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/ai-poet/agent-client/internal/hostctl"
-	"github.com/ai-poet/agent-client/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/hostctl"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
 
-	"github.com/ai-poet/agent-client/internal/node"
-	"github.com/ai-poet/agent-client/internal/node/computer"
-	"github.com/ai-poet/agent-client/internal/node/logging"
-	"github.com/ai-poet/agent-client/internal/node/mcp"
-	"github.com/ai-poet/agent-client/internal/node/telemetry"
+	"github.com/ai-poet/cheaprouter-harness/internal/node"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/computer"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/mcp"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/telemetry"
 )
 
 func main() {

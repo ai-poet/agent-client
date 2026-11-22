@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // TestDocumentSandboxNoBridge covers what a session document's page is given:

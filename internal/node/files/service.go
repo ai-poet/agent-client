@@ -5,9 +5,9 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
-	"github.com/ai-poet/agent-client/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"lukechampine.com/blake3"
 	"strings"
 	"time"

@@ -3,7 +3,7 @@ package preview
 import (
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/desktop/transfers"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/transfers"
 )
 
 // Installations is the preview's installation queue: plugins downloading or

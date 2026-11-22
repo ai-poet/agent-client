@@ -7,7 +7,7 @@
   those package assets. A submodule is a separate Git repository, not a symbolic
   link or a second source copy.
 - Plugins own their UI, state, workflows and tool orchestration. Reuse the public
-  [SDK contract](https://github.com/ai-poet/agent-client/blob/main/sdk/plugins.md);
+  [SDK contract](https://github.com/ai-poet/cheaprouter-harness/blob/main/sdk/plugins.md);
   shared execution, transport and persistence services remain in the application.
 - Start new packages at `0.1.0`. Increase the semantic version for changed package
   content; ordinary updates increment the patch version. Update detection uses

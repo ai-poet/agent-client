@@ -17,8 +17,8 @@ import (
 	"sync"
 	"unicode"
 
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 type Selection struct {

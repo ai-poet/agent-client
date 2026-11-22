@@ -3,8 +3,8 @@ package files
 import (
 	"context"
 	"errors"
-	"github.com/ai-poet/agent-client/internal/core"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"io/fs"
 	"os"
 	"regexp"

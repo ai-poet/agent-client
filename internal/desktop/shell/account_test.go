@@ -4,9 +4,9 @@ import (
 	"reflect"
 	"testing"
 
-	cheapauthui "github.com/ai-poet/agent-client/internal/desktop/cheapauth"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/settings"
+	cheapauthui "github.com/ai-poet/cheaprouter-harness/internal/desktop/cheapauth"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/settings"
 	"github.com/egoist/mygo/ui"
 )
 

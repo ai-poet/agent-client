@@ -3,8 +3,8 @@ package node
 import (
 	"context"
 
-	"github.com/ai-poet/agent-client/internal/link"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func (node *Node) dispatchPort(ctx context.Context, caller protocol.NodeID, request protocol.Request) (link.Admission, error) {

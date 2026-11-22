@@ -1,6 +1,6 @@
 package node
 
-import "github.com/ai-poet/agent-client/internal/protocol"
+import "github.com/ai-poet/cheaprouter-harness/internal/protocol"
 
 // commandWorktree reads typed v1 resource identity. Authorization and path
 // resolution belong to the Node's captured workspace scope.

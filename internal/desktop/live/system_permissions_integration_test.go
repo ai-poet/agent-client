@@ -19,9 +19,9 @@ import (
 
 	"github.com/egoist/mygo/plugins/permissionflow"
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/settings"
-	"github.com/ai-poet/agent-client/internal/node"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/settings"
+	"github.com/ai-poet/cheaprouter-harness/internal/node"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // systemProbe stands in for the system's permission calls of this process.
@@ -161,7 +161,7 @@ func TestSystemPermissionsUI(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(helper), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if output, err := exec.CommandContext(ctx, "go", "build", "-o", helper, "github.com/ai-poet/agent-client/internal/node/testdata/computerhelper").CombinedOutput(); err != nil {
+	if output, err := exec.CommandContext(ctx, "go", "build", "-o", helper, "github.com/ai-poet/cheaprouter-harness/internal/node/testdata/computerhelper").CombinedOutput(); err != nil {
 		t.Fatalf("building the stand-in helper: %v\n%s", err, output)
 	}
 	t.Setenv("SAILRY_HELPERS_DIR", helpers)

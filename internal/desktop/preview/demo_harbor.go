@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/desktop/composer"
-	cv "github.com/ai-poet/agent-client/internal/desktop/conversation"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
+	cv "github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 )
 
 // The demo's harbor-api project, a booking service in Go: a run in progress

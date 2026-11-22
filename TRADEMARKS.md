@@ -29,4 +29,4 @@ Third-party names and logos shown in Sailry, such as model provider brands,
 belong to their respective owners.
 
 To request permission, [contact the maintainers](https://github.com/sailry) or
-[open an issue](https://github.com/ai-poet/agent-client/issues).
+[open an issue](https://github.com/ai-poet/cheaprouter-harness/issues).

@@ -12,7 +12,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func TestMCPPoolKey(t *testing.T) {

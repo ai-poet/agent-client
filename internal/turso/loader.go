@@ -9,8 +9,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/core"
-	"github.com/ai-poet/agent-client/internal/shipped"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/shipped"
 	turso_libs "github.com/tursodatabase/turso-go-platform-libs"
 	sdk "turso.tech/database/tursogo"
 )

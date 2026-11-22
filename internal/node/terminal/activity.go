@@ -3,7 +3,7 @@ package terminal
 import (
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // activityTracker reads what a program reports about itself in its output:

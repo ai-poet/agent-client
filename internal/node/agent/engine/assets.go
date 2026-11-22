@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
-	"github.com/ai-poet/agent-client/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 )
 
 func (r *Runtime) modelAssetsWith(ctx context.Context, records []canonical.Record, assets map[string][]byte) (map[string][]byte, error) {

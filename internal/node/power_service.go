@@ -6,9 +6,9 @@ import (
 	"log"
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/node/power"
-	"github.com/ai-poet/agent-client/internal/node/store"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/power"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // initPower creates the owner of the system's idle-sleep request. It holds

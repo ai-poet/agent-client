@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // sourceDefault is the profile of builds made from a checkout.

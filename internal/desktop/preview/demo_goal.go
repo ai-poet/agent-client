@@ -4,10 +4,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/desktop/composer"
-	cv "github.com/ai-poet/agent-client/internal/desktop/conversation"
-	"github.com/ai-poet/agent-client/internal/desktop/icons"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
+	cv "github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 )
 
 // The demo's goals (the goals plugin): one in pursuit, whose turns after the

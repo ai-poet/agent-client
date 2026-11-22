@@ -3,8 +3,8 @@ package link
 import (
 	"context"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
-	"github.com/ai-poet/agent-client/internal/protocol/wire"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol/wire"
 )
 
 func (local *Local) ScopedKnowledge(ctx context.Context, call protocol.ScopedKnowledgeCall) (Admission, error) {

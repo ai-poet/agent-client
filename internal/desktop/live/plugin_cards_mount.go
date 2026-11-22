@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	desktopplugins "github.com/ai-poet/agent-client/internal/desktop/plugins"
-	nodeplugins "github.com/ai-poet/agent-client/internal/node/plugins"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	desktopplugins "github.com/ai-poet/cheaprouter-harness/internal/desktop/plugins"
+	nodeplugins "github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func (r *Runtime) ensurePluginCard(view *ui.Context, card *pluginCardInstance) {

@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	"github.com/Masterminds/semver/v3"
-	"github.com/ai-poet/agent-client/internal/core"
-	"github.com/ai-poet/agent-client/internal/link"
-	clientupdate "github.com/ai-poet/agent-client/internal/update"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	clientupdate "github.com/ai-poet/cheaprouter-harness/internal/update"
 )
 
 func TestProductIdentityAlignedWithMain(t *testing.T) {

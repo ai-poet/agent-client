@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/client"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func (location *pluginNativeLocation) confirm(ctx context.Context, cursor string, expected *protocol.WorktreeID, id protocol.RequestID) (protocol.Worktree, error) {

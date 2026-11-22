@@ -7,8 +7,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/ai-poet/agent-client/internal/node/program"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/program"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // operationAction is the action a package must declare before a tool or flow

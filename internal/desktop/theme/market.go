@@ -18,8 +18,8 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/egoist/mygo/netproxy"
-	sailry "github.com/ai-poet/agent-client"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	sailry "github.com/ai-poet/cheaprouter-harness"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const ThemeCatalogURL = "https://sailry.dev/themes/catalog.json"

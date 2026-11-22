@@ -10,8 +10,8 @@ import (
 
 	myterminal "github.com/egoist/mygo/plugins/terminal"
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/node/process"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/process"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 type Launch struct {

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/ai-poet/agent-client/internal/desktop/shell"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/shell"
 )
 
 // exitGuard confirms application quits and protects unsaved documents and

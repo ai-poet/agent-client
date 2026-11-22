@@ -4,7 +4,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/ai-poet/agent-client/internal/protocol/wire"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol/wire"
 )
 
 type contextStream interface {

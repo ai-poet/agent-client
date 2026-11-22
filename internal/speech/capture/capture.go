@@ -16,7 +16,7 @@ import (
 
 	"github.com/ebitengine/purego"
 
-	"github.com/ai-poet/agent-client/internal/shipped"
+	"github.com/ai-poet/cheaprouter-harness/internal/shipped"
 )
 
 // Version is the pinned miniaudio release compiled into the library.

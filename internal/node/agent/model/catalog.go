@@ -5,9 +5,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ai-poet/agent-client/internal/appresources"
-	"github.com/ai-poet/agent-client/internal/node/providers"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/appresources"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/providers"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // The pinned source catalog supplies request capabilities, not model-name tables.

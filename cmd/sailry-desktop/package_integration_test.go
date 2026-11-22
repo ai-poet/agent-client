@@ -12,17 +12,17 @@ import (
 
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/core"
-	"github.com/ai-poet/agent-client/internal/link/iroh"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/link/iroh"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ai-poet/agent-client/internal/node"
-	"github.com/ai-poet/agent-client/internal/node/computer"
-	"github.com/ai-poet/agent-client/internal/node/mcp"
-	"github.com/ai-poet/agent-client/internal/shipped"
+	"github.com/ai-poet/cheaprouter-harness/internal/node"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/computer"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/mcp"
+	"github.com/ai-poet/cheaprouter-harness/internal/shipped"
 
-	"github.com/ai-poet/agent-client/internal/speech/capture"
-	"github.com/ai-poet/agent-client/internal/turso"
+	"github.com/ai-poet/cheaprouter-harness/internal/speech/capture"
+	"github.com/ai-poet/cheaprouter-harness/internal/turso"
 )
 
 func TestPackagedColdStartup(t *testing.T) {

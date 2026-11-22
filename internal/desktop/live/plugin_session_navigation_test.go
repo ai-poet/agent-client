@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	desktopplugins "github.com/ai-poet/agent-client/internal/desktop/plugins"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	desktopplugins "github.com/ai-poet/cheaprouter-harness/internal/desktop/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func TestPluginSessionNavigationRetainsExecutionNode(t *testing.T) {

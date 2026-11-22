@@ -1,8 +1,8 @@
 package live
 
 import (
-	"github.com/ai-poet/agent-client/internal/desktop/panel"
-	"github.com/ai-poet/agent-client/internal/desktop/shell"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/shell"
 )
 
 // showItem shows a file or a diff of the project: on the rail's page of its

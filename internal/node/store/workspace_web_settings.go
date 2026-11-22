@@ -6,8 +6,8 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/ai-poet/agent-client/internal/node/web"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/web"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func readWebSearchStored(ctx context.Context, db *sql.Conn) (searchStored, error) {

@@ -6,8 +6,8 @@ import (
 	"log"
 	"unsafe"
 
-	"github.com/ai-poet/agent-client/assets/branding"
-	"github.com/ai-poet/agent-client/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/assets/branding"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
 	"github.com/egoist/mygo"
 	"golang.org/x/sys/windows"
 )

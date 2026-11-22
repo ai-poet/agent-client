@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/desktop/preferences"
-	"github.com/ai-poet/agent-client/internal/desktop/updater"
-	"github.com/ai-poet/agent-client/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preferences"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/updater"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
 )
 
 func TestUpdateLocksEveryWindowDocuments(t *testing.T) {

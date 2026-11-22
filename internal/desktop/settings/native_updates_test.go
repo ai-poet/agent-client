@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/preview"
-	clientupdate "github.com/ai-poet/agent-client/internal/update"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
+	clientupdate "github.com/ai-poet/cheaprouter-harness/internal/update"
 	"github.com/egoist/mygo/ui"
 )
 

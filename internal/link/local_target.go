@@ -3,7 +3,7 @@ package link
 import (
 	"context"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // ForTarget lets the local controller's resource router choose a directly

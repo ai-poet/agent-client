@@ -426,8 +426,8 @@ func TestMyGoNativeUpdaterEnabledWithBuildFlags(t *testing.T) {
 		"-X github.com/egoist/mygo.production=1",
 		"-X github.com/egoist/mygo.packageUpdateFeed=" + feedURL,
 		"-X github.com/egoist/mygo.packageUpdateKey=" + encodedKey,
-		"-X github.com/ai-poet/agent-client/internal/update.BuildFeedURL=" + feedURL,
-		"-X github.com/ai-poet/agent-client/internal/update.BuildPublicKey=" + encodedKey,
+		"-X github.com/ai-poet/cheaprouter-harness/internal/update.BuildFeedURL=" + feedURL,
+		"-X github.com/ai-poet/cheaprouter-harness/internal/update.BuildPublicKey=" + encodedKey,
 	}, " ")
 	dir := t.TempDir()
 	if runtime.GOOS == "darwin" {

@@ -9,8 +9,8 @@ import (
 	"slices"
 	"sort"
 
-	dispatcher "github.com/ai-poet/agent-client/internal/node/dispatch"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	dispatcher "github.com/ai-poet/cheaprouter-harness/internal/node/dispatch"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func saveDispatchSchedule(ctx context.Context, db *sql.Conn, packageName string, schedule protocol.DispatchSchedule, timestamp int64) (protocol.DispatchSchedule, error) {

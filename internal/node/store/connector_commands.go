@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func ExecuteConnectorCommand(ctx context.Context, db *sql.Conn, command protocol.Command, consent *ConnectorLoginCapture) (protocol.Output, error) {

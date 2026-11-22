@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	sailry "github.com/ai-poet/agent-client"
-	"github.com/ai-poet/agent-client/internal/desktop/icons"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	sailry "github.com/ai-poet/cheaprouter-harness"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/egoist/mygo/ui"
 	"github.com/jonboulle/clockwork"
 )

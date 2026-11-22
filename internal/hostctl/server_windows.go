@@ -7,7 +7,7 @@ import (
 	"errors"
 	"net"
 
-	"github.com/ai-poet/agent-client/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
 )
 
 type Server struct{}

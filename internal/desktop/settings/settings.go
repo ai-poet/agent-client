@@ -4,13 +4,13 @@
 package settings
 
 import (
-	cheapauthui "github.com/ai-poet/agent-client/internal/desktop/cheapauth"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
-	"github.com/ai-poet/agent-client/internal/desktop/icons"
-	imagestudioui "github.com/ai-poet/agent-client/internal/desktop/imagestudio"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/preview"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	cheapauthui "github.com/ai-poet/cheaprouter-harness/internal/desktop/cheapauth"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
+	imagestudioui "github.com/ai-poet/cheaprouter-harness/internal/desktop/imagestudio"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 	"github.com/egoist/mygo/ui"
 )
 

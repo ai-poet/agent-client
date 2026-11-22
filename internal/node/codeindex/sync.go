@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/odvcencio/gotreesitter"
-	"github.com/ai-poet/agent-client/internal/core"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // Reconciling scans the worktree, reads and parses bounded batches in

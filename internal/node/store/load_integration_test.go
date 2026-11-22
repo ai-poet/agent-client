@@ -21,10 +21,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/core"
-	knowledgeText "github.com/ai-poet/agent-client/internal/node/knowledge"
-	"github.com/ai-poet/agent-client/internal/protocol"
-	"github.com/ai-poet/agent-client/internal/turso"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	knowledgeText "github.com/ai-poet/cheaprouter-harness/internal/node/knowledge"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/turso"
 	"lukechampine.com/blake3"
 )
 

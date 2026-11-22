@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	anthropic "github.com/ai-poet/agent-client/internal/node/agent/model/anthropic"
+	anthropic "github.com/ai-poet/cheaprouter-harness/internal/node/agent/model/anthropic"
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 )

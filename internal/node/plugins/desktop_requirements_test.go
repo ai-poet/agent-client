@@ -3,7 +3,7 @@ package plugins
 import (
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func TestDesktopBundleRetainsPlatformRequirements(t *testing.T) {

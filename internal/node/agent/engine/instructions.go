@@ -6,11 +6,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
-	"github.com/ai-poet/agent-client/internal/node/agent/model"
-	"github.com/ai-poet/agent-client/internal/node/agent/prompt"
-	"github.com/ai-poet/agent-client/internal/node/agent/tokens"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/prompt"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/tokens"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func validateInstructionRecord(record canonical.Record) error {

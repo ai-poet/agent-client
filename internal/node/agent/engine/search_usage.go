@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // RecordSearchUsage completes the billed response append after cancellation.

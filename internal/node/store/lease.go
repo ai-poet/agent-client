@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
 	turso "turso.tech/database/tursogo"
 )
 

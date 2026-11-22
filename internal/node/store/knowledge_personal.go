@@ -8,8 +8,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/node/knowledge"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/knowledge"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // PersonalKnowledgeController identifies only a replica's personal namespace.

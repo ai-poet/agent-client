@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // Fitting sizes a page from entries encoded once. The sum must equal the real

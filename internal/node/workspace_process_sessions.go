@@ -1,7 +1,7 @@
 package node
 
 import (
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // processSessionEvents stops the commands of removed sessions. The store has

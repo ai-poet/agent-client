@@ -17,7 +17,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/live"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/live"
 )
 
 func main() {

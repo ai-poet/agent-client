@@ -13,7 +13,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/MoeForge/moego/base64"
-	"github.com/ai-poet/agent-client/internal/node/agent/model/google"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model/google"
 	"github.com/google/uuid"
 )
 

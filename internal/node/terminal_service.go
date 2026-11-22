@@ -7,10 +7,10 @@ import (
 	"log/slog"
 	"runtime"
 
-	"github.com/ai-poet/agent-client/internal/link"
-	"github.com/ai-poet/agent-client/internal/node/store"
-	"github.com/ai-poet/agent-client/internal/node/terminal"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/terminal"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func terminalCommand(kind string) bool {

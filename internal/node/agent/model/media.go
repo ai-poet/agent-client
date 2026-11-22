@@ -21,8 +21,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/netproxy"
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	_ "golang.org/x/image/webp" // provider images that are re-encoded as PNG
 )
 

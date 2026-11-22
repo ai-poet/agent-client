@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/node/files"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/files"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/disk"
 	systemhost "github.com/shirou/gopsutil/v4/host"

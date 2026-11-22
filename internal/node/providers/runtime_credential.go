@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/node/authorization"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/authorization"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // RuntimeAccount exports only fields used to execute an already selected model.

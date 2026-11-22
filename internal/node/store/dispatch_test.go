@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // Over 1 s only beside the package's other parallel tests: each opens its own synced store.

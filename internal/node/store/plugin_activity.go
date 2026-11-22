@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func ReadActivityCatalog(ctx context.Context, db *sql.Conn, node protocol.NodeID) (protocol.ActivityCatalog, error) {

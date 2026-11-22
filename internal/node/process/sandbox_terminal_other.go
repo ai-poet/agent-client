@@ -2,7 +2,7 @@
 
 package process
 
-import "github.com/ai-poet/agent-client/internal/protocol"
+import "github.com/ai-poet/cheaprouter-harness/internal/protocol"
 
 // SandboxTerminal refuses a workspace terminal: a macOS sandbox profile must
 // name the pseudo-terminal device, which the terminal runtime opens inside its

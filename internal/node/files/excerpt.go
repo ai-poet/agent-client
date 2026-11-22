@@ -2,7 +2,7 @@ package files
 
 import (
 	udiff "github.com/go-git/go-git/v5/utils/diff"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/sergi/go-diff/diffmatchpatch"
 	"unicode/utf8"
 )

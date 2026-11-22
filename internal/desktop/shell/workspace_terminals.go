@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/ai-poet/agent-client/internal/desktop/panes"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panes"
 )
 
 // WorkspaceTerminal is an independent terminal surface in the main workspace.

@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"reflect"
 
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
 	"lukechampine.com/blake3"
 )
 

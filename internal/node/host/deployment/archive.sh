@@ -46,8 +46,8 @@ go run ./native/fetch -target "$platform" -host ${artifacts[@]+"${artifacts[@]}"
 
 # A release build opens the release profile by default and loads the iroh
 # library only from its package, against the seal written below.
-telemetry=github.com/ai-poet/agent-client/internal/node/telemetry
-flags="-w -X github.com/ai-poet/agent-client/internal/core.Default=~/.sailry"
+telemetry=github.com/ai-poet/cheaprouter-harness/internal/node/telemetry
+flags="-w -X github.com/ai-poet/cheaprouter-harness/internal/core.Default=~/.sailry"
 revision=${SAILRY_REVISION:-$(git rev-parse HEAD)}
 flags="$flags -X $telemetry.BuildRevision=$revision"
 test -z "${SAILRY_SENTRY_DSN:-}" || flags="$flags -X $telemetry.BuildDSN=$SAILRY_SENTRY_DSN"

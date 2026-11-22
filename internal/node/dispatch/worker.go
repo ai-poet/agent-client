@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/jonboulle/clockwork"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // Recheck bounds the wait for the next due time. A timer counts monotonic

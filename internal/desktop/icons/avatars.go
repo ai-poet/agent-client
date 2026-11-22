@@ -7,7 +7,7 @@ import (
 
 	dicebear "github.com/dicebear/dicebear-go/v10"
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // Role avatars are DiceBear's Gaze drawn from a seed: a pair of eyes on a

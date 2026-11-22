@@ -6,8 +6,8 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/ai-poet/agent-client/internal/node/providers"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/providers"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func CaptureSessionRoles(ctx context.Context, db *sql.Conn, node protocol.NodeID, execution protocol.ConversationExecution, team *protocol.TeamSelection, models map[protocol.RoleID]protocol.RoleModel) (protocol.RoleSnapshot, error) {

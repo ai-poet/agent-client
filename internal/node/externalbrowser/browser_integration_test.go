@@ -19,7 +19,7 @@ import (
 
 	"github.com/shirou/gopsutil/v4/process"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const integrationPage = `<!doctype html><html><head><title>Sailry fixture</title></head><body>

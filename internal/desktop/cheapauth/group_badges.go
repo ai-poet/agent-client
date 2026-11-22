@@ -1,10 +1,10 @@
 package cheapauth
 
 import (
-	core "github.com/ai-poet/agent-client/internal/cheapauth"
-	"github.com/ai-poet/agent-client/internal/desktop/icons"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	core "github.com/ai-poet/cheaprouter-harness/internal/cheapauth"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 	"github.com/egoist/mygo/ui"
 )
 

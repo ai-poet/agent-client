@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func StampCards(result json.RawMessage, node protocol.NodeID, scope protocol.PluginContext, info protocol.PluginInfo, call protocol.RequestID) json.RawMessage {

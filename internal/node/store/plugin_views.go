@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"slices"
 
-	"github.com/ai-poet/agent-client/internal/node/plugins"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func ResolvePluginViewInfo(ctx context.Context, db *sql.Conn, reference protocol.PluginReference, surface protocol.PluginDesktopSurface) (protocol.PluginInfo, error) {

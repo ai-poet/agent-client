@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	cv "github.com/ai-poet/agent-client/internal/desktop/conversation"
+	cv "github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
 )
 
 // Preview content for phase 4a: attachments, output files of every kind
@@ -45,7 +45,7 @@ const reportMD = "# Scroll report\n\nFrames stayed under **1.2 ms** while scroll
 
 const benchGo = "package conversation_test\n\nfunc BenchmarkSteady(b *testing.B) {\n\ts, cv, tt := bigTester(b)\n\ts.List(cv.ID).ScrollTo(500, ui.Center)\n\tfor b.Loop() {\n\t\ttt.Move(500, 300)\n\t}\n}\n"
 
-const logText = "ok  \tgithub.com/ai-poet/agent-client/internal/desktop/conversation\t0.353s\nBenchmarkScroll-14    200    567118 ns/op\nBenchmarkSteady-14    200    175308 ns/op\n"
+const logText = "ok  \tgithub.com/ai-poet/cheaprouter-harness/internal/desktop/conversation\t0.353s\nBenchmarkScroll-14    200    567118 ns/op\nBenchmarkSteady-14    200    175308 ns/op\n"
 
 // outputs are the files of the artifacts scene: one of each kind and of
 // each preview state.

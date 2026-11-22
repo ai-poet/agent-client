@@ -5,8 +5,8 @@ import (
 	"io/fs"
 	"sync"
 
-	sailry "github.com/ai-poet/agent-client"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	sailry "github.com/ai-poet/cheaprouter-harness"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // officialTool is the public identity of one tool of a shipped package.

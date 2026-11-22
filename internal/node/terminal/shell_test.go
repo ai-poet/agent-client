@@ -10,7 +10,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // testShellCommand checks how saved settings become a terminal program. It is

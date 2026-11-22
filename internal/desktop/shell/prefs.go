@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/ai-poet/agent-client/internal/desktop/onboarding"
-	"github.com/ai-poet/agent-client/internal/desktop/panel"
-	"github.com/ai-poet/agent-client/internal/desktop/panes"
-	"github.com/ai-poet/agent-client/internal/desktop/sidebar"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/onboarding"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panes"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/sidebar"
 )
 
 // Prefs are the window's UI preferences that come back after a relaunch:

@@ -1,6 +1,6 @@
 package link
 
-import "github.com/ai-poet/agent-client/internal/protocol"
+import "github.com/ai-poet/cheaprouter-harness/internal/protocol"
 
 var ProductVersion = "0.4.1"
 

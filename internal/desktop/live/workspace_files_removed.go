@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 )
 
 func workspaceEntryContains(parent, relative string) bool {

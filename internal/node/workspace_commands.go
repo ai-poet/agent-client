@@ -10,13 +10,13 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/core"
-	"github.com/ai-poet/agent-client/internal/link"
-	"github.com/ai-poet/agent-client/internal/node/admission"
-	"github.com/ai-poet/agent-client/internal/node/files"
-	"github.com/ai-poet/agent-client/internal/node/process"
-	"github.com/ai-poet/agent-client/internal/node/store"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/admission"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/files"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/process"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 type workspaceCompletion struct {

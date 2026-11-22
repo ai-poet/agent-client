@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"math"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // ReadPluginVersion reads an immutable package capture independently of its live

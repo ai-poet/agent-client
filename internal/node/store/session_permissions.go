@@ -1,6 +1,6 @@
 package store
 
-import "github.com/ai-poet/agent-client/internal/protocol"
+import "github.com/ai-poet/cheaprouter-harness/internal/protocol"
 
 // withinSessionPermissions applies the same ceiling to reused children and
 // sessions created by callbacks captured from an existing conversation.

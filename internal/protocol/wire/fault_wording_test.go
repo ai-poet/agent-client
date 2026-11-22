@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // TestFrameNetworkFaultKeepsItsWording pins the text users read in failure

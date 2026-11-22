@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/node/process"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/process"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func TestRemovedSessionStopsCommands(t *testing.T) {

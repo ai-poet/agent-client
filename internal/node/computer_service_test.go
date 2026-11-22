@@ -7,9 +7,9 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/node/computer"
-	"github.com/ai-poet/agent-client/internal/node/plugins"
-	"github.com/ai-poet/agent-client/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/computer"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 )
 
 // A helper launch that joined the cursor overlay still validates: the session

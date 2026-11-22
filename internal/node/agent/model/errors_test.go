@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func TestFailureRetryHints(t *testing.T) {

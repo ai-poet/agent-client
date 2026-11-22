@@ -8,9 +8,9 @@ import (
 	"io"
 	"path/filepath"
 
-	"github.com/ai-poet/agent-client/internal/client"
-	"github.com/ai-poet/agent-client/internal/core"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const IdentityUsage = "Usage: sailry-host users list [--data-dir <profile>]\n       sailry-host devices list|revoke <device id> [--confirm-last] [--data-dir <profile>] [--request-id <id>]"

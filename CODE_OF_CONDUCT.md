@@ -14,7 +14,7 @@ content or restrict participation according to the conduct and its impact.
 
 ## Reporting a concern
 
-[Ask a maintainer for a private contact method](https://github.com/ai-poet/agent-client/issues/new?title=Private%20contact%20request).
+[Ask a maintainer for a private contact method](https://github.com/ai-poet/cheaprouter-harness/issues/new?title=Private%20contact%20request).
 Do not include names, personal information or incident details in that public
 request. Share the details privately once a maintainer provides a channel.
 

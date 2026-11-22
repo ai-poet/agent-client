@@ -6,7 +6,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func nativeSelect(results []protocol.SearchResult, input protocol.SearchRequest, now time.Time) []protocol.SearchResult {

@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	core "github.com/ai-poet/agent-client/internal/acceptance"
-	"github.com/ai-poet/agent-client/internal/client"
-	profile "github.com/ai-poet/agent-client/internal/core"
-	"github.com/ai-poet/agent-client/internal/desktop/conversation"
-	"github.com/ai-poet/agent-client/internal/desktop/live"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	core "github.com/ai-poet/cheaprouter-harness/internal/acceptance"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
+	profile "github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/live"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // This fixture is deliberately handwritten. It exercises the recorded data

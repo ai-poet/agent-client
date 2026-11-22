@@ -7,8 +7,8 @@ import (
 	"errors"
 	"math"
 
-	"github.com/ai-poet/agent-client/internal/node/hooks"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/hooks"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func ReadHooks(ctx context.Context, db *sql.Conn, worktree protocol.WorktreeID) (protocol.HooksSettings, error) {

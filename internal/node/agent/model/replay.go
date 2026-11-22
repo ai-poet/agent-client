@@ -11,7 +11,7 @@ import (
 	"slices"
 
 	"charm.land/fantasy"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // scopeReplay keeps native thinking only with the projected request that made

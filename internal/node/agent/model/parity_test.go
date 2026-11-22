@@ -19,10 +19,10 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
-	"github.com/ai-poet/agent-client/internal/node/agent/model/anthropic"
-	"github.com/ai-poet/agent-client/internal/node/agent/model/google"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model/anthropic"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model/google"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/cespare/xxhash/v2"
 )
 

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func (state *pluginNativeState) chooseSecretFile(ctx context.Context, _ string) ([]byte, string, error) {

@@ -12,10 +12,10 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/ai-poet/agent-client/internal/core"
-	"github.com/ai-poet/agent-client/internal/node/backup"
-	dispatcher "github.com/ai-poet/agent-client/internal/node/dispatch"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/backup"
+	dispatcher "github.com/ai-poet/cheaprouter-harness/internal/node/dispatch"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const (

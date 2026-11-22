@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 )
 
 func (host *CardHost) Components() []NativeComponent {

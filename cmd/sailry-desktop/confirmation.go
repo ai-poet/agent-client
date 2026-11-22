@@ -4,7 +4,7 @@ import (
 	"log"
 
 	"github.com/egoist/mygo"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 )
 
 // nativeConfirmations attaches every confirmation to its owning native window.

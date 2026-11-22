@@ -1,6 +1,6 @@
 package viewmodel
 
-import "github.com/ai-poet/agent-client/internal/desktop/conversation"
+import "github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
 
 type EditorNotebook struct {
 	Path, Revision, Language string

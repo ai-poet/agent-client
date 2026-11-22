@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	gogit "github.com/go-git/go-git/v5"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // go-git serializes its own writers with descriptor locks. Native Git uses

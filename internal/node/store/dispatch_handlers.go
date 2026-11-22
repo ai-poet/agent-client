@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/kaptinlin/jsonpointer"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func saveDispatchHandler(ctx context.Context, db *sql.Conn, reference protocol.PluginReference, handler protocol.DispatchHandler) (protocol.DispatchHandler, error) {

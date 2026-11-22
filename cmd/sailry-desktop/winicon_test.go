@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ai-poet/agent-client/assets/branding"
-	"github.com/ai-poet/agent-client/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/assets/branding"
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
 )
 
 var wantWindowsIconSizes = []int{16, 24, 32, 48, 64, 128, 256}

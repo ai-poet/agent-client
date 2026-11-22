@@ -5,8 +5,8 @@ import (
 	"unicode"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/composer"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // sessionBase is a new conversation's starting branch. The first send or

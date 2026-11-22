@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/ai-poet/agent-client/internal/migrate"
+	"github.com/ai-poet/cheaprouter-harness/internal/migrate"
 )
 
 // RunLegacyMigration uses the running profile's single storage writer. The

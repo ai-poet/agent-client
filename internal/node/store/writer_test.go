@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
-	"github.com/ai-poet/agent-client/internal/turso"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/turso"
 	sdk "turso.tech/database/tursogo"
 )
 

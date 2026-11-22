@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/desktop/composer"
-	"github.com/ai-poet/agent-client/internal/desktop/preview"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
 	"github.com/egoist/mygo/ui"
 )
 

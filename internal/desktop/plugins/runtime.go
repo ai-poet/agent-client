@@ -16,8 +16,8 @@ import (
 	"github.com/MoeForge/moejs"
 	"github.com/egoist/mygo/ui"
 	"github.com/jonboulle/clockwork"
-	nodeplugins "github.com/ai-poet/agent-client/internal/node/plugins"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	nodeplugins "github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 //go:embed js/*.js

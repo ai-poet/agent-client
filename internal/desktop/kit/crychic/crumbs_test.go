@@ -7,7 +7,7 @@ import (
 
 	"github.com/ELY-Open-Source/CrychicUI/navigation"
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 )
 
 // Crumbs cannot supply PathBar: its overflow is its own left-click menu,

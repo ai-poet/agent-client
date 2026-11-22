@@ -18,13 +18,13 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/jonboulle/clockwork"
-	sailry "github.com/ai-poet/agent-client"
-	"github.com/ai-poet/agent-client/internal/desktop/conversation"
-	desktop "github.com/ai-poet/agent-client/internal/desktop/plugins"
-	"github.com/ai-poet/agent-client/internal/desktop/shell"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
-	packages "github.com/ai-poet/agent-client/internal/node/plugins"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	sailry "github.com/ai-poet/cheaprouter-harness"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
+	desktop "github.com/ai-poet/cheaprouter-harness/internal/desktop/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/shell"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
+	packages "github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 type entry struct {

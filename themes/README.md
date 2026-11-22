@@ -1,7 +1,7 @@
 # Sailry themes
 
 Official theme packages for [Sailry](https://sailry.dev), maintained independently
-from the [application](https://github.com/ai-poet/agent-client). Each package
+from the [application](https://github.com/ai-poet/cheaprouter-harness). Each package
 owns its manifest, artwork and provenance; Sailry owns the reusable importer
 and renderer. See [AGENTS.md](AGENTS.md) for repository rules and
 [SOURCE.md](SOURCE.md) for the initial source revision.
@@ -12,7 +12,7 @@ The application checks out this repository as its `themes/` Git submodule.
 Clone both repositories with:
 
 ```sh
-git clone --recurse-submodules https://github.com/ai-poet/agent-client.git
+git clone --recurse-submodules https://github.com/ai-poet/cheaprouter-harness.git
 ```
 
 For an existing application checkout, run

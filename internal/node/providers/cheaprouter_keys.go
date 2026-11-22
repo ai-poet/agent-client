@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/cheapauth"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/cheapauth"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const cheapRouterKeyBundleVersion = 1

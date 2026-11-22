@@ -6,7 +6,7 @@ import (
 	"io/fs"
 	"os"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // MoveEntryTo prefers the confined native rename so same-filesystem moves keep

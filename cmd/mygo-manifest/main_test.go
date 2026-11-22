@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	clientupdate "github.com/ai-poet/agent-client/internal/update"
+	clientupdate "github.com/ai-poet/cheaprouter-harness/internal/update"
 )
 
 func TestPackSignVerifyAndClientCompatibility(t *testing.T) {

@@ -1,6 +1,6 @@
 package codeindex
 
-import "github.com/ai-poet/agent-client/internal/protocol"
+import "github.com/ai-poet/cheaprouter-harness/internal/protocol"
 
 type (
 	Range        = protocol.CodeIndexRange

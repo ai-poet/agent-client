@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/link/iroh"
+	"github.com/ai-poet/cheaprouter-harness/internal/link/iroh"
 )
 
 type connectionTelemetry struct {

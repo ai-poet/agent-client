@@ -3,7 +3,7 @@ package canonical
 import (
 	"bytes"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // decodeTrimmed decodes a value given directly to UnmarshalJSON. Unicode

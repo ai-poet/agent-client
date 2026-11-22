@@ -9,8 +9,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/node/agent/canonical"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // NativeSearch uses one frozen provider binding. Prepare owns authorization and

@@ -7,9 +7,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/node/admission"
-	"github.com/ai-poet/agent-client/internal/node/plugins"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/admission"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func TestAssistantTurnPackageUpdates(t *testing.T) {

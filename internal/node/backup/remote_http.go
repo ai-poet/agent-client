@@ -11,7 +11,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/studio-b12/gowebdav"
 )

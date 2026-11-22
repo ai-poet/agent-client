@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func SaveTerminal(ctx context.Context, db *sql.Conn, value protocol.TerminalInfo, event bool) ([]protocol.Event, error) {

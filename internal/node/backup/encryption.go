@@ -8,7 +8,7 @@ import (
 	"unicode"
 
 	"filippo.io/age"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // workFactor bounds memory use to approximately 256 MiB, including on small

@@ -13,9 +13,9 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/link"
-	"github.com/ai-poet/agent-client/internal/link/iroh"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/link/iroh"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const fixtureEnvironment = "B7_LINK_FIXTURE"

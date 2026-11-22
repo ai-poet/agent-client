@@ -7,7 +7,7 @@ import (
 	"errors"
 	"reflect"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // A user merge must not discard an existing source-to-local identity binding.

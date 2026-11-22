@@ -6,9 +6,9 @@ import (
 	"log"
 	"sync"
 
-	"github.com/ai-poet/agent-client/internal/node/files"
-	"github.com/ai-poet/agent-client/internal/node/store"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/files"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // storedFiles orders the files the profile stores under a row: attachments

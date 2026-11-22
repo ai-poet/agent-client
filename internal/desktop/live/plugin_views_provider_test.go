@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/desktop/conversation"
-	desktopplugins "github.com/ai-poet/agent-client/internal/desktop/plugins"
-	"github.com/ai-poet/agent-client/internal/desktop/settings"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
+	desktopplugins "github.com/ai-poet/cheaprouter-harness/internal/desktop/plugins"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/settings"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func TestProviderPluginSlot(t *testing.T) {

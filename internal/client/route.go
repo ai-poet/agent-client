@@ -1,6 +1,6 @@
 package client
 
-import "github.com/ai-poet/agent-client/internal/protocol"
+import "github.com/ai-poet/cheaprouter-harness/internal/protocol"
 
 // Route distinguishes a controller entry from the actual resource Node.
 // Direct and local transports use the same identity for both.

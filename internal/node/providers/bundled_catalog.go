@@ -4,7 +4,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ai-poet/agent-client/internal/appresources"
+	"github.com/ai-poet/cheaprouter-harness/internal/appresources"
 )
 
 var bundledCatalog = sync.OnceValues(func() (*CatalogDownload, error) {

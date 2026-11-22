@@ -45,7 +45,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ai-poet/agent-client/internal/shipped"
+	"github.com/ai-poet/cheaprouter-harness/internal/shipped"
 )
 
 // lockFile describes pinned helper assets.

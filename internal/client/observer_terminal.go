@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // terminalView is one delivery of a terminal's state. A screen sent as a VT

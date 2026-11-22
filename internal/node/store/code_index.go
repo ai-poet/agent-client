@@ -6,7 +6,7 @@ import (
 	"errors"
 	"math"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // OpenCodeIndex opens one worktree's derived code index. The file is a cache:

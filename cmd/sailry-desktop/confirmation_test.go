@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 )
 
 func TestNativeConfirmationDefaultAndCancelMapping(t *testing.T) {

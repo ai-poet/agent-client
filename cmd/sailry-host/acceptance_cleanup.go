@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/ai-poet/agent-client/internal/acceptance"
-	"github.com/ai-poet/agent-client/internal/client"
+	"github.com/ai-poet/cheaprouter-harness/internal/acceptance"
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
 )
 
 // cleanupAcceptanceSessions runs after the child has exited. The ledger is the

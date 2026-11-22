@@ -1,7 +1,7 @@
 package panel
 
 import (
-	"github.com/ai-poet/agent-client/internal/desktop/kit/kittest"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit/kittest"
 	"os"
 	"slices"
 	"strings"
@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/kit"
-	"github.com/ai-poet/agent-client/internal/desktop/preview"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 )
 
 // dividers counts the diffs drawn side by side: each has a divider between

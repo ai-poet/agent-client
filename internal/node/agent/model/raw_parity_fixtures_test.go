@@ -11,9 +11,9 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
-	"github.com/ai-poet/agent-client/internal/link"
-	"github.com/ai-poet/agent-client/internal/node/agent/model/anthropic"
-	"github.com/ai-poet/agent-client/internal/node/agent/model/google"
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model/anthropic"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model/google"
 )
 
 const rawRustRevision = "eaad1b7f18e448c8c4e9e9286e19560c8a351ae1"

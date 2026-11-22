@@ -11,7 +11,7 @@ import (
 	"syscall"
 
 	"github.com/creack/pty/v2"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 func launchNative(launch Launch, environment Environment, captureManaged func(string) (string, error)) (_ *nativeProcess, failure error) {

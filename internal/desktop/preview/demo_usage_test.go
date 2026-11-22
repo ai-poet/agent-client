@@ -11,7 +11,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/ai-poet/agent-client/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 // usageSum adds metrics up the way a report's totals are.

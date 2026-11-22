@@ -18,7 +18,7 @@ import (
 	"strings"
 
 	"github.com/MoeForge/moego/base64"
-	"github.com/ai-poet/agent-client/internal/desktop/updater"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/updater"
 )
 
 func main() {

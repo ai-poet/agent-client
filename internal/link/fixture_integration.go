@@ -5,7 +5,7 @@ package link
 import (
 	"context"
 
-	"github.com/ai-poet/agent-client/internal/link/iroh"
+	"github.com/ai-poet/cheaprouter-harness/internal/link/iroh"
 )
 
 func OpenRelayFixture(ctx context.Context, path, relay string, handler Handler, roots [][]byte) (*Link, error) {

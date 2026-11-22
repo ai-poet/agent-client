@@ -2,7 +2,7 @@ package kit
 
 import (
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/theme"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 )
 
 // The application's table look around MyGo's ui.Table, which has no frame,

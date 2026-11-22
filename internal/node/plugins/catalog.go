@@ -13,8 +13,8 @@ import (
 	"strings"
 	"sync"
 
-	sailry "github.com/ai-poet/agent-client"
-	"github.com/ai-poet/agent-client/internal/protocol"
+	sailry "github.com/ai-poet/cheaprouter-harness"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
 const OfficialRepository = "https://github.com/sailry/sailry-plugins"

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/agent-client/internal/desktop/i18n"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 )
 
 // testLiveKnowledge covers the viewer over pages a controller reads: the
