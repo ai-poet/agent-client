@@ -1,0 +1,2288 @@
+// ignore: unused_import
+import 'package:intl/intl.dart' as intl;
+import 'app_localizations.dart';
+
+// ignore_for_file: type=lint
+
+/// The translations for Korean (`ko`).
+class AppLocalizationsKo extends AppLocalizations {
+  AppLocalizationsKo([String locale = 'ko']) : super(locale);
+
+  @override
+  String get guidanceWithdraw => '지침 철회';
+
+
+
+
+
+
+
+
+
+
+  @override
+  String get welcomeTitle => '오늘 뭘 하시겠어요?';
+
+  @override
+  String get welcomeExplore => '프로젝트 탐색하기';
+
+  @override
+  String get welcomeExploreDetail => '구조 및 입력 지점 이해';
+
+  @override
+  String get welcomeExplorePrompt =>
+      '이 프로젝트를 이해할 수 있도록 도와주세요. 핵심 모듈과 접근 지점을 포함해서요.';
+
+  @override
+  String get welcomeBuild => '아이디어 만들기';
+
+  @override
+  String get welcomeBuildDetail => '아이디어를 실현하세요';
+
+  @override
+  String get welcomeBuildPrompt =>
+      '이 프로젝트에 기능을 추가하고 싶습니다. 먼저 요구 사항을 확인하고 구현 계획을 설명해 주십시오.';
+
+  @override
+  String get welcomeReview => '변경 사항 검토';
+
+  @override
+  String get welcomeReviewDetail => '변경 사항 및 잠재적 문제 확인';
+
+  @override
+  String get welcomeReviewPrompt =>
+      '잠재적인 문제점과 누락된 테스트에 초점을 맞추어 이 프로젝트의 현재 변경 사항을 검토합니다.';
+
+  @override
+  String get welcomePlan => '계획을 세우세요';
+
+  @override
+  String get welcomePlanDetail => '목표와 단계 명확화';
+
+  @override
+  String get welcomePlanPrompt => '다가오는 개발 작업에 대한 단계별 계획을 작성하는 데 도움을 주십시오.';
+
+  @override
+  String get conversationEmpty => '귀하의 작업을 설명';
+
+  @override
+  String get conversationLoading => '채팅 불러오는 중';
+
+  @override
+  String get conversationReconnecting => '다시 연결 중';
+
+  @override
+  String get conversationErrorDetails => '보기 이유';
+
+  @override
+  String conversationModelRetrying(String attempt, String limit) {
+    return '모델 요청을 다시 시도 중 $attempt/$limit';
+  }
+
+  @override
+  String conversationModelRetried(String attempt, String limit) {
+    return '모델 요청 재시도 $attempt/$limit';
+  }
+
+  @override
+  String get conversationStepSkipped => '건너뜀';
+
+  @override
+  String get conversationChild => '하위 작업';
+
+  @override
+  String get conversationOffline => '연결 끊김Comment';
+
+  @override
+  String get conversationUnavailable => '사용할 수 없는 채팅';
+
+  @override
+  String get conversationReconnectingHint => '호스트 응답을 기다리는 중';
+
+  @override
+  String get conversationUnavailableHint => '메시지를 불러올 수 없음';
+
+  @override
+  String get connectionDetails => '세부 정보';
+
+  @override
+  String get conversationFailed => '작업 실패; 다시 시도하기';
+
+  @override
+  String get conversationUnknown => '결과 확인되지 않음; 다시 행동하기 전에 채팅을 확인하십시오';
+
+  @override
+  String get conversationCheckResult => '결과 확인';
+
+  @override
+  String get conversationConflict => '설정이 변경되었습니다. 다시 실행하기 전에 다시 엽니다';
+
+  @override
+  String get conversationOlder => '이전 메시지 불러오기';
+
+  @override
+  String get conversationNew => '새 채팅';
+
+  @override
+  String get conversationNoHost => '먼저 호스트 연결하기';
+
+  @override
+  String get conversationNoProject => '먼저 호스트에 프로젝트 추가';
+
+  @override
+  String get conversationNoModel => '먼저 호스트에서 모델을 구성합니다';
+
+  @override
+  String get conversationNoTasks => '아직 채팅이 없습니다';
+
+  @override
+  String get conversationNoMessages => '메시지 없음';
+
+  @override
+  String get conversationPreviewUnavailable => '사용할 수 없는 메시지';
+
+  @override
+  String get conversationInterrupted => '중단됨';
+
+  @override
+  String get conversationContinued => '이어짐';
+
+  @override
+  String get conversationFailedStatus => '실패';
+
+  @override
+  String get conversationStopping => '중지 중';
+
+  @override
+  String get conversationQueued => '대기열';
+
+  @override
+  String get conversationGenerating => '응답 중';
+
+  @override
+  String get conversationWaiting => '확인을 기다리는 중';
+
+  @override
+  String get conversationWaitingChild => '하위 에이전트 1개 대기 중';
+
+  @override
+  String conversationWaitingChildren(String count) {
+    return '하위 에이전트 $count개 대기 중';
+  }
+
+  @override
+  String get conversationCompacting => '컨텍스트 압축';
+
+  @override
+  String get conversationWaitingController => '컨트롤러 로그인 업데이트 대기 중';
+
+  @override
+  String get conversationCompacted => '컨텍스트 압축됨';
+
+  @override
+  String get conversationToolWaiting => '보류 중';
+
+  @override
+  String get conversationStartCoding => '실행 시작';
+
+  @override
+  String get conversationPlanFeedback => '변경 사항 제안하기';
+
+  @override
+  String get conversationOther => '기타';
+
+  @override
+  String get conversationSubmit => '제출';
+
+  @override
+  String get conversationMode => '작업 모드';
+
+  @override
+  String get conversationCode => '표준';
+
+  @override
+  String get conversationPlan => '계획';
+
+  @override
+  String get conversationFlagship => '협업';
+
+  @override
+  String get conversationAsk => '매번 물어보기';
+
+  @override
+  String get conversationProject => '프로젝트 액세스';
+
+  @override
+  String get conversationFull => '전체 액세스';
+
+  @override
+  String get conversationPermission => '권한';
+
+  @override
+  String get conversationAskDescription => '파일을 편집하거나 명령을 실행하기 전에 묻기';
+
+  @override
+  String get conversationProjectDescription => '프로젝트 파일 자동 편집; 명령 실행 전에 묻기';
+
+  @override
+  String get conversationFullDescription => '프로젝트 외부에서도 파일을 편집하고 명령을 자동으로 실행';
+
+  @override
+  String get conversationBudget => '예산 추론';
+
+  @override
+  String get conversationAttachment => '첨부 파일';
+
+  @override
+  String get conversationImageFailed => '이미지를 표시할 수 없음';
+
+  @override
+  String get conversationImageUnavailable => '이미지를 사용할 수 없음';
+
+  @override
+  String get conversationDownloadFailed => '첨부 파일을 불러올 수 없음';
+
+  @override
+  String get conversationSources => '소스';
+
+  @override
+  String get conversationSearchSuggestions => '검색 제안';
+
+  @override
+  String get conversationStats => '채팅 사용량';
+
+  @override
+  String get conversationStatsEmpty => '아직 사용되지 않음';
+
+  @override
+  String get conversationStatsOverview => '개요';
+
+  @override
+  String get conversationStatsTokenGroup => 'Token 사용';
+
+  @override
+  String get conversationStatsCostGroup => '비용';
+
+  @override
+  String get conversationStatsGenerationGroup => '생성';
+
+  @override
+  String get conversationStatsTokens => 'Tokens';
+
+  @override
+  String get conversationStatsInput => '입력';
+
+  @override
+  String get conversationStatsOutput => '출력';
+
+  @override
+  String get conversationStatsCached => '캐시된 입력';
+
+  @override
+  String get conversationStatsReasoning => '추론 출력';
+
+  @override
+  String get conversationStatsCacheRate => '캐시 히트';
+
+  @override
+  String get conversationStatsCost => '예상 비용';
+
+  @override
+  String get conversationStatsCostCoverage => '비용 범위';
+
+  @override
+  String get conversationStatsSpeed => '첫 토큰 대기를 포함한 출력 속도';
+
+  @override
+  String conversationStatsSpeedValue(String value) {
+    return '$value tok/s';
+  }
+
+  @override
+  String get conversationStatsTimingCoverage => '타이밍 범위';
+
+  @override
+  String get conversationStatsTurns => '턴';
+
+  @override
+  String get conversationStatsResponses => '모델 응답';
+
+  @override
+  String get conversationStatsContext => '현재 컨텍스트';
+
+  @override
+  String get conversationStatsInputCost => '입력 비용';
+
+  @override
+  String get conversationStatsOutputCost => '출력 비용';
+
+  @override
+  String get conversationStatsCacheReadCost => '캐시 읽기 비용';
+
+  @override
+  String get conversationStatsCacheWriteCost => '캐시 쓰기 비용';
+
+  @override
+  String get messageHistoryUpdated => '채팅 업데이트; 원본 기록 보관';
+
+  @override
+  String get turnUndoUnsaved => '파일에 저장되지 않은 변경 사항이 있습니다. 먼저 저장하거나 버리십시오';
+
+  @override
+  String get codePlain => '일반 텍스트';
+
+  @override
+  String get turnChanges => '변경 사항 돌리기';
+
+  @override
+  String turnChangesCount(String count) {
+    return '$count 파일';
+  }
+
+  @override
+  String get fileChangesApprovalOne => '파일 1개에 패치 적용';
+
+  @override
+  String fileChangesApproval(String count) {
+    return '파일 $count개에 패치 적용';
+  }
+
+  @override
+  String get fileChangesAdded => '추가';
+
+  @override
+  String get fileChangesModified => '수정';
+
+  @override
+  String get fileChangesRenamed => '이름 변경';
+
+  @override
+  String get fileChangesDeleted => '삭제';
+
+  @override
+  String get turnUndo => '변경 사항 실행 취소';
+
+  @override
+  String get turnUndoAll => '모두 실행 취소';
+
+  @override
+  String get turnUndoConfirm =>
+      '이번 순서에서 파일 변경 사항을 실행 취소하시겠습니까? 나중에 변경한 것과 충돌하면 작업이 중단됩니다';
+
+  @override
+  String get turnUndoDone => '실행 취소됨';
+
+  @override
+  String get turnUndoPartial => '일부 변경 사항 실행 취소; 나머지 파일 확인';
+
+  @override
+  String get messageActions => '메시지 동작';
+
+  @override
+  String get messageEdit => '편집 및 재생성';
+
+  @override
+  String get messageEditConfirm => '이 메시지와 다음 채팅을 바꾸시겠습니까? 파일은 되돌리지 않습니다';
+
+  @override
+  String get messageRewind => '여기로 되감기';
+
+  @override
+  String get messageRewindConfirm => '이 턴을 남기고 이후 메시지를 제거할까요? 파일은 바뀌지 않습니다';
+
+  @override
+  String get messageBackup => '채팅 백업 보기';
+
+  @override
+  String get messageRegenerate => '다시 생성';
+
+  @override
+  String get messageSearch => '채팅 검색';
+
+  @override
+  String get messageSearchHint => '메시지 검색';
+
+  @override
+  String get messageSearchMissing => '이 메시지는 더 이상 현재 채팅에 없습니다';
+
+  @override
+  String get messageSearchStale => '채팅 변경; 다시 검색';
+
+  @override
+  String get messageNoResults => '일치하는 메시지가 없음';
+
+  @override
+  String get messageCheck => '작업 결과 확인';
+
+  @override
+  String get messageReference => '참조';
+
+  @override
+  String get messageReferenceContext => '이 참조는 메시지가 전송되었을 때의 컨텍스트에 속합니다';
+
+  @override
+  String get toolFailed => '실패';
+
+  @override
+  String get fileLinkUnavailable => '이 링크를 열 수 없습니다';
+
+  @override
+  String get imagePreview => '이미지 미리 보기';
+
+  @override
+  String get fileOpenExternal => '다른 앱으로 열기';
+
+  @override
+  String get fileOpenFailed => '파일을 열 수 없음';
+
+  @override
+  String get fileNoApplication => '이 파일을 열 수 있는 앱이 없습니다';
+
+  @override
+  String get fileSaveBeforeShare => '공유하기 전에 변경 사항을 저장하시겠습니까?';
+
+  @override
+  String fileTrashConfirm(String name) {
+    return '“$name”을 호스트 휴지통으로 이동하시겠습니까';
+  }
+
+  @override
+  String get fileTrashUncertain => '삭제 결과가 확인되지 않았습니다. 쿼리를 다시 시도하십시오';
+
+  @override
+  String get fileSaveFailed => '파일 저장 실패';
+
+  @override
+  String get terminalHideKeyboard => '키보드 숨기기';
+
+  @override
+  String get terminalEscape => 'Esc';
+
+  @override
+  String get terminalTab => 'Tab';
+
+  @override
+  String get terminalCtrl => 'Ctrl';
+
+  @override
+  String get terminalAlt => 'Alt';
+
+  @override
+  String get terminalShift => 'Shift';
+
+  @override
+  String get terminalCmd => 'Cmd';
+
+  @override
+  String get terminalArrowLeft => '왼쪽';
+
+  @override
+  String get terminalArrowUp => '위';
+
+  @override
+  String get terminalArrowDown => '아래';
+
+  @override
+  String get terminalArrowRight => '오른쪽';
+
+  @override
+  String get resourceNoWorkspace => '연결된 호스트에서 작업 트리 선택';
+
+  @override
+  String get resourceRoot => '루트';
+
+  @override
+  String get resourceMore => '더 많이 로드';
+
+  @override
+  String get resourcePartial => '부분적인 내용 표시';
+
+  @override
+  String get resourceEmpty => '내용 없음';
+
+  @override
+  String get resourceSaveError => '저장 실패; 초안 보관';
+
+  @override
+  String get resourceReloadConfirm => '초안을 버리고 최신 콘텐츠를 로드하시겠습니까?';
+
+  @override
+  String get resourceWorktreeCreate => '새 작업 트리';
+
+  @override
+  String get resourceSessionServices => '채팅 서비스';
+
+  @override
+  String get resourceServicesUnavailable => '서비스 목록을 사용할 수 없음';
+
+  @override
+  String get resourceNoServices => '서비스 주소가 없습니다';
+
+  @override
+  String get resourceServiceOpen => '개방형 서비스';
+
+  @override
+  String get resourceRemotePort => '원격 포트';
+
+  @override
+  String get resourceOpenPort => '포워드 포트';
+
+  @override
+  String get resourceOpenBrowser => '웹 페이지 미리보기';
+
+  @override
+  String get resourcePreviewFailed => '페이지를 불러올 수 없습니다';
+
+  @override
+  String get resourcePreviewLink => '미리보기에서 이 링크를 열 수 없습니다';
+
+  @override
+  String get resourceForwardStopped => '전달 중지됨';
+
+  @override
+  String get resourceTerminalControl => '제어하세요';
+
+  @override
+  String get resourceTerminalControlHint => '다른 장치에서 제어됨';
+
+  @override
+  String get resourceTerminalClaiming => '제어권 획득';
+
+  @override
+  String get resourceTerminalEnded => '터미널 종료';
+
+  @override
+  String get resourceTerminalConnecting => '터미널 연결 중';
+
+  @override
+  String get resourceTerminalPaste => '붙여넣기';
+
+  @override
+  String get resourceGitNotRepository => '이 디렉터리는 Git 저장소가 아닙니다';
+
+  @override
+  String get resourceInvalidPort => '1–65535 사이의 포트를 입력합니다';
+
+  @override
+  String get tool_navigate => '페이지 열기';
+
+  @override
+  String get tool_back => '뒤로 가기';
+
+  @override
+  String get tool_forward => '앞으로 가기';
+
+  @override
+  String get tool_refresh => '페이지 새로 고침';
+
+  @override
+  String get tool_right_click => '클릭 요소';
+
+  @override
+  String get tool_clear => '텍스트 입력';
+
+  @override
+  String get tool_select => '옵션 선택';
+
+  @override
+  String get tool_hover => '항목 위치 바꾸기';
+
+  @override
+  String get tool_scroll => '페이지 스크롤';
+
+  @override
+  String get tool_press_key => '키 누르기';
+
+  @override
+  String get tool_new_tab => '새 탭';
+
+  @override
+  String get tool_list_windows => '브라우저 탭';
+
+  @override
+  String get tool_switch_window => '탭 전환';
+
+  @override
+  String get tool_close_window => '창 닫기';
+
+  @override
+  String get tool_close_session => '브라우저 닫기';
+
+  @override
+  String get tool_screenshot => '페이지 캡처';
+
+  @override
+  String get tool_print_to_pdf => 'PDF 내보내기';
+
+  @override
+  String get tool_file_upload => '파일 업로드';
+
+  @override
+  String get tool_downloads => '다운로드 보기';
+
+  @override
+  String get tool_save_download => '다운로드한 파일 저장';
+
+  @override
+  String get tool_evaluate_js => '페이지 스크립트 실행';
+
+  @override
+  String get tool_get_cookies => '쿠키 읽기';
+
+  @override
+  String get tool_delete_all_cookies => '쿠키 변경';
+
+  @override
+  String get tool_drag_and_drop => '항목 드래그';
+
+  @override
+  String get tool_focus => '초점 요소';
+
+  @override
+  String get tool_handle_alert => '페이지 알림 처리';
+
+  @override
+  String get tool_database_catalog => '데이터베이스 탐색';
+
+  @override
+  String get tool_database_query => '데이터베이스 쿼리';
+
+  @override
+  String get tool_database_execute => '데이터베이스 작업 실행';
+
+  @override
+  String get tool_search_memory => '검색 메모리';
+
+  @override
+  String get tool_review_memories => '메모리 검토';
+
+  @override
+  String get tool_consolidate_memories => '추억 병합';
+
+  @override
+  String get tool_save_memory => '메모리 절약';
+
+  @override
+  String get tool_forget_memory => '메모리 삭제';
+
+  @override
+  String get tool_update_plan => '계획 업데이트';
+
+  @override
+  String get tool_create_goal => '목표 만들기';
+
+  @override
+  String get tool_get_goal => '목표 보기';
+
+  @override
+  String get tool_update_goal => '업데이트 목표';
+
+  @override
+  String get tool_spawn_agent => '하위 에이전트';
+
+  @override
+  String get tool_browser_tabs => '브라우저 탭';
+
+  @override
+  String get tool_browser_read => '읽기 페이지';
+
+  @override
+  String get tool_browser_navigate => '페이지 열기';
+
+  @override
+  String get tool_browser_click => '클릭 요소';
+
+  @override
+  String get tool_browser_input => '텍스트 입력';
+
+  @override
+  String get tool_browser_scroll => '페이지 스크롤';
+
+  @override
+  String get tool_browser_back => '뒤로 가기';
+
+  @override
+  String get tool_browser_forward => '앞으로 가기';
+
+  @override
+  String get tool_browser_refresh => '페이지 새로 고침';
+
+  @override
+  String get tool_browser_open => '새 탭';
+
+  @override
+  String get tool_browser_close => '탭 닫기';
+
+  @override
+  String get tool_browser_focus => '탭 전환';
+
+  @override
+  String get tool_browser_select => '옵션 선택';
+
+  @override
+  String get tool_browser_hover => '항목 위치 바꾸기';
+
+  @override
+  String get tool_browser_key => '키 누르기';
+
+  @override
+  String get tool_browser_frame => '프레임 전환';
+
+  @override
+  String get tool_browser_wait => '페이지 기다림';
+
+  @override
+  String get tool_browser_screenshot => '페이지 캡처';
+
+  @override
+  String get tool_ssh_run => 'SSH 명령 실행';
+
+  @override
+  String get tool_ssh_transfer => '전송 SSH 파일';
+
+  @override
+  String get tool_list_worktrees => '작업 트리 목록';
+
+  @override
+  String get tool_create_worktree => '새 작업 트리';
+
+  @override
+  String get tool_register_worktree => '작업 트리 추가';
+
+  @override
+  String get tool_remove_worktree => '작업 트리 삭제';
+
+  @override
+  String get tool_google_search => '웹 검색';
+
+  @override
+  String get tool_web_fetch => '페이지 가져오기';
+
+  @override
+  String get tool_fetch_url => '페이지 가져오기';
+
+  @override
+  String get tool_read_file => '파일 읽기';
+
+  @override
+  String get tool_write_file => '파일 쓰기';
+
+  @override
+  String get tool_list_directory => '디렉터리 찾아보기';
+
+  @override
+  String get tool_search_files => '파일 검색';
+
+  @override
+  String get tool_run_command => '명령 실행';
+
+  @override
+  String get tool_read_command => '배경 보기 명령';
+
+  @override
+  String get tool_stop_command => '중지 명령';
+
+  @override
+  String get tool_load_skill => '스킬 로드';
+
+  @override
+  String get tool_read_skill_resource => '스킬 자원 읽기';
+
+  @override
+  String get tool_computer_desktop => '데스크톱 보기';
+
+  @override
+  String get tool_computer_observe => '화면 관찰';
+
+  @override
+  String get tool_computer_input => '제어 컴퓨터';
+
+  @override
+  String get tool_computer_focus => '앱 전환';
+
+  @override
+  String get tool_computer_open => '앱 열기';
+
+  @override
+  String get tool_git_status => 'Git 상태';
+
+  @override
+  String get tool_git_diff => '차이 보기';
+
+  @override
+  String get tool_git_log => 'Git 로그';
+
+  @override
+  String get tool_inspect_image => '이미지 검사';
+
+  @override
+  String get tool_generate_image => '이미지 생성';
+
+  @override
+  String get tool_generate_video => '비디오 생성';
+
+  @override
+  String get refresh => '새로고침';
+
+  @override
+  String get loading => '로딩 중';
+
+  @override
+  String get home => '대화';
+
+  @override
+  String get idle => '대기 중';
+
+  @override
+  String get allProjects => '모든 프로젝트';
+
+  @override
+  String get unassignedChats => '대화';
+
+  @override
+  String get allWorktrees => '모든 작업 트리';
+
+  @override
+  String get tasksActive => '진행 중';
+
+  @override
+  String get tasksToday => '오늘';
+
+  @override
+  String get yesterday => '어제';
+
+  @override
+  String get tasksThisWeek => '이번 주';
+
+  @override
+  String get tasksEarlier => '이전';
+
+  @override
+  String get filterProjects => '프로젝트 필터';
+
+  @override
+  String get archiveShort => '압축 파일';
+
+  @override
+  String get archiveTab => '보관함';
+
+  @override
+  String get delete => '삭제';
+
+  @override
+  String get deleteTask => '채팅 삭제';
+
+  @override
+  String get deleteWarning => '이 채팅은 삭제 후 재개할 수 없습니다';
+
+  @override
+  String get restored => '홈으로 복원';
+
+  @override
+  String get restore => '복원';
+
+  @override
+  String get archiveEmpty => '보관된 채팅 없음';
+
+  @override
+  String get brand => 'Sailry';
+
+  @override
+  String get mobile => '모바일 작업 공간';
+
+  @override
+  String get preview => '미리 보기';
+
+  @override
+  String get mixed => '빛과 어둠';
+
+  @override
+  String get dark => '다크';
+
+  @override
+  String get light => '라이트';
+
+  @override
+  String get brandColor => '강조 색상';
+
+  @override
+  String get brandOrange => '주황';
+
+  @override
+  String get brandBlue => '파랑';
+
+  @override
+  String get brandGreen => '초록';
+
+  @override
+  String get brandPurple => '보라';
+
+  @override
+  String get brandPink => '분홍';
+
+  @override
+  String get brandTeal => '청록';
+
+  @override
+  String get focus => '단일 화면';
+
+  @override
+  String get page => '페이지 선택';
+
+  @override
+  String get design => '기능 및 디자인';
+
+  @override
+  String get footer => '항해 / 모바일';
+
+  @override
+  String get tasks => '작업';
+
+  @override
+  String get chat => '채팅';
+
+  @override
+  String get hosts => '호스트';
+
+  @override
+  String get resources => '자원';
+
+  @override
+  String get settings => '설정';
+
+  @override
+  String get usage => '사용량';
+
+  @override
+  String get changes => '변경 사항';
+
+  @override
+  String get terminal => '터미널';
+
+  @override
+  String get newTerminal => '새 터미널';
+
+  @override
+  String get terminalEnd => '터미널 종료';
+
+  @override
+  String get terminalEndWarning => '셸과 실행 중인 명령이 중지됩니다';
+
+  @override
+  String get terminalNone => '실행 중인 터미널 없음';
+
+  @override
+  String get files => '파일';
+
+  @override
+  String get project => '프로젝트';
+
+  @override
+  String get projects => '프로젝트';
+
+  @override
+  String get editProject => '프로젝트 편집';
+
+  @override
+  String get removeProject => '프로젝트 제거';
+
+  @override
+  String get removeProjectWarning =>
+      '프로젝트를 목록에서 제거하고 열린 터미널을 닫으며 백그라운드 명령을 중지합니다. 파일과 채팅 기록은 유지됩니다.';
+
+  @override
+  String get projectRemovalMayHaveClosedTerminals =>
+      '프로젝트의 일부 터미널이 이미 닫혔을 수 있습니다.';
+
+  @override
+  String get worktree => '작업 트리';
+
+  @override
+  String get allHosts => '모든 호스트';
+
+  @override
+  String get all => '모두';
+
+  @override
+  String get running => '실행 중';
+
+  @override
+  String get waiting => '보류 중';
+
+  @override
+  String get completed => '완료됨';
+
+  @override
+  String get search => '검색';
+
+  @override
+  String get searchTasks => '작업 및 프로젝트 검색';
+
+  @override
+  String get noResults => '일치하는 작업이 없음';
+
+  @override
+  String get notification => '알림';
+
+  @override
+  String get newConversation => '새 채팅';
+
+  @override
+  String get question => '어떤 언어로 문서를 작성해야 합니까?';
+
+  @override
+  String get reply => '답장';
+
+  @override
+  String get approval => '승인';
+
+  @override
+  String get allow => '한 번만 허용';
+
+  @override
+  String get deny => '거부';
+
+  @override
+  String get working => '작업 중';
+
+  @override
+  String get branch => 'feature/sign-in';
+
+  @override
+  String get today => '오늘 09:36';
+
+  @override
+  String get phaseThinking => '생각';
+
+  @override
+  String get phaseReading => '파일 읽기';
+
+  @override
+  String get phaseQuestion => '응답 기다리는 중';
+
+  @override
+  String get phaseEditing => '파일 편집';
+
+  @override
+  String get phaseApproval => '승인을 기다리는 중';
+
+  @override
+  String get phaseTesting => '실행 중인 테스트';
+
+  @override
+  String get phaseReply => '응답 중';
+
+  @override
+  String get phaseFollowup => '대기열 처리 중';
+
+  @override
+  String get phaseComplete => '완료됨';
+
+  @override
+  String get phaseFailed => '테스트 실패';
+
+  @override
+  String get allowShort => '허용';
+
+  @override
+  String get queueShort => '대기열';
+
+  @override
+  String get questionPending => '귀하의 답변을 기다리고 있습니다';
+
+  @override
+  String queueCount(String count) {
+    return '$count 대기 중인 메시지';
+  }
+
+  @override
+  String queuePaused(String count) {
+    return '대기열 일시 정지됨 · $count';
+  }
+
+  @override
+  String queueGuidance(String queue) {
+    return '$queue, 지침 합류 대기 중';
+  }
+
+  @override
+  String get pauseQueue => '대기열 일시 정지';
+
+  @override
+  String get resumeQueue => '대기열 재개';
+
+  @override
+  String get moveUp => '위로 이동';
+
+  @override
+  String get thinkingNow => '생각';
+
+  @override
+  String get thought => '추론';
+
+  @override
+  String get describeTask => '귀하의 작업을 설명';
+
+  @override
+  String get send => '보내기';
+
+  @override
+  String get attach => '첨부';
+
+  @override
+  String get attachment => '첨부 파일';
+
+  @override
+  String get removeAttachment => '첨부 파일 삭제';
+
+  @override
+  String get model => '모델';
+
+  @override
+  String get copy => '복사';
+
+  @override
+  String get copied => '복사됨';
+
+  @override
+  String get copyFailed => '복사할 수 없습니다. 텍스트를 수동으로 선택하십시오';
+
+  @override
+  String get more => '더 보기';
+
+  @override
+  String get close => '닫기';
+
+  @override
+  String get back => '뒤로';
+
+  @override
+  String get cancel => '취소';
+
+  @override
+  String get save => '저장';
+
+  @override
+  String get queue => '메시지 큐';
+
+  @override
+  String get queueEmpty => '대기 중인 메시지 없음';
+
+  @override
+  String get fork => '대화 분기';
+
+  @override
+  String get stop => '작업 중지';
+
+  @override
+  String get stoppedStatus => '중지됨';
+
+  @override
+  String get pair => '호스트 연결';
+
+  @override
+  String get online => '온라인';
+
+  @override
+  String get offline => '오프라인';
+
+  @override
+  String get cpu => 'CPU';
+
+  @override
+  String get memory => '메모리';
+
+  @override
+  String get metrics => '리소스 사용';
+
+  @override
+  String get activity => '활동';
+
+  @override
+  String get processes => '프로세스';
+
+  @override
+  String get network => '네트워크';
+
+  @override
+  String get relay => '중계';
+
+  @override
+  String get retry => '다시 시도';
+
+  @override
+  String get pairTitle => '호스트 연결';
+
+  @override
+  String get pairCode => '연결 코드';
+
+  @override
+  String get pairInvalid => '6자리를 입력하십시오';
+
+  @override
+  String get pairTicket => '페어링 티켓';
+
+  @override
+  String get pairTicketInvalid => '페어링 티켓을 입력하세요';
+
+  @override
+  String get workspace => '작업 공간';
+
+  @override
+  String get selectHost => '호스트 선택';
+
+  @override
+  String get confirm => '확인';
+
+  @override
+  String get git => 'Git';
+
+  @override
+  String get gitBranches => '브랜치';
+
+  @override
+  String get gitHistory => '기록';
+
+  @override
+  String gitViewAll(String count) {
+    return '변경 사항 $count개 모두 보기';
+  }
+
+  @override
+  String terminalRunningCount(String count) {
+    return '$count개 실행 중';
+  }
+
+  @override
+  String get gitUnstaged => '스테이징 안 됨';
+
+  @override
+  String get gitStageFile => '스테이징';
+
+  @override
+  String gitCommitCount(String count) {
+    return '$count개 커밋';
+  }
+
+  @override
+  String get gitRemote => '원격';
+
+  @override
+  String get gitCurrentShort => '현재';
+
+  @override
+  String gitDiscardConfirm(String name) {
+    return '“$name”의 모든 변경 사항을 버릴까요?';
+  }
+
+  @override
+  String gitTrashConfirm(String name) {
+    return '“$name”을(를) 호스트 휴지통으로 옮길까요?';
+  }
+
+  @override
+  String get gitCommitOptions => '커밋 옵션';
+
+  @override
+  String get gitSkipHooks => 'Hook 건너뛰기';
+
+  @override
+  String get gitPushAfterCommit => '커밋 후 푸시';
+
+  @override
+  String get fileShare => '공유';
+
+  @override
+  String get fileTrash => '휴지통으로 이동';
+
+  @override
+  String get gitActions => 'Git 작업';
+
+  @override
+  String get gitFetch => '가져오기';
+
+  @override
+  String get gitPull => '끌어오기';
+
+  @override
+  String get gitPush => '밀어 넣기';
+
+  @override
+  String get gitCurrent => '현재 브랜치';
+
+  @override
+  String get gitCreateBranch => '새 브랜치';
+
+  @override
+  String get gitBranchName => '브랜치 이름';
+
+  @override
+  String get gitSwitch => '브랜치 바꾸기';
+
+  @override
+  String get gitMerge => '브랜치 병합';
+
+  @override
+  String get gitDeleteBranch => '브랜치 삭제';
+
+  @override
+  String get review => '검토';
+
+  @override
+  String get selectWorkspace => '프로젝트 및 작업 트리';
+
+  @override
+  String get searchFiles => '파일 검색';
+
+  @override
+  String get src => '소스';
+
+  @override
+  String get folder => '폴더';
+
+  @override
+  String get modified => '수정됨';
+
+  @override
+  String get edit => '편집';
+
+  @override
+  String get unsaved => '저장 안 됨';
+
+  @override
+  String get discard => '변경 사항 버리기';
+
+  @override
+  String get connections => '더 많은 리소스';
+
+  @override
+  String get ssh => 'SSH';
+
+  @override
+  String get database => '데이터베이스';
+
+  @override
+  String get ports => '포트 전달';
+
+  @override
+  String get browser => '웹 미리 보기';
+
+  @override
+  String get openFile => '파일 열기';
+
+  @override
+  String get closePort => '앞으로 닫기';
+
+  @override
+  String get workingTree => '작업 트리';
+
+  @override
+  String get staged => '스테이지';
+
+  @override
+  String get stage => '모든 단계';
+
+  @override
+  String get unstage => '무대 탈출';
+
+  @override
+  String get commit => '커밋';
+
+  @override
+  String get commitMessage => '커밋 메시지';
+
+  @override
+  String get noChanges => '커밋할 변경 사항 없음';
+
+  @override
+  String get terminalKeyboard => '키보드';
+
+  @override
+  String get terminalEnter => 'Enter';
+
+  @override
+  String get readOnly => '읽기 전용';
+
+  @override
+  String get tokens => 'Tokens';
+
+  @override
+  String get requests => '응답';
+
+  @override
+  String usageCoverage(String priced, String total) {
+    return '$priced / $total 응답 가격';
+  }
+
+  @override
+  String get usageEmpty => '사용량 데이터 없음';
+
+  @override
+  String get estimatedCost => '예상 비용(USD)';
+
+  @override
+  String get partial => '부분 데이터';
+
+  @override
+  String get input => '입력';
+
+  @override
+  String get output => '출력';
+
+  @override
+  String get cached => '캐시 히트';
+
+  @override
+  String get appearance => '모양';
+
+  @override
+  String get notifications => '알림';
+
+  @override
+  String get enabled => '켜짐';
+
+  @override
+  String get disabled => '꺼짐';
+
+  @override
+  String get add => '추가';
+
+  @override
+  String get configName => '이름';
+
+  @override
+  String get configEndpoint => '끝점';
+
+  @override
+  String get configModels => '모델';
+
+  @override
+  String get configEmpty => '항목 없음';
+
+  @override
+  String get configDuplicate => '이름이 이미 존재합니다';
+
+  @override
+  String configDelete(String name) {
+    return '“$name”을 삭제하시겠습니까?';
+  }
+
+  @override
+  String get providers => '모델과 공급자';
+
+  @override
+  String get about => 'Sailry에 대하여';
+
+  @override
+  String get modelPicker => '모델 선택';
+
+  @override
+  String get team => '팀';
+
+  @override
+  String get executionModel => '단일 모델';
+
+  @override
+  String get teamDefault => '기본 팀';
+
+  @override
+  String get teamLead => '리더';
+
+  @override
+  String get memberReset => '모델 재설정';
+
+  @override
+  String get auto => '자동';
+
+  @override
+  String get manual => '매번 물어보기';
+
+  @override
+  String get required => '먼저 작업을 설명하십시오';
+
+  @override
+  String get hostConnectPrompt => '호스트 연결';
+
+  @override
+  String get hostDisconnected => '호스트가 오프라인입니다';
+
+  @override
+  String get hostUpdateRequired => '연결하려면 호스트를 업데이트하세요';
+
+  @override
+  String get appUpdateRequired => '연결하려면 이 앱을 업데이트하세요';
+
+  @override
+  String get language => '언어';
+
+  @override
+  String get languageSystem => '시스템';
+
+  @override
+  String get languageChinese => '简体中文';
+
+  @override
+  String get languageEnglish => 'English';
+
+  @override
+  String get languageTraditionalChinese => '繁體中文';
+
+  @override
+  String get languageJapanese => '日本語';
+
+  @override
+  String get languageKorean => '한국어';
+
+  @override
+  String get languageFrench => 'Français';
+
+  @override
+  String get languageGerman => 'Deutsch';
+
+  @override
+  String get languageSpanish => 'Español';
+
+  @override
+  String get languagePortugueseBrazil => 'Português (Brasil)';
+
+  @override
+  String get languageRussian => 'Русский';
+
+  @override
+  String get backgroundConnection => '백그라운드에서 연결 유지';
+
+  @override
+  String get backgroundConnectionActive => '호스트 연결 유지';
+
+  @override
+  String get backgroundConnectionFailed => '백그라운드 연결이 활성화되지 않았습니다. 다시 시도하십시오';
+
+  @override
+  String get resetReasoning => '노력 초기화';
+
+  @override
+  String get completionAlerts => '완료 알림';
+
+  @override
+  String get preferencesFailed => '설정이 저장되지 않았습니다. 다시 시도하십시오';
+
+  @override
+  String get startupFailed => '시작 실패';
+
+  @override
+  String get pairAction => '연결';
+
+  @override
+  String get pairFailed => '연결에 실패했습니다. 다시 시도하십시오';
+
+  @override
+  String get pairExpired => '페어링 코드가 만료되었습니다. 새 코드 가져오기';
+
+  @override
+  String get pairing => '연결 중';
+
+  @override
+  String get hostRemove => '호스트 제거';
+
+  @override
+  String hostRemoveConfirm(String name) {
+    return '‘$name’을 제거하고 이 기기의 접근 권한을 취소할까요? 데이터는 호스트에 남습니다. 마지막 기기라면 관리자가 접근 권한을 복구해야 합니다.';
+  }
+
+  @override
+  String get hostRemoved => '호스트를 제거했습니다';
+
+  @override
+  String get hostOriginDirect => '직접 페어링';
+
+  @override
+  String hostOriginSource(String name) {
+    return '$name 경유';
+  }
+
+  @override
+  String get hostRemoveFailed => '호스트를 제거할 수 없습니다';
+
+  @override
+  String get hostMetricsFailed => '호스트 상태를 읽을 수 없음';
+
+  @override
+  String get hostProcessesEmpty => '프로세스 없음';
+
+  @override
+  String get hostRegisterProject => '프로젝트 추가';
+
+  @override
+  String get hostChooseDirectory => '디렉터리 선택';
+
+  @override
+  String get hostChooseFile => '파일 선택';
+
+  @override
+  String get hostParentDirectory => '상위 디렉터리';
+
+  @override
+  String get hostEmptyDirectory => '디렉터리가 비어 있습니다';
+
+  @override
+  String get hostLoadMore => '더 많이 로드';
+
+  @override
+  String get hostProjectName => '프로젝트 이름';
+
+  @override
+  String get hostProjectPath => '호스트의 프로젝트 경로';
+
+  @override
+  String get hostRefresh => '새로고침';
+
+  @override
+  String get hostMetricCpu => 'CPU';
+
+  @override
+  String get hostMetricMemory => '메모리';
+
+  @override
+  String get hostMetricDisk => '디스크';
+
+  @override
+  String get failureConflict => '내용이 변경되었습니다. 다시 로드하고 다시 시도하십시오';
+
+  @override
+  String get failureUnknown => '결과가 확인되지 않았습니다. 먼저 호스트 상태를 확인하십시오';
+
+  @override
+  String get failureDenied => '권한 거부됨';
+
+  @override
+  String get failureUnavailable => '연결되지 않음';
+
+  @override
+  String get failureBusy => '서비스가 바쁘습니다. 나중에 다시 시도하십시오';
+
+  @override
+  String get failureGeneric => '작업 실패';
+
+  @override
+  String get settingsLoadFailed => '불러올 수 없음';
+
+  @override
+  String get settingsSaveFailed => '저장 실패; 초안 보관';
+
+  @override
+  String get settingsConflict => '설정 변경; 다시 열고 다시 시도';
+
+  @override
+  String get settingsUnknown => '결과 확인되지 않음; 확인하려면 새로 고침';
+
+  @override
+  String get settingsRequired => '값 입력';
+
+  @override
+  String get settingsApi => 'API 포맷';
+
+  @override
+  String get settingsOpenCodeGo => 'OpenCode Go';
+
+  @override
+  String get settingsOpenCodeZen => 'OpenCode Zen';
+
+  @override
+  String get settingsApiKey => 'API 키';
+
+  @override
+  String get settingsEnabled => '활성화';
+
+  @override
+  String get apiChatCompletions => 'Chat Completions';
+
+  @override
+  String get apiResponses => 'Responses';
+
+  @override
+  String get apiAnthropic => 'Anthropic';
+
+  @override
+  String get apiGemini => 'Gemini';
+
+  @override
+  String get apiDeepSeek => 'DeepSeek';
+
+  @override
+  String get apiAzureOpenAi => 'Azure OpenAI';
+
+  @override
+  String get apiAzureAi => 'Azure AI';
+
+  @override
+  String get apiPlugin => '플러그인';
+
+  @override
+  String get providerNew => '새 서비스';
+
+  @override
+  String get providerEmpty => '모델 서비스 없음';
+
+  @override
+  String get providerDesktopHint => 'OAuth 모델은 데스크톱에서 관리합니다';
+
+  @override
+  String get providerConnection => '연결';
+
+  @override
+  String get providerKeyUnset => '설정 안 됨';
+
+  @override
+  String get providerShowKey => '키 표시';
+
+  @override
+  String get providerHideKey => '키 숨기기';
+
+  @override
+  String providerModelCount(String count) {
+    return '모델 $count개';
+  }
+
+  @override
+  String get providerFetch => '가져오기';
+
+  @override
+  String get providerFetchTitle => '모델 가져오기';
+
+  @override
+  String providerFetched(String count) {
+    return '$count개 반환됨';
+  }
+
+  @override
+  String get providerSelectAll => '모두 선택';
+
+  @override
+  String get providerSelectNone => '모두 해제';
+
+  @override
+  String get providerSearch => '모델 검색';
+
+  @override
+  String get providerAdded => '추가됨';
+
+  @override
+  String providerContext(String tokens) {
+    return '컨텍스트 $tokens';
+  }
+
+  @override
+  String providerAddCount(String count) {
+    return '$count개 추가';
+  }
+
+  @override
+  String get providerModelId => '모델 ID';
+
+  @override
+  String get providerModelExists => '이미 추가된 모델';
+
+  @override
+  String get providerDefault => '기본';
+
+  @override
+  String get providerBasic => '기본 정보';
+
+  @override
+  String get providerContextLength => '컨텍스트 길이';
+
+  @override
+  String get providerCapabilities => '기능';
+
+  @override
+  String get providerVision => '이미지';
+
+  @override
+  String get providerTools => '도구';
+
+  @override
+  String get providerReasoning => '추론';
+
+  @override
+  String get providerCapUnderstands => '이해';
+
+  @override
+  String get providerCapCan => '지원';
+
+  @override
+  String get providerCapGenerates => '생성';
+
+  @override
+  String get providerGenerateImage => '이미지';
+
+  @override
+  String get providerGenerateVideo => '동영상';
+
+  @override
+  String get providerGenerateSpeech => '음성';
+
+  @override
+  String get providerDeploymentId => '배포 이름';
+
+  @override
+  String get providerHeaders => '사용자 지정 요청 헤더';
+
+  @override
+  String get providerHeadersHint => '한 줄에 하나씩, 이름: 값';
+
+  @override
+  String get providerHeadersInvalid => '각 요청 헤더 줄에는 이름과 콜론이 필요합니다';
+
+  @override
+  String get providerEfforts => '추론 강도';
+
+  @override
+  String get providerEffortPlaceholder => '강도 또는 Token 예산';
+
+  @override
+  String get providerEffortInvalid => '추론 강도가 잘못되었습니다. 이름, 중복 및 API 지원을 확인하세요';
+
+  @override
+  String get providerEffortDefault => '기본 강도';
+
+  @override
+  String get providerEffortSetDefault => '기본값으로 설정';
+
+  @override
+  String get providerSetDefault => '기본 모델로 설정';
+
+  @override
+  String get providerIsDefault => '기본 모델';
+
+  @override
+  String get providerDeleteModel => '모델 삭제';
+
+  @override
+  String get providerDelete => '서비스 삭제';
+
+  @override
+  String get providerNumberInvalid => '양의 정수를 입력하세요';
+
+  @override
+  String get providerLimitsInvalid => '최대 출력은 컨텍스트 길이를 넘을 수 없습니다';
+
+  @override
+  String get settingsUsageUnknown => '알 수 없음';
+
+  @override
+  String get settingsUsagePartial => '일부 호스트 데이터가 최신이 아닙니다';
+
+  @override
+  String get settingsUsageCache => '캐시됨';
+
+  @override
+  String get settingsUsageInput => '캐시 안 됨';
+
+  @override
+  String get settingsUsageOutput => '출력';
+
+  @override
+  String get usageRange24h => '24시간';
+
+  @override
+  String get usageRange7d => '7일';
+
+  @override
+  String get usageRange30d => '30일';
+
+  @override
+  String get usageRange90d => '90일';
+
+  @override
+  String get usageRange1y => '1년';
+
+  @override
+  String get usageReasoning => '추론';
+
+  @override
+  String get usageHitRate => '캐시 적중률';
+
+  @override
+  String get usageSpeed => '대기 포함 출력 속도';
+
+  @override
+  String get usageSpeedUnit => 'tok/s';
+
+  @override
+  String get usageCostPartial => '일부';
+
+  @override
+  String get usageTrend => 'Token 추이';
+
+  @override
+  String get usageLocalTime => '현지 시간';
+
+  @override
+  String usageActiveDays(String count) {
+    return '활동일 $count일';
+  }
+
+  @override
+  String get usageBreakdown => '분포';
+
+  @override
+  String get usageProvider => '공급자';
+
+  @override
+  String get usageShowAll => '모두 보기';
+
+  @override
+  String get usageCollapse => '접기';
+
+  @override
+  String get usageUnassigned => '미분류';
+
+  @override
+  String usageHit(String value) {
+    return '적중 $value';
+  }
+
+  @override
+  String usageResponseCount(String count) {
+    return '응답 $count개';
+  }
+
+  @override
+  String get artifactContents => '목차';
+
+  @override
+  String get artifactZoomIn => '확대';
+
+  @override
+  String get artifactZoomOut => '축소';
+
+  @override
+  String get artifactVersions => '버전';
+
+  @override
+  String get artifactFormRequired => '필수 항목을 입력하세요';
+
+  @override
+  String get artifactFormInvalid => '답변을 제출할 수 없습니다';
+
+  @override
+  String get artifactRenderFailed => '시각 자료를 표시할 수 없습니다';
+
+  @override
+  String artifactReply(String id, String revision, String title, String form) {
+    return '“$title” v$revision ($id/$form)에 대한 답변';
+  }
+
+  @override
+  String get connectionRouteP2p => 'P2P';
+
+  @override
+  String get connectionRouteRelay => 'Relay';
+
+  @override
+  String get connectionRouteUnknown => '—';
+
+  @override
+  String get backgroundNoticeTitle => '백그라운드 결과';
+
+  @override
+  String get backgroundCompleted => '완료';
+
+  @override
+  String get backgroundFailed => '실패';
+
+  @override
+  String get backgroundCancelled => '취소됨';
+
+  @override
+  String get backgroundStopped => '중지됨';
+
+  @override
+  String get backgroundTimedOut => '시간 초과';
+
+  @override
+  String get backgroundInterrupted => '중단됨';
+
+  @override
+  String get backgroundStalled => '최근 출력 없음';
+
+  @override
+  String get backgroundUnknown => '결과 불확실';
+
+  @override
+  String conversationSteps(String count) {
+    return '$count단계';
+  }
+
+  @override
+  String get conversationStep => '1단계';
+
+  @override
+  String get activityProgress => '진행 상황';
+
+  @override
+  String get activityBackground => '백그라운드 작업';
+
+  @override
+  String get activityPorts => '포트';
+
+  @override
+  String get hostConnecting => '연결 중';
+
+  @override
+  String get hostConnected => '연결됨';
+
+  @override
+  String get hostNotConnected => '연결 안 됨';
+
+  @override
+  String hostsConnected(String connected, String total) {
+    return '호스트 $connected/$total대 연결됨';
+  }
+
+  @override
+  String get hostInfo => '호스트 정보';
+
+  @override
+  String get hostLatency => '지연 시간';
+
+  @override
+  String hostLatencySummary(String average, String peak) {
+    return '평균 $average  최대 $peak';
+  }
+
+  @override
+  String get hostSystem => '시스템';
+
+  @override
+  String get hostProcessor => '프로세서';
+
+  @override
+  String hostCores(String count) {
+    return '$count코어';
+  }
+
+  @override
+  String hostLoad(String value) {
+    return '부하 $value';
+  }
+
+  @override
+  String hostMemoryShare(String percent) {
+    return '사용 $percent';
+  }
+
+  @override
+  String get hostUptime => '가동 시간';
+
+  @override
+  String hostNodeUptime(String duration) {
+    return '서비스 $duration';
+  }
+
+  @override
+  String hostDays(String count) {
+    return '$count일';
+  }
+
+  @override
+  String hostHours(String count) {
+    return '$count시간';
+  }
+
+  @override
+  String hostMinutes(String count) {
+    return '$count분';
+  }
+
+  @override
+  String get hostTrend => '추이';
+
+  @override
+  String get hostTrendWindow => '최근 1분';
+
+  @override
+  String get hostChartStart => '60s 전';
+
+  @override
+  String get hostChartNow => '지금';
+
+  @override
+  String get hostMetricGpu => 'GPU';
+
+  @override
+  String get hostMemoryUsed => '사용 중';
+
+  @override
+  String get hostMemoryCache => '캐시';
+
+  @override
+  String get hostMemorySwap => '스왑';
+
+  @override
+  String get hostGpuUsage => '사용률';
+
+  @override
+  String get hostNetwork => '네트워크';
+
+  @override
+  String hostNetworkTotals(String received, String sent) {
+    return '누적 ↓ $received  ↑ $sent';
+  }
+
+  @override
+  String get hostDownload => '다운로드';
+
+  @override
+  String get hostUpload => '업로드';
+
+  @override
+  String hostPartitions(String count) {
+    return '파티션 $count개';
+  }
+
+  @override
+  String get hostDiskRead => '읽기';
+
+  @override
+  String get hostDiskWrite => '쓰기';
+
+  @override
+  String get hostProcesses => '프로세스';
+
+  @override
+  String get hostSortCpu => 'CPU순';
+
+  @override
+  String get hostSortMemory => '메모리순';
+
+  @override
+  String get hostSortRecent => '최근 사용';
+
+  @override
+  String get hostSearchProcesses => '프로세스 검색';
+
+  @override
+  String get hostSearchProjects => '프로젝트 검색';
+
+  @override
+  String hostProcessLimit(String count) {
+    return '상위 $count개 표시';
+  }
+
+  @override
+  String get hostNoMatches => '일치 항목 없음';
+
+  @override
+  String get modelFeatureOff => '표준';
+
+  @override
+  String get modelFeatureFast => '빠름';
+
+  @override
+  String get modelFeatureSpeed => '속도';
+
+  @override
+  String get backgroundHeld => '결과 전달 안 됨';
+
+  @override
+  String get backgroundHoldLimit => '전달 안 됨 · 자동 턴 한도 도달';
+
+  @override
+  String get backgroundHoldStopped => '전달 안 됨 · 응답 중지됨';
+
+  @override
+  String get backgroundHoldInterrupted => '전달 안 됨 · 응답 중단됨';
+
+  @override
+  String get backgroundHoldFailed => '전달 안 됨 · 응답 실패';
+
+  @override
+  String get continuationRefused => '계속되지 않음';
+
+  @override
+  String get continuationPlan => '계획 모드에서는 계속되지 않음';
+
+  @override
+  String get continuationChild => '하위 작업은 계속되지 않음';
+
+  @override
+  String get continuationArchived => '보관된 채팅은 계속되지 않음';
+
+  @override
+  String get continuationWorktree => '계속되지 않음 · 작업 트리 없음';
+
+  @override
+  String get continuationQueuePaused => '계속되지 않음 · 대기열 일시 정지됨';
+
+  @override
+  String get continuationQueuedInput => '계속되지 않음 · 대기 중인 메시지 있음';
+
+  @override
+  String get continuationRunning => '계속되지 않음 · 응답 진행 중';
+
+  @override
+  String get continuationInteraction => '계속되지 않음 · 응답을 기다리는 요청 있음';
+
+  @override
+  String get continuationLimit => '자동 턴 한도에 도달함';
+
+  @override
+  String continuationLimitCount(String count, String limit) {
+    return '자동 턴 한도에 도달함 · $count/$limit';
+  }
+
+  @override
+  String get continuationStale => '계속되지 않음 · 채팅이 이미 진행됨';
+
+  @override
+  String get conversationContextOverflow => '모델 컨텍스트 한도를 초과함';
+
+  @override
+  String get conversationOutputLimit => '출력 한도에서 응답이 잘림';
+
+  @override
+  String get demoHost => 'MacBook Pro';
+
+  @override
+  String get demoUnavailable => '이 작업은 사용할 수 없습니다.';
+
+  @override
+  String get demoConversationTitle => '로그인 양식 개선';
+
+  @override
+  String get demoNotesTitle => '릴리스 검토 준비';
+
+  @override
+  String get demoUserMessage =>
+      '로그인 양식의 간격과 키보드 포커스를 개선해 주세요. 기존 레이아웃은 유지해 주세요.';
+
+  @override
+  String get demoReply =>
+      '로그인 양식의 간격과 터치 영역을 조정했습니다.\n\n- 양식 간격을 20 px로 설정했습니다.\n- 버튼 최소 높이를 44 px로 설정했습니다.\n- 필드 순서와 키보드 탐색을 유지했습니다.\n\n```css\nmin-height: 44px;\n```\n\n변경 사항은 `src/pages/Login.tsx`와 `src/styles/login.css`에 있습니다.';
+
+  @override
+  String get demoReadme =>
+      '# Lumen Web\n\n접근성 있는 입력 필드와 명확한 키보드 탐색을 갖춘 반응형 로그인 페이지입니다.\n\n## 프로젝트 구조\n\n- `src/pages/Login.tsx` — 로그인 양식.\n- `src/styles/login.css` — 레이아웃 및 상호작용 스타일.\n- `docs/review.md` — 릴리스 체크리스트.\n\n## 인터페이스 지침\n\n필드 사이 간격은 20 px로 하고 터치 영역은 44 px 이상으로 합니다. 필드 순서와 보이는 포커스 스타일을 유지합니다.\n';
+
+  @override
+  String get demoReviewNotes =>
+      '# 릴리스 검토\n\n| 영역 | 검토 내용 |\n| --- | --- |\n| 필드 | 레이블과 필수 항목 메시지 확인 |\n| 키보드 | 탭 순서와 보이는 포커스 확인 |\n| 터치 영역 | 로그인 버튼 높이를 44 px 이상으로 유지 |\n| 레이아웃 | 좁은 화면과 넓은 화면 확인 |\n| 변경 사항 | 릴리스 전에 로그인 페이지와 스타일 검토 |\n';
+
+  @override
+  String get demoNotesPrompt => '로그인 페이지용 간단한 릴리스 검토 체크리스트를 만들어 주세요.';
+
+  @override
+  String get demoSimulatedReply =>
+      '레이아웃을 유지하면서 로그인 페이지에 집중하겠습니다.\n\n1. 필드 간격과 키보드 포커스를 검토합니다.\n2. 터치 영역 높이를 44 px 이상으로 유지합니다.\n3. `src/pages/Login.tsx`와 `src/styles/login.css`를 함께 확인합니다.\n\n릴리스 체크리스트는 `docs/review.md`에 있습니다.';
+
+  @override
+  String get demoTerminalWelcome =>
+      'Last login: Sun Nov 15 09:00:00 on ttys001';
+
+  @override
+  String get personalKvConflict => '개인 데이터 충돌: 컨트롤러의 값을 유지했습니다';
+
+  @override
+  String get sessionAlerts => '채팅 알림';
+}

@@ -1,0 +1,206 @@
+import 'package:flutter/widgets.dart';
+
+import '../../../runtime/session.dart';
+import '../../../runtime/json.dart';
+import 'attachments.dart';
+
+typedef PendingMessage = ({
+  String request,
+  String text,
+  List<PickedAttachment> attachments,
+  bool composer,
+  // Identifies a completed review using this page-owned send for feedback.
+  String? question,
+});
+
+typedef GuidancePreview = ({
+  String? turn,
+  String text,
+  List<PickedAttachment> attachments,
+});
+
+/// Owns the composer's captured input while a durable command is unresolved.
+class TurnDraft extends ChangeNotifier {
+  TurnDraft({
+    required this.host,
+    required this.session,
+    String text = '',
+    List<PickedAttachment> attachments = const [],
+  }) : input = TextEditingController(text: text),
+       attachments = List.of(attachments);
+
+  static final _drafts = Expando<Map<String, TurnDraft>>();
+
+  /// A connection is scoped to both the controller entry and execution Node.
+  /// Keep unsettled input attached to that route when a page is dismissed.
+  static TurnDraft retain({
+    required HostConnection host,
+    required String session,
+    String text = '',
+    List<PickedAttachment> attachments = const [],
+  }) {
+    final drafts = _drafts[host] ??= {};
+    final draft = drafts.putIfAbsent(
+      session,
+      () => TurnDraft(
+        host: host,
+        session: session,
+        text: text,
+        attachments: attachments,
+      ),
+    );
+    draft._views++;
+    return draft;
+  }
+
+  final HostConnection host;
+  final String session;
+  final TextEditingController input;
+  final List<PickedAttachment> attachments;
+  PendingMessage? _pending;
+  GuidancePreview? _guidance;
+  bool _sending = false;
+  bool _disposed = false;
+  int _views = 0;
+
+  PendingMessage? get pending => _pending;
+  bool get sending => _sending;
+  GuidancePreview? get guidance => _guidance;
+
+  Future<void> send(
+    int revision, {
+    String? message,
+    String? question,
+    ({String turn, int revision})? recipient,
+    bool delegated = false,
+  }) async {
+    final composer = message == null;
+    final text = message ?? input.text;
+    final files = composer ? List.of(attachments) : <PickedAttachment>[];
+    if (sending || pending != null || !host.connected) return;
+    if (composer && text.trim().isEmpty && files.isEmpty) return;
+    _sending = true;
+    _guidance = recipient == null
+        ? null
+        : (turn: null, text: text, attachments: files);
+    notifyListeners();
+    try {
+      final output = await host.command(
+        recipient == null ? 'submit_turn' : 'guide_turn',
+        {
+          if (recipient == null) 'session': session,
+          if (recipient != null) 'recipient': recipient.turn,
+          // Child guidance keeps its capture; ordinary input uses live config.
+          'expected_revision': delegated && recipient != null
+              ? recipient.revision
+              : revision,
+          'message': {
+            'text': text,
+            'attachments': files.map((item) => item.attachment['id']).toList(),
+          },
+        },
+      );
+      if (!_disposed) {
+        _admitted(output);
+        if (composer) _clear(text, files);
+      }
+    } catch (error) {
+      if (!_disposed && error is CommandFailure && error.retained) {
+        _pending = (
+          request: error.request!,
+          text: text,
+          attachments: files,
+          composer: composer,
+          question: question,
+        );
+      } else if (!_disposed) {
+        _guidance = null;
+      }
+      rethrow;
+    } finally {
+      if (!_disposed) {
+        _sending = false;
+        notifyListeners();
+        _releaseIfSettled();
+      }
+    }
+  }
+
+  Future<bool> check() async {
+    final captured = pending;
+    if (captured == null || sending) return false;
+    _sending = true;
+    notifyListeners();
+    try {
+      // Reconciliation queries the original request; it never resubmits input.
+      final output = await host.check(captured.request);
+      if (_disposed) return false;
+      _admitted(output);
+      if (captured.composer) _clear(captured.text, captured.attachments);
+      _pending = null;
+      return true;
+    } catch (error) {
+      if (!_disposed && error is CommandFailure && error.rejected) {
+        _pending = null;
+        _guidance = null;
+      }
+      rethrow;
+    } finally {
+      if (!_disposed) {
+        _sending = false;
+        notifyListeners();
+        _releaseIfSettled();
+      }
+    }
+  }
+
+  /// Retires the optimistic preview once the projected [guidance] shows its
+  /// admitted turn, so a later rewind or replacement cannot revive it.
+  ///
+  /// Unadmitted and uncertain submissions stay visible. This does not notify:
+  /// the observed projection already hides the preview.
+  void observe(Map<String, dynamic> guidance) {
+    final turn = _guidance?.turn;
+    if (turn != null && guidance.containsKey(turn)) _guidance = null;
+  }
+
+  void _admitted(Map<String, dynamic> output) {
+    final captured = _guidance;
+    if (captured == null) return;
+    _guidance = (
+      turn: object(output['data'])['id'] as String?,
+      text: captured.text,
+      attachments: captured.attachments,
+    );
+  }
+
+  void _clear(String text, List<PickedAttachment> files) {
+    // Preserve typing and files added while admission was pending.
+    if (input.text == text) input.clear();
+    attachments.removeWhere(files.contains);
+  }
+
+  void release() {
+    _views--;
+    _releaseIfSettled();
+  }
+
+  void _releaseIfSettled() {
+    final drafts = _drafts[host];
+    if (_views != 0 ||
+        _sending ||
+        _pending != null ||
+        drafts?[session] != this) {
+      return;
+    }
+    drafts!.remove(session);
+    dispose();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    input.dispose();
+    super.dispose();
+  }
+}
