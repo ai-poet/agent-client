@@ -299,3 +299,55 @@ func TestCheapRouterProvidersDefaultProtocolRouting(t *testing.T) {
 		})
 	}
 }
+
+func TestCheapRouterSuccessor(t *testing.T) {
+	offer := func(id protocol.ProviderID, enabled bool, models ...protocol.ConversationModel) protocol.ConversationProvider {
+		return protocol.ConversationProvider{ID: id, Enabled: enabled, Models: models}
+	}
+	model := func(id, platform string) protocol.ConversationModel {
+		return protocol.ConversationModel{ID: id, Platform: platform}
+	}
+	claude, codex := CheapRouterLaneID(cheapauth.LaneClaude), CheapRouterLaneID(cheapauth.LaneCodex)
+	sonnet, shared, custom := model("claude-sonnet-4-6", ""), model("shared-model", ""), model("custom-model", "anthropic")
+	retired := offer(CheapRouterProviderID, false, sonnet, shared, custom)
+	for _, tc := range []struct {
+		name     string
+		provider protocol.ProviderID
+		model    string
+		lanes    map[string]string
+		current  []protocol.ConversationProvider
+		want     protocol.ProviderID
+	}{
+		{name: "routing table lane", provider: CheapRouterProviderID, model: "shared-model", lanes: map[string]string{"shared-model": cheapauth.LaneCodex},
+			current: []protocol.ConversationProvider{retired, offer(claude, true, shared), offer(codex, true, shared)}, want: codex},
+		{name: "own lane without a table entry", provider: CheapRouterProviderID, model: "claude-sonnet-4-6",
+			current: []protocol.ConversationProvider{retired, offer(codex, true, sonnet), offer(claude, true, sonnet)}, want: claude},
+		{name: "own lane by the saved platform", provider: CheapRouterProviderID, model: "custom-model",
+			current: []protocol.ConversationProvider{retired, offer(claude, true, custom)}, want: claude},
+		{name: "model without a lane", provider: CheapRouterProviderID, model: "shared-model",
+			current: []protocol.ConversationProvider{retired, offer(claude, true, shared), offer(codex, true, shared)}},
+		{name: "unbound lane keeps its model from another lane", provider: CheapRouterProviderID, model: "claude-sonnet-4-6",
+			current: []protocol.ConversationProvider{retired, offer(claude, false, sonnet), offer(codex, true, sonnet)}},
+		{name: "disabled table lane keeps its model from another lane", provider: CheapRouterProviderID, model: "shared-model", lanes: map[string]string{"shared-model": cheapauth.LaneCodex},
+			current: []protocol.ConversationProvider{retired, offer(claude, true, shared), offer(codex, false, shared)}},
+		{name: "lane without the model", provider: CheapRouterProviderID, model: "claude-sonnet-4-6",
+			current: []protocol.ConversationProvider{retired, offer(claude, true, shared), offer(codex, true, sonnet)}},
+		{name: "table lane without the model", provider: CheapRouterProviderID, model: "shared-model", lanes: map[string]string{"shared-model": cheapauth.LaneCodex},
+			current: []protocol.ConversationProvider{retired, offer(claude, true, shared), offer(codex, true, sonnet)}},
+		{name: "unbound route still serves", provider: CheapRouterProviderID, model: "claude-sonnet-4-6",
+			current: []protocol.ConversationProvider{offer(CheapRouterProviderID, true, sonnet), offer(claude, true, sonnet)}},
+		{name: "removed unbound route", provider: CheapRouterProviderID, model: "claude-sonnet-4-6",
+			current: []protocol.ConversationProvider{offer(claude, true, sonnet)}},
+		{name: "lane provider has no successor", provider: claude, model: "claude-sonnet-4-6",
+			current: []protocol.ConversationProvider{retired, offer(claude, false, sonnet), offer(codex, true, sonnet)}},
+		{name: "another provider with the model", provider: protocol.ProviderID{1}, model: "claude-sonnet-4-6",
+			current: []protocol.ConversationProvider{offer(claude, true, sonnet)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := CheapRouterSuccessor(tc.provider, tc.model, tc.lanes, tc.current)
+			if ok != (tc.want != protocol.ProviderID{}) || got.ID != tc.want {
+				t.Fatalf("successor = %s, %t; want %s", got.ID, ok, tc.want)
+			}
+		})
+	}
+}
