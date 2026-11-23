@@ -21,6 +21,8 @@ handle approvals/questions, and open remote terminals and workspaces.
 
 - **Go**: `1.27.3` (`unset GOROOT && export GOTOOLCHAIN=go1.27.3`)
 - **Flutter**: version pinned in `apps/mobile/.flutter-version` (`3.44.7`)
+- **Rust**: `rustup` with toolchain `1.98.0` and the target of each slice
+  (`aarch64-linux-android`, `aarch64-apple-ios`, ...) for `native/iroh`
 - **Android**: JDK 17, Android SDK `platforms;android-36`,
   `build-tools;36.0.0`, Android NDK `28.2.13676358`
 - **iOS**: macOS with Xcode, CocoaPods, and an Apple Developer Team /
@@ -30,7 +32,12 @@ handle approvals/questions, and open remote terminals and workspaces.
 
 Gradle (`apps/mobile/android/app/build.gradle.kts`) automatically invokes
 `cmd/sailry-mobile/build.sh android <abi>` during `preBuild` to compile
-`libsailry_mobile.so` into `.runtime/native/android-mobile-jni/<abi>/`.
+`libsailry_mobile.so` (Go) and `libsailry_iroh.so` (Rust) into
+`.runtime/native/android-mobile-jni/<abi>/`. Both ship in the APK: Link has no
+transport without iroh. `MainActivity` calls `ai.sailry.bridge.Native` to load
+them and hand iroh the application context, and the Dart bridge's `initialize`
+loads iroh into the Go runtime before a controller opens. The package name
+`ai.sailry.bridge` is fixed by the JNI symbol exported from `native/iroh`.
 
 ### Debug APK (arm64-v8a)
 
@@ -69,7 +76,7 @@ flutter build apk --release --target-platform android-arm64
 
 Output: `apps/mobile/build/app/outputs/flutter-apk/app-release.apk`.
 
-### Building the Go C ABI library standalone
+### Building the native libraries standalone
 
 ```sh
 export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
@@ -83,7 +90,8 @@ Supported ABIs: `arm64-v8a`, `armeabi-v7a`, `x86_64`.
 iOS builds require macOS with Xcode and CocoaPods. The Xcode project
 (`apps/mobile/ios/Runner.xcodeproj`) has a build phase (`Build Sailry Native`)
 that runs `apps/mobile/ios/build_native.sh` -> `cmd/sailry-mobile/build.sh ios`
-to build and `lipo` `libsailry_mobile.a` into `$(BUILT_PRODUCTS_DIR)/SailryNative`.
+to build and `lipo` `libsailry_mobile.a` and `SailryIroh.framework` into
+`$(BUILT_PRODUCTS_DIR)/SailryNative`, then embeds the framework in the app.
 
 ### Simulator Build
 
@@ -136,3 +144,11 @@ flutter test
 Manual Android debug builds are available via GitHub Actions workflow
 `.github/workflows/mobile-android-debug.yml` (`workflow_dispatch` only; does
 not block desktop test or release pipelines).
+
+`.github/workflows/mobile-android-release.yml` builds the signed APK and AAB.
+A `v*` tag attaches them to that tag's release. To replace the Android build
+on a published release without a new tag (which would also start the desktop
+release), run it manually from `main` with `release_tag` set to that release,
+for example `v0.5.1`. The Mobile version in `apps/mobile/pubspec.yaml` is
+independent of the desktop version; raise its build number so the new APK
+installs over the old one.
