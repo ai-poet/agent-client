@@ -78,6 +78,7 @@ type Node struct {
 	processAfter      func(time.Duration) <-chan time.Time
 	locks             workspaceLocks
 	stored            storedFiles
+	keptWorktrees     keptWorktrees
 	profile           *Profile
 	ctx               context.Context
 	mu                sync.Mutex
