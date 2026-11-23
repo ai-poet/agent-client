@@ -148,6 +148,44 @@ func TestGeneratedImageAssetFileRequiresNativeReceipt(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("multi-image paths", func(t *testing.T) {
+		asset2 := canonical.AssetRef{Digest: strings.Repeat("b", 64), Mime: "image/png", Size: 256}
+		body, _ := json.Marshal(map[string]any{
+			"path":       "assets/generated/sunset-1.png",
+			"paths":      []string{"assets/generated/sunset-1.png", "assets/generated/sunset-2.png"},
+			"media_type": asset.Mime,
+			"size":       asset.Size,
+			"channel":    "cheaprouter",
+			"model":      "gpt-image-2",
+		})
+		resp := &canonical.ToolResponse{
+			ID: "gen-multi", Name: "generate_image", Status: canonical.ToolSuccess,
+			Result:      canonical.Payload{Value: body},
+			Attachments: []canonical.Attachment{{Asset: asset}, {Asset: asset2}},
+		}
+		paths, ok := generatedImageAssetFiles(resp)
+		if !ok || len(paths) != 2 || paths[0] != "assets/generated/sunset-1.png" || paths[1] != "assets/generated/sunset-2.png" {
+			t.Fatalf("generatedImageAssetFiles = %v, %v", paths, ok)
+		}
+		// Mismatched paths count must be rejected.
+		resp.Attachments = append(resp.Attachments, canonical.Attachment{Asset: asset2})
+		if _, ok := generatedImageAssetFiles(resp); ok {
+			t.Fatal("mismatched attachment count was accepted")
+		}
+		// Escaped path inside paths must be rejected.
+		badBody, _ := json.Marshal(map[string]any{
+			"path":       "assets/generated/sunset-1.png",
+			"paths":      []string{"assets/generated/sunset-1.png", "../escape.png"},
+			"media_type": asset.Mime,
+			"size":       asset.Size,
+		})
+		resp.Attachments = []canonical.Attachment{{Asset: asset}, {Asset: asset2}}
+		resp.Result.Value = badBody
+		if _, ok := generatedImageAssetFiles(resp); ok {
+			t.Fatal("escaped path in multi-image paths was accepted")
+		}
+	})
 }
 
 func conversationGeneratedImageResponse(path string, asset canonical.AssetRef) *canonical.ToolResponse {
