@@ -96,6 +96,7 @@ type Node struct {
 	forwards          atomic.Int32
 	forwarding        sync.Map      // request IDs whose forward is in flight
 	mediaPoll         time.Duration // interval between video job reads
+	imageStudio       *nodeImageStudio
 	feed              *feed.Hub
 	providerDirectory providers.Directory
 	subscribersMu     sync.Mutex
@@ -148,6 +149,7 @@ type Options struct {
 	Process       process.Options
 	Power         power.Backend
 	Telemetry     telemetry.Options
+	ImageStudio   *ImageStudioOptions
 	knowledge     func(*knowledgeservice.Options)
 }
 
@@ -177,6 +179,7 @@ func StartWithOptions(ctx context.Context, path string, options Options) (*Node,
 	}
 	nodeContext, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	value := &Node{cancel: cancel, profile: profile, ctx: nodeContext, knowledgeAdjust: options.knowledge, closed: make(chan struct{}), stopDone: make(chan struct{}), subscribers: make(map[*events]struct{})}
+	value.imageStudio = newNodeImageStudio(profile.Ownership.Path, options.ImageStudio)
 	for index := range value.lanes {
 		value.lanes[index] = commandLane{wake: make(chan struct{}, 1), done: make(chan struct{})}
 	}

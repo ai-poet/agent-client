@@ -210,8 +210,10 @@ func conversationAssetItems(ctx context.Context, db *sql.Conn, record canonical.
 						targets.push("attachment", &attachment)
 					}
 				case *canonical.ToolResponse:
-					if path, ok := generatedImageAssetFile(value); ok {
-						targets.file(path)
+					if paths, ok := generatedImageAssetFiles(value); ok {
+						for _, p := range paths {
+							targets.file(p)
+						}
 						break
 					}
 					for index, asset := range conversationAssetImages(value) {
@@ -290,23 +292,59 @@ func conversationAssetImages(response *canonical.ToolResponse) []canonical.Asset
 }
 
 func generatedImageAssetFile(response *canonical.ToolResponse) (string, bool) {
-	if response.Name != "generate_image" || response.Status != canonical.ToolSuccess || response.Format != canonical.JSON || len(response.Attachments) != 1 || len(response.Result.Assets) != 0 {
+	paths, ok := generatedImageAssetFiles(response)
+	if !ok || len(paths) != 1 {
 		return "", false
 	}
-	asset := response.Attachments[0].Asset
-	if !supportedAgentImage(asset) {
-		return "", false
+	return paths[0], true
+}
+
+func generatedImageAssetFiles(response *canonical.ToolResponse) ([]string, bool) {
+	if response.Name != "generate_image" || response.Status != canonical.ToolSuccess || response.Format != canonical.JSON || len(response.Attachments) == 0 || len(response.Result.Assets) != 0 {
+		return nil, false
+	}
+	for _, attachment := range response.Attachments {
+		if !supportedAgentImage(attachment.Asset) {
+			return nil, false
+		}
 	}
 	var result struct {
-		Path      string `json:"path"`
-		MediaType string `json:"media_type"`
-		Size      uint64 `json:"size"`
+		Path      string   `json:"path"`
+		Paths     []string `json:"paths"`
+		MediaType string   `json:"media_type"`
+		Size      uint64   `json:"size"`
 	}
-	if json.Unmarshal(response.Result.Value, &result) != nil || !validAssetRelative(result.Path) || result.MediaType != asset.Mime || result.Size != asset.Size {
-		return "", false
+	if json.Unmarshal(response.Result.Value, &result) != nil {
+		return nil, false
 	}
-	// Native generation stores the same bytes in its file and preview attachment.
-	// Prefer its literal workspace path so a later Markdown image publication
-	// refers to one inventory target while canonical image access stays intact.
-	return result.Path, true
+	first := response.Attachments[0].Asset
+	if len(response.Attachments) == 1 {
+		if !validAssetRelative(result.Path) || result.MediaType != first.Mime || result.Size != first.Size {
+			return nil, false
+		}
+		if len(result.Paths) > 0 && (len(result.Paths) != 1 || result.Paths[0] != result.Path) {
+			return nil, false
+		}
+		// Native generation stores the same bytes in its file and preview attachment.
+		// Prefer its literal workspace path so a later Markdown image publication
+		// refers to one inventory target while canonical image access stays intact.
+		return []string{result.Path}, true
+	}
+	if len(result.Paths) != len(response.Attachments) {
+		return nil, false
+	}
+	if result.Path != "" && result.Path != result.Paths[0] {
+		return nil, false
+	}
+	if result.MediaType != first.Mime || result.Size != first.Size {
+		return nil, false
+	}
+	seen := make(map[string]bool, len(result.Paths))
+	for _, p := range result.Paths {
+		if !validAssetRelative(p) || seen[p] {
+			return nil, false
+		}
+		seen[p] = true
+	}
+	return result.Paths, true
 }
