@@ -30,6 +30,7 @@ func (r *Runtime) recoverFailedReads(refresh bool) {
 		node, projectID, overview := r.localRuntime().App.ProjectOwner()
 		for _, project := range r.workspace.projects {
 			clear(project.failedReads)
+			clear(project.failedAt)
 			project.pendingFiles, project.pendingGit = true, true
 			if overview && node == r.controller.Target().String() && project.owner.Project != nil && project.owner.Project.String() == projectID {
 				project.pendingGit = false

@@ -19,7 +19,7 @@ func (p *workspaceProject) gitHistoryMore() {
 	}
 }
 func (p *workspaceProject) readGitLog(cursor *protocol.GitLogCursor, reset bool) {
-	if p.loading["git-log"] {
+	if p.loading["git-log"] || p.readBackedOff("git-log") {
 		return
 	}
 	delete(p.failedReads, "git-log")
