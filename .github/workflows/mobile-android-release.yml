@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published v* release whose Android build this run replaces; empty builds without publishing
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -83,6 +88,23 @@ jobs:
         run: |
           printf 'ANDROID_NDK_HOME=%s/ndk/28.2.13676358\n' "$ANDROID_HOME" >> "$GITHUB_ENV"
 
+      - name: Install Rust (iroh)
+        shell: bash
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --target aarch64-linux-android
+          rustup default 1.98.0
+
+      - name: Cache Rust build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .runtime/native/android-arm64/cargo
+          key: mobile-android-arm64-rust-1.98.0-${{ hashFiles('native/iroh/Cargo.lock') }}
+          restore-keys: |
+            mobile-android-arm64-rust-1.98.0-
+
       - name: Decode release keystore
         shell: bash
         env:
@@ -147,6 +169,18 @@ jobs:
           apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           "$apksigner" verify --print-certs dist-android/*.apk | head -20
 
+      - name: Verify the APK ships its native libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          listing=$(unzip -Z1 dist-android/*.apk)
+          for library in libsailry_mobile.so libsailry_iroh.so; do
+            if ! grep -qx "lib/arm64-v8a/$library" <<<"$listing"; then
+              echo "::error::the APK does not ship $library"
+              exit 1
+            fi
+          done
+
       - name: Upload Android artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -155,23 +189,37 @@ jobs:
           if-no-files-found: error
 
       - name: Attach the Android build to the release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
-          # The desktop pipeline creates the draft in parallel; wait for it so the
-          # APK always lands on the same release instead of racing ahead of it.
-          for attempt in $(seq 1 60); do
-            if gh release view "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              break
-            fi
-            if [ "$attempt" -eq 60 ]; then
-              echo "::error::release ${GITHUB_REF_NAME} did not appear within 20 minutes"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            # A manual run replaces the Android build on a published release;
+            # a new tag would also start the desktop release.
+            case "$RELEASE_TAG" in
+              v*) ;;
+              *) echo "::error::release_tag must name a v* release"; exit 1 ;;
+            esac
+            if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null; then
+              echo "::error::release ${RELEASE_TAG} does not exist"
               exit 1
             fi
-            echo "waiting for release ${GITHUB_REF_NAME} (${attempt}/60)"
-            sleep 20
-          done
-          gh release upload "${GITHUB_REF_NAME}" dist-android/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            # The desktop pipeline creates the draft in parallel; wait for it so the
+            # APK always lands on the same release instead of racing ahead of it.
+            for attempt in $(seq 1 60); do
+              if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+                break
+              fi
+              if [ "$attempt" -eq 60 ]; then
+                echo "::error::release ${RELEASE_TAG} did not appear within 20 minutes"
+                exit 1
+              fi
+              echo "waiting for release ${RELEASE_TAG} (${attempt}/60)"
+              sleep 20
+            done
+          fi
+          gh release upload "$RELEASE_TAG" dist-android/* --clobber --repo "$GITHUB_REPOSITORY"
