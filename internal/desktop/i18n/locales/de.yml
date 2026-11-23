@@ -1729,6 +1729,7 @@ files_download_destination: Der Download konnte nicht gespeichert werden
 files_download_conflict: Das Ziel wurde geändert; wählen Sie erneut aus, wo Sie speichern möchten
 chat_attachment_remove_failed: Entfernung fehlgeschlagen
 workspace_action_failed: Arbeitsbereichsaktion fehlgeschlagen
+workspace_read_permission_failed: Lesen des Arbeitsbereichs verweigert; Dateiberechtigungen prüfen
 workspace_changed: Arbeitsbereich geändert; vor dem erneuten Versuch neu laden
 workspace_action_unknown: Ergebnis ungewiss; vor dem erneuten Versuch prüfen
 workspace_saved: Gespeichert

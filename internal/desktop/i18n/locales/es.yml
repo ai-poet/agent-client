@@ -1729,6 +1729,7 @@ files_download_destination: No se pudo guardar la descarga
 files_download_conflict: El destino ha cambiado; vuelve a elegir dónde guardar
 chat_attachment_remove_failed: La eliminación falló
 workspace_action_failed: La acción del espacio de trabajo falló
+workspace_read_permission_failed: Se rechazó la lectura del espacio de trabajo; revisa los permisos de archivo
 workspace_changed: El espacio de trabajo cambió; recarga antes de reintentar
 workspace_action_unknown: Resultado incierto; revisa antes de reintentar
 workspace_saved: Guardado

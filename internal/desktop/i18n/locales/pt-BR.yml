@@ -1729,6 +1729,7 @@ files_download_destination: Não foi possível salvar o download
 files_download_conflict: O destino mudou; escolha onde salvar novamente
 chat_attachment_remove_failed: A remoção falhou
 workspace_action_failed: A ação do espaço de trabalho falhou
+workspace_read_permission_failed: A leitura do espaço de trabalho foi recusada; verifique as permissões dos arquivos
 workspace_changed: O espaço de trabalho mudou; recarregue antes de tentar novamente
 workspace_action_unknown: Resultado incerto; verifique antes de tentar novamente
 workspace_saved: Salvo
