@@ -160,7 +160,7 @@ func agentStatisticsObservations(ctx context.Context, db *sql.Conn, session prot
 	}
 	phases := map[string]protocol.ConversationObservationPhases{}
 	replies := map[string]bool{}
-	var usageCount, cacheCount, reasoningCount, cacheTotal, reasoningTotal uint64
+	var usageCount, reasoningCount, reasoningTotal uint64
 	for rows.Next() {
 		var turn string
 		var body []byte
@@ -185,10 +185,6 @@ func agentStatisticsObservations(ctx context.Context, db *sql.Conn, session prot
 		}
 		if usage := event.Usage; usage != nil {
 			usageCount++
-			if usage.CacheRead != nil {
-				cacheCount++
-				cacheTotal = addAgentStatistic(cacheTotal, *usage.CacheRead)
-			}
 			if usage.Reasoning != nil {
 				reasoningCount++
 				reasoningTotal = addAgentStatistic(reasoningTotal, *usage.Reasoning)
@@ -211,9 +207,6 @@ func agentStatisticsObservations(ctx context.Context, db *sql.Conn, session prot
 		return result, err
 	}
 	result.Replies = uint64(len(replies))
-	if usageCount > 0 && cacheCount == usageCount {
-		result.CacheRead = &cacheTotal
-	}
 	if usageCount > 0 && reasoningCount == usageCount {
 		result.Reasoning = &reasoningTotal
 	}

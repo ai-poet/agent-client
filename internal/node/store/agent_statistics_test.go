@@ -306,6 +306,48 @@ func TestAgentStatistics(t *testing.T) {
 	})
 }
 
+func TestAgentStatisticsCacheCoverage(t *testing.T) {
+	t.Parallel()
+	storage, _, session, turn, now := agentHistoryFixture(t, protocol.WorkModeCode)
+	ctx := t.Context()
+	if err := storage.Node.Write(ctx, func(db *sql.Conn) error {
+		appendUsage := func(usage canonical.Usage) error {
+			message := canonical.NewMessage(canonical.Assistant)
+			message.Usage = &usage
+			record := canonical.NewRecord(turn, "message", &message, now)
+			record.Metadata.Execution = &canonical.Execution{Timing: &canonical.Timing{ElapsedUs: ptr(uint64(10))}}
+			_, _, err := AppendCanonical(ctx, db, session.ID, record)
+			return err
+		}
+		if err := appendUsage(canonical.Usage{}); err != nil {
+			return err
+		}
+		if err := appendUsage(canonical.Usage{Input: ptr(uint64(100)), Output: ptr(uint64(20)), CacheRead: ptr(uint64(60))}); err != nil {
+			return err
+		}
+		stats, err := ReadAgentStatistics(ctx, db, session.ID)
+		if err != nil {
+			return err
+		}
+		if stats.Responses != 1 || stats.Usage == nil || stats.Usage.Input != 100 || stats.Observations.CacheRead == nil || *stats.Observations.CacheRead != 60 {
+			return fmt.Errorf("unmetered retry affected reported cache coverage: %+v", stats)
+		}
+		if err := appendUsage(canonical.Usage{Input: ptr(uint64(50)), Output: ptr(uint64(10))}); err != nil {
+			return err
+		}
+		stats, err = ReadAgentStatistics(ctx, db, session.ID)
+		if err != nil {
+			return err
+		}
+		if stats.Responses != 2 || stats.Usage == nil || stats.Usage.Input != 150 || stats.Observations.CacheRead != nil {
+			return fmt.Errorf("appended response without cache usage: statistics=%+v", stats)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDelegatedStatistics(t *testing.T) {
 	t.Parallel()
 	storage, node, session, parent, now := agentHistoryFixture(t, protocol.WorkModeCode)
