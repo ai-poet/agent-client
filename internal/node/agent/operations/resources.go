@@ -32,6 +32,7 @@ type Package struct {
 	Modes      []protocol.PluginModesDeclaration
 	Options    json.RawMessage
 	standalone bool
+	builtin    bool
 	tree       fs.FS
 	directory  string
 	read       func(context.Context, string, int) ([]byte, error)
@@ -82,6 +83,15 @@ func CaptureResources(ctx context.Context, profile string, references []protocol
 		captured.Reference = reference
 		value.packages = append(value.packages, captured)
 	}
+	builtins, err := builtinPackages()
+	if err != nil {
+		return nil, err
+	}
+	for _, b := range builtins {
+		if !slices.ContainsFunc(value.packages, func(p Package) bool { return p.Reference.Name == b.Reference.Name }) {
+			value.packages = append(value.packages, b)
+		}
+	}
 	return value, nil
 }
 
@@ -102,6 +112,9 @@ func (r *Resources) Python(ctx context.Context, key string, manager *python.Mana
 		return nil, nil
 	}
 	value := r.packages[index]
+	if value.builtin {
+		return nil, nil
+	}
 	var requirements *python.Requirements
 	if !value.standalone {
 		var content []byte
@@ -179,6 +192,12 @@ func (r *Resources) Read(ctx context.Context, key, relative string) (SkillText, 
 	}
 	if !utf8.Valid(expected) {
 		return SkillText{}, resourceFault(protocol.ErrorCodeInvalidRequest, "skill resource is not UTF-8 text")
+	}
+	if p.builtin {
+		if err := ctx.Err(); err != nil {
+			return SkillText{}, err
+		}
+		return SkillText{Content: string(expected)}, nil
 	}
 	directory, err := r.materialize(ctx, p)
 	if err != nil {
