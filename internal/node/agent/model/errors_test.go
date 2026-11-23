@@ -134,3 +134,23 @@ func TestFaultRecoveryExhaustionReason(t *testing.T) {
 		})
 	}
 }
+
+func TestResponsesStreamFailureKeepsProviderMessage(t *testing.T) {
+	const diagnostic = "The service is temporarily unavailable. Please retry later."
+	for _, message := range []string{diagnostic, diagnostic + " (request id: fixture-request)"} {
+		event := fmt.Sprintf(`data: {"type":"response.failed","response":{"error":{"code":"server_error","message":%q}}}`, message)
+		server := serverFixture(t, event+"\n\n")
+		language, err := newSDK(t.Context(), transportConfig{Kind: "responses", Model: "fixture", Endpoint: server.URL, Key: "fixture-key"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = language.Generate(t.Context(), requestCall(t, "responses"))
+		failure := Classify(err)
+		if failure == nil || failure.Kind != Unavailable || !failure.Retryable() || failure.status == nil || *failure.status != http.StatusOK {
+			t.Fatalf("lost stream failure or HTTP status: %+v", failure)
+		}
+		if failure.Message != message {
+			t.Errorf("message = %q, want %q", failure.Message, message)
+		}
+	}
+}
