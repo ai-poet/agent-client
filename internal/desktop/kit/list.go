@@ -53,7 +53,7 @@ const (
 // Toast tells an operation's outcome for the window's toast duration, as
 // the reference's notifications do. Pages show outcomes only as toasts.
 func Toast(c *ui.Context, outcome Outcome, message string) {
-	t := ui.Toast{Title: message, Timeout: ToastDuration(c)}
+	t := ui.Toast{ID: message, Title: message, Timeout: ToastDuration(c)}
 	switch outcome {
 	case Done:
 		t.Type = "success"

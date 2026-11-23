@@ -314,3 +314,72 @@ func TestToastSurfaceResistsModalBackdropDimming(t *testing.T) {
 		t.Fatalf("the modal masks visibly dimmed the foreground notification surface: %v became %v", before, after)
 	}
 }
+
+func TestToastDeduplicatesIdenticalCopy(t *testing.T) {
+	for _, sample := range []struct {
+		name    string
+		publish func(*ui.Context)
+		want    int
+	}{
+		{
+			name: "toast same message",
+			publish: func(c *ui.Context) {
+				Toast(c, Failed, "Workspace action failed")
+				Toast(c, Failed, "Workspace action failed")
+			},
+			want: 1,
+		},
+		{
+			name: "toast distinct messages",
+			publish: func(c *ui.Context) {
+				Toast(c, Failed, "Workspace action failed")
+				Toast(c, Failed, "Waiting for the host")
+			},
+			want: 2,
+		},
+		{
+			name: "recover same message",
+			publish: func(c *ui.Context) {
+				Recover(c, Failed, "Workspace action failed", func() {})
+				Recover(c, Failed, "Workspace action failed", func() {})
+			},
+			want: 1,
+		},
+		{
+			name: "error same title and detail",
+			publish: func(c *ui.Context) {
+				Error(c, "Connection failed", "timeout")
+				Error(c, "Connection failed", "timeout")
+			},
+			want: 1,
+		},
+		{
+			name: "error distinct details",
+			publish: func(c *ui.Context) {
+				Error(c, "Connection failed", "timeout")
+				Error(c, "Connection failed", "refused")
+			},
+			want: 2,
+		},
+	} {
+		t.Run(sample.name, func(t *testing.T) {
+			published := false
+			var shown []ui.Toast
+			window := ui.NewTester(func(c *ui.Context) {
+				theme.Apply(c, "", theme.Light)
+				if !published {
+					published = true
+					sample.publish(c)
+				}
+				ui.ToastViewportBase(c, func(_ ui.Element, toasts []ui.Toast) {
+					shown = append(shown[:0], toasts...)
+				})
+			}, 400, 200)
+			window.SetLocale("en")
+			window.Frame()
+			if len(shown) != sample.want {
+				t.Fatalf("shown %d toasts (%+v), want %d", len(shown), shown, sample.want)
+			}
+		})
+	}
+}
