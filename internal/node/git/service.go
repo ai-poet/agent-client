@@ -15,6 +15,7 @@ import (
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/cache"
 	"github.com/go-git/go-git/v5/storage/filesystem"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"lukechampine.com/blake3"
@@ -148,6 +149,18 @@ func open(root string) (*gogit.Repository, error) {
 	}
 	if actual != expected {
 		return nil, invalid("expected the exact registered worktree root")
+	}
+	return r, nil
+}
+func openDiff(root string) (*gogit.Repository, error) {
+	r, err := open(root)
+	if err != nil {
+		return nil, err
+	}
+	// Reuse the resolved Git filesystem. PlainOpen cannot set the threshold
+	// that lets status and diff see a large loose object's size without inflating it.
+	if store, ok := r.Storer.(*filesystem.Storage); ok {
+		r.Storer = filesystem.NewStorageWithOptions(store.Filesystem(), cache.NewObjectLRUDefault(), filesystem.Options{LargeObjectThreshold: statLimit})
 	}
 	return r, nil
 }
