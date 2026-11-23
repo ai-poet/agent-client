@@ -57,14 +57,36 @@ type CustomSummary struct {
 	Configured  bool
 }
 
-// GenerateSpec describes one image generation request.
+// ReferenceImage is one input image supplied to /v1/images/edits.
+type ReferenceImage struct {
+	Filename string
+	MimeType string
+	Data     []byte
+}
+
+// GenerateSpec describes one image generation or editing request.
 type GenerateSpec struct {
-	Channel Channel `json:"channel"`
-	Model   string  `json:"model"`
-	Prompt  string  `json:"prompt"`
-	Size    string  `json:"size,omitempty"`
-	Quality string  `json:"quality,omitempty"`
-	Count   int     `json:"count"`
+	Channel        Channel          `json:"channel"`
+	Model          string           `json:"model"`
+	Prompt         string           `json:"prompt"`
+	Size           string           `json:"size,omitempty"`
+	Quality        string           `json:"quality,omitempty"`
+	ResponseFormat string           `json:"response_format,omitempty"`
+	Count          int              `json:"count"`
+	References     []ReferenceImage `json:"-"`
+}
+
+// IsEdit reports whether this request edits one or more reference images.
+func (s GenerateSpec) IsEdit() bool {
+	return len(s.References) > 0
+}
+
+// DecodedImage holds raw image bytes decoded from base64 or downloaded from URL.
+type DecodedImage struct {
+	Data          []byte
+	Ext           string
+	MimeType      string
+	RevisedPrompt string
 }
 
 // NormalizedCount clamps Count to [1, MaxCount].
@@ -114,9 +136,11 @@ const (
 
 // ImageError is a categorized, secret-sanitized generation error.
 type ImageError struct {
-	Kind    ErrorKind `json:"kind"`
-	Status  int       `json:"status,omitempty"`
-	Message string    `json:"message"`
+	Kind      ErrorKind `json:"kind"`
+	Status    int       `json:"status,omitempty"`
+	Message   string    `json:"message"`
+	TaskID    string    `json:"task_id,omitempty"`
+	TaskEnded bool      `json:"-"`
 }
 
 func (e *ImageError) Error() string {

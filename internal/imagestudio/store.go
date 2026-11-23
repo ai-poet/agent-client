@@ -178,10 +178,78 @@ func (s *IndexStore) Load(now time.Time) (Index, error) {
 	return idx, nil
 }
 
+// LoadDenials reads active (non-expired) group denials without mutating jobs on disk.
+func (s *IndexStore) LoadDenials(now time.Time) ([]Denial, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx, err := s.loadRawLocked()
+	if err != nil {
+		return nil, err
+	}
+	ttl := int64(DenialTTL / time.Second)
+	nowUnix := now.Unix()
+	var active []Denial
+	for _, d := range idx.Denials {
+		if nowUnix-d.At < ttl {
+			active = append(active, d)
+		}
+	}
+	return active, nil
+}
+
+// RecordDenials merges newly refused groups for model into the persisted index
+// without disturbing studio preferences or job history.
+func (s *IndexStore) RecordDenials(model string, groupIDs []int64, now time.Time) ([]Denial, error) {
+	if len(groupIDs) == 0 || strings.TrimSpace(model) == "" {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx, err := s.loadRawLocked()
+	if err != nil {
+		return nil, err
+	}
+	nowUnix := now.Unix()
+	ttl := int64(DenialTTL / time.Second)
+	kept := idx.Denials[:0]
+	for _, d := range idx.Denials {
+		if nowUnix-d.At < ttl {
+			kept = append(kept, d)
+		}
+	}
+	idx.Denials = kept
+	for _, gid := range groupIDs {
+		RecordDenial(&idx, model, gid, nowUnix)
+	}
+	if err := s.saveLocked(idx); err != nil {
+		return nil, err
+	}
+	return append([]Denial(nil), idx.Denials...), nil
+}
+
+func (s *IndexStore) loadRawLocked() (Index, error) {
+	raw, err := os.ReadFile(s.path)
+	if errors.Is(err, os.ErrNotExist) || (err == nil && len(bytes.TrimSpace(raw)) == 0) {
+		return Index{}, nil
+	}
+	if err != nil {
+		return Index{}, err
+	}
+	var idx Index
+	if err := json.Unmarshal(raw, &idx); err != nil {
+		return Index{}, nil
+	}
+	return idx, nil
+}
+
 // Save writes the studio index atomically with 0600 permissions.
 func (s *IndexStore) Save(idx Index) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.saveLocked(idx)
+}
+
+func (s *IndexStore) saveLocked(idx Index) error {
 	if len(idx.Jobs) > maxStoredJobs {
 		idx.Jobs = idx.Jobs[:maxStoredJobs]
 	}

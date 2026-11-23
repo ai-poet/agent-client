@@ -9,15 +9,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/cheapauth"
+	"github.com/egoist/mygo/netproxy"
 )
 
 const (
@@ -25,25 +29,57 @@ const (
 	maxSyncBodyBytes   = 64 << 20
 )
 
-// Client performs background HTTP image generation and output downloads.
+// Client performs background HTTP image generation, editing, and output downloads.
 // All methods honor ctx cancellation and redact secrets from errors.
 type Client struct {
 	httpClient     *http.Client
 	downloadClient *http.Client
+	pollInterval   time.Duration
+	taskTimeout    time.Duration
 }
 
 // NewClient constructs an image generation client with sane timeouts.
 func NewClient() *Client {
+	transport := netproxy.Transport()
 	return &Client{
-		httpClient:     &http.Client{Timeout: 16 * time.Minute},
-		downloadClient: &http.Client{Timeout: 5 * time.Minute},
+		httpClient:     &http.Client{Transport: transport, Timeout: 16 * time.Minute},
+		downloadClient: &http.Client{Transport: transport, Timeout: 5 * time.Minute},
+		pollInterval:   PollInterval,
+		taskTimeout:    TaskTimeout + 2*time.Minute,
 	}
 }
 
-// GenerateCheapRouter calls CheapRouter's Images API. It attempts async task
-// submission + polling when tryAsync is true and falls back to synchronous
-// generation (SSE stream for OpenAI image models, JSON for Grok/others) when
-// async tasks are unavailable.
+// WithTimings returns a shallow copy of Client using custom async poll interval
+// and task timeout durations when positive.
+func (c *Client) WithTimings(pollInterval, taskTimeout time.Duration) *Client {
+	copy := *c
+	if pollInterval > 0 {
+		copy.pollInterval = pollInterval
+	}
+	if taskTimeout > 0 {
+		copy.taskTimeout = taskTimeout
+	}
+	return &copy
+}
+
+func (c *Client) effectivePollInterval() time.Duration {
+	if c.pollInterval > 0 {
+		return c.pollInterval
+	}
+	return PollInterval
+}
+
+func (c *Client) effectiveTaskTimeout() time.Duration {
+	if c.taskTimeout > 0 {
+		return c.taskTimeout
+	}
+	return TaskTimeout + 2*time.Minute
+}
+
+// GenerateCheapRouter calls CheapRouter's Images API (generations or edits when
+// spec.References is non-empty). It attempts async task submission + polling
+// when tryAsync is true and falls back to synchronous generation (SSE stream
+// for OpenAI image models, JSON for Grok/others) when async tasks are unavailable.
 func (c *Client) GenerateCheapRouter(
 	ctx context.Context,
 	origin, apiKey string,
@@ -51,6 +87,11 @@ func (c *Client) GenerateCheapRouter(
 	tryAsync bool,
 	onTaskID func(string),
 ) ([]ImageOutput, bool, *ImageError) {
+	if spec.IsEdit() {
+		if err := validateReferences(spec.References); err != nil {
+			return nil, !tryAsync, err
+		}
+	}
 	asyncDisabled := !tryAsync
 	if tryAsync {
 		taskID, err := c.submitCheapRouterAsync(ctx, origin, apiKey, spec)
@@ -75,15 +116,9 @@ func (c *Client) GenerateCheapRouter(
 }
 
 // GenerateCustom calls a user-configured OpenAI Images-compatible endpoint
-// (POST /v1/images/generations), supporting both b64_json and url responses.
+// (POST /v1/images/generations or POST /v1/images/edits when spec.References is
+// non-empty), supporting both b64_json and url responses.
 func (c *Client) GenerateCustom(ctx context.Context, cfg CustomConfig, spec GenerateSpec) ([]ImageOutput, *ImageError) {
-	endpoint, err := GenerationsURL(cfg.BaseURL)
-	if err != nil {
-		if ie, ok := err.(*ImageError); ok {
-			return nil, ie
-		}
-		return nil, &ImageError{Kind: ErrBadRequest, Message: "invalid base URL"}
-	}
 	model := strings.TrimSpace(spec.Model)
 	if model == "" {
 		model = strings.TrimSpace(cfg.Model)
@@ -91,6 +126,7 @@ func (c *Client) GenerateCustom(ctx context.Context, cfg CustomConfig, spec Gene
 	if model == "" {
 		return nil, &ImageError{Kind: ErrBadRequest, Message: "model is required"}
 	}
+	spec.Model = model
 	extra, extraErr := ParseExtraParams(cfg.ExtraParams)
 	if extraErr != nil {
 		if ie, ok := extraErr.(*ImageError); ok {
@@ -98,7 +134,32 @@ func (c *Client) GenerateCustom(ctx context.Context, cfg CustomConfig, spec Gene
 		}
 		return nil, &ImageError{Kind: ErrBadRequest, Message: "invalid extra parameters"}
 	}
-	payload := buildJSONPayload(model, spec.Prompt, spec.Size, spec.Quality, spec.NormalizedCount(), false, false, extra)
+	if spec.IsEdit() {
+		endpoint, err := EditsURL(cfg.BaseURL)
+		if err != nil {
+			if ie, ok := err.(*ImageError); ok {
+				return nil, ie
+			}
+			return nil, &ImageError{Kind: ErrBadRequest, Message: "invalid base URL"}
+		}
+		outputs, editErr := c.GenerateEdits(ctx, endpoint, cfg.APIKey, spec, extra)
+		if editErr != nil && (editErr.Status == http.StatusNotFound || editErr.Status == http.StatusMethodNotAllowed || editErr.Status == http.StatusNotImplemented) {
+			return nil, &ImageError{
+				Kind:    ErrBadRequest,
+				Status:  editErr.Status,
+				Message: fmt.Sprintf("custom image API does not support image editing (/v1/images/edits, HTTP %d): %s", editErr.Status, editErr.Message),
+			}
+		}
+		return outputs, editErr
+	}
+	endpoint, err := GenerationsURL(cfg.BaseURL)
+	if err != nil {
+		if ie, ok := err.(*ImageError); ok {
+			return nil, ie
+		}
+		return nil, &ImageError{Kind: ErrBadRequest, Message: "invalid base URL"}
+	}
+	payload := buildJSONPayload(model, spec.Prompt, spec.Size, spec.Quality, spec.ResponseFormat, spec.NormalizedCount(), false, false, extra)
 	body, status, reqErr := c.postJSON(ctx, endpoint, cfg.APIKey, payload, 10*time.Minute)
 	if reqErr != nil {
 		return nil, reqErr
@@ -113,14 +174,76 @@ func (c *Client) GenerateCustom(ctx context.Context, cfg CustomConfig, spec Gene
 	return outputs, nil
 }
 
+// GenerateEdits sends a multipart/form-data request to an OpenAI-compatible
+// POST /v1/images/edits endpoint with one or more reference images ("image"
+// parts), supporting both b64_json and url responses.
+func (c *Client) GenerateEdits(
+	ctx context.Context,
+	endpoint, apiKey string,
+	spec GenerateSpec,
+	extra map[string]any,
+) ([]ImageOutput, *ImageError) {
+	if err := validateReferences(spec.References); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(spec.Model) == "" {
+		return nil, &ImageError{Kind: ErrBadRequest, Message: "model is required"}
+	}
+	grok := cheapauth.IsGrokImageModel(spec.Model)
+	payload, contentType, err := buildMultipartPayload(spec, spec.NormalizedCount(), false, grok, extra, "image")
+	if err != nil {
+		return nil, err
+	}
+	body, status, reqErr := c.postMultipart(ctx, endpoint, apiKey, contentType, payload, 10*time.Minute)
+	if reqErr != nil {
+		return nil, reqErr
+	}
+	if status < 200 || status >= 300 {
+		return nil, ClassifyError(status, body, apiKey)
+	}
+	return ParseOutputs(body, apiKey)
+}
+
+func validateReferences(refs []ReferenceImage) *ImageError {
+	if len(refs) == 0 {
+		return &ImageError{Kind: ErrBadRequest, Message: "at least one reference image is required for editing"}
+	}
+	for i, ref := range refs {
+		if len(ref.Data) == 0 {
+			return &ImageError{Kind: ErrBadRequest, Message: fmt.Sprintf("reference image %d is empty", i+1)}
+		}
+		if len(ref.Data) > MaxReferenceBytes {
+			return &ImageError{Kind: ErrBadRequest, Message: fmt.Sprintf("reference image %d exceeds the 20 MiB upload limit", i+1)}
+		}
+	}
+	return nil
+}
+
 func (c *Client) submitCheapRouterAsync(ctx context.Context, origin, apiKey string, spec GenerateSpec) (string, *ImageError) {
-	endpoint, err := CheapRouterImageURL(origin, "images/generations/async")
+	relPath := "images/generations/async"
+	if spec.IsEdit() {
+		relPath = "images/edits/async"
+	}
+	endpoint, err := CheapRouterImageURL(origin, relPath)
 	if err != nil {
 		return "", &ImageError{Kind: ErrBadRequest, Message: "invalid gateway endpoint"}
 	}
 	grok := cheapauth.IsGrokImageModel(spec.Model)
-	payload := buildJSONPayload(spec.Model, spec.Prompt, spec.Size, spec.Quality, spec.NormalizedCount(), false, grok, nil)
-	body, status, reqErr := c.postJSON(ctx, endpoint, apiKey, payload, 3*time.Minute)
+	var (
+		body   []byte
+		status int
+		reqErr *ImageError
+	)
+	if spec.IsEdit() {
+		payload, contentType, buildErr := buildMultipartPayload(spec, spec.NormalizedCount(), false, grok, nil, "image[]")
+		if buildErr != nil {
+			return "", buildErr
+		}
+		body, status, reqErr = c.postMultipart(ctx, endpoint, apiKey, contentType, payload, 3*time.Minute)
+	} else {
+		payload := buildJSONPayload(spec.Model, spec.Prompt, spec.Size, spec.Quality, spec.ResponseFormat, spec.NormalizedCount(), false, grok, nil)
+		body, status, reqErr = c.postJSON(ctx, endpoint, apiKey, payload, 3*time.Minute)
+	}
 	if reqErr != nil {
 		return "", reqErr
 	}
@@ -145,62 +268,91 @@ func (c *Client) submitCheapRouterAsync(ctx context.Context, origin, apiKey stri
 func (c *Client) pollCheapRouterTask(ctx context.Context, origin, apiKey, taskID string) ([]ImageOutput, *ImageError) {
 	endpoint, err := CheapRouterImageURL(origin, "images/tasks/"+url.PathEscape(strings.TrimSpace(taskID)))
 	if err != nil {
-		return nil, &ImageError{Kind: ErrBadRequest, Message: "invalid task endpoint"}
+		return nil, &ImageError{Kind: ErrBadRequest, Message: "invalid task endpoint", TaskID: taskID}
 	}
-	deadline := time.Now().Add(TaskTimeout + 2*time.Minute)
+	withTask := func(ie *ImageError) *ImageError {
+		if ie != nil && ie.TaskID == "" {
+			ie.TaskID = taskID
+		}
+		return ie
+	}
+	deadline := time.Now().Add(c.effectiveTaskTimeout())
 	networkFailures := 0
-	ticker := time.NewTicker(PollInterval)
+	ticker := time.NewTicker(c.effectivePollInterval())
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, &ImageError{Kind: ErrCancelled, Message: "cancelled"}
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return nil, &ImageError{Kind: ErrTimeout, Message: "image task timed out", TaskID: taskID}
+			}
+			return nil, &ImageError{Kind: ErrCancelled, Message: "cancelled", TaskID: taskID}
 		case <-ticker.C:
+		}
+		if time.Now().After(deadline) {
+			return nil, &ImageError{Kind: ErrTimeout, Message: "image task timed out", TaskID: taskID}
 		}
 		body, status, reqErr := c.getJSON(ctx, endpoint, apiKey, 30*time.Second)
 		if reqErr != nil {
 			if reqErr.Kind == ErrCancelled {
-				return nil, reqErr
+				return nil, withTask(reqErr)
 			}
 			if reqErr.Kind == ErrNetwork && networkFailures < pollNetworkRetries {
 				networkFailures++
+				if time.Now().After(deadline) {
+					return nil, &ImageError{Kind: ErrTimeout, Message: "image task timed out", TaskID: taskID}
+				}
 				continue
 			}
-			return nil, reqErr
+			return nil, withTask(reqErr)
 		}
 		if status == http.StatusNotFound {
 			classified := ClassifyError(status, body, apiKey)
 			classified.Kind = ErrTaskLost
-			return nil, classified
+			return nil, withTask(classified)
 		}
 		if status < 200 || status >= 300 {
-			return nil, ClassifyError(status, body, apiKey)
+			return nil, withTask(ClassifyError(status, body, apiKey))
 		}
 		networkFailures = 0
 		done, outputs, taskErr := parseTaskResponse(body, apiKey)
 		if taskErr != nil {
-			return nil, taskErr
+			return nil, withTask(taskErr)
 		}
 		if done {
 			return outputs, nil
 		}
 		if time.Now().After(deadline) {
-			return nil, &ImageError{Kind: ErrTimeout, Message: "image task timed out"}
+			return nil, &ImageError{Kind: ErrTimeout, Message: "image task timed out", TaskID: taskID}
 		}
 	}
 }
 
 func (c *Client) generateCheapRouterSync(ctx context.Context, origin, apiKey string, spec GenerateSpec) ([]ImageOutput, *ImageError) {
-	endpoint, err := CheapRouterImageURL(origin, "images/generations")
+	relPath := "images/generations"
+	if spec.IsEdit() {
+		relPath = "images/edits"
+	}
+	endpoint, err := CheapRouterImageURL(origin, relPath)
 	if err != nil {
 		return nil, &ImageError{Kind: ErrBadRequest, Message: "invalid gateway endpoint"}
 	}
 	grok := cheapauth.IsGrokImageModel(spec.Model)
 	count := spec.NormalizedCount()
+	sendOne := func(n int, stream bool) ([]byte, int, *ImageError) {
+		if spec.IsEdit() {
+			payload, contentType, buildErr := buildMultipartPayload(spec, n, stream, grok, nil, "image[]")
+			if buildErr != nil {
+				return nil, 0, buildErr
+			}
+			return c.postMultipart(ctx, endpoint, apiKey, contentType, payload, 16*time.Minute)
+		}
+		payload := buildJSONPayload(spec.Model, spec.Prompt, spec.Size, spec.Quality, spec.ResponseFormat, n, stream, grok, nil)
+		return c.postJSON(ctx, endpoint, apiKey, payload, 16*time.Minute)
+	}
 	if grok {
-		payload := buildJSONPayload(spec.Model, spec.Prompt, spec.Size, spec.Quality, count, false, true, nil)
-		body, status, reqErr := c.postJSON(ctx, endpoint, apiKey, payload, 16*time.Minute)
+		body, status, reqErr := sendOne(count, false)
 		if reqErr != nil {
 			return nil, reqErr
 		}
@@ -217,8 +369,7 @@ func (c *Client) generateCheapRouterSync(ctx context.Context, origin, apiKey str
 			}
 			return nil, &ImageError{Kind: ErrCancelled, Message: "cancelled"}
 		}
-		payload := buildJSONPayload(spec.Model, spec.Prompt, spec.Size, spec.Quality, 1, true, false, nil)
-		body, status, reqErr := c.postJSON(ctx, endpoint, apiKey, payload, 16*time.Minute)
+		body, status, reqErr := sendOne(1, true)
 		if reqErr != nil {
 			if len(outputs) == 0 {
 				return nil, reqErr
@@ -246,7 +397,7 @@ func (c *Client) generateCheapRouterSync(ctx context.Context, origin, apiKey str
 	return outputs, nil
 }
 
-func buildJSONPayload(model, prompt, size, quality string, count int, stream, grok bool, extra map[string]any) map[string]any {
+func buildJSONPayload(model, prompt, size, quality, responseFormat string, count int, stream, grok bool, extra map[string]any) map[string]any {
 	body := make(map[string]any, 8+len(extra))
 	for k, v := range extra {
 		body[k] = v
@@ -269,12 +420,153 @@ func buildJSONPayload(model, prompt, size, quality string, count int, stream, gr
 	}
 	if stream {
 		body["stream"] = true
+	} else if rf := strings.TrimSpace(responseFormat); rf != "" {
+		body["response_format"] = rf
 	} else if grok {
 		if _, set := body["response_format"]; !set {
 			body["response_format"] = "b64_json"
 		}
 	}
 	return body
+}
+
+func buildMultipartPayload(
+	spec GenerateSpec,
+	count int,
+	stream, grok bool,
+	extra map[string]any,
+	imageField string,
+) ([]byte, string, *ImageError) {
+	if count < 1 {
+		count = 1
+	}
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	written := map[string]bool{}
+	writeField := func(name, value string) error {
+		written[name] = true
+		return writer.WriteField(name, value)
+	}
+	if err := writeField("model", strings.TrimSpace(spec.Model)); err != nil {
+		return nil, "", &ImageError{Kind: ErrBadRequest, Message: "failed to encode multipart model"}
+	}
+	if err := writeField("prompt", spec.Prompt); err != nil {
+		return nil, "", &ImageError{Kind: ErrBadRequest, Message: "failed to encode multipart prompt"}
+	}
+	if err := writeField("n", strconv.Itoa(count)); err != nil {
+		return nil, "", &ImageError{Kind: ErrBadRequest, Message: "failed to encode multipart count"}
+	}
+	if s := strings.TrimSpace(spec.Size); s != "" && !strings.EqualFold(s, "auto") {
+		if err := writeField("size", s); err != nil {
+			return nil, "", &ImageError{Kind: ErrBadRequest, Message: "failed to encode multipart size"}
+		}
+	} else if strings.EqualFold(strings.TrimSpace(spec.Size), "auto") && !grok {
+		if err := writeField("size", "auto"); err != nil {
+			return nil, "", &ImageError{Kind: ErrBadRequest, Message: "failed to encode multipart size"}
+		}
+	}
+	if !grok {
+		if q := strings.TrimSpace(spec.Quality); q != "" && !strings.EqualFold(q, "auto") {
+			if err := writeField("quality", q); err != nil {
+				return nil, "", &ImageError{Kind: ErrBadRequest, Message: "failed to encode multipart quality"}
+			}
+		}
+	}
+	if stream {
+		if err := writeField("stream", "true"); err != nil {
+			return nil, "", &ImageError{Kind: ErrBadRequest, Message: "failed to encode multipart stream"}
+		}
+	} else if rf := strings.TrimSpace(spec.ResponseFormat); rf != "" {
+		if err := writeField("response_format", rf); err != nil {
+			return nil, "", &ImageError{Kind: ErrBadRequest, Message: "failed to encode multipart response_format"}
+		}
+	} else if grok {
+		if _, set := extra["response_format"]; !set {
+			if err := writeField("response_format", "b64_json"); err != nil {
+				return nil, "", &ImageError{Kind: ErrBadRequest, Message: "failed to encode multipart response_format"}
+			}
+		}
+	}
+	for k, v := range extra {
+		if written[k] || k == "image" || k == "image[]" || v == nil {
+			continue
+		}
+		var text string
+		switch val := v.(type) {
+		case string:
+			text = val
+		case bool:
+			text = strconv.FormatBool(val)
+		case float64:
+			text = strconv.FormatFloat(val, 'f', -1, 64)
+		default:
+			if encoded, err := json.Marshal(val); err == nil {
+				text = string(encoded)
+			}
+		}
+		if text != "" {
+			if err := writer.WriteField(k, text); err != nil {
+				return nil, "", &ImageError{Kind: ErrBadRequest, Message: "failed to encode multipart extra parameter"}
+			}
+		}
+	}
+	for i, ref := range spec.References {
+		ext := SniffExtension(ref.Data)
+		mime := strings.TrimSpace(ref.MimeType)
+		if mime == "" {
+			mime = MimeTypeForExt(ext)
+		}
+		filename := sanitizeMultipartFilename(ref.Filename, fmt.Sprintf("reference-%d.%s", i+1, ext))
+		header := make(textproto.MIMEHeader)
+		header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, imageField, filename))
+		header.Set("Content-Type", mime)
+		part, err := writer.CreatePart(header)
+		if err != nil {
+			return nil, "", &ImageError{Kind: ErrBadRequest, Message: "failed to create multipart image part"}
+		}
+		if _, err := part.Write(ref.Data); err != nil {
+			return nil, "", &ImageError{Kind: ErrBadRequest, Message: "failed to write multipart image data"}
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, "", &ImageError{Kind: ErrBadRequest, Message: "failed to finalize multipart request"}
+	}
+	return buf.Bytes(), writer.FormDataContentType(), nil
+}
+
+func sanitizeMultipartFilename(raw, fallback string) string {
+	base := filepath.Base(strings.TrimSpace(raw))
+	if base == "" || base == "." || base == "/" || base == `\` {
+		base = fallback
+	}
+	var b strings.Builder
+	for _, r := range base {
+		if r == '"' || r == '\\' || r < 0x20 || r == 0x7f {
+			b.WriteByte('_')
+			continue
+		}
+		b.WriteRune(r)
+	}
+	if b.Len() == 0 {
+		return fallback
+	}
+	return b.String()
+}
+
+func (c *Client) postMultipart(ctx context.Context, endpoint, apiKey, contentType string, payload []byte, timeout time.Duration) ([]byte, int, *ImageError) {
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return nil, 0, &ImageError{Kind: ErrBadRequest, Message: "invalid request URL"}
+	}
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	if key := strings.TrimSpace(apiKey); key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	return c.execute(ctx, reqCtx, req, apiKey)
 }
 
 func (c *Client) postJSON(ctx context.Context, endpoint, apiKey string, payload map[string]any, timeout time.Duration) ([]byte, int, *ImageError) {
@@ -360,7 +652,9 @@ func (c *Client) SaveOutputs(ctx context.Context, outputs []ImageOutput, outputD
 	return paths, nil
 }
 
-func (c *Client) saveOne(ctx context.Context, output ImageOutput, stemPath string) (string, *ImageError) {
+// DecodeOutput resolves one ImageOutput into raw bytes, downloading URL outputs
+// without sending any API key and enforcing MaxDownloadBytes.
+func (c *Client) DecodeOutput(ctx context.Context, output ImageOutput) (DecodedImage, *ImageError) {
 	var data []byte
 	if output.Source.Base64 != "" {
 		cleaned := strings.Map(func(r rune) rune {
@@ -373,49 +667,61 @@ func (c *Client) saveOne(ctx context.Context, output ImageOutput, stemPath strin
 		if err != nil {
 			decoded, err = base64.RawStdEncoding.DecodeString(cleaned)
 			if err != nil {
-				return "", &ImageError{Kind: ErrOther, Message: "invalid base64 image payload"}
+				return DecodedImage{}, &ImageError{Kind: ErrOther, Message: "invalid base64 image payload"}
 			}
 		}
 		data = decoded
 	} else if output.Source.URL != "" {
 		parsed, err := url.Parse(output.Source.URL)
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-			return "", &ImageError{Kind: ErrOther, Message: "invalid image download URL"}
+			return DecodedImage{}, &ImageError{Kind: ErrOther, Message: "invalid image download URL"}
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, output.Source.URL, nil)
 		if err != nil {
-			return "", &ImageError{Kind: ErrOther, Message: "invalid image download request"}
+			return DecodedImage{}, &ImageError{Kind: ErrOther, Message: "invalid image download request"}
 		}
 		resp, err := c.downloadClient.Do(req)
 		if err != nil {
 			if errors.Is(ctx.Err(), context.Canceled) {
-				return "", &ImageError{Kind: ErrCancelled, Message: "cancelled"}
+				return DecodedImage{}, &ImageError{Kind: ErrCancelled, Message: "cancelled"}
 			}
-			return "", &ImageError{Kind: ErrNetwork, Message: "failed to download generated image"}
+			return DecodedImage{}, &ImageError{Kind: ErrNetwork, Message: "failed to download generated image"}
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return "", &ImageError{Kind: ErrNetwork, Status: resp.StatusCode, Message: fmt.Sprintf("image download returned HTTP %d", resp.StatusCode)}
+			return DecodedImage{}, &ImageError{Kind: ErrNetwork, Status: resp.StatusCode, Message: fmt.Sprintf("image download returned HTTP %d", resp.StatusCode)}
 		}
 		downloaded, err := io.ReadAll(io.LimitReader(resp.Body, MaxDownloadBytes+1))
 		if err != nil {
 			if errors.Is(ctx.Err(), context.Canceled) {
-				return "", &ImageError{Kind: ErrCancelled, Message: "cancelled"}
+				return DecodedImage{}, &ImageError{Kind: ErrCancelled, Message: "cancelled"}
 			}
-			return "", &ImageError{Kind: ErrNetwork, Message: "failed while reading downloaded image"}
+			return DecodedImage{}, &ImageError{Kind: ErrNetwork, Message: "failed while reading downloaded image"}
 		}
 		if len(downloaded) > MaxDownloadBytes {
-			return "", &ImageError{Kind: ErrOther, Message: "downloaded image exceeds size limit"}
+			return DecodedImage{}, &ImageError{Kind: ErrOther, Message: "downloaded image exceeds size limit"}
 		}
 		data = downloaded
 	} else {
-		return "", &ImageError{Kind: ErrOther, Message: "empty image output"}
+		return DecodedImage{}, &ImageError{Kind: ErrOther, Message: "empty image output"}
 	}
-
 	ext := SniffExtension(data)
-	target := stemPath + "." + ext
+	return DecodedImage{
+		Data:          data,
+		Ext:           ext,
+		MimeType:      MimeTypeForExt(ext),
+		RevisedPrompt: output.RevisedPrompt,
+	}, nil
+}
+
+func (c *Client) saveOne(ctx context.Context, output ImageOutput, stemPath string) (string, *ImageError) {
+	decoded, err := c.DecodeOutput(ctx, output)
+	if err != nil {
+		return "", err
+	}
+	target := stemPath + "." + decoded.Ext
 	tmp := stemPath + ".part"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, decoded.Data, 0o644); err != nil {
 		return "", &ImageError{Kind: ErrOther, Message: "failed to write image file"}
 	}
 	if err := os.Rename(tmp, target); err != nil {
@@ -570,14 +876,17 @@ func parseTaskResponse(body []byte, secret string) (bool, []ImageOutput, *ImageE
 	case "processing", "queued", "running":
 		return false, nil, nil
 	case "failed":
+		var taskErr *ImageError
 		switch v := obj["error"].(type) {
 		case map[string]any:
-			return false, nil, classifyObject(httpStatus, v, secret)
+			taskErr = classifyObject(httpStatus, v, secret)
 		case string:
-			return false, nil, classifyFields(httpStatus, "", "", v, secret)
+			taskErr = classifyFields(httpStatus, "", "", v, secret)
 		default:
-			return false, nil, classifyFields(httpStatus, "", "", "image task failed", secret)
+			taskErr = classifyFields(httpStatus, "", "", "image task failed", secret)
 		}
+		taskErr.TaskEnded = true
+		return false, nil, taskErr
 	case "completed":
 		if resultMap, ok := obj["result"].(map[string]any); ok {
 			outputs, err := outputsFromMap(resultMap, secret)

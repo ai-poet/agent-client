@@ -51,6 +51,8 @@ func NewService(profileDir string) (*Service, error) {
 func (s *Service) Restore() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	credentialLock.Lock()
+	defer credentialLock.Unlock()
 	credentials, err := s.store.Load()
 	if err != nil {
 		return err
@@ -1003,6 +1005,19 @@ func (s *Service) SetGroup(ctx context.Context, groupID *int64) error {
 	}
 	*s.credentials = updated
 	return nil
+}
+
+// ModelCatalog fetches the current CheapRouter model catalog for the signed-in account.
+func (s *Service) ModelCatalog(ctx context.Context) ([]Model, error) {
+	credentials, client, _, err := s.apiSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	catalog, err := client.ModelCatalog(ctx, credentials.AccessToken)
+	if err != nil {
+		return nil, err
+	}
+	return catalog.Items, nil
 }
 
 // ImageRouteCandidates returns the ordered routing groups to try for an image

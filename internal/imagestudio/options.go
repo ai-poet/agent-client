@@ -13,10 +13,14 @@ import (
 )
 
 const (
+	// DefaultCheapRouterModel is the fallback image model when catalog has no match.
+	DefaultCheapRouterModel = "gpt-image-2"
 	// MaxCount is the maximum number of images requested in one job.
 	MaxCount = 4
 	// MaxRunning caps concurrent generation jobs.
 	MaxRunning = 3
+	// MaxReferenceBytes caps each reference image uploaded to /v1/images/edits.
+	MaxReferenceBytes = 20 << 20
 	// DenialTTL is how long a refused CheapRouter group is skipped before retrying.
 	DenialTTL = 24 * time.Hour
 	// PollInterval matches Rust sub2api::images::POLL_INTERVAL_SECONDS.
@@ -28,6 +32,21 @@ const (
 	// MaxErrorBodyBytes caps error responses read from image servers.
 	MaxErrorBodyBytes = 64 << 10
 )
+
+// PickDefaultImageModel selects the preferred default CheapRouter image model.
+func PickDefaultImageModel(models []cheapauth.Model) string {
+	if len(models) == 0 {
+		return DefaultCheapRouterModel
+	}
+	for _, preferred := range []string{"gpt-image-2", "gpt-image-1.5", "gpt-image-1"} {
+		for _, m := range models {
+			if strings.EqualFold(m.ID, preferred) {
+				return m.ID
+			}
+		}
+	}
+	return models[0].ID
+}
 
 // SizeOptions returns supported sizes for model, first being the default.
 // Matches Rust sub2api::images::size_options plus common OpenAI-compatible sizes.
@@ -83,6 +102,20 @@ func SniffExtension(data []byte) string {
 	}
 }
 
+// MimeTypeForExt returns the canonical MIME type for a sniffed image extension.
+func MimeTypeForExt(ext string) string {
+	switch strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), ".")) {
+	case "jpg", "jpeg":
+		return "image/jpeg"
+	case "webp":
+		return "image/webp"
+	case "gif":
+		return "image/gif"
+	default:
+		return "image/png"
+	}
+}
+
 // DefaultOutputDir returns the local folder where generated images are saved:
 // ~/Pictures/CheapRouter when a Pictures folder is usable, else <profile>/image-studio/outputs.
 func DefaultOutputDir(profileDir string) string {
@@ -126,6 +159,29 @@ func GenerationsURL(baseURL string) (string, error) {
 		return normalized + "/v1/images/generations", nil
 	}
 	return normalized + "/images/generations", nil
+}
+
+// EditsURL resolves the OpenAI-compatible POST /v1/images/edits URL from a
+// user-supplied base URL (accepting origin, .../v1, .../images/generations, or
+// .../images/edits).
+func EditsURL(baseURL string) (string, error) {
+	normalized, err := NormalizeBaseURL(baseURL)
+	if err != nil {
+		return "", err
+	}
+	lower := strings.ToLower(normalized)
+	if strings.HasSuffix(lower, "/images/edits") {
+		return normalized, nil
+	}
+	if strings.HasSuffix(lower, "/images/generations") {
+		return normalized[:len(normalized)-len("/images/generations")] + "/images/edits", nil
+	}
+	parsed, _ := url.Parse(normalized)
+	path := strings.TrimRight(parsed.Path, "/")
+	if path == "" {
+		return normalized + "/v1/images/edits", nil
+	}
+	return normalized + "/images/edits", nil
 }
 
 // CheapRouterImageURL builds a CheapRouter gateway Images API URL (e.g. "images/generations").
