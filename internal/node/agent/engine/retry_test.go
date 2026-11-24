@@ -31,15 +31,15 @@ func TestRetryExhaustionKeepsProviderCause(t *testing.T) {
 			f := newFixture(t, m)
 			f.start()
 			turn := f.submit("Task")
-			intervals := []time.Duration{5, 10, 20, 40, 60, 60, 60, 60, 60}
-			for index := range model.MainRetries {
+			interval := 300 * time.Millisecond
+			for range model.MainRetries {
 				select {
 				case wait := <-f.r.clock.(*manualClock).waits:
-					base := intervals[index] * time.Second
-					if wait.duration < base*4/5 || wait.duration > min(base*6/5, time.Minute) {
+					if wait.duration < interval*4/5 || wait.duration > min(interval*6/5, 30*time.Second) {
 						t.Fatalf("retry wait = %s", wait.duration)
 					}
 					close(wait.advance)
+					interval = min(interval*2, 30*time.Second)
 				case <-f.ctx.Done():
 					t.Fatal("the transient request did not reach its retry budget")
 				}

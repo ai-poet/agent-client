@@ -790,7 +790,7 @@ func TestTransientRetryRecord(t *testing.T) {
 	select {
 	case wait := <-f.r.clock.(*manualClock).waits:
 		delay = wait.duration
-		if delay < 4*time.Second || delay > 6*time.Second {
+		if delay < 240*time.Millisecond || delay > 360*time.Millisecond {
 			t.Fatalf("retry wait = %s", wait.duration)
 		}
 		close(wait.advance)
@@ -858,7 +858,7 @@ func TestSummaryRetryRecord(t *testing.T) {
 	wait := func(f *engineFixture) clockWait {
 		select {
 		case wait := <-f.r.clock.(*manualClock).waits:
-			if wait.duration < 4*time.Second || wait.duration > 6*time.Second {
+			if wait.duration < 240*time.Millisecond || wait.duration > 360*time.Millisecond {
 				t.Fatalf("retry wait = %s", wait.duration)
 			}
 			return wait
