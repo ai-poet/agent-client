@@ -23,7 +23,7 @@ func ReadAgentStatistics(ctx context.Context, db *sql.Conn, session protocol.Ses
  WHERE h.session=?1 AND t.kind='task' AND EXISTS(SELECT 1 FROM agent_events e WHERE e.turn=h.turn)`, session.String()).Scan(&result.Turns); err != nil {
 		return result, err
 	}
-	metrics, delegated, err := agentStatisticsMetrics(ctx, db, session)
+	metrics, delegated, cacheReported, err := agentStatisticsMetrics(ctx, db, session)
 	if err != nil {
 		return result, err
 	}
@@ -32,6 +32,10 @@ func ReadAgentStatistics(ctx context.Context, db *sql.Conn, session protocol.Ses
 	result.Delegated = delegated
 	if result.Observations, err = agentStatisticsObservations(ctx, db, session); err != nil {
 		return result, err
+	}
+	result.Observations.CacheRead = nil
+	if metrics.Tokens != nil && cacheReported == metrics.Responses {
+		result.Observations.CacheRead = &metrics.Tokens.CachedInput
 	}
 	if err = agentStatisticsContext(ctx, db, session, &result); err != nil {
 		return result, err
@@ -75,8 +79,9 @@ const agentStatisticsUsageRows = `WITH selected AS (
 
 // agentStatisticsMetrics totals the session's own usage and, apart from it,
 // the usage of the children its turns delegated.
-func agentStatisticsMetrics(ctx context.Context, db *sql.Conn, session protocol.SessionID) (protocol.UsageMetrics, protocol.UsageMetrics, error) {
+func agentStatisticsMetrics(ctx context.Context, db *sql.Conn, session protocol.SessionID) (protocol.UsageMetrics, protocol.UsageMetrics, uint64, error) {
 	result, delegated := protocol.DefaultUsageMetrics(), protocol.DefaultUsageMetrics()
+	var cacheReported uint64
 	type row struct {
 		usage      canonical.Usage
 		model      string
@@ -87,7 +92,7 @@ func agentStatisticsMetrics(ctx context.Context, db *sql.Conn, session protocol.
 	}
 	rows, err := db.QueryContext(ctx, agentStatisticsUsageRows, session.String())
 	if err != nil {
-		return result, delegated, err
+		return result, delegated, 0, err
 	}
 	var records []row
 	for rows.Next() {
@@ -95,16 +100,16 @@ func agentStatisticsMetrics(ctx context.Context, db *sql.Conn, session protocol.
 		var body []byte
 		if err = rows.Scan(&body, &value.model, &value.api, &value.elapsed, &value.media, &value.delegated, &value.preset); err != nil {
 			rows.Close()
-			return result, delegated, err
+			return result, delegated, 0, err
 		}
 		if err = json.Unmarshal(body, &value.usage); err != nil {
 			rows.Close()
-			return result, delegated, err
+			return result, delegated, 0, err
 		}
 		records = append(records, value)
 	}
 	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
-		return result, delegated, err
+		return result, delegated, 0, err
 	}
 	prices := modelPrices{}
 	for _, row := range records {
@@ -112,7 +117,7 @@ func agentStatisticsMetrics(ctx context.Context, db *sql.Conn, session protocol.
 		if !row.media.Valid || row.media.String != "image" && row.media.String != "video" {
 			cost, err = estimateAgentCost(ctx, db, prices, row.preset.String, row.api.String, row.model, row.usage)
 			if err != nil {
-				return result, delegated, err
+				return result, delegated, 0, err
 			}
 		}
 		var elapsed *uint64
@@ -124,12 +129,14 @@ func agentStatisticsMetrics(ctx context.Context, db *sql.Conn, session protocol.
 		total := &result
 		if row.delegated {
 			total = &delegated
+		} else if row.usage.CacheRead != nil {
+			cacheReported++
 		}
 		if err = addUsageMetrics(total, tokens, cost, elapsed); err != nil {
-			return result, delegated, err
+			return result, delegated, 0, err
 		}
 	}
-	return result, delegated, nil
+	return result, delegated, cacheReported, nil
 }
 
 // AgentCompactionBudget describes the same captured threshold used by execution.

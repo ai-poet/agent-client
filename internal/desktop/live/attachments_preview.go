@@ -36,7 +36,6 @@ func (r *Runtime) openCapturedFilePreview(session string, file conversation.File
 		return
 	}
 	file.ID = "preview/" + r.controller.Target().String() + "/" + session + "/" + file.ID
-	r.attachments.previews[file.ID] = descriptor
 	r.attachments.previewGeneration[file.ID]++
 	generation := r.attachments.previewGeneration[file.ID]
 	file.State = conversation.PreviewLoading
@@ -44,9 +43,12 @@ func (r *Runtime) openCapturedFilePreview(session string, file conversation.File
 	var preview *filePreview
 	var document *documentImages
 	if file.Kind == conversation.ImageFile {
-		preview, ctx = r.beginFilePreview(file, fileview.Callbacks{Image: r.localRuntime().ArtifactImageAction})
+		preview, ctx = r.beginFilePreview(file, fileview.Callbacks{Image: func(action kit.ImageAction, _ conversation.Image) {
+			r.enqueue(func(c *ui.Context) { r.attachmentImageDescriptorAction(c, action, descriptor) })
+		}})
 		preview.worktree = descriptor.worktree
 	} else {
+		r.attachments.previews[file.ID] = descriptor
 		if old := r.attachments.previewDocuments[file.ID]; old != nil {
 			old.cancel()
 		}

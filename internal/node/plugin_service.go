@@ -33,6 +33,8 @@ type pluginInvocation struct {
 
 type pluginControls struct {
 	manager      *plugins.Manager
+	inventoryMu  sync.Mutex
+	unavailable  map[string]struct{}
 	memory       *plugins.MemoryTracker
 	python       *python.Manager
 	pythonWake   chan struct{}
@@ -53,7 +55,7 @@ const (
 	programIdle  = 10 * time.Minute
 )
 
-func (node *Node) initPlugins(ctx context.Context, configured *mcp.Options) error {
+func (node *Node) initPlugins(ctx context.Context, configured *mcp.Options) (startupErr error) {
 	options := mcp.Options{}
 	if configured != nil {
 		options = *configured
@@ -71,6 +73,11 @@ func (node *Node) initPlugins(ctx context.Context, configured *mcp.Options) erro
 		controls.warm = make(chan struct{}, 1)
 	}
 	node.plugins = controls
+	defer func() {
+		if startupErr != nil {
+			startupErr = errors.Join(startupErr, node.closePlugins())
+		}
+	}()
 	node.collectPlugins(ctx)
 	var users []protocol.User
 	if err := node.profile.Store.Node.Read(ctx, func(db *sql.Conn) error {
@@ -84,7 +91,7 @@ func (node *Node) initPlugins(ctx context.Context, configured *mcp.Options) erro
 		if user.State != "active" {
 			continue
 		}
-		if err := node.InitializeUserPlugins(ctx, user); err != nil {
+		if err := node.initializeUserPlugins(ctx, user, true); err != nil {
 			return err
 		}
 	}
@@ -97,6 +104,10 @@ func (node *Node) initPlugins(ctx context.Context, configured *mcp.Options) erro
 // InitializeUserPlugins installs bundled defaults without copying another user's
 // settings or restoring that user's explicit removal choices.
 func (node *Node) InitializeUserPlugins(ctx context.Context, user protocol.User) error {
+	return node.initializeUserPlugins(ctx, user, false)
+}
+
+func (node *Node) initializeUserPlugins(ctx context.Context, user protocol.User, startup bool) error {
 	ctx = store.WithCapturedUser(store.WithUser(ctx, user), user.ID)
 	for _, entry := range plugins.BundledDefaults() {
 		var current *protocol.PluginInfo
@@ -133,7 +144,11 @@ func (node *Node) InitializeUserPlugins(ctx context.Context, user protocol.User)
 		}
 		inspected, err := node.plugins.manager.InspectBundled(ctx, entry.Name)
 		if err != nil {
-			return err
+			if !startup || ctx.Err() != nil {
+				return err
+			}
+			logUnavailablePackage(protocol.PluginReference{Name: entry.Name}, "bundled plugin inspection failed", err)
+			continue
 		}
 		if plugins.IsWithdrawn(inspected) {
 			continue
@@ -141,9 +156,18 @@ func (node *Node) InitializeUserPlugins(ctx context.Context, user protocol.User)
 		if current != nil && !plugins.IsNewer(current.Summary.Version, inspected.Summary.Version) {
 			continue
 		}
-		info, err := node.plugins.manager.InstallBundled(ctx, entry.Name)
+		var info protocol.PluginInfo
+		if startup {
+			info, err = node.plugins.manager.RestoreBundled(ctx, plugins.PackageReference(inspected))
+		} else {
+			info, err = node.plugins.manager.InstallBundled(ctx, entry.Name)
+		}
 		if err != nil {
-			return err
+			if !startup || ctx.Err() != nil {
+				return err
+			}
+			logUnavailablePackage(plugins.PackageReference(inspected), "bundled plugin installation failed", err)
+			continue
 		}
 		revision := uint64(0)
 		if current != nil {
@@ -253,7 +277,10 @@ func (node *Node) validatePluginRequestDB(ctx context.Context, db *sql.Conn, cal
 		return nil
 	}
 	if request.Plugin.Surface.Kind == "card" {
-		return store.CheckPluginCardRequest(ctx, db, node.ID(), caller, request)
+		if err := store.CheckPluginCardRequest(ctx, db, node.ID(), caller, request); err != nil {
+			return err
+		}
+		return node.checkPluginAvailability(request.Plugin.Package)
 	}
 	var captured *protocol.PluginInfo
 	if request.Plugin.Invocation != nil {
@@ -280,8 +307,24 @@ func (node *Node) validatePluginRequestDB(ctx context.Context, db *sql.Conn, cal
 			return &protocol.Fault{Code: protocol.ErrorCodePermissionDenied, Message: "plugin invocation is unavailable"}
 		}
 	}
-	_, err := store.AuthorizePluginRequest(ctx, db, node.ID(), caller, request, captured)
-	return err
+	if _, err := store.AuthorizePluginRequest(ctx, db, node.ID(), caller, request, captured); err != nil {
+		return err
+	}
+	return node.checkPluginAvailability(request.Plugin.Package)
+}
+
+func (node *Node) pluginUnavailable(digest string) bool {
+	node.plugins.mu.Lock()
+	defer node.plugins.mu.Unlock()
+	_, unavailable := node.plugins.unavailable[digest]
+	return unavailable
+}
+
+func (node *Node) checkPluginAvailability(reference protocol.PluginReference) error {
+	if node.pluginUnavailable(reference.Digest) {
+		return &protocol.Fault{Code: protocol.ErrorCodeNotConfigured, Message: "plugin package is unavailable: " + reference.Name}
+	}
+	return nil
 }
 
 func (node *Node) pluginCallback(ctx context.Context, caller protocol.NodeID, request protocol.Request, readOnly bool) (protocol.Output, error) {
@@ -448,7 +491,7 @@ func (node *Node) pluginCommitted(changes []protocol.Event, ctx context.Context,
 		}
 	}
 	if packagesChanged && node.plugins.python != nil {
-		_ = node.retainPackagePython(context.WithoutCancel(ctx))
+		_ = node.retainPackagePython(context.WithoutCancel(ctx), false)
 	}
 	if packagesChanged {
 		node.authChanged()

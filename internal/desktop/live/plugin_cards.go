@@ -170,12 +170,6 @@ func (r *Runtime) pluginCardEligible(card *pluginCardInstance) bool {
 	if !exists || history.Removed {
 		return false
 	}
-	for _, summary := range card.owner.snapshot().Plugins {
-		if summary.Name == card.summary.Package.Name && summary.Digest == card.summary.Package.Digest {
-			card.updateReference(packageReference(summary))
-			break
-		}
-	}
 	var latest *protocol.ConversationRun
 	for index := range history.Snapshot.Page.Runs {
 		run := &history.Snapshot.Page.Runs[index]
@@ -183,8 +177,21 @@ func (r *Runtime) pluginCardEligible(card *pluginCardInstance) bool {
 			latest = run
 		}
 	}
-	return latest != nil && latest.Turn == card.summary.Receipt.Turn && latest.Origin == nil &&
-		slices.Contains([]protocol.ConversationStatus{protocol.ConversationStatusRunning, protocol.ConversationStatusCompleted, protocol.ConversationStatusFailed}, latest.Status)
+	if latest == nil || latest.Turn != card.summary.Receipt.Turn || latest.Origin != nil ||
+		!slices.Contains([]protocol.ConversationStatus{protocol.ConversationStatusRunning, protocol.ConversationStatusCompleted, protocol.ConversationStatusFailed}, latest.Status) {
+		return false
+	}
+	for _, summary := range card.owner.snapshot().Plugins {
+		if summary.Name != card.summary.Package.Name {
+			continue
+		}
+		if !summary.Enabled || summary.Compatibility.Kind != "compatible" || summary.Digest != card.summary.Package.Digest {
+			return false
+		}
+		card.updateReference(packageReference(summary))
+		return true
+	}
+	return false
 }
 
 func (r *Runtime) pluginCardLive(card *pluginCardInstance, generation uint64) bool {
@@ -230,7 +237,9 @@ func (r *Runtime) pluginCardsFrame(view *ui.Context) {
 	for _, card := range r.pluginCards.cards {
 		card.visible = false
 		if !r.pluginCardEligible(card) || card.locale != "" && card.locale != r.packageLocale() {
-			r.suspendPluginCard(card)
+			if card.ctx != nil || card.attempted {
+				r.suspendPluginCard(card)
+			}
 			continue
 		}
 		if card.mounted != nil {
@@ -278,8 +287,8 @@ func (r *Runtime) closePluginCards() {
 func (r *Runtime) suspendPluginCard(card *pluginCardInstance) {
 	if card.cancel != nil {
 		card.cancel()
-		card.cancel = nil
 	}
+	card.ctx, card.cancel = nil, nil
 	card.login.suspend()
 	if card.runtime != nil {
 		_ = card.runtime.Close()
