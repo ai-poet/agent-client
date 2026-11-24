@@ -92,7 +92,7 @@ func TestCheapRouterBoundLaneRequests(t *testing.T) {
 		supports                                         cheapauth.ResponsesSupport
 		api                                              protocol.ConversationModelApi
 	}{
-		{cheapauth.LaneClaude, "anthropic", "claude-test", "anthropic", "/v1/messages", "x-api-key", "messages", cheapauth.ResponsesSupportUnset, protocol.ConversationModelApiAnthropic},
+		{cheapauth.LaneClaude, "anthropic", "claude-test", "anthropic", "/v1/messages?beta=true", "x-api-key", "messages", cheapauth.ResponsesSupportUnset, protocol.ConversationModelApiAnthropic},
 		{cheapauth.LaneCodex, "openai", "gpt-test", "responses", "/v1/responses", "Authorization", "input", cheapauth.ResponsesSupportUnset, protocol.ConversationModelApiResponses},
 		{cheapauth.LaneCodex, "gpt", "gpt-alias", "responses", "/v1/responses", "Authorization", "input", cheapauth.ResponsesSupportUnset, protocol.ConversationModelApiResponses},
 		{cheapauth.LaneCodex, "openai", "gpt-chat-only", "chat", "/v1/chat/completions", "Authorization", "messages", cheapauth.ResponsesSupportUnsupported, protocol.ConversationModelApiChatCompletions},

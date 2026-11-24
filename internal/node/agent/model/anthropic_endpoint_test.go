@@ -21,9 +21,10 @@ func TestAnthropicCompatibleEndpoint(t *testing.T) {
 			const key = "fixture-key"
 			response := fixture(t, "anthropic-text.sse")
 			messagesPath := row.prefix + "/v1/messages"
-			query := ""
+			query := "beta=true"
+			wantBeta := "claude-code-20250219"
 			if row.beta != "" {
-				query = "beta=true"
+				wantBeta += "," + row.beta
 			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Header.Get("x-api-key") != key || r.Header.Get("Authorization") != "" || r.Header.Get("anthropic-version") != "2023-06-01" {
@@ -34,7 +35,7 @@ func TestAnthropicCompatibleEndpoint(t *testing.T) {
 					w.Header().Set("Content-Type", "application/json")
 					io.WriteString(w, `{"data":[{"id":"fixture-model"}],"has_more":false}`)
 				case "POST " + messagesPath:
-					if r.URL.RawQuery != query || r.Header.Get("anthropic-beta") != row.beta || r.Header.Get("Content-Type") != "application/json" {
+					if r.URL.RawQuery != query || r.Header.Get("anthropic-beta") != wantBeta || r.Header.Get("Content-Type") != "application/json" {
 						t.Errorf("Messages query=%q beta=%q content type=%q", r.URL.RawQuery, r.Header.Get("anthropic-beta"), r.Header.Get("Content-Type"))
 					}
 					w.Header().Set("Content-Type", "text/event-stream")
@@ -71,7 +72,7 @@ func TestAnthropicCompatibleEndpoint(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if search.URL.EscapedPath() != messagesPath || search.URL.RawQuery != query || search.Header.Get("anthropic-beta") != row.beta {
+			if search.URL.EscapedPath() != messagesPath || search.URL.RawQuery != query || search.Header.Get("anthropic-beta") != wantBeta {
 				t.Errorf("native search path = %s, beta = %q", search.URL.RequestURI(), search.Header.Get("anthropic-beta"))
 			}
 		})
