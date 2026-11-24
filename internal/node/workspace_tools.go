@@ -229,7 +229,7 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 					node.agent.Committed()
 				}
 			}
-			value := node.workspaceToolValue(ctx, request, output)
+			value := node.workspaceToolValue(ctx, request, output, effect.timedOut)
 			return engine.ToolResult{Value: value, ReturnedError: workspaceOutputFailed(output), ReturnedFailure: workspaceOutputFailure(output)}
 		}
 		tools = append(tools, tool)
@@ -314,7 +314,7 @@ func workspaceOutputFailure(output protocol.Output) *protocol.ToolFailure {
 	}
 	return failure
 }
-func (node *Node) workspaceToolValue(ctx context.Context, request protocol.Request, output protocol.Output) any {
+func (node *Node) workspaceToolValue(ctx context.Context, request protocol.Request, output protocol.Output, timedOut bool) any {
 	if value, shaped := codeToolValue(output); shaped {
 		return value
 	}
@@ -350,9 +350,18 @@ func (node *Node) workspaceToolValue(ctx context.Context, request protocol.Reque
 			value["sailry_command"] = preview
 		}
 	}
+	if input, ok := request.Command.Data.(*protocol.CommandRunCommandPayload); ok && !input.Background && timedOut && output.Kind == "command_result" {
+		if data, ok := value["data"].(map[string]any); ok {
+			data["notice"] = "Background command capacity was full, so the command was stopped at its timeout."
+		}
+	}
 	if input, ok := request.Command.Data.(*protocol.CommandRunCommandPayload); ok && output.Kind == "command_started" && !input.Background {
 		if data, ok := value["data"].(map[string]any); ok {
-			data["notice"] = "The user sent a new message while this command was running. The command was moved to the background and is still running; use the command read and stop tools with this id to check it. Its completion is reported automatically."
+			notice := "The user sent a new message while this command was running. The command was moved to the background and is still running; use the command read and stop tools with this id to check it. Its completion is reported automatically."
+			if timedOut {
+				notice = "The command reached timeout_ms and is still running in the background. Use read_command with this id (wait_ms, until) to follow it, or stop_command to end it. Its completion is reported automatically."
+			}
+			data["notice"] = notice
 		}
 	}
 	if workspaceOutputFailed(output) {
