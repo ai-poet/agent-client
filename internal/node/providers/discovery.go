@@ -59,7 +59,7 @@ func discover(ctx context.Context, provider protocol.ConversationProvider, secre
 	case openAI:
 		candidates[0] = OpenAIBaseURL(*root)
 	case provider.Api == protocol.ConversationModelApiAnthropic:
-		candidates[0].Path = strings.TrimSuffix(path, "/v1")
+		candidates[0] = AnthropicBaseURL(*root)
 	default:
 		last := path[strings.LastIndex(path, "/")+1:]
 		versioned := len(last) > 1 && last[0] == 'v' && last[1] >= '0' && last[1] <= '9'
@@ -91,7 +91,7 @@ func discover(ctx context.Context, provider protocol.ConversationProvider, secre
 		case openAI:
 			candidate = *candidate.JoinPath("models")
 		case provider.Api == protocol.ConversationModelApiAnthropic:
-			candidate.Path = strings.TrimRight(candidate.Path, "/") + "/v1/models"
+			candidate = *candidate.JoinPath("v1", "models")
 		default:
 			candidate.Path = strings.TrimRight(candidate.Path, "/") + "/models"
 		}
