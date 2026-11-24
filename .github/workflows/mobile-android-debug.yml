@@ -52,6 +52,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          # Maven Central rate-limits shared runners; a Gradle cache avoids a
+          # cold resolve on every run.
+          cache: gradle
 
       - name: Install Android SDK and NDK
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.0
@@ -101,7 +104,18 @@ jobs:
         working-directory: apps/mobile
         shell: bash
         run: |
-          flutter build apk --debug --no-pub --target-platform android-arm64
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            if flutter build apk --debug --no-pub --target-platform android-arm64; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Gradle could not resolve dependencies after 3 attempts"
+              exit 1
+            fi
+            echo "build attempt ${attempt} failed; retrying in 30s"
+            sleep 30
+          done
 
       - name: Upload debug APK
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
