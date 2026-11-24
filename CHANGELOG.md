@@ -3,6 +3,54 @@
 Release entries supply the corresponding GitHub Release notes. A version is
 released only after its entry is here.
 
+## [0.5.2](https://github.com/ai-poet/cheaprouter-harness/releases/tag/v0.5.2) — 2026-11-24
+
+创作工作台支持参考图编辑与局部重绘，Agent 也能直接画图和改图；另含一批稳定性修复。
+
+The image studio edits reference images and redraws masked areas, and the Agent can draw and edit pictures itself; plus a round of stability fixes.
+
+### 新增 / Added
+
+- 创作工作台可添加参考图编辑图片：通过按钮选择、拖入窗口或粘贴图片添加，也能把生成结果一键「用作参考图」；参考图会复制保存，原文件移动或删除后仍可重试
+
+  The image studio edits from reference images: add them with the button, by dropping them on the window or by pasting, or turn a result into a reference in one click. References are kept as copies, so a retry still works after the original moves or is deleted
+
+- 局部重绘：在第一张参考图上用画笔和橡皮涂抹要重绘的区域，可调笔刷大小、撤销与清除；生成结果的菜单里也可直接「局部重绘」
+
+  Inpainting: paint the area to redraw over the first reference image with a brush and an eraser, with adjustable size, undo and clear; a result's menu offers Inpaint directly
+
+- 历史记录可「应用参数」，一次恢复提示词、模型、尺寸、质量、数量、参考图与蒙版；画廊支持按提示词搜索和按状态筛选
+
+  History cards can Apply parameters, restoring the prompt, model, size, quality, count, references and mask at once; the gallery searches prompts and filters by status
+
+- Agent 内置画图能力：`generate_image` 支持选择渠道与模型、尺寸、质量、一次多张，以及基于工作区图片或会话附件的参考图编辑；没有可用画图后端时不提供该工具
+
+  The Agent draws on its own: `generate_image` chooses the channel and model, size, quality and several pictures at once, and edits from workspace images or conversation attachments; the tool is withheld when no image backend is available
+
+### 修复 / Fixed
+
+- 相同的提示、恢复与错误通知不再重复堆叠；工作区读取失败按原因提示（权限不足、忙碌、离线），并对短时间内的重复失败降噪
+
+  Identical toasts, recovery and error notices no longer stack; workspace read failures name their cause (permission, busy, offline) and repeated failures in a short window stay quiet
+
+- 流式响应出错时不再附带误导性的「HTTP 200」后缀；会话缓存统计与实际计费的模型请求口径一致
+
+  A failed streaming response no longer ends with a misleading "HTTP 200"; conversation cache statistics match the model requests actually billed
+
+- Git 状态与差异不再解压超大文件对象；内置插件启动时按校验摘要恢复，不可用的包被隔离；缺失的内置技能资源包原子补齐
+
+  Git status and diff no longer inflate very large blobs; built-in plugins are restored at startup by digest and unusable packages are isolated; missing built-in skill bundles are restored atomically
+
+- 资源释放与稳定性：退役插件视图与失效卡片回调、已交付的终端流与关闭的文件预览、插件初始化失败的扩展运行时、已结束进程的输入都会及时释放；工作树清理重试有冷却，Link 帧压缩限制并发与内存
+
+  Resources are released promptly: retired plugin views and stale card callbacks, delivered terminal output and closed file previews, extension runtimes whose plugin failed to start, and the input of finished processes; worktree cleanup retries cool down, and Link frame compression bounds its concurrency and memory
+
+### 说明 / Notes
+
+- 移动端 App 本版无变化
+
+  The mobile app is unchanged in this release
+
 ## [0.5.1](https://github.com/ai-poet/cheaprouter-harness/releases/tag/v0.5.1) — 2026-11-22
 
 加入移动端远控：用手机或平板连接你自己的 Host，查看会话、发消息、审批并跟进执行。
