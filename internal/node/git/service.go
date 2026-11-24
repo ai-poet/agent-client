@@ -153,14 +153,17 @@ func open(root string) (*gogit.Repository, error) {
 	return r, nil
 }
 func openDiff(root string) (*gogit.Repository, error) {
+	return openBounded(root, statLimit)
+}
+func openBounded(root string, limit int64) (*gogit.Repository, error) {
 	r, err := open(root)
 	if err != nil {
 		return nil, err
 	}
 	// Reuse the resolved Git filesystem. PlainOpen cannot set the threshold
-	// that lets status and diff see a large loose object's size without inflating it.
+	// that lets bounded blob reads inspect a large loose object's size without inflating it.
 	if store, ok := r.Storer.(*filesystem.Storage); ok {
-		r.Storer = filesystem.NewStorageWithOptions(store.Filesystem(), cache.NewObjectLRUDefault(), filesystem.Options{LargeObjectThreshold: statLimit})
+		r.Storer = filesystem.NewStorageWithOptions(store.Filesystem(), cache.NewObjectLRUDefault(), filesystem.Options{LargeObjectThreshold: limit})
 	}
 	return r, nil
 }

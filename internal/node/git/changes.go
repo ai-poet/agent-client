@@ -526,7 +526,7 @@ func (s *Service) changeBytes(ctx context.Context, root string, snapshot protoco
 	if err != nil {
 		return candidate{}, nil, nil, "", "", err
 	}
-	r, err := open(root)
+	r, err := openBounded(root, maxFile)
 	if err != nil {
 		return candidate{}, nil, nil, "", "", err
 	}
