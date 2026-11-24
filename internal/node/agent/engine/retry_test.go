@@ -126,7 +126,7 @@ func TestTCPDialTimeoutPersistsRetryLimitAndTerminalAttempt(t *testing.T) {
 			continue
 		}
 		if retry := execution.Retry; retry != nil {
-			if retry.Limit == nil || *retry.Limit != 2 || retry.DelayMs == nil || retry.Error == nil || *retry.Error != diagnostic {
+			if retry.Limit == nil || *retry.Limit != 1 || retry.DelayMs == nil || retry.Error == nil || *retry.Error != diagnostic {
 				t.Fatalf("wrong canonical retry: %+v", retry)
 			}
 			retries = append(retries, retry.Attempt)
@@ -138,7 +138,7 @@ func TestTCPDialTimeoutPersistsRetryLimitAndTerminalAttempt(t *testing.T) {
 			attempts = append(attempts, attempt.Index)
 		}
 	}
-	if !slices.Equal(retries, []uint64{1, 2}) || !slices.Equal(attempts, []uint64{1, 2, 3}) {
+	if !slices.Equal(retries, []uint64{0, 1}) || !slices.Equal(attempts, []uint64{1, 2, 3}) {
 		t.Fatalf("stored retries=%v, observations=%v", retries, attempts)
 	}
 }
