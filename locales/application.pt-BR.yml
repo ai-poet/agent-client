@@ -2638,6 +2638,7 @@ git_diff_side_by_side: Lado a lado
 git_diff_inline: Em linha
 git_diff_needs_width: A visualização lado a lado precisa de mais largura
 workspace_action_failed: A ação do espaço de trabalho falhou
+workspace_read_permission_failed: A leitura do espaço de trabalho foi recusada; verifique as permissões dos arquivos
 workspace_changed: O espaço de trabalho mudou; recarregue antes de tentar novamente
 workspace_action_unknown: Resultado incerto; verifique antes de tentar novamente
 workspace_saved: Salvo

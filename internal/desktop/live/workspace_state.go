@@ -2,6 +2,7 @@ package live
 
 import (
 	"context"
+	"log/slog"
 	"path"
 	"sort"
 	"strings"
@@ -12,6 +13,8 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
+
+const workspaceReadBackoff = 5 * time.Second
 
 // WorkspaceNative delegates native file effects to the window's verified
 // transfer owner. Execution-host paths never become controller-local paths.
@@ -67,6 +70,7 @@ type workspaceProject struct {
 	directories              map[string]bool
 	loading                  map[string]bool
 	failedReads              map[string]bool
+	failedAt                 map[string]time.Time
 	missingEntries           map[string]bool
 	staleReads               map[string]bool
 	trashing                 map[string]bool
@@ -278,8 +282,32 @@ func (p *workspaceProject) actions() *panel.Actions {
 		PasteReady: func() bool { return len(p.runtime.workspace.clipboard.paths) > 0 },
 	}
 }
+func (p *workspaceProject) readBackedOff(key string) bool {
+	at, failed := p.failedAt[key]
+	return failed && time.Since(at) < workspaceReadBackoff
+}
+func (p *workspaceProject) readBlocked(key string) bool {
+	return p.loading[key] || p.failedReads[key] || p.readBackedOff(key) || p.trashBlocksRead(key)
+}
+func workspaceReadFailureKey(key string, err error) string {
+	switch faultCode(err) {
+	case protocol.ErrorCodeNotFound:
+		if strings.HasPrefix(key, "file/") || strings.HasPrefix(key, "directory/") {
+			return ""
+		}
+	case protocol.ErrorCodeBusy:
+		return "live_read_busy"
+	case protocol.ErrorCodePermissionDenied:
+		return "workspace_read_permission_failed"
+	case protocol.ErrorCodeUnavailable:
+		if faultMessage(err) == "resource host is offline" {
+			return "resource_offline_action"
+		}
+	}
+	return "workspace_action_failed"
+}
 func (p *workspaceProject) read(key string, command protocol.Command, done func(*ui.Context, protocol.Output), failures ...func(*ui.Context, error)) {
-	if p.loading[key] || p.failedReads[key] || p.trashBlocksRead(key) {
+	if p.readBlocked(key) {
 		return
 	}
 	p.loading[key] = true
@@ -308,6 +336,10 @@ func (p *workspaceProject) read(key string, command protocol.Command, done func(
 				p.failedReads = map[string]bool{}
 			}
 			p.failedReads[key] = true
+			if p.failedAt == nil {
+				p.failedAt = map[string]time.Time{}
+			}
+			p.failedAt[key] = time.Now()
 			if strings.HasPrefix(key, "directory/") {
 				directory := strings.TrimPrefix(key, "directory/")
 				if faultCode(err) == protocol.ErrorCodeNotFound {
@@ -319,12 +351,17 @@ func (p *workspaceProject) read(key string, command protocol.Command, done func(
 				state.Next = false
 				p.directoryState(directory, state)
 			}
-			p.runtime.reportKeys(c, err, "workspace_action_failed", "workspace_changed", "workspace_action_unknown")
+			slog.Warn("workspace read failed", "key", key, "command", command.Kind, "code", faultCode(err))
+			if failedKey := workspaceReadFailureKey(key, err); failedKey != "" {
+				p.runtime.reportKeys(c, err, failedKey, "workspace_changed", "workspace_action_unknown")
+			}
 			for _, failure := range failures {
 				failure(c, err)
 			}
 			return
 		}
+		delete(p.failedReads, key)
+		delete(p.failedAt, key)
 		done(c, out)
 	})
 }
@@ -336,6 +373,7 @@ func (p *workspaceProject) refresh() {
 	p.reviewTarget = nil
 	p.reviewTurns = map[string]protocol.TurnID{}
 	p.failedReads = map[string]bool{}
+	p.failedAt = map[string]time.Time{}
 	p.missingEntries = nil
 	p.documents = map[string]uint32{}
 	p.diffs = map[string]bool{}
@@ -370,7 +408,7 @@ func (p *workspaceProject) directoryState(directory string, state panel.Director
 }
 func (p *workspaceProject) requestDirectory(directory string, after *protocol.DirectoryCursor, accumulated []protocol.FileEntry, extent int, partial bool) {
 	key := "directory/" + directory
-	if p.loading[key] || p.failedReads[key] || p.trashBlocksRead(key) {
+	if p.readBlocked(key) {
 		return
 	}
 	state := p.directoryStates[directory]

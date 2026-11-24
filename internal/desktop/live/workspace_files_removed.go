@@ -80,6 +80,8 @@ func (p *workspaceProject) entryFound(relative string) {
 			delete(p.missingEntries, relative)
 			delete(p.failedReads, "file/"+relative)
 			delete(p.failedReads, "directory/"+relative)
+			delete(p.failedAt, "file/"+relative)
+			delete(p.failedAt, "directory/"+relative)
 			p.pendingFiles = true
 		}
 		if relative == "" {

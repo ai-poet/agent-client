@@ -2638,6 +2638,7 @@ git_diff_side_by_side: 左右に並べる
 git_diff_inline: インライン
 git_diff_needs_width: 左右表示には幅が足りません
 workspace_action_failed: ワークスペースの操作に失敗しました
+workspace_read_permission_failed: ワークスペースの読み取りが拒否されました。ファイルの権限を確認してください
 workspace_changed: ワークスペースが変更されました。再読み込みしてからやり直してください
 workspace_action_unknown: 結果が不明です。確認してからやり直してください
 workspace_saved: 保存しました

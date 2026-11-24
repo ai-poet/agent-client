@@ -102,7 +102,7 @@ func (r *Runtime) projectWorkspaceComposer(cv *viewmodel.Conversation, comp *com
 		}
 	}
 	ctx.Repository = composer.Repository{Kind: composer.Inspecting}
-	if p.failedReads["git-status"] {
+	if p.failedReads["git-status"] || p.readBackedOff("git-status") {
 		ctx.Repository.Kind = composer.Unavailable
 	}
 	if p.statusKnown {

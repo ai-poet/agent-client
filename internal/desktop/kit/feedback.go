@@ -22,7 +22,11 @@ func Copied(c *ui.Context) {
 // Views keep their content and drafts; the toast is the only place a failure
 // shows.
 func Error(c *ui.Context, title, detail string) {
-	c.AddToast(ui.Toast{Type: "error", Title: title, Description: detail, Timeout: ToastDuration(c)})
+	id := title
+	if detail != "" {
+		id += "\x00" + detail
+	}
+	c.AddToast(ui.Toast{ID: id, Type: "error", Title: title, Description: detail, Timeout: ToastDuration(c)})
 }
 
 // Notify is a neutral toast with an optional title over its detail.
@@ -51,7 +55,7 @@ func Recover(c *ui.Context, outcome Outcome, message string, again func()) {
 	if outcome == Uncertain {
 		kind = "warning"
 	}
-	c.AddToast(ui.Toast{Type: kind, Title: message, Timeout: ToastDuration(c), Action: i18n.T(c, "chat_retry"), OnAction: again})
+	c.AddToast(ui.Toast{ID: message, Type: kind, Title: message, Timeout: ToastDuration(c), Action: i18n.T(c, "chat_retry"), OnAction: again})
 }
 
 // Details is a dialog up to 560 wide and 80% of the window high with the

@@ -1729,6 +1729,7 @@ files_download_destination: Не удалось сохранить загруз�
 files_download_conflict: Место назначения изменилось; снова выберите место сохранения
 chat_attachment_remove_failed: Удаление не удалось
 workspace_action_failed: Не удалось выполнить действие в рабочей области
+workspace_read_permission_failed: Чтение рабочей области отклонено; проверьте права доступа к файлам
 workspace_changed: Рабочая область изменилась; обновите и повторите
 workspace_action_unknown: Результат неизвестен; проверьте перед повтором
 workspace_saved: Сохранено
