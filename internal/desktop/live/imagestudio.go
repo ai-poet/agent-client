@@ -1,10 +1,13 @@
 package live
 
 import (
+	"bytes"
 	"context"
+	"image"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +27,7 @@ type imageStudioRuntime struct {
 	profileDir    string
 	customStore   *core.CustomStore
 	indexStore    *core.IndexStore
+	refStore      *core.ReferenceStore
 	client        *core.Client
 	runner        *core.Runner
 	state         *imagestudioui.State
@@ -39,6 +43,8 @@ func (r *Runtime) initImageStudio() {
 	profile := filepath.Dir(filepath.Dir(r.Preferences.Path))
 	customStore, _ := core.NewCustomStore(profile)
 	indexStore, _ := core.NewIndexStore(profile)
+	refStore, _ := core.NewReferenceStore(profile)
+	startedAt := time.Now()
 	client := core.NewClient()
 	var auth core.AuthProvider
 	if r.cheapAuth != nil && r.cheapAuth.service != nil {
@@ -51,6 +57,7 @@ func (r *Runtime) initImageStudio() {
 		profileDir:    profile,
 		customStore:   customStore,
 		indexStore:    indexStore,
+		refStore:      refStore,
 		client:        client,
 		runner:        core.NewRunner(client, auth, customStore, indexStore),
 		state:         state,
@@ -68,6 +75,14 @@ func (r *Runtime) initImageStudio() {
 	settingsState.OpenStudio = func() { r.App.Navigate(shell.ImageStudioPage) }
 
 	// Wire Creative Studio callbacks.
+	if refStore != nil {
+		state.PickReferences = r.pickStudioReferences
+		state.AddReferences = r.addStudioReferences
+		state.AddReferenceData = r.addStudioReferenceData
+		state.OpenMask = r.openStudioMask
+		state.UseAsReference = func(path string) { r.addStudioReferences([]string{path}) }
+		state.Inpaint = r.inpaintStudioImage
+	}
 	state.Submit = r.submitImageStudioJob
 	state.CancelJob = r.cancelImageStudioJob
 	state.RetryJob = r.retryImageStudioJob
@@ -104,6 +119,17 @@ func (r *Runtime) initImageStudio() {
 			if loaded, err := indexStore.Load(time.Now()); err == nil {
 				idx = loaded
 			}
+		}
+		// Stored references no job names are dropped; copies made since
+		// startup may belong to the draft and stay.
+		if refStore != nil && indexStore != nil {
+			keep := map[string]bool{}
+			for _, job := range idx.Jobs {
+				for _, path := range job.Spec.ReferencePaths {
+					keep[filepath.Clean(path)] = true
+				}
+			}
+			refStore.Prune(keep, startedAt)
 		}
 		r.enqueue(func(*ui.Context) {
 			studio.settingsState.ApplySummary(summary, true)
@@ -298,12 +324,19 @@ func (r *Runtime) submitImageStudioJob() {
 		Quality: s.EffectiveQuality(),
 		Count:   s.EffectiveCount(),
 	}
+	if len(s.References) > 0 {
+		spec.ReferencePaths = slices.Clone(s.References)
+		if s.HasMask() {
+			spec.MaskStrokes = slices.Clone(s.MaskStrokes)
+		}
+	}
 	var estimate *float64
 	if est, ok := s.EstimateUSD(); ok {
 		copied := est
 		estimate = &copied
 	}
 	s.Prompt = ""
+	s.ClearInputs()
 	r.pushImageJob(spec, estimate)
 }
 
@@ -438,7 +471,13 @@ func (r *Runtime) startImageJob(job core.Job) {
 				})
 			},
 		}
-		result, finalErr := studio.runner.Run(jobCtx, job.Spec, opts)
+		// The job names its reference images and mask; their bytes are
+		// read here, for the first run and for a retry after a restart.
+		spec, finalErr := core.LoadInputs(job.Spec)
+		var result core.RunResult
+		if finalErr == nil {
+			result, finalErr = studio.runner.Run(jobCtx, spec, opts)
+		}
 		var paths []string
 		if finalErr == nil {
 			paths, finalErr = studio.client.SaveOutputs(jobCtx, result.Outputs, outputDir, job.Stem)
@@ -613,6 +652,119 @@ func (r *Runtime) openStudioOutputFolder() {
 	r.async(func() {
 		_ = os.MkdirAll(dir, 0o755)
 		r.enqueue(func(*ui.Context) { openFn(dir) })
+	})
+}
+
+func (r *Runtime) pickStudioReferences() {
+	if r.attachments == nil || r.attachments.native.PickFiles == nil {
+		return
+	}
+	r.attachments.native.PickFiles(func(paths []string) {
+		if len(paths) > 0 {
+			r.addStudioReferences(paths)
+		}
+	})
+}
+
+// addStudioReferences copies picked, dropped or pasted image files into the
+// reference store and adds the copies to the draft.
+func (r *Runtime) addStudioReferences(paths []string) {
+	r.importStudioReferences(func(store *core.ReferenceStore) ([]string, int) {
+		var stored []string
+		failed := 0
+		for _, path := range paths {
+			copied, err := store.ImportFile(path)
+			if err != nil {
+				failed++
+				continue
+			}
+			stored = append(stored, copied)
+		}
+		return stored, failed
+	}, nil)
+}
+
+// addStudioReferenceData stores a pasted picture as a reference image.
+func (r *Runtime) addStudioReferenceData(data []byte) {
+	r.importStudioReferences(func(store *core.ReferenceStore) ([]string, int) {
+		copied, err := store.Import(data)
+		if err != nil {
+			return nil, 1
+		}
+		return []string{copied}, 0
+	}, nil)
+}
+
+// inpaintStudioImage makes a generated picture the draft's only reference
+// and opens the mask editor on it.
+func (r *Runtime) inpaintStudioImage(path string) {
+	r.importStudioReferences(func(store *core.ReferenceStore) ([]string, int) {
+		copied, err := store.ImportFile(path)
+		if err != nil {
+			return nil, 1
+		}
+		return []string{copied}, 0
+	}, func(stored []string) {
+		s := r.imageStudio.state
+		s.ClearInputs()
+		s.AddReferencePaths(stored)
+		r.openStudioMask()
+	})
+}
+
+// importStudioReferences runs load off the UI thread, then adds what it
+// stored to the draft (or hands it to replace), telling of files that are
+// not PNG, JPEG or WebP images within the size limit and of the model's
+// reference limit.
+func (r *Runtime) importStudioReferences(load func(*core.ReferenceStore) ([]string, int), replace func([]string)) {
+	studio := r.imageStudio
+	if studio == nil || studio.refStore == nil {
+		return
+	}
+	store := studio.refStore
+	r.async(func() {
+		stored, failed := load(store)
+		r.enqueue(func(c *ui.Context) {
+			if failed > 0 {
+				kit.Toast(c, kit.Failed, i18n.T(c, "image_studio_reference_invalid"))
+			}
+			if len(stored) == 0 {
+				return
+			}
+			if replace != nil {
+				replace(stored)
+				return
+			}
+			if studio.state.AddReferencePaths(stored) {
+				kit.Toast(c, kit.Failed, i18n.T(c, "image_studio_reference_limit", "limit", studio.state.ReferenceLimit()))
+			}
+		})
+	})
+}
+
+// openStudioMask opens the mask editor over the draft's first reference
+// image, decoded with the standard decoders rather than ui.DecodeImage:
+// those ignore EXIF orientation, so the editor shows the pixels the edits
+// endpoint receives and the mask is drawn in them.
+func (r *Runtime) openStudioMask() {
+	studio := r.imageStudio
+	if studio == nil || !studio.state.BeginMask() {
+		return
+	}
+	path := studio.state.Mask.Path
+	r.async(func() {
+		var decoded image.Image
+		if data, err := os.ReadFile(path); err == nil {
+			decoded, _, _ = image.Decode(bytes.NewReader(data))
+		}
+		r.enqueue(func(*ui.Context) {
+			if decoded == nil {
+				studio.state.MaskLoaded(path, nil, 0, 0)
+				return
+			}
+			b := decoded.Bounds()
+			studio.state.MaskLoaded(path, ui.NewBitmap(decoded), b.Dx(), b.Dy())
+		})
 	})
 }
 

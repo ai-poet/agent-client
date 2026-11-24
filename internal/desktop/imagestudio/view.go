@@ -3,21 +3,24 @@ package imagestudio
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
-	core "github.com/ai-poet/cheaprouter-harness/internal/imagestudio"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
+	core "github.com/ai-poet/cheaprouter-harness/internal/imagestudio"
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 )
 
 const (
 	studioMaxWidth float32 = 1040
 	studioCardW    float32 = 224
+	referenceThumb float32 = 56
 )
 
 // Page renders the Creative Studio workspace in the shell's main column.
@@ -35,7 +38,16 @@ func Page(c *ui.Context, state *State) {
 		c.After(time.Second)
 	}
 
-	ui.Column(c.Key("image-studio")).Fill().MinHeight(0).Children(func() {
+	// Files dropped anywhere on the page become the draft's reference images.
+	root := ui.Column(c.Key("image-studio")).Fill().MinHeight(0)
+	dragOver := false
+	if state.AddReferences != nil {
+		dragOver = root.FileDragOver()
+		if paths := root.DroppedFiles(); len(paths) > 0 {
+			state.AddReferences(paths)
+		}
+	}
+	root.Children(func() {
 		renderToolbar(c, state)
 		ui.Scroll(c.Key("gallery-scroll")).Grow(1).MinHeight(0).FillWidth().TrackScroll(&state.Scroll).Children(func() {
 			ui.Column(c.Key("gallery-wrap")).FillWidth().MaxWidth(studioMaxWidth).Margin(0, ui.Auto).Padding(12, 24, 24, 24).Gap(16).Children(func() {
@@ -43,9 +55,10 @@ func Page(c *ui.Context, state *State) {
 				renderGallery(c, state)
 			})
 		})
-		renderComposer(c, state)
+		renderComposer(c, state, dragOver)
 	})
 
+	maskDialog(c, state)
 	kit.ImageViewer(c, &state.Viewer, func(entry ViewerEntry) kit.ViewerItem {
 		src := resolveThumb(state, entry.Path)
 		return kit.ViewerItem{
@@ -175,15 +188,26 @@ func renderGallery(c *ui.Context, state *State) {
 		return
 	}
 
+	renderFilters(c, state)
+	visible := state.Visible()
+	if len(visible) == 0 {
+		kit.Result(c, kit.ResultProps{
+			Icon:     icons.Search,
+			Title:    t("image_studio_no_matches"),
+			SubTitle: t("image_studio_no_matches_body"),
+		}).Padding(32, 0)
+		return
+	}
+
 	nowUnix := c.Now().Unix()
-	allEntries := state.AllViewerEntries()
+	allEntries := state.ViewerEntries(visible)
 	entryIndex := make(map[string]int, len(allEntries))
 	for i, entry := range allEntries {
 		entryIndex[entry.JobID+"|"+entry.Path] = i
 	}
 
 	ui.Row(c.Key("cards")).FillWidth().Wrap().Gap(16).AlignItems(ui.Start).Children(func() {
-		for i := range state.Jobs {
+		for _, i := range visible {
 			job := &state.Jobs[i]
 			switch job.Status {
 			case core.JobDone:
@@ -196,6 +220,24 @@ func renderGallery(c *ui.Context, state *State) {
 			case core.JobFailed, core.JobCancelled:
 				renderFailedCard(c, state, job)
 			}
+		}
+	})
+}
+
+// renderFilters is the gallery's search over prompts and its outcome filter.
+func renderFilters(c *ui.Context, state *State) {
+	t := func(k string, args ...any) string { return i18n.T(c, k, args...) }
+	ui.Row(c.Key("filters")).FillWidth().Gap(12).AlignItems(ui.Center).Wrap().Children(func() {
+		ui.SearchField(c.Key("search"), &state.Query).
+			Placeholder(t("image_studio_search")).Label(t("image_studio_search")).Width(260)
+		selected := int(state.Filter)
+		if kit.Segmented(c, "status-filter", &selected, []string{
+			t("image_studio_filter_all"),
+			t("image_studio_filter_done"),
+			t("image_studio_filter_running"),
+			t("image_studio_filter_failed"),
+		}, kit.SegmentedProps{Size: kit.SizeSmall}).Changed() {
+			state.Filter = Filter(selected)
 		}
 	})
 }
@@ -238,12 +280,23 @@ func renderDoneCard(c *ui.Context, state *State, job *core.Job, outIdx int, path
 						state.RevealImage(path)
 					}
 				}
+				if !missing && state.UseAsReference != nil {
+					if m.Item(t("image_studio_use_reference")).Icon(icons.ImagePlus).Chosen() {
+						state.UseAsReference(path)
+					}
+				}
+				if !missing && state.Inpaint != nil {
+					if m.Item(t("image_studio_inpaint")).Icon(icons.Brush).Chosen() {
+						state.Inpaint(path)
+					}
+				}
+				m.Separator()
 				if m.Item(t("image_studio_copy_prompt")).Icon(icons.Copy).Chosen() {
 					c.WriteClipboard(job.Spec.Prompt)
 					kit.Copied(c)
 				}
-				if m.Item(t("image_studio_edit_prompt")).Icon(icons.Pencil).Chosen() {
-					state.Prompt = job.Spec.Prompt
+				if m.Item(t("image_studio_apply_params")).Icon(icons.Pencil).Chosen() {
+					state.ApplyJob(*job)
 				}
 				if state.RetryJob != nil {
 					if m.Item(t("image_studio_rerun")).Icon(icons.Reload).Chosen() {
@@ -345,6 +398,9 @@ func renderFailedCard(c *ui.Context, state *State, job *core.Job) {
 				if needsSettings && state.OpenSettings != nil {
 					kit.TextAction(c.Key("settings"), t("image_studio_open_settings"), false).OnClick(state.OpenSettings)
 				}
+				kit.IconButton(c.Key("apply"), icons.Pencil, t("image_studio_apply_params"), 28, false).OnClick(func() {
+					state.ApplyJob(*job)
+				})
 				if state.RemoveJob != nil {
 					kit.IconButton(c.Key("remove"), icons.Trash, t("image_studio_remove"), 28, false).OnClick(func() {
 						state.RemoveJob(job.ID)
@@ -361,6 +417,13 @@ func renderJobCaption(c *ui.Context, state *State, job *core.Job, trailing func(
 	t := func(k string, args ...any) string { return i18n.T(c, k, args...) }
 
 	var meta []string
+	if n := len(job.Spec.ReferencePaths); n > 0 {
+		if core.HasMask(job.Spec.MaskStrokes) {
+			meta = append(meta, t("image_studio_mode_inpaint"))
+		} else {
+			meta = append(meta, t("image_studio_mode_edit_n", "count", n))
+		}
+	}
 	if job.Spec.Model != "" {
 		meta = append(meta, job.Spec.Model)
 	}
@@ -387,23 +450,33 @@ func renderJobCaption(c *ui.Context, state *State, job *core.Job, trailing func(
 	})
 }
 
-func renderComposer(c *ui.Context, state *State) {
+func renderComposer(c *ui.Context, state *State, dragOver bool) {
 	p := theme.Of(c)
 	t := func(k string, args ...any) string { return i18n.T(c, k, args...) }
 
-	ui.Row(c.Key("composer-dock")).FillWidth().Shrink(0).BorderWidth(1, 0, 0, 0).BorderColor(p.Border).Background(p.Surface).Children(func() {
+	fill := p.Surface
+	if dragOver {
+		fill = fill.Mix(p.Primary, 0.12)
+	}
+	ui.Row(c.Key("composer-dock")).FillWidth().Shrink(0).BorderWidth(1, 0, 0, 0).BorderColor(p.Border).Background(fill).Children(func() {
 		ui.Column(c).FillWidth().MaxWidth(studioMaxWidth).Margin(0, ui.Auto).Padding(14, 24, 16, 24).Gap(10).Children(func() {
+			renderReferences(c, state)
 			area := ui.TextArea(c.Key("prompt"), &state.Prompt).
 				Label(t("image_studio")).
 				Placeholder(t("image_studio_prompt_placeholder")).
 				FillWidth().
 				MinHeight(64).
 				MaxHeight(140)
+			area.OnPaste(func(text string) bool { return pasteReference(c, state, text) })
 			if area.Shortcut(ui.Cmd, ui.KeyEnter) && !c.ShortcutRepeated() && state.CanSubmit() && state.Submit != nil {
 				state.Submit()
 			}
 
 			ui.Row(c.Key("controls")).FillWidth().Gap(8).AlignItems(ui.Center).Wrap().Children(func() {
+				if state.PickReferences != nil {
+					kit.IconButton(c.Key("add-reference"), icons.ImagePlus, t("image_studio_add_reference"), 32, false).
+						OnClick(state.PickReferences)
+				}
 				// Model control
 				if state.EffectiveChannel() == core.ChannelCustom {
 					modelLabel := t("settings_image_api_status_empty")
@@ -505,7 +578,14 @@ func renderComposer(c *ui.Context, state *State) {
 					kit.Tag(c, "~"+formatUSD(est))
 				}
 
-				kit.Primary(c.Key("generate"), t("image_studio_generate"), !state.CanSubmit()).OnClick(func() {
+				action := t("image_studio_generate")
+				switch {
+				case state.HasMask():
+					action = t("image_studio_inpaint")
+				case len(state.References) > 0:
+					action = t("image_studio_edit")
+				}
+				kit.Primary(c.Key("generate"), action, !state.CanSubmit()).OnClick(func() {
 					if state.Submit != nil {
 						state.Submit()
 					}
@@ -513,6 +593,95 @@ func renderComposer(c *ui.Context, state *State) {
 			})
 		})
 	})
+}
+
+// renderReferences is the draft's reference images over the prompt, each
+// removable, with the mask action for the first: the mask is drawn over it.
+func renderReferences(c *ui.Context, state *State) {
+	if len(state.References) == 0 {
+		return
+	}
+	p := theme.Of(c)
+	t := func(k string, args ...any) string { return i18n.T(c, k, args...) }
+	limit := state.ReferenceLimit()
+	ui.Row(c.Key("references")).FillWidth().Gap(8).AlignItems(ui.Center).Wrap().Children(func() {
+		for i, path := range slices.Clone(state.References) {
+			src := resolveThumb(state, path)
+			missing := state.Thumbs[path].Status == ThumbMissing
+			ui.Column(c.Key("reference-"+path)).Gap(4).AlignItems(ui.Center).Children(func() {
+				kit.Image(c.Key("img"), src, kit.ImageProps{
+					Size:    referenceThumb,
+					Loading: src == nil && !missing,
+					Failed:  missing,
+					Alt:     t("image_studio_reference_n", "count", i+1),
+					Actions: func() {
+						kit.IconButton(c.Key("remove"), icons.Close, t("image_studio_remove_reference"), 20, false).
+							OnClick(func() { state.RemoveReference(i) })
+					},
+				})
+				if i == 0 && state.HasMask() {
+					kit.Badge(c, t("image_studio_mask_badge"), kit.Negative)
+				}
+			})
+		}
+		if state.OpenMask != nil {
+			label := t("image_studio_mask_add")
+			if state.HasMask() {
+				label = t("image_studio_mask_edit")
+			}
+			kit.Secondary(c.Key("mask"), label).OnClick(state.OpenMask)
+		}
+		ui.Spacer(c)
+		count := t("image_studio_reference_count", "count", len(state.References), "limit", limit)
+		color := p.MutedForeground
+		if len(state.References) > limit {
+			count = t("image_studio_reference_over_limit", "limit", limit)
+			color = p.Danger
+		}
+		ui.Text(c, count).FontSize(12).TextColor(color)
+	})
+}
+
+// pastedReferenceFormats are the picture formats a paste into the prompt
+// takes as a reference image: the edits endpoint's.
+var pastedReferenceFormats = []transfer.Format{transfer.PNG, "image/jpeg", "image/webp"}
+
+// pasteReference takes a paste into the prompt as reference images: copied
+// image files by their paths, or a copied picture when the clipboard has no
+// text. It reports whether it took the paste.
+func pasteReference(c *ui.Context, state *State, text string) bool {
+	sv := c.Services()
+	offered := sv.ClipboardFormats()
+	if state.AddReferences != nil && slices.Contains(offered, transfer.FileList) {
+		if paths, err := sv.ReadClipboardData(transfer.FileList).Files(); err == nil {
+			images := slices.DeleteFunc(paths, func(path string) bool { return !referenceExtension(path) })
+			if len(images) > 0 {
+				state.AddReferences(images)
+				return true
+			}
+		}
+	}
+	if text != "" || state.AddReferenceData == nil {
+		return false
+	}
+	for _, format := range pastedReferenceFormats {
+		if !slices.Contains(offered, format) {
+			continue
+		}
+		if data, err := sv.ReadClipboardData(format).Read(format); err == nil && len(data) > 0 {
+			state.AddReferenceData(data)
+			return true
+		}
+	}
+	return false
+}
+
+func referenceExtension(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".png", ".jpg", ".jpeg", ".webp":
+		return true
+	}
+	return false
 }
 
 func resolveThumb(state *State, path string) ui.ImageSource {

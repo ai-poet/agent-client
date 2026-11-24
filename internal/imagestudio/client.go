@@ -88,7 +88,7 @@ func (c *Client) GenerateCheapRouter(
 	onTaskID func(string),
 ) ([]ImageOutput, bool, *ImageError) {
 	if spec.IsEdit() {
-		if err := validateReferences(spec.References); err != nil {
+		if err := validateEdit(spec); err != nil {
 			return nil, !tryAsync, err
 		}
 	}
@@ -183,7 +183,7 @@ func (c *Client) GenerateEdits(
 	spec GenerateSpec,
 	extra map[string]any,
 ) ([]ImageOutput, *ImageError) {
-	if err := validateReferences(spec.References); err != nil {
+	if err := validateEdit(spec); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(spec.Model) == "" {
@@ -215,6 +215,16 @@ func validateReferences(refs []ReferenceImage) *ImageError {
 		if len(ref.Data) > MaxReferenceBytes {
 			return &ImageError{Kind: ErrBadRequest, Message: fmt.Sprintf("reference image %d exceeds the 20 MiB upload limit", i+1)}
 		}
+	}
+	return nil
+}
+
+func validateEdit(spec GenerateSpec) *ImageError {
+	if err := validateReferences(spec.References); err != nil {
+		return err
+	}
+	if spec.Mask != nil && len(spec.Mask.Data) == 0 {
+		return &ImageError{Kind: ErrBadRequest, Message: "mask image is empty"}
 	}
 	return nil
 }
@@ -527,6 +537,18 @@ func buildMultipartPayload(
 		}
 		if _, err := part.Write(ref.Data); err != nil {
 			return nil, "", &ImageError{Kind: ErrBadRequest, Message: "failed to write multipart image data"}
+		}
+	}
+	if spec.Mask != nil {
+		header := make(textproto.MIMEHeader)
+		header.Set("Content-Disposition", `form-data; name="mask"; filename="mask.png"`)
+		header.Set("Content-Type", "image/png")
+		part, err := writer.CreatePart(header)
+		if err != nil {
+			return nil, "", &ImageError{Kind: ErrBadRequest, Message: "failed to create multipart mask part"}
+		}
+		if _, err := part.Write(spec.Mask.Data); err != nil {
+			return nil, "", &ImageError{Kind: ErrBadRequest, Message: "failed to write multipart mask data"}
 		}
 	}
 	if err := writer.Close(); err != nil {

@@ -599,7 +599,7 @@ func (node *Node) loadReferenceImages(ctx context.Context, inv *store.AgentInvoc
 			if err != nil {
 				return nil, err
 			}
-			mime, ok := detectSupportedReferenceImage(data)
+			mime, ok := imagestudio.ReferenceMimeType(data)
 			if !ok {
 				return nil, mediaFault(protocol.ErrorCodeInvalidRequest, fmt.Sprintf("reference attachment %s is not a supported PNG, JPEG, or WebP image", ref))
 			}
@@ -639,7 +639,7 @@ func (node *Node) loadReferenceImages(ctx context.Context, inv *store.AgentInvoc
 		if len(data) > imagestudio.MaxReferenceBytes {
 			return nil, mediaFault(protocol.ErrorCodeInvalidRequest, fmt.Sprintf("reference image %q exceeds the 20 MiB edit limit", ref))
 		}
-		mime, ok := detectSupportedReferenceImage(data)
+		mime, ok := imagestudio.ReferenceMimeType(data)
 		if !ok {
 			return nil, mediaFault(protocol.ErrorCodeInvalidRequest, fmt.Sprintf("reference image %q is not a supported PNG, JPEG, or WebP image", ref))
 		}
@@ -650,19 +650,6 @@ func (node *Node) loadReferenceImages(ctx context.Context, inv *store.AgentInvoc
 		})
 	}
 	return out, nil
-}
-
-func detectSupportedReferenceImage(data []byte) (string, bool) {
-	switch {
-	case len(data) >= 4 && bytes.Equal(data[:4], []byte{0x89, 'P', 'N', 'G'}):
-		return "image/png", true
-	case len(data) >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF:
-		return "image/jpeg", true
-	case len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP":
-		return "image/webp", true
-	default:
-		return "", false
-	}
 }
 
 func (node *Node) generateImageViaStudio(

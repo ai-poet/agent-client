@@ -66,19 +66,34 @@ type ReferenceImage struct {
 
 // GenerateSpec describes one image generation or editing request.
 type GenerateSpec struct {
-	Channel        Channel          `json:"channel"`
-	Model          string           `json:"model"`
-	Prompt         string           `json:"prompt"`
-	Size           string           `json:"size,omitempty"`
-	Quality        string           `json:"quality,omitempty"`
-	ResponseFormat string           `json:"response_format,omitempty"`
-	Count          int              `json:"count"`
-	References     []ReferenceImage `json:"-"`
+	Channel        Channel `json:"channel"`
+	Model          string  `json:"model"`
+	Prompt         string  `json:"prompt"`
+	Size           string  `json:"size,omitempty"`
+	Quality        string  `json:"quality,omitempty"`
+	ResponseFormat string  `json:"response_format,omitempty"`
+	Count          int     `json:"count"`
+	// ReferencePaths name a studio job's stored reference images
+	// (ReferenceStore) and MaskStrokes its inpainting mask over the first,
+	// so the job can be retried or its parameters applied after a restart.
+	// LoadInputs reads them into References and Mask for the request.
+	ReferencePaths []string     `json:"reference_paths,omitempty"`
+	MaskStrokes    []MaskStroke `json:"mask_strokes,omitempty"`
+	// References are the edit request's input images; Mask, when set, is
+	// the PNG mask over the first, transparent where it is redrawn.
+	References []ReferenceImage `json:"-"`
+	Mask       *ReferenceImage  `json:"-"`
 }
 
 // IsEdit reports whether this request edits one or more reference images.
 func (s GenerateSpec) IsEdit() bool {
 	return len(s.References) > 0
+}
+
+// IsInpaint reports whether this request redraws a masked area of its first
+// reference image.
+func (s GenerateSpec) IsInpaint() bool {
+	return s.IsEdit() && s.Mask != nil
 }
 
 // DecodedImage holds raw image bytes decoded from base64 or downloaded from URL.

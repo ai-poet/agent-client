@@ -4,6 +4,8 @@
 package imagestudio
 
 import (
+	"image"
+	"slices"
 	"strings"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/cheapauth"
@@ -76,6 +78,45 @@ type ViewerEntry struct {
 	Prompt string
 }
 
+// Filter narrows the gallery to jobs of one outcome.
+type Filter int
+
+const (
+	FilterAll Filter = iota
+	FilterDone
+	FilterRunning
+	FilterFailed
+)
+
+// MaskEditor is the inpainting dialog's state: the first reference image
+// decoded as the endpoint receives it, the strokes painted over it in its
+// own pixels, and a preview of their coverage at display resolution.
+type MaskEditor struct {
+	Open    bool
+	Path    string
+	Loading bool
+	Failed  bool
+	// Image is the reference decoded without EXIF orientation, W×H its
+	// stored pixels, which the mask must match.
+	Image ui.ImageSource
+	W, H  int
+
+	Strokes []core.MaskStroke
+	Erase   bool
+	Width   float32
+
+	// drawing is the stroke being dragged; cov and overlay the preview
+	// (cov's pixels are scale times the image's), shown through bitmap.
+	drawing bool
+	scale   float32
+	cov     *image.Alpha
+	overlay [2]*image.RGBA
+	front   int
+	bitmap  *ui.Bitmap
+	tint    ui.Color
+	dirty   bool
+}
+
 // State is UI-thread presentation state for the Creative Studio page.
 // It never stores API keys or OAuth tokens.
 type State struct {
@@ -97,14 +138,33 @@ type State struct {
 	Quality string
 	Count   int
 	Prompt  string
+	// References are the draft's stored reference images (ReferenceStore
+	// paths) and MaskStrokes its inpainting mask over the first.
+	References  []string
+	MaskStrokes []core.MaskStroke
+	Mask        MaskEditor
 
 	// Persisted job history (newest first) and cached thumbnails.
-	Jobs    []core.Job
-	Thumbs  map[string]Thumb
-	Viewer  kit.Viewer[ViewerEntry]
-	Scroll  ui.ScrollState
+	Jobs   []core.Job
+	Thumbs map[string]Thumb
+	Viewer kit.Viewer[ViewerEntry]
+	Scroll ui.ScrollState
+	Query  string
+	Filter Filter
 
 	// Callbacks wired by internal/desktop/live.
+	// PickReferences opens the file picker; AddReferences imports dropped
+	// or pasted files and AddReferenceData a pasted picture, each adding
+	// the stored copies to the draft. OpenMask decodes the first reference
+	// for the mask editor.
+	PickReferences   func()
+	AddReferences    func(paths []string)
+	AddReferenceData func(data []byte)
+	OpenMask         func()
+	// UseAsReference adds a generated picture to the draft's references;
+	// Inpaint makes it the only reference and opens the mask editor on it.
+	UseAsReference func(path string)
+	Inpaint        func(path string)
 	Submit           func()
 	CancelJob        func(jobID string)
 	RetryJob         func(jobID string)
@@ -216,7 +276,127 @@ func (s *State) ChannelReady() bool {
 
 // CanSubmit reports whether Generate is enabled.
 func (s *State) CanSubmit() bool {
-	return s != nil && s.ChannelReady() && strings.TrimSpace(s.Prompt) != ""
+	return s != nil && s.ChannelReady() && strings.TrimSpace(s.Prompt) != "" &&
+		len(s.References) <= s.ReferenceLimit()
+}
+
+// ReferenceLimit is how many reference images the active model accepts.
+func (s *State) ReferenceLimit() int {
+	return core.ReferenceLimit(s.EffectiveModel())
+}
+
+// AddReferencePaths adds stored reference images to the draft, skipping
+// ones it has, up to ReferenceLimit. It reports whether some were left out
+// for the limit.
+func (s *State) AddReferencePaths(paths []string) bool {
+	if s == nil {
+		return false
+	}
+	limit := s.ReferenceLimit()
+	for _, path := range paths {
+		if path == "" || slices.Contains(s.References, path) {
+			continue
+		}
+		if len(s.References) >= limit {
+			return true
+		}
+		s.References = append(s.References, path)
+	}
+	return false
+}
+
+// RemoveReference drops the draft's i-th reference image. The mask belongs
+// to the first, so removing it drops the mask too.
+func (s *State) RemoveReference(i int) {
+	if s == nil || i < 0 || i >= len(s.References) {
+		return
+	}
+	s.References = slices.Delete(s.References, i, i+1)
+	if i == 0 {
+		s.MaskStrokes = nil
+	}
+}
+
+// HasMask reports whether the draft redraws a masked area of its first
+// reference image.
+func (s *State) HasMask() bool {
+	return s != nil && len(s.References) > 0 && core.HasMask(s.MaskStrokes)
+}
+
+// ApplyJob restores a job's prompt, parameters, reference images and mask
+// into the composer. A model the channel no longer offers falls back as
+// EffectiveModel does; sizes and qualities are re-validated the same way.
+func (s *State) ApplyJob(job core.Job) {
+	if s == nil {
+		return
+	}
+	spec := job.Spec
+	s.Prompt = spec.Prompt
+	if spec.Channel == core.ChannelCustom || spec.Channel == core.ChannelCheapRouter {
+		s.Channel = spec.Channel
+	}
+	if spec.Channel != core.ChannelCustom && spec.Model != "" {
+		s.Model = spec.Model
+	}
+	if spec.Size != "" {
+		s.Size = spec.Size
+	}
+	if spec.Quality != "" {
+		s.Quality = spec.Quality
+	}
+	if spec.Count > 0 {
+		s.Count = spec.Count
+	}
+	s.References = slices.Clone(spec.ReferencePaths)
+	s.MaskStrokes = nil
+	if len(s.References) > 0 {
+		s.MaskStrokes = slices.Clone(spec.MaskStrokes)
+	}
+}
+
+// ClearInputs empties the draft's reference images and mask.
+func (s *State) ClearInputs() {
+	if s == nil {
+		return
+	}
+	s.References, s.MaskStrokes = nil, nil
+}
+
+// Visible returns the indices of the jobs the gallery shows: those of the
+// selected outcome whose prompt contains the query, case-insensitively.
+func (s *State) Visible() []int {
+	if s == nil {
+		return nil
+	}
+	query := strings.ToLower(strings.TrimSpace(s.Query))
+	out := make([]int, 0, len(s.Jobs))
+	for i := range s.Jobs {
+		job := &s.Jobs[i]
+		switch s.Filter {
+		case FilterDone:
+			if job.Status != core.JobDone {
+				continue
+			}
+		case FilterRunning:
+			if job.Status != core.JobRunning {
+				continue
+			}
+		case FilterFailed:
+			if job.Status != core.JobFailed && job.Status != core.JobCancelled {
+				continue
+			}
+		}
+		if query != "" && !strings.Contains(strings.ToLower(job.Spec.Prompt), query) {
+			continue
+		}
+		out = append(out, i)
+	}
+	return out
+}
+
+// Filtered reports whether the query or outcome filter hides any jobs.
+func (s *State) Filtered() bool {
+	return s != nil && (s.Filter != FilterAll || strings.TrimSpace(s.Query) != "")
 }
 
 // EstimateUSD computes an estimated cost for CheapRouter when pricing metadata exists.
@@ -263,13 +443,14 @@ func (s *State) PictureCount() int {
 	return total
 }
 
-// AllViewerEntries collects all completed output images in gallery order.
-func (s *State) AllViewerEntries() []ViewerEntry {
+// ViewerEntries collects the completed output images of the visible jobs
+// (Visible), in gallery order.
+func (s *State) ViewerEntries(visible []int) []ViewerEntry {
 	if s == nil {
 		return nil
 	}
 	var out []ViewerEntry
-	for i := range s.Jobs {
+	for _, i := range visible {
 		job := &s.Jobs[i]
 		if job.Status != core.JobDone {
 			continue

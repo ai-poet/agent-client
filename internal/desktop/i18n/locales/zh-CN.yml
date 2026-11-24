@@ -2374,7 +2374,6 @@ image_studio_generating: 生成中…
 image_studio_cancel: 取消
 image_studio_retry: 重试
 image_studio_rerun: 再次生成
-image_studio_edit_prompt: 复用提示词
 image_studio_copy_prompt: 复制提示词
 image_studio_save_as: 另存为…
 image_studio_reveal: 在文件夹中显示
@@ -2410,6 +2409,36 @@ image_studio_error_bad_request: 不支持的参数或请求无效
 image_studio_error_network: 网络请求失败，请检查网络或接口地址
 image_studio_error_cancelled: 已取消生成
 image_studio_error_other: 图片生成失败
+image_studio_edit: 编辑图片
+image_studio_inpaint: 局部重绘
+image_studio_add_reference: 添加参考图
+image_studio_remove_reference: 移除参考图
+image_studio_reference_n: 参考图 %{count}
+image_studio_reference_count: '%{count}/%{limit} 张参考图'
+image_studio_reference_over_limit: 当前模型最多支持 %{limit} 张参考图
+image_studio_reference_limit: 参考图已达上限（%{limit} 张）
+image_studio_reference_invalid: 参考图仅支持 20 MB 以内的 PNG、JPEG 或 WebP 图片
+image_studio_use_reference: 用作参考图
+image_studio_apply_params: 应用参数
+image_studio_mode_edit_n: 编辑 %{count} 张参考图
+image_studio_mask_title: 涂抹需要重绘的区域
+image_studio_mask_hint: 涂抹的区域会按提示词重绘，第一张参考图的其余部分保持不变
+image_studio_mask_brush: 画笔
+image_studio_mask_eraser: 橡皮
+image_studio_mask_width: 笔刷大小
+image_studio_mask_undo: 撤销
+image_studio_mask_clear: 清除
+image_studio_mask_apply: 应用蒙版
+image_studio_mask_add: 绘制蒙版
+image_studio_mask_edit: 编辑蒙版
+image_studio_mask_badge: 蒙版
+image_studio_search: 搜索提示词
+image_studio_filter_all: 全部
+image_studio_filter_done: 已完成
+image_studio_filter_running: 进行中
+image_studio_filter_failed: 失败
+image_studio_no_matches: 没有匹配的记录
+image_studio_no_matches_body: 换个关键词或筛选条件试试
 settings_image_api: 画图接口
 settings_image_api_description: 配置自定义 OpenAI 兼容画图接口（POST /v1/images/generations），与 CheapRouter 通道并存
 settings_image_api_base_url: Base URL

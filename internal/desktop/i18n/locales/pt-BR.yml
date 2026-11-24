@@ -2374,7 +2374,6 @@ image_studio_generating: Gerando…
 image_studio_cancel: Cancelar
 image_studio_retry: Tentar novamente
 image_studio_rerun: Gerar novamente
-image_studio_edit_prompt: Reutilizar prompt
 image_studio_copy_prompt: Copiar prompt
 image_studio_save_as: Salvar como…
 image_studio_reveal: Mostrar na pasta
@@ -2410,6 +2409,36 @@ image_studio_error_bad_request: Parâmetro não suportado ou solicitação invá
 image_studio_error_network: Erro de rede — verifique a conexão e o endereço
 image_studio_error_cancelled: Geração cancelada
 image_studio_error_other: Falha ao gerar imagem
+image_studio_edit: Edit image
+image_studio_inpaint: Inpaint
+image_studio_add_reference: Add reference images
+image_studio_remove_reference: Remove reference image
+image_studio_reference_n: Reference image %{count}
+image_studio_reference_count: '%{count}/%{limit} reference images'
+image_studio_reference_over_limit: This model accepts up to %{limit} reference images
+image_studio_reference_limit: Reference image limit reached (%{limit})
+image_studio_reference_invalid: Only PNG, JPEG or WebP images up to 20 MB can be references
+image_studio_use_reference: Use as reference
+image_studio_apply_params: Apply parameters
+image_studio_mode_edit_n: Edit with %{count} reference(s)
+image_studio_mask_title: Paint the area to redraw
+image_studio_mask_hint: Painted areas are redrawn from the prompt; the rest of the first reference image stays unchanged
+image_studio_mask_brush: Brush
+image_studio_mask_eraser: Eraser
+image_studio_mask_width: Brush size
+image_studio_mask_undo: Undo
+image_studio_mask_clear: Clear
+image_studio_mask_apply: Apply mask
+image_studio_mask_add: Draw mask
+image_studio_mask_edit: Edit mask
+image_studio_mask_badge: Mask
+image_studio_search: Search prompts
+image_studio_filter_all: All
+image_studio_filter_done: Done
+image_studio_filter_running: In progress
+image_studio_filter_failed: Failed
+image_studio_no_matches: No matching records
+image_studio_no_matches_body: Try another search or filter
 settings_image_api: API de imagens
 settings_image_api_description: Configure um endpoint compatível com OpenAI Images (POST /v1/images/generations) em paralelo ao CheapRouter
 settings_image_api_base_url: Base URL
