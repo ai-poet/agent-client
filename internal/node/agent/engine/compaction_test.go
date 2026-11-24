@@ -734,6 +734,22 @@ func TestCompactionRetriesContextOverflowWithSmallerTranscript(t *testing.T) {
 	}
 }
 
+func TestContextTokensExcludesUnreplayedReasoning(t *testing.T) {
+	turn := protocol.NewTurnID()
+	input, output, reasoning, total := uint64(10_000), uint64(8_000), uint64(6_000), uint64(18_000)
+	unsigned := canonical.NewMessage(canonical.Assistant, canonical.Block{Index: 0, Kind: "thinking", Data: &canonical.Thinking{Text: "Scratchpad"}}, canonical.Text(1, "Answer"))
+	unsigned.Usage = &canonical.Usage{Input: &input, Output: &output, Reasoning: &reasoning, Total: &total}
+	if got := contextTokens([]canonical.Record{{ID: "a", Turn: turn, Kind: "message", Data: &unsigned}}); got != 12_000 {
+		t.Fatalf("unsigned reasoning contextTokens = %d, want 12000", got)
+	}
+	sig := "signed-thinking-blob"
+	signed := canonical.NewMessage(canonical.Assistant, canonical.Block{Index: 0, Kind: "thinking", Data: &canonical.Thinking{Text: "Plan", Signature: &sig}}, canonical.Text(1, "Answer"))
+	signed.Usage = &canonical.Usage{Input: &input, Output: &output, Reasoning: &reasoning, Total: &total}
+	if got := contextTokens([]canonical.Record{{ID: "b", Turn: turn, Kind: "message", Data: &signed}}); got != 18_000 {
+		t.Fatalf("signed reasoning contextTokens = %d, want 18000", got)
+	}
+}
+
 // compactionFailed checks the stored failure record and returns the failure the
 // conversation page and the statistics report for it.
 func compactionFailed(t *testing.T, f *engineFixture, record canonical.Record) protocol.ConversationCompactionFailure {
