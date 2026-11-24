@@ -50,15 +50,62 @@
   {
     "name": "generate_image",
     "operation": "media.image",
-    "description": "Generate a real PNG with the model assigned to Image in Media models; without an assignment the conversation model generates it. Describe the subject, purpose, style, composition and constraints in prompt. Save under assets/generated without replacing existing files. file_name is an optional plain .png name. Do not substitute SVG or replay an uncertain generation.",
+    "description": "Generate or edit real images under assets/generated without replacing existing files. Describe the subject, purpose, style, composition and constraints in prompt; pass references (worktree-relative image paths or conversation attachment IDs) to edit existing images. Omit channel and model to use the active default backend, or specify channel, model, size, quality, count, or file_name when requested. Do not substitute SVG or replay an uncertain generation.",
     "parameters": {
       "type": "object",
       "properties": {
         "prompt": {
-          "type": "string"
+          "type": "string",
+          "description": "Visual description for generation or editing instructions."
         },
         "file_name": {
-          "type": "string"
+          "type": "string",
+          "description": "Optional plain output file name without path separators (for example sunset.png). When count > 1, -1/-2 suffixes are appended."
+        },
+        "channel": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "cheaprouter",
+            "custom",
+            "media"
+          ],
+          "description": "Optional image backend override. Defaults to auto."
+        },
+        "model": {
+          "type": "string",
+          "description": "Optional image model ID override for the selected channel."
+        },
+        "size": {
+          "type": "string",
+          "description": "Optional output dimensions such as 1024x1024, 1536x1024, 1024x1536, 2048x2048, or auto."
+        },
+        "quality": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "low",
+            "medium",
+            "high",
+            "standard",
+            "hd"
+          ],
+          "description": "Optional quality level. Automatically ignored by models that do not support quality."
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4,
+          "description": "Number of images to generate (1-4, default 1)."
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 8,
+          "description": "Optional worktree-relative image paths or conversation attachment IDs to edit via /v1/images/edits."
         }
       },
       "required": [

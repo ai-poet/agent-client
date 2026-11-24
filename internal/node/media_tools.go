@@ -88,6 +88,22 @@ func (node *Node) mediaTools(inv *store.AgentInvocation) ([]engine.Tool, error) 
 	var tools []engine.Tool
 	for _, spec := range specs {
 		kind, _ := mediaOperationKind(spec.Operation)
+		if kind == protocol.MediaKindImage {
+			state := node.captureImageBackend(inv)
+			if !state.offered() {
+				continue
+			}
+			route := state.convRoute
+			if state.mediaAssignedValid {
+				route = state.mediaAssignedRoute
+			}
+			tool, err := node.buildMediaTool(inv, spec, kind, route, state)
+			if err != nil {
+				return nil, err
+			}
+			tools = append(tools, tool)
+			continue
+		}
 		route, offered := routeMedia(inv, kind)
 		if !offered {
 			continue
@@ -106,21 +122,30 @@ func mediaFault(code protocol.ErrorCode, message string) error {
 }
 
 // mediaArguments are what the model may send. Inspection names one image
-// source; generation names at most a plain output file name, and a video may
-// name the job an earlier call left unsaved.
+// source; generation names at most a plain output file name (plus optional
+// image routing/edit parameters for generate_image), and a video may name the
+// job an earlier call left unsaved.
 type mediaArguments struct {
-	Prompt     string  `json:"prompt"`
-	Path       *string `json:"path"`
-	Attachment *string `json:"attachment"`
-	FileName   *string `json:"file_name"`
-	Job        *string `json:"job"`
+	Prompt     string   `json:"prompt"`
+	Path       *string  `json:"path"`
+	Attachment *string  `json:"attachment"`
+	FileName   *string  `json:"file_name"`
+	Job        *string  `json:"job"`
+	Channel    *string  `json:"channel"`
+	Model      *string  `json:"model"`
+	Size       *string  `json:"size"`
+	Quality    *string  `json:"quality"`
+	Count      *int     `json:"count"`
+	References []string `json:"references"`
 }
 
-// mediaCall is one prepared call: the request its approval names and, for a
-// video, the provider job it fetches instead of submitting the prompt.
+// mediaCall is one prepared call: the request its approval names, image
+// options for generate_image, and for a video, the provider job it fetches
+// instead of submitting the prompt.
 type mediaCall struct {
 	request protocol.Request
 	job     string
+	image   imageCallOptions
 }
 
 // mediaAction checks the arguments and returns the action the approval
@@ -130,6 +155,9 @@ func mediaAction(kind protocol.MediaKind, arguments json.RawMessage) (protocol.M
 	decoder := json.NewDecoder(bytes.NewReader(arguments))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&input) != nil {
+		return protocol.MediaAction{}, mediaFault(protocol.ErrorCodeInvalidRequest, "invalid media arguments")
+	}
+	if kind != protocol.MediaKindImage && (input.Channel != nil || input.Model != nil || input.Size != nil || input.Quality != nil || input.Count != nil || input.References != nil) {
 		return protocol.MediaAction{}, mediaFault(protocol.ErrorCodeInvalidRequest, "invalid media arguments")
 	}
 	// A job is a plain identifier: it becomes one segment of the provider URL.
@@ -160,6 +188,11 @@ func mediaAction(kind protocol.MediaKind, arguments json.RawMessage) (protocol.M
 	if input.Path != nil || input.Attachment != nil {
 		return protocol.MediaAction{}, mediaFault(protocol.ErrorCodeInvalidRequest, "generation does not accept input files")
 	}
+	if kind == protocol.MediaKindImage {
+		if _, err := validateImageOptions(input); err != nil {
+			return protocol.MediaAction{}, err
+		}
+	}
 	extension := ".png"
 	if kind == protocol.MediaKindVideo {
 		extension = ".mp4"
@@ -168,7 +201,11 @@ func mediaAction(kind protocol.MediaKind, arguments json.RawMessage) (protocol.M
 	if input.FileName != nil {
 		name = *input.FileName
 	}
-	if !strings.HasSuffix(name, extension) {
+	if kind == protocol.MediaKindImage {
+		if !supportedImageOutputExtension(name) {
+			return protocol.MediaAction{}, mediaFault(protocol.ErrorCodeInvalidRequest, "media output has an unsupported extension")
+		}
+	} else if !strings.HasSuffix(name, extension) {
 		return protocol.MediaAction{}, mediaFault(protocol.ErrorCodeInvalidRequest, "media output has an unsupported extension")
 	}
 	if strings.ContainsFunc(name, func(r rune) bool { return r == '/' || r == '\\' || r == ':' || r < 0x20 || r >= 0x7f && r <= 0x9f }) {
@@ -187,16 +224,30 @@ func mediaAction(kind protocol.MediaKind, arguments json.RawMessage) (protocol.M
 }
 
 func (node *Node) mediaTool(inv *store.AgentInvocation, spec operations.MediaSpec, kind protocol.MediaKind, route mediaRoute) (engine.Tool, error) {
+	var state imageBackendState
+	if kind == protocol.MediaKindImage {
+		state = mergeImageBackendFallback(node.captureImageBackend(inv), route)
+	}
+	return node.buildMediaTool(inv, spec, kind, route, state)
+}
+
+func (node *Node) buildMediaTool(inv *store.AgentInvocation, spec operations.MediaSpec, kind protocol.MediaKind, route mediaRoute, imageState imageBackendState) (engine.Tool, error) {
 	var schema map[string]any
 	if err := json.Unmarshal(spec.Parameters, &schema); err != nil {
 		return engine.Tool{}, err
+	}
+	description := spec.Description
+	if kind == protocol.MediaKindImage {
+		if suffix := imageState.descriptionSuffix(); suffix != "" {
+			description += suffix
+		}
 	}
 	operation := spec.Operation
 	var mu sync.Mutex
 	calls := map[string]*mediaCall{}
 	// The binding has no owning package: the tool is the Node's own, and a
 	// session rule remembers it by name and operation.
-	tool := engine.Tool{Definition: fantasy.FunctionTool{Name: spec.Name, Description: spec.Description, InputSchema: schema}, SchemaJSON: spec.Parameters,
+	tool := engine.Tool{Definition: fantasy.FunctionTool{Name: spec.Name, Description: description, InputSchema: schema}, SchemaJSON: spec.Parameters,
 		ReadOnly: spec.ReadOnly, Concurrent: spec.Concurrent, Deferred: true, Approval: !spec.ReadOnly,
 		Binding: &store.ApprovalBinding{Tool: spec.Name, Operation: &operation}}
 	tool.Prepare = func(_ context.Context, call canonical.ToolRequest) error {
@@ -204,29 +255,40 @@ func (node *Node) mediaTool(inv *store.AgentInvocation, spec operations.MediaSpe
 		if err != nil {
 			return err
 		}
-		target := ""
-		switch input := action.Data.(type) {
-		case *protocol.MediaActionImagePayload:
-			target = input.Path
-		case *protocol.MediaActionVideoPayload:
-			target = input.Path
+		var input mediaArguments
+		_ = json.Unmarshal(call.Arguments, &input)
+		var imageOpts imageCallOptions
+		if kind == protocol.MediaKindImage {
+			imageOpts, err = validateImageOptions(input)
+			if err != nil {
+				return err
+			}
 		}
-		if target != "" {
+		var targets []string
+		switch payload := action.Data.(type) {
+		case *protocol.MediaActionImagePayload:
+			targets = generatedImagePaths(payload.Path, imageOpts.count)
+		case *protocol.MediaActionVideoPayload:
+			targets = []string{payload.Path}
+		}
+		if len(targets) > 0 {
 			confined, err := core.OpenFiles(inv.Worktree.Path, core.RestrictedFiles)
 			if err != nil {
 				return err
 			}
 			defer confined.Close()
 			// An existing file is refused before the provider is called.
-			if existing, err := confined.Open(target); err == nil {
-				existing.Close()
-				return mediaFault(protocol.ErrorCodeConflict, "a file already exists at the media output path")
+			for _, target := range targets {
+				if existing, err := confined.Open(target); err == nil {
+					existing.Close()
+					return mediaFault(protocol.ErrorCodeConflict, "a file already exists at the media output path")
+				}
 			}
 		}
-		prepared := &mediaCall{request: protocol.NewRequest(node.ID(), protocol.Command{Kind: "use_media", Data: &protocol.CommandUseMediaPayload{Turn: inv.Run.Turn, Session: inv.Session.ID, Worktree: inv.Run.Worktree, Action: action}})}
-		// The action was decoded from the same arguments.
-		var input mediaArguments
-		_ = json.Unmarshal(call.Arguments, &input)
+		prepared := &mediaCall{
+			request: protocol.NewRequest(node.ID(), protocol.Command{Kind: "use_media", Data: &protocol.CommandUseMediaPayload{Turn: inv.Run.Turn, Session: inv.Session.ID, Worktree: inv.Run.Worktree, Action: action}}),
+			image:   imageOpts,
+		}
 		if input.Job != nil {
 			prepared.job = *input.Job
 		}
@@ -262,17 +324,42 @@ func (node *Node) mediaTool(inv *store.AgentInvocation, spec operations.MediaSpe
 			return workspaceToolFault(errors.New("native tool was not prepared"))
 		}
 		action := current.request.Command.Data.(*protocol.CommandUseMediaPayload).Action
-		binding, err := node.mediaBinding(ctx, inv, route)
-		if err != nil {
-			return workspaceToolFault(mediaModelFault(err))
-		}
-		var result engine.ToolResult
+		var (
+			result engine.ToolResult
+			err    error
+		)
 		switch input := action.Data.(type) {
 		case *protocol.MediaActionInspectPayload:
+			binding, bindErr := node.mediaBinding(ctx, inv, route)
+			if bindErr != nil {
+				return workspaceToolFault(mediaModelFault(bindErr))
+			}
 			result, err = node.inspectMedia(ctx, inv, binding, *input)
 		case *protocol.MediaActionImagePayload:
-			result, err = node.generateMedia(ctx, inv, binding, route, kind, input.Prompt, input.Path, "")
+			selectedChannel, selectedModel, mediaImgRoute, routeErr := imageState.resolveImageRoute(current.image.channel, current.image.model)
+			if routeErr != nil {
+				return workspaceToolFault(routeErr)
+			}
+			if selectedChannel == imageChannelMedia {
+				if len(current.image.references) > 0 {
+					return workspaceToolFault(mediaFault(protocol.ErrorCodeInvalidRequest, "the selected Media image model does not support reference-image editing; specify channel cheaprouter or custom if configured"))
+				}
+				if current.image.count > 1 {
+					return workspaceToolFault(mediaFault(protocol.ErrorCodeInvalidRequest, "the selected Media image model generates one image per call; set count to 1 or use channel cheaprouter or custom"))
+				}
+				binding, bindErr := node.mediaBinding(ctx, inv, mediaImgRoute)
+				if bindErr != nil {
+					return workspaceToolFault(mediaModelFault(bindErr))
+				}
+				result, err = node.generateMedia(ctx, inv, binding, mediaImgRoute, kind, input.Prompt, input.Path, "")
+			} else {
+				result, err = node.generateImageViaStudio(ctx, inv, selectedChannel, selectedModel, input.Prompt, input.Path, current.image)
+			}
 		case *protocol.MediaActionVideoPayload:
+			binding, bindErr := node.mediaBinding(ctx, inv, route)
+			if bindErr != nil {
+				return workspaceToolFault(mediaModelFault(bindErr))
+			}
 			result, err = node.generateMedia(ctx, inv, binding, route, kind, input.Prompt, input.Path, current.job)
 		}
 		if err != nil {
@@ -572,6 +659,10 @@ func (node *Node) generateMedia(ctx context.Context, inv *store.AgentInvocation,
 		return engine.ToolResult{}, mediaFault(protocol.ErrorCodeOutcomeUnknown, "media was saved at "+target+" but its usage could not be recorded")
 	}
 	data := map[string]any{"path": target, "media_type": output.MediaType, "size": len(output.Data), "provider": binding.Provider.Name, "model": binding.Config.Model}
+	if kind == protocol.MediaKindImage {
+		data["paths"] = []string{target}
+		data["channel"] = string(imageChannelMedia)
+	}
 	if output.Job != "" {
 		data["job"] = output.Job
 	}

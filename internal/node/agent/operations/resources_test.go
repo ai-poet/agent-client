@@ -102,8 +102,14 @@ func TestSkillLoad(t *testing.T) {
 			if !native {
 				found = true
 				captured, err := CaptureResources(t.Context(), t.TempDir(), []protocol.PluginReference{p.Reference})
-				if err != nil || len(captured.Skills()) != len(p.Skills) {
+				if err != nil {
 					t.Fatal("skill-only package missing from admission", p.Reference, err)
+				}
+				skills := captured.Skills()
+				for _, s := range p.Skills {
+					if _, ok := skills[p.Reference.Name+":"+s.Name]; !ok {
+						t.Fatal("skill-only package missing from admission", p.Reference, s.Name)
+					}
 				}
 				break
 			}
@@ -211,4 +217,49 @@ func TestModeMapping(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestBuiltinImageGenerationSkill(t *testing.T) {
+	resources, err := CaptureResources(t.Context(), t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("CaptureResources with no plugins failed: %v", err)
+	}
+	skills := resources.Skills()
+	skill, ok := skills["builtin:image-generation"]
+	if !ok {
+		t.Fatalf("builtin:image-generation missing from skills: %v", skills)
+	}
+	if skill.Name != "image-generation" || strings.TrimSpace(skill.Description) == "" {
+		t.Fatalf("unexpected skill metadata: %+v", skill)
+	}
+	catalog, err := resources.Catalog()
+	if err != nil || !strings.Contains(catalog, "builtin:image-generation") {
+		t.Fatalf("Catalog missing builtin:image-generation: err=%v catalog=%q", err, catalog)
+	}
+	text, err := resources.Read(t.Context(), "builtin:image-generation", "SKILL.md")
+	if err != nil {
+		t.Fatalf("Read builtin:image-generation failed: %v", err)
+	}
+	if text.Directory != "" {
+		t.Fatalf("builtin skill should not materialize a directory, got %q", text.Directory)
+	}
+	for _, want := range []string{"generate_image", "references", "assets/generated/", "outcome_unknown", "CheapRouter"} {
+		if !strings.Contains(strings.ToLower(text.Content), strings.ToLower(want)) {
+			t.Fatalf("SKILL.md missing expected guidance %q", want)
+		}
+	}
+	for _, forbidden := range []string{"sk-", "Bearer ", "access_token", "refresh_token", "cheaprouter-account.json"} {
+		if strings.Contains(text.Content, forbidden) {
+			t.Fatalf("SKILL.md must not contain secret or credential marker %q", forbidden)
+		}
+	}
+	if ready, err := resources.Python(t.Context(), "builtin:image-generation", nil); err != nil || ready != nil {
+		t.Fatalf("builtin skill Python = %v, %v; want nil, nil", ready, err)
+	}
+	if _, err := resources.Read(t.Context(), "builtin:image-generation", "../escape.md"); err == nil {
+		t.Fatal("builtin skill accepted escaped path")
+	}
+	if _, err := resources.Read(t.Context(), "builtin:image-generation", "missing.md"); err == nil {
+		t.Fatal("builtin skill accepted missing resource")
+	}
 }

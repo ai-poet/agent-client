@@ -2,7 +2,6 @@ package live
 
 import (
 	"context"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -22,15 +21,15 @@ import (
 )
 
 type imageStudioRuntime struct {
-	profileDir       string
-	customStore      *core.CustomStore
-	indexStore       *core.IndexStore
-	client           *core.Client
-	state            *imagestudioui.State
-	settingsState    *imagestudioui.SettingsState
-	denials          []core.Denial
-	running          map[string]context.CancelFunc
-	asyncUnavailable bool
+	profileDir    string
+	customStore   *core.CustomStore
+	indexStore    *core.IndexStore
+	client        *core.Client
+	runner        *core.Runner
+	state         *imagestudioui.State
+	settingsState *imagestudioui.SettingsState
+	denials       []core.Denial
+	running       map[string]context.CancelFunc
 
 	saveMu  sync.Mutex
 	saveSeq uint64
@@ -40,6 +39,11 @@ func (r *Runtime) initImageStudio() {
 	profile := filepath.Dir(filepath.Dir(r.Preferences.Path))
 	customStore, _ := core.NewCustomStore(profile)
 	indexStore, _ := core.NewIndexStore(profile)
+	client := core.NewClient()
+	var auth core.AuthProvider
+	if r.cheapAuth != nil && r.cheapAuth.service != nil {
+		auth = r.cheapAuth.service
+	}
 
 	state := imagestudioui.NewState()
 	settingsState := imagestudioui.NewSettingsState()
@@ -47,7 +51,8 @@ func (r *Runtime) initImageStudio() {
 		profileDir:    profile,
 		customStore:   customStore,
 		indexStore:    indexStore,
-		client:        core.NewClient(),
+		client:        client,
+		runner:        core.NewRunner(client, auth, customStore, indexStore),
 		state:         state,
 		settingsState: settingsState,
 		running:       map[string]context.CancelFunc{},
@@ -166,23 +171,9 @@ func (r *Runtime) syncImageStudioCatalog() {
 			}
 		}
 		if !matched {
-			studio.state.Model = pickDefaultImageModel(models)
+			studio.state.Model = core.PickDefaultImageModel(models)
 		}
 	}
-}
-
-func pickDefaultImageModel(models []cheapauth.Model) string {
-	if len(models) == 0 {
-		return ""
-	}
-	for _, preferred := range []string{"gpt-image-2", "gpt-image-1.5", "gpt-image-1"} {
-		for _, m := range models {
-			if strings.EqualFold(m.ID, preferred) {
-				return m.ID
-			}
-		}
-	}
-	return models[0].ID
 }
 
 func (r *Runtime) refreshCheapImageCatalog() {
@@ -410,7 +401,7 @@ func (r *Runtime) removeImageStudioJob(jobID string) {
 
 func (r *Runtime) startImageJob(job core.Job) {
 	studio := r.imageStudio
-	if studio == nil {
+	if studio == nil || studio.runner == nil {
 		return
 	}
 	jobCtx, cancel := context.WithCancel(r.ctx)
@@ -419,35 +410,46 @@ func (r *Runtime) startImageJob(job core.Job) {
 	outputDir := filepath.Join(core.DefaultOutputDir(studio.profileDir), job.Folder)
 	catalogCopy := append([]cheapauth.Model(nil), studio.state.CheapCatalog...)
 	denialsCopy := append([]core.Denial(nil), studio.denials...)
-	tryAsync := !studio.asyncUnavailable
 
 	r.async(func() {
 		defer cancel()
-		var (
-			paths         []string
-			finalErr      *core.ImageError
-			winningGroup  int64
-			asyncDisabled bool
-			newDenials    []int64
-		)
-
-		if job.Spec.Channel == core.ChannelCustom {
-			paths, finalErr = r.runCustomImageJob(jobCtx, studio, job, outputDir)
-		} else {
-			paths, winningGroup, asyncDisabled, newDenials, finalErr = r.runCheapRouterImageJob(
-				jobCtx, studio, job, outputDir, catalogCopy, denialsCopy, tryAsync,
-			)
+		opts := core.RunOptions{
+			Catalog: catalogCopy,
+			Denials: denialsCopy,
+			OnGroup: func(groupID int64, groupName string) {
+				r.enqueue(func(*ui.Context) {
+					for i := range studio.state.Jobs {
+						if studio.state.Jobs[i].ID == job.ID && studio.state.Jobs[i].Status == core.JobRunning {
+							studio.state.Jobs[i].GroupID = groupID
+							studio.state.Jobs[i].GroupName = groupName
+							break
+						}
+					}
+				})
+			},
+			OnTaskID: func(taskID string) {
+				r.enqueue(func(*ui.Context) {
+					for i := range studio.state.Jobs {
+						if studio.state.Jobs[i].ID == job.ID && studio.state.Jobs[i].Status == core.JobRunning {
+							studio.state.Jobs[i].TaskID = taskID
+							break
+						}
+					}
+				})
+			},
+		}
+		result, finalErr := studio.runner.Run(jobCtx, job.Spec, opts)
+		var paths []string
+		if finalErr == nil {
+			paths, finalErr = studio.client.SaveOutputs(jobCtx, result.Outputs, outputDir, job.Stem)
 		}
 
 		r.enqueue(func(*ui.Context) {
 			delete(studio.running, job.ID)
-			if asyncDisabled {
-				studio.asyncUnavailable = true
-			}
 			now := time.Now().Unix()
-			if len(newDenials) > 0 {
+			if len(result.NewDenials) > 0 {
 				idx := core.Index{Denials: studio.denials}
-				for _, gid := range newDenials {
+				for _, gid := range result.NewDenials {
 					core.RecordDenial(&idx, job.Spec.Model, gid, now)
 				}
 				studio.denials = idx.Denials
@@ -460,8 +462,8 @@ func (r *Runtime) startImageJob(job core.Job) {
 					break
 				}
 				studio.state.Jobs[i].FinishedAt = now
-				if winningGroup > 0 {
-					studio.state.Jobs[i].GroupID = winningGroup
+				if result.GroupID > 0 {
+					studio.state.Jobs[i].GroupID = result.GroupID
 				}
 				if finalErr != nil {
 					if finalErr.Kind == core.ErrCancelled {
@@ -484,130 +486,6 @@ func (r *Runtime) startImageJob(job core.Job) {
 			r.persistImageStudioIndex()
 		})
 	})
-}
-
-func (r *Runtime) runCustomImageJob(ctx context.Context, studio *imageStudioRuntime, job core.Job, outputDir string) ([]string, *core.ImageError) {
-	if studio.customStore == nil {
-		return nil, &core.ImageError{Kind: core.ErrBadRequest, Message: "custom image API is not configured"}
-	}
-	cfg, err := studio.customStore.Load()
-	if err != nil || !cfg.Configured() {
-		return nil, &core.ImageError{Kind: core.ErrBadRequest, Message: "custom image API is not configured"}
-	}
-	outputs, genErr := studio.client.GenerateCustom(ctx, cfg, job.Spec)
-	if genErr != nil {
-		return nil, genErr
-	}
-	return studio.client.SaveOutputs(ctx, outputs, outputDir, job.Stem)
-}
-
-func (r *Runtime) runCheapRouterImageJob(
-	ctx context.Context,
-	studio *imageStudioRuntime,
-	job core.Job,
-	outputDir string,
-	catalog []cheapauth.Model,
-	denials []core.Denial,
-	tryAsync bool,
-) ([]string, int64, bool, []int64, *core.ImageError) {
-	if r.cheapAuth == nil || r.cheapAuth.service == nil || !r.cheapAuth.service.SignedIn() {
-		return nil, 0, false, nil, &core.ImageError{Kind: core.ErrUnauthorized, Message: "not signed in to CheapRouter"}
-	}
-	candidates := r.cheapAuth.service.ImageRouteCandidates(catalog, job.Spec.Model)
-	now := time.Now().Unix()
-	tempIdx := core.Index{Denials: denials}
-
-	var filtered []cheapauth.ImageGroup
-	for _, g := range candidates {
-		if !core.IsDenied(&tempIdx, job.Spec.Model, g.GroupID, now) {
-			filtered = append(filtered, g)
-		}
-	}
-	if len(filtered) > 0 {
-		candidates = filtered
-	}
-	if len(candidates) == 0 {
-		// Fall back to account default key when catalog carries no explicit group ID.
-		candidates = []cheapauth.ImageGroup{{GroupID: 0}}
-	}
-
-	var (
-		lastErr       *core.ImageError
-		newDenials    []int64
-		asyncDisabled bool
-	)
-	for _, group := range candidates {
-		if ctx.Err() != nil {
-			return nil, 0, asyncDisabled, newDenials, &core.ImageError{Kind: core.ErrCancelled, Message: "cancelled"}
-		}
-		var gidPtr *int64
-		if group.GroupID > 0 {
-			gid := group.GroupID
-			gidPtr = &gid
-		}
-		groupName := group.Name
-		groupID := group.GroupID
-		r.enqueue(func(*ui.Context) {
-			for i := range studio.state.Jobs {
-				if studio.state.Jobs[i].ID == job.ID && studio.state.Jobs[i].Status == core.JobRunning {
-					studio.state.Jobs[i].GroupID = groupID
-					studio.state.Jobs[i].GroupName = groupName
-					break
-				}
-			}
-		})
-
-		origin, apiKey, keyErr := r.cheapAuth.service.ImageRouteKey(ctx, gidPtr)
-		if keyErr != nil {
-			if errors.Is(keyErr, context.Canceled) {
-				return nil, 0, asyncDisabled, newDenials, &core.ImageError{Kind: core.ErrCancelled, Message: "cancelled"}
-			}
-			if cheapAuthRejected(keyErr) {
-				return nil, 0, asyncDisabled, newDenials, &core.ImageError{Kind: core.ErrUnauthorized, Message: "CheapRouter session expired"}
-			}
-			lastErr = &core.ImageError{Kind: core.ErrNetwork, Message: "failed to resolve CheapRouter gateway key"}
-			continue
-		}
-
-		onTaskID := func(taskID string) {
-			r.enqueue(func(*ui.Context) {
-				for i := range studio.state.Jobs {
-					if studio.state.Jobs[i].ID == job.ID && studio.state.Jobs[i].Status == core.JobRunning {
-						studio.state.Jobs[i].TaskID = taskID
-						break
-					}
-				}
-			})
-		}
-
-		outputs, disabled, genErr := studio.client.GenerateCheapRouter(ctx, origin, apiKey, job.Spec, tryAsync && !asyncDisabled, onTaskID)
-		if disabled {
-			asyncDisabled = true
-		}
-		if genErr == nil {
-			paths, saveErr := studio.client.SaveOutputs(ctx, outputs, outputDir, job.Stem)
-			if saveErr != nil {
-				return nil, group.GroupID, asyncDisabled, newDenials, saveErr
-			}
-			if group.GroupID > 0 {
-				_ = r.cheapAuth.service.RememberImageGroup(r.ctx, job.Spec.Model, group.GroupID)
-			}
-			return paths, group.GroupID, asyncDisabled, newDenials, nil
-		}
-		if genErr.Kind == core.ErrCancelled {
-			return nil, 0, asyncDisabled, newDenials, genErr
-		}
-		if genErr.ShouldTryNextGroup() && group.GroupID > 0 {
-			newDenials = append(newDenials, group.GroupID)
-			lastErr = genErr
-			continue
-		}
-		return nil, group.GroupID, asyncDisabled, newDenials, genErr
-	}
-	if lastErr == nil {
-		lastErr = &core.ImageError{Kind: core.ErrNoImagePermission, Message: "no group can generate images for this model"}
-	}
-	return nil, 0, asyncDisabled, newDenials, lastErr
 }
 
 func (r *Runtime) persistImageStudioIndex() {
