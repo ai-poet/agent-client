@@ -1,3 +1,5 @@
+import groovy.json.JsonSlurper
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -37,6 +39,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        proguardFiles("consumer-rules.pro")
         // Flutter's default filters also admit other ABIs from dependency AARs.
         if (providers.gradleProperty("target-platform").orNull == "android-arm64") {
             ndk {
@@ -65,8 +68,24 @@ android {
     }
 }
 
+// The iroh library verifies relay TLS through the platform verifier; its
+// companion Android library ships inside the locked Rust crate.
+val rustMetadata = providers.exec {
+    workingDir(rootProject.file("../../.."))
+    commandLine("rustup", "run", "1.98.0", "cargo", "metadata", "--locked", "--format-version", "1",
+        "--manifest-path", "native/iroh/Cargo.toml",
+        "--filter-platform", "aarch64-linux-android")
+}.standardOutput.asText
+val packages = (JsonSlurper().parseText(rustMetadata.get()) as Map<*, *>)["packages"] as List<*>
+val verifier = packages.map { it as Map<*, *> }.first { it["name"] == "rustls-platform-verifier-android" }
+repositories {
+    maven {
+        url = uri(File(File(verifier["manifest_path"] as String).parentFile, "maven"))
+    }
+}
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    implementation("rustls:rustls-platform-verifier:${verifier["version"]}")
 }
 
 val nativePlatforms = providers.gradleProperty("target-platform").orNull
@@ -84,10 +103,13 @@ val prepareSailryNative = tasks.register("prepareSailryNative") {
     inputs.files(fileTree(File(sourceRoot, "internal/client")), fileTree(File(sourceRoot, "internal/link")),
         fileTree(File(sourceRoot, "internal/protocol")), fileTree(File(sourceRoot, "internal/mobile")),
         fileTree(File(sourceRoot, "assets/catalogs")), fileTree(File(sourceRoot, "cmd/sailry-mobile")),
-        File(sourceRoot, "go.mod"), File(sourceRoot, "go.sum"))
+        fileTree(File(sourceRoot, "native/iroh/src")), File(sourceRoot, "go.mod"), File(sourceRoot, "go.sum"),
+        File(sourceRoot, "native/iroh/Cargo.toml"), File(sourceRoot, "native/iroh/Cargo.lock"))
     inputs.property("abis", nativeAbis.joinToString(","))
     inputs.property("ndkVersion", flutter.ndkVersion)
-    outputs.files(nativeAbis.map { File(sailryJniDir, "$it/libsailry_mobile.so") })
+    outputs.files(nativeAbis.flatMap { abi ->
+        listOf(File(sailryJniDir, "$abi/libsailry_mobile.so"), File(sailryJniDir, "$abi/libsailry_iroh.so"))
+    })
     doLast {
         nativeAbis.forEach { abi ->
             providers.exec {

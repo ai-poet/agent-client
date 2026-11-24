@@ -1,5 +1,12 @@
 package cc.cheaprouter.harness
 
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import ai.sailry.bridge.Native
 
-class MainActivity : FlutterActivity()
+class MainActivity : FlutterActivity() {
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        Native.initialize(applicationContext)
+        super.configureFlutterEngine(flutterEngine)
+    }
+}

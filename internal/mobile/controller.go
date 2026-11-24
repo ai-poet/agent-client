@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"maps"
 	"net/url"
+	"os"
 	"slices"
 	"sync"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/client"
 	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/link/iroh"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
@@ -48,6 +50,7 @@ type input struct {
 	RemotePort uint16   `json:"remote_port"`
 	Upload     string   `json:"upload"`
 	Download   string   `json:"download"`
+	Iroh       string   `json:"iroh"`
 }
 
 func (values input) networkScope() link.NetworkScope {
@@ -72,8 +75,16 @@ func (runtime *Runtime) create(ctx context.Context, method string, data json.Raw
 	}
 	switch method {
 	case "initialize":
-		// Older Dart bridges initialize explicitly before opening a controller.
-		return nil, nil
+		// The app ships the iroh library beside this one and names it here;
+		// Link cannot open an endpoint until it is loaded.
+		path := os.Getenv("SAILRY_IROH_LIB")
+		if path == "" {
+			path = values.Iroh
+		}
+		if path == "" {
+			return nil, invalid("iroh library path is required")
+		}
+		return nil, iroh.Load(path)
 	case "open":
 		lifetime, cancel, detach := runtime.lifetime(ctx, 0)
 		endpoint, err := link.OpenController(lifetime, values.Path, values.networkScope())

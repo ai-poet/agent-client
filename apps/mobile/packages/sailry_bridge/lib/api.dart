@@ -11,6 +11,7 @@ class Controller extends NativeHandle {
     required List<String> relays,
     String? bind,
   }) async {
+    await initializeNativeBridge();
     final bridge = nativeBridge;
     final value = await bridge.invoke(0, 'open', {
       'path': path,

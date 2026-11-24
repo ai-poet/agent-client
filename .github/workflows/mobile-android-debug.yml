@@ -64,6 +64,23 @@ jobs:
         run: |
           printf 'ANDROID_NDK_HOME=%s/ndk/28.2.13676358\n' "$ANDROID_HOME" >> "$GITHUB_ENV"
 
+      - name: Install Rust (iroh)
+        shell: bash
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --target aarch64-linux-android
+          rustup default 1.98.0
+
+      - name: Cache Rust build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .runtime/native/android-arm64/cargo
+          key: mobile-android-arm64-rust-1.98.0-${{ hashFiles('native/iroh/Cargo.lock') }}
+          restore-keys: |
+            mobile-android-arm64-rust-1.98.0-
+
       - name: Run Go client and mobile tests
         shell: bash
         env:

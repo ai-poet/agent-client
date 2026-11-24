@@ -22,7 +22,8 @@ func TestMobileInvokeOps(t *testing.T) {
 		input  string
 		ok     bool
 	}{
-		{"initialize", `{"iroh":"/missing/legacy/library"}`, true},
+		{"initialize", `{}`, false},
+		{"initialize", `{"iroh":"/missing/iroh/library"}`, false},
 		{"new", `{"kind":"digest"}`, true},
 		{"new", `{"kind":"speech_input"}`, false},
 		{"missing", `{}`, false},

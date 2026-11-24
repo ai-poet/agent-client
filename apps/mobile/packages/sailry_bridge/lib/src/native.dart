@@ -12,9 +12,25 @@ import 'envelope.dart';
 typedef _Completion = Void Function(Uint64, Pointer<Uint8>, Uint64);
 
 NativeBridge? _shared;
+Future<void>? _initialization;
 
+/// Loads the iroh library into the Go runtime once per bridge. Link cannot
+/// open a controller before this completes.
 Future<void> initializeNativeBridge({DynamicLibrary? library}) async {
-  _openNativeBridge(library);
+  final existing = _initialization;
+  if (existing != null) return existing;
+  final bridge = _openNativeBridge(library);
+  if (bridge.initialized) return;
+  final initialization = bridge.initialize();
+  _initialization = initialization;
+  try {
+    await initialization;
+  } catch (_) {
+    await bridge.shutdown();
+    rethrow;
+  } finally {
+    _initialization = null;
+  }
 }
 
 NativeBridge get nativeBridge => _openNativeBridge(null);
@@ -96,7 +112,13 @@ class NativeBridge {
   bool _closing = false;
   bool _closed = false;
   bool _disposeRequested = false;
+  bool initialized = false;
   Completer<void>? _shutdown;
+
+  Future<void> initialize() async {
+    await invoke(0, 'initialize', {'iroh': _irohLibrary()});
+    initialized = true;
+  }
 
   int _nextRequest() {
     if (_request == 0x7fffffffffffffff) {
@@ -321,4 +343,16 @@ DynamicLibrary _library() {
     return DynamicLibrary.open('libsailry_mobile.dylib');
   }
   throw UnsupportedError('Sailry Mobile is unavailable on this platform');
+}
+
+String _irohLibrary() {
+  final explicit = Platform.environment['SAILRY_IROH_LIB'];
+  if (explicit != null && explicit.isNotEmpty) return explicit;
+  if (Platform.isIOS) {
+    return '${File(Platform.resolvedExecutable).parent.path}'
+        '/Frameworks/SailryIroh.framework/SailryIroh';
+  }
+  if (Platform.isAndroid || Platform.isLinux) return 'libsailry_iroh.so';
+  if (Platform.isMacOS) return 'libsailry_iroh.dylib';
+  throw UnsupportedError('Sailry Link is unavailable on this platform');
 }
