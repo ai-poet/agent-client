@@ -372,6 +372,10 @@ func (r *Runtime) Close() error {
 	r.closed = true
 	r.mu.Unlock()
 	r.flushPreferences()
+	if r.backupSettings.scheduleTimer != nil {
+		r.backupSettings.scheduleTimer.Stop()
+		r.backupSettings.scheduleTimer = nil
+	}
 	r.cancel()
 	if r.updates != nil {
 		// A closing window no longer needs to acknowledge an installation's
