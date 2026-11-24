@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MoeForge/moejs"
 	sailry "github.com/ai-poet/cheaprouter-harness"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
@@ -674,6 +675,43 @@ export default class Example extends View {render(){return `+current.expression+
 		scope.Package.Name = "other"
 		if _, err := runtime.Mount(bundle, scope); err == nil {
 			t.Fatal("foreign package context was accepted")
+		}
+	})
+	t.Run("replacing timer stops prior handle", func(t *testing.T) {
+		clock := clockwork.NewFakeClock()
+		runtime, err := NewRuntime(RuntimeBindings{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := runtime.SetClock(clock); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = runtime.Close() })
+		bundle, scope := runtimeBundle(`
+import {View} from "gpui-kit";
+export default class extends View {
+  render(){return "ok";}
+}`)
+		mounted, err := runtime.Mount(bundle, scope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := mounted.execute(desktopTaskBudget, func(context.Context) error {
+			_, err := mounted.schedule(nil, moejs.Undefined(), []moejs.Value{moejs.Number(1), moejs.Number(10)})
+			if err != nil {
+				return err
+			}
+			_, err = mounted.schedule(nil, moejs.Undefined(), []moejs.Value{moejs.Number(1), moejs.Number(100)})
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		clock.Advance(20 * time.Millisecond)
+		mounted.queueMu.Lock()
+		firedEarly := len(mounted.queue)
+		mounted.queueMu.Unlock()
+		if firedEarly != 0 {
+			t.Fatalf("replaced timer still fired at old deadline: %d completions", firedEarly)
 		}
 	})
 }
