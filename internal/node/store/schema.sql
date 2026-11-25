@@ -394,6 +394,12 @@ CREATE INDEX IF NOT EXISTS agent_events_turn ON agent_events(turn,sequence);
 CREATE INDEX IF NOT EXISTS agent_visibility ON agent_events(
     json_extract(body,'$.message'),sequence DESC
 ) WHERE json_extract(body,'$.kind')='operation' AND json_extract(body,'$.operation')='visibility';
+CREATE INDEX IF NOT EXISTS agent_observation_outcome ON agent_events(
+    turn,json_extract(body,'$.metadata.execution.observation.attempts[0].outcome')
+) WHERE json_type(body,'$.metadata.execution.observation')='object';
+CREATE INDEX IF NOT EXISTS agent_execution_timing ON agent_events(
+    json_extract(body,'$.metadata.execution.timing.first_token_us'),json_extract(body,'$.metadata.execution.timing.elapsed_us')
+) WHERE json_type(body,'$.metadata.execution.timing')='object';
 CREATE INDEX IF NOT EXISTS agent_usage ON agent_events(
     turn,
     max(0,coalesce(json_extract(body,'$.usage.input'),json_extract(body,'$.summary.usage.input'))),

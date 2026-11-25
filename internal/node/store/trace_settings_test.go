@@ -21,3 +21,18 @@ func TestTraceSettingPersists(t *testing.T) {
 		t.Fatalf("disable: %v", err)
 	}
 }
+
+func TestTraceSchemaUpgrade(t *testing.T) {
+	profile, node, old := schemaFixture(t)
+	schemaExecute(t, old.Node, "DROP INDEX agent_execution_timing; DROP INDEX agent_observation_outcome; ALTER TABLE node DROP COLUMN trace_enabled")
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+	current := reopenSchemaFixture(t, profile, node)
+	if current.Node.TraceEnabled() {
+		t.Fatal("upgrade opted in to collection")
+	}
+	if got := schemaInteger(t, current.Node, "SELECT count(*) FROM sqlite_schema WHERE type='index' AND name IN ('agent_execution_timing','agent_observation_outcome')"); got != 2 {
+		t.Fatalf("missing migrated indexes: %d", got)
+	}
+}

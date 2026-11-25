@@ -19,11 +19,14 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
-func readAgentUsage(ctx context.Context, db *sql.Conn, node protocol.NodeID, query protocol.UsageQuery) (protocol.UsageReport, error) {
+func readAgentUsage(ctx context.Context, db *sql.Conn, node protocol.NodeID, query protocol.UsageQuery, observations bool) (protocol.UsageReport, error) {
 	report := protocol.DefaultUsageReport()
 	report.Node = node
 	report.Query = query
-	if query.StartMs < 0 || query.EndMs <= query.StartMs || query.EndMs-query.StartMs > 366*86400000 || query.UtcOffsetMinutes > 840 || query.UtcOffsetMinutes < -840 || query.Before != nil && (query.Before.TimestampMs < query.StartMs || query.Before.TimestampMs >= query.EndMs) || len(query.Projects) > 128 || len(query.Worktrees) > 128 || len(query.Providers) > 128 || len(query.Models) > 128 {
+	if !observations && (len(query.Outcomes) != 0 || len(query.EndKinds) != 0 || len(query.Sessions) != 0 || len(query.Credentials) != 0) {
+		return report, invalid("observation filters require read_usage_v2")
+	}
+	if query.StartMs < 0 || query.EndMs <= query.StartMs || query.EndMs-query.StartMs > 366*86400000 || query.UtcOffsetMinutes > 840 || query.UtcOffsetMinutes < -840 || query.Before != nil && (query.Before.TimestampMs < query.StartMs || query.Before.TimestampMs >= query.EndMs) || len(query.Projects) > 128 || len(query.Worktrees) > 128 || len(query.Providers) > 128 || len(query.Models) > 128 || len(query.Outcomes) > 128 || len(query.EndKinds) > 128 || len(query.Sessions) > 128 || len(query.Credentials) > 128 {
 		return report, invalid("usage time range or filters exceed the query limits")
 	}
 	for _, model := range query.Models {
@@ -38,47 +41,47 @@ func readAgentUsage(ctx context.Context, db *sql.Conn, node protocol.NodeID, que
 	report.Days = usageBuckets(query.StartMs, query.EndMs, 86400000, offset)
 	recentStart := max(query.StartMs, query.EndMs-2*86400000)
 	report.Recent = usageBuckets(recentStart, query.EndMs, 1800000, offset)
-	projects, _ := encode(query.Projects)
-	worktrees, _ := encode(query.Worktrees)
-	providers, _ := encode(query.Providers)
-	models, _ := encode(query.Models)
-	if query.Projects == nil {
-		projects = []byte("[]")
-	}
-	if query.Worktrees == nil {
-		worktrees = []byte("[]")
-	}
-	if query.Providers == nil {
-		providers = []byte("[]")
-	}
-	if query.Models == nil {
-		models = []byte("[]")
+	args := []any{time.UnixMilli(query.StartMs).UTC().Format("2006-01-02T15:04:05"), time.UnixMilli(query.EndMs).UTC().Format("2006-01-02T15:04:05")}
+	for _, filter := range []any{query.Projects, query.Worktrees, query.Providers, query.Models, query.Outcomes, query.EndKinds, query.Sessions, query.Credentials} {
+		data, err := encode(filter)
+		if err != nil {
+			return report, err
+		}
+		if string(data) == "null" {
+			data = []byte("[]")
+		}
+		args = append(args, string(data))
 	}
 	user, err := CurrentUser(ctx, db)
 	if err != nil {
 		return report, err
 	}
-	rows, err := db.QueryContext(ctx, agentUsageRows, time.UnixMilli(query.StartMs).UTC().Format("2006-01-02T15:04:05"), time.UnixMilli(query.EndMs).UTC().Format("2006-01-02T15:04:05"), string(projects), string(worktrees), string(providers), string(models), 100001, user.ID.String())
+	rows, err := db.QueryContext(ctx, agentUsageRows(observations), append(args, 100001, user.ID.String())...)
 	if err != nil {
 		return report, err
 	}
 	type usageRow struct {
-		time                          string
-		tokens                        protocol.ConversationUsage
-		provider, model               string
-		project                       sql.NullString
-		worktree                      string
-		api, authentication, endpoint sql.NullString
-		usage                         string
-		elapsed                       sql.NullInt64
-		media                         sql.NullString
-		sequence                      uint64
-		session, turn                 string
-		first                         sql.NullInt64
-		providerName                  sql.NullString
-		scope                         string
-		resource, assistant           sql.NullString
-		preset                        sql.NullString
+		time string
+
+		provider, model                               string
+		project                                       sql.NullString
+		worktree                                      string
+		api, authentication, endpoint                 sql.NullString
+		usage                                         *string
+		elapsed                                       sql.NullInt64
+		media                                         sql.NullString
+		sequence                                      uint64
+		session, turn                                 string
+		first                                         sql.NullInt64
+		providerName                                  sql.NullString
+		scope                                         string
+		resource, assistant                           sql.NullString
+		preset                                        sql.NullString
+		requestID, gatewayID, retryReason, credential *string
+		attempt                                       *uint64
+		status                                        *uint16
+		outcome                                       *protocol.ConversationObservationOutcome
+		endKind                                       *protocol.ConversationObservationEndKind
 	}
 	captured := []usageRow{}
 	for rows.Next() {
@@ -87,7 +90,7 @@ func readAgentUsage(ctx context.Context, db *sql.Conn, node protocol.NodeID, que
 			return report, invalid("usage report exceeds the row limit; narrow the time range or filters")
 		}
 		var row usageRow
-		if err = rows.Scan(&row.time, &row.tokens.Input, &row.tokens.Output, &row.tokens.CachedInput, &row.tokens.Reasoning, &row.provider, &row.model, &row.project, &row.worktree, &row.api, &row.authentication, &row.endpoint, &row.usage, &row.elapsed, &row.media, &row.sequence, &row.session, &row.turn, &row.first, &row.providerName, &row.scope, &row.resource, &row.assistant, &row.preset); err != nil {
+		if err = rows.Scan(&row.time, &row.provider, &row.model, &row.project, &row.worktree, &row.api, &row.authentication, &row.endpoint, &row.usage, &row.elapsed, &row.media, &row.sequence, &row.session, &row.turn, &row.first, &row.providerName, &row.scope, &row.resource, &row.assistant, &row.preset, &row.requestID, &row.attempt, &row.status, &row.outcome, &row.endKind, &row.gatewayID, &row.retryReason, &row.credential); err != nil {
 			rows.Close()
 			return report, err
 		}
@@ -133,96 +136,102 @@ func readAgentUsage(ctx context.Context, db *sql.Conn, node protocol.NodeID, que
 			}
 			project = &id
 		}
-		owner := protocol.UsageKey{Kind: "session", Data: session}
-		location := owner
-		if project != nil {
-			owner = protocol.UsageKey{Kind: "project", Data: *project}
-			location = protocol.UsageKey{Kind: "worktree", Data: protocol.UsageKeyWorktreePayload{Project: *project, Worktree: worktree}}
-		} else if row.resource.Valid {
-			var resource protocol.ConnectionResource
-			if e = json.Unmarshal([]byte(row.resource.String), &resource); e != nil {
-				return report, e
-			}
-			owner = protocol.UsageKey{Kind: "connection", Data: resource}
-			location = owner
-		} else if row.assistant.Valid {
-			var assistant protocol.PluginConversationBinding
-			if e = json.Unmarshal([]byte(row.assistant.String), &assistant); e != nil {
-				return report, e
-			}
-			owner = protocol.UsageKey{Kind: "assistant", Data: protocol.UsageKeyAssistantPayload{Package: assistant.Package.Name, ID: assistant.ID}}
-			location = owner
-		}
-		keys := []protocol.UsageKey{{Kind: "provider", Data: provider}, {Kind: "model", Data: protocol.UsageKeyModelPayload{Provider: provider, Model: row.model}}, owner, location}
-		index := 0
-		switch query.Dimension {
-		case protocol.UsageDimensionModel:
-			index = 1
-		case protocol.UsageDimensionProject:
-			index = 2
-		case protocol.UsageDimensionWorktree:
-			index = 3
-		}
-		key := keys[index]
-		keyText := usageKeyText(key)
-		group := groups[keyText]
-		if group == nil {
-			g := protocol.DefaultUsageGroup()
-			g.Key = key
-			group = &g
-			groups[keyText] = group
-		}
 		providerName := row.provider
 		if row.providerName.Valid {
 			providerName = row.providerName.String
-		}
-		name := providerName
-		if index == 2 {
-			name = row.scope
-		}
-		if index < 3 && name != "" {
-			v := name
-			group.Name = &v
-		}
-		for _, key := range keys {
-			resources[usageKeyText(key)] = key
-		}
-		if len(groups) > 4096 || len(resources) > 4096*4 {
-			return report, invalid("usage report exceeds the group or resource limit; narrow the filters")
-		}
-		var usage canonical.Usage
-		if e = json.Unmarshal([]byte(row.usage), &usage); e != nil {
-			return report, e
-		}
-		var cost *protocol.UsageCost
-		if !row.media.Valid || row.media.String != "image" && row.media.String != "video" {
-			cost, e = estimateAgentCost(ctx, db, prices, row.preset.String, row.api.String, row.model, usage)
-			if e != nil {
-				return report, e
-			}
 		}
 		var elapsed *uint64
 		if row.elapsed.Valid && row.elapsed.Int64 >= 0 {
 			v := uint64(row.elapsed.Int64)
 			elapsed = &v
 		}
-		if e = addUsageMetrics(&report.Totals, row.tokens, cost, elapsed); e != nil {
-			return report, e
-		}
-		if e = addUsageMetrics(&group.Metrics, row.tokens, cost, elapsed); e != nil {
-			return report, e
-		}
-		day := int((usageFloor(ms, 86400000, offset) - report.Days[0].StartMs) / 86400000)
-		if e = addUsageMetrics(&report.Days[day].Metrics, row.tokens, cost, elapsed); e != nil {
-			return report, e
-		}
-		addUsageModel(&report.Days[day], row.model, row.tokens)
-		if ms >= recentStart {
-			bucket := int((usageFloor(ms, 1800000, offset) - report.Recent[0].StartMs) / 1800000)
-			if e = addUsageMetrics(&report.Recent[bucket].Metrics, row.tokens, cost, elapsed); e != nil {
+		var usage canonical.Usage
+		if row.usage != nil {
+			if e = json.Unmarshal([]byte(*row.usage), &usage); e != nil {
 				return report, e
 			}
-			addUsageModel(&report.Recent[bucket], row.model, row.tokens)
+		}
+		var tokens *protocol.ConversationUsage
+		var cost *protocol.UsageCost
+		if usage.Input != nil && usage.Output != nil {
+			tokens = &protocol.ConversationUsage{Input: *usage.Input, Output: *usage.Output, CachedInput: optionalUint(usage.CacheRead), Reasoning: optionalUint(usage.Reasoning)}
+			if !row.media.Valid || row.media.String != "image" && row.media.String != "video" {
+				cost, e = estimateAgentCost(ctx, db, prices, row.preset.String, row.api.String, row.model, usage)
+				if e != nil {
+					return report, e
+				}
+			}
+			owner := protocol.UsageKey{Kind: "session", Data: session}
+			location := owner
+			if project != nil {
+				owner = protocol.UsageKey{Kind: "project", Data: *project}
+				location = protocol.UsageKey{Kind: "worktree", Data: protocol.UsageKeyWorktreePayload{Project: *project, Worktree: worktree}}
+			} else if row.resource.Valid {
+				var resource protocol.ConnectionResource
+				if e = json.Unmarshal([]byte(row.resource.String), &resource); e != nil {
+					return report, e
+				}
+				owner = protocol.UsageKey{Kind: "connection", Data: resource}
+				location = owner
+			} else if row.assistant.Valid {
+				var assistant protocol.PluginConversationBinding
+				if e = json.Unmarshal([]byte(row.assistant.String), &assistant); e != nil {
+					return report, e
+				}
+				owner = protocol.UsageKey{Kind: "assistant", Data: protocol.UsageKeyAssistantPayload{Package: assistant.Package.Name, ID: assistant.ID}}
+				location = owner
+			}
+			keys := []protocol.UsageKey{{Kind: "provider", Data: provider}, {Kind: "model", Data: protocol.UsageKeyModelPayload{Provider: provider, Model: row.model}}, owner, location}
+			index := 0
+			switch query.Dimension {
+			case protocol.UsageDimensionModel:
+				index = 1
+			case protocol.UsageDimensionProject:
+				index = 2
+			case protocol.UsageDimensionWorktree:
+				index = 3
+			}
+			key := keys[index]
+			keyText := usageKeyText(key)
+			group := groups[keyText]
+			if group == nil {
+				g := protocol.DefaultUsageGroup()
+				g.Key = key
+				group = &g
+				groups[keyText] = group
+			}
+			name := providerName
+			if index == 2 {
+				name = row.scope
+			}
+			if index < 3 && name != "" {
+				v := name
+				group.Name = &v
+			}
+			for _, key := range keys {
+				resources[usageKeyText(key)] = key
+			}
+			if len(groups) > 4096 || len(resources) > 4096*4 {
+				return report, invalid("usage report exceeds the group or resource limit; narrow the filters")
+			}
+			if e = addUsageMetrics(&report.Totals, *tokens, cost, elapsed); e != nil {
+				return report, e
+			}
+			if e = addUsageMetrics(&group.Metrics, *tokens, cost, elapsed); e != nil {
+				return report, e
+			}
+			day := int((usageFloor(ms, 86400000, offset) - report.Days[0].StartMs) / 86400000)
+			if e = addUsageMetrics(&report.Days[day].Metrics, *tokens, cost, elapsed); e != nil {
+				return report, e
+			}
+			addUsageModel(&report.Days[day], row.model, *tokens)
+			if ms >= recentStart {
+				bucket := int((usageFloor(ms, 1800000, offset) - report.Recent[0].StartMs) / 1800000)
+				if e = addUsageMetrics(&report.Recent[bucket].Metrics, *tokens, cost, elapsed); e != nil {
+					return report, e
+				}
+				addUsageModel(&report.Recent[bucket], row.model, *tokens)
+			}
 		}
 		position := protocol.UsagePosition{TimestampMs: ms, Node: node, Sequence: row.sequence}
 		if before := query.Before; before != nil && (ms > before.TimestampMs || ms == before.TimestampMs &&
@@ -239,8 +248,20 @@ func readAgentUsage(ctx context.Context, db *sql.Conn, node protocol.NodeID, que
 		request.Provider = provider
 		request.ProviderName = providerName
 		request.Model = row.model
-		request.Tokens = row.tokens
+		request.Tokens = tokens
 		request.ElapsedUs = elapsed
+		if observations {
+			request.RequestID, request.Attempt, request.Status = row.requestID, row.attempt, row.status
+			request.Outcome, request.EndKind = row.outcome, row.endKind
+			request.CacheWrite, request.GatewayRequestID, request.RetryReason = usage.CacheWrite, row.gatewayID, row.retryReason
+			if row.credential != nil {
+				id, err := protocol.ParseCredentialID(*row.credential)
+				if err != nil {
+					return report, err
+				}
+				request.Credential = &id
+			}
+		}
 		if row.first.Valid && row.first.Int64 >= 0 && elapsed != nil && uint64(row.first.Int64) <= *elapsed {
 			v := uint64(row.first.Int64)
 			request.FirstTokenUs = &v

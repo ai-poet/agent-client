@@ -151,8 +151,11 @@ read_conversation
 read_conversation_runs
 read_conversation_run
 read_usage
+read_usage_v2
 read_activity_catalog
 read_activity
+read_trace
+clear_trace
 read_turn_capture
 read_turn
 read_tool_detail

@@ -484,6 +484,13 @@ func (r *Runtime) observationRecord(x *execution, binding model.Binding, purpose
 	observed.ElapsedUs = timing.ElapsedUs
 	observed.FirstTokenUs = timing.FirstTokenUs
 	observed.Status = attempt.Status
+	observed.CacheWrite = attempt.Usage.CacheWrite
+	observed.EndKind = attempt.EndKind
+	observed.GatewayRequestID = attempt.GatewayRequestID
+	if attempt.RetryDelay != nil && attempt.Failure != nil {
+		reason := string(attempt.Failure.Kind)
+		observed.RetryReason = &reason
+	}
 	observed.Outcome = attempt.Outcome()
 	if attempt.Usage.Input != nil && attempt.Usage.Output != nil {
 		usage := protocol.ConversationUsage{Input: *attempt.Usage.Input, Output: *attempt.Usage.Output}

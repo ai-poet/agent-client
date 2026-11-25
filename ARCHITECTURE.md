@@ -666,6 +666,13 @@ per body, 64 MiB or 200 attempts per session, 512 MiB per profile) and storage
 errors never change model output. The ordinary log and backup roots exclude
 these bodies.
 
+Only a controller with access to the session can list trace records, preview
+a body, or clear the trace. A clear has a durable command receipt. Archiving
+or removing a session deletes its private trace; startup also checks for
+inactive trace directories after interrupted cleanup. `read_usage_v2` lists
+observed attempts even without token counts. Only reported usage contributes
+to billing totals, independently of whether body capture was enabled.
+
 Model request recovery permits up to nine retries and ten minutes of cumulative
 waiting. Network failures use exponential waits from one to thirty seconds;
 rate limits and overload use five seconds to one minute, with jitter. Provider

@@ -138,9 +138,13 @@ func (value ConversationObservationRequest) MarshalJSON() ([]byte, error) {
 }
 
 type ConversationObservationAttempt struct {
-	Index     uint64 `json:"index"`
-	Transport string `json:"transport"`
-	Reused    *bool  `json:"reused"`
+	CacheWrite       *uint64                         `json:"cache_write,omitempty"`
+	EndKind          *ConversationObservationEndKind `json:"end_kind,omitempty"`
+	GatewayRequestID *string                         `json:"gateway_request_id,omitempty"`
+	RetryReason      *string                         `json:"retry_reason,omitempty"`
+	Index            uint64                          `json:"index"`
+	Transport        string                          `json:"transport"`
+	Reused           *bool                           `json:"reused"`
 	// RequestBytes counts the final serialized body. Timing offsets are from
 	// attempt start: DispatchUs precedes HTTP I/O; RequestSentUs follows a
 	// successful request write. Missing transport facts remain nil.

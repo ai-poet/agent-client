@@ -7,15 +7,19 @@ import (
 )
 
 type UsageQuery struct {
-	StartMs          int64          `json:"start_ms"`
-	EndMs            int64          `json:"end_ms"`
-	UtcOffsetMinutes int32          `json:"utc_offset_minutes"`
-	Dimension        UsageDimension `json:"dimension"`
-	Projects         []ProjectID    `json:"projects"`
-	Worktrees        []WorktreeID   `json:"worktrees"`
-	Providers        []ProviderID   `json:"providers"`
-	Models           []string       `json:"models"`
-	Before           *UsagePosition `json:"before"`
+	Outcomes         []ConversationObservationOutcome `json:"outcomes,omitempty"`
+	EndKinds         []ConversationObservationEndKind `json:"end_kinds,omitempty"`
+	Sessions         []SessionID                      `json:"sessions,omitempty"`
+	Credentials      []CredentialID                   `json:"credentials,omitempty"`
+	StartMs          int64                            `json:"start_ms"`
+	EndMs            int64                            `json:"end_ms"`
+	UtcOffsetMinutes int32                            `json:"utc_offset_minutes"`
+	Dimension        UsageDimension                   `json:"dimension"`
+	Projects         []ProjectID                      `json:"projects"`
+	Worktrees        []WorktreeID                     `json:"worktrees"`
+	Providers        []ProviderID                     `json:"providers"`
+	Models           []string                         `json:"models"`
+	Before           *UsagePosition                   `json:"before"`
 }
 
 func DefaultUsageQuery() UsageQuery {
@@ -80,20 +84,30 @@ func (value UsagePosition) MarshalJSON() ([]byte, error) {
 }
 
 type UsageRequest struct {
-	Position     UsagePosition     `json:"position"`
-	Session      SessionID         `json:"session"`
-	SessionTitle *string           `json:"session_title"`
-	Turn         TurnID            `json:"turn"`
-	Project      *ProjectID        `json:"project"`
-	ScopeName    string            `json:"scope_name"`
-	Worktree     WorktreeID        `json:"worktree"`
-	Provider     ProviderID        `json:"provider"`
-	ProviderName string            `json:"provider_name"`
-	Model        string            `json:"model"`
-	Tokens       ConversationUsage `json:"tokens"`
-	UsdMicros    *uint64           `json:"usd_micros"`
-	ElapsedUs    *uint64           `json:"elapsed_us"`
-	FirstTokenUs *uint64           `json:"first_token_us"`
+	CacheWrite       *uint64                         `json:"cache_write,omitempty"`
+	EndKind          *ConversationObservationEndKind `json:"end_kind,omitempty"`
+	GatewayRequestID *string                         `json:"gateway_request_id,omitempty"`
+	RetryReason      *string                         `json:"retry_reason,omitempty"`
+	Outcome          *ConversationObservationOutcome `json:"outcome,omitempty"`
+	Credential       *CredentialID                   `json:"credential,omitempty"`
+	RequestID        *string                         `json:"request_id,omitempty"`
+	Attempt          *uint64                         `json:"attempt,omitempty"`
+	Status           *uint16                         `json:"status,omitempty"`
+	Position         UsagePosition                   `json:"position"`
+	Session          SessionID                       `json:"session"`
+	SessionTitle     *string                         `json:"session_title"`
+	Turn             TurnID                          `json:"turn"`
+	Project          *ProjectID                      `json:"project"`
+	ScopeName        string                          `json:"scope_name"`
+	Worktree         WorktreeID                      `json:"worktree"`
+	Provider         ProviderID                      `json:"provider"`
+	ProviderName     string                          `json:"provider_name"`
+	Model            string                          `json:"model"`
+	// Tokens is null in v2 when the attempt did not report both input and output.
+	Tokens       *ConversationUsage `json:"tokens"`
+	UsdMicros    *uint64            `json:"usd_micros"`
+	ElapsedUs    *uint64            `json:"elapsed_us"`
+	FirstTokenUs *uint64            `json:"first_token_us"`
 }
 
 func DefaultUsageRequest() UsageRequest {
@@ -108,7 +122,7 @@ func DefaultUsageRequest() UsageRequest {
 		Provider:     ProviderID{},
 		ProviderName: "",
 		Model:        "",
-		Tokens:       DefaultConversationUsage(),
+		Tokens:       &ConversationUsage{},
 		UsdMicros:    nil,
 		ElapsedUs:    nil,
 		FirstTokenUs: nil,
@@ -118,7 +132,7 @@ func (value *UsageRequest) UnmarshalJSON(data []byte) error {
 	type plain UsageRequest
 	decoded := plain{}
 	decoded.SessionTitle = nil
-	if err := DecodeObject(data, &decoded, []string{"position", "session", "turn", "scope_name", "worktree", "provider", "provider_name", "model", "tokens"}, false); err != nil {
+	if err := DecodeObject(data, &decoded, []string{"position", "session", "turn", "scope_name", "worktree", "provider", "provider_name", "model"}, false); err != nil {
 		return err
 	}
 	*value = UsageRequest(decoded)
