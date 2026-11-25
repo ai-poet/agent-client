@@ -20,6 +20,7 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/onboarding"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panes"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/settings"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/sidebar"
@@ -537,6 +538,10 @@ func (a *App) nav(c *ui.Context, f frame, panel ui.Color) {
 			} else if a.Page == PluginPage && a.PluginNavigation != nil {
 				a.PluginNavigation(c)
 			} else {
+				a.Sidebar.Terminal = ""
+				if t := a.panes.Active; t.Kind == panes.Terminal && a.HasWorkspaceTerminal(t.ID) {
+					a.Sidebar.Terminal = t.ID
+				}
 				sidebar.View(c, a.Sidebar)
 			}
 			a.accountFooter(c)

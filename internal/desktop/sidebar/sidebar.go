@@ -29,12 +29,15 @@ const (
 
 // State is the sidebar's part of the app state.
 type State struct {
-	Data              *viewmodel.Data
-	Actions           *Actions
-	Sample            Sample
-	Metrics           *Metrics
-	Selected          string // conversation ID
-	SelectedHost      string
+	Data         *viewmodel.Data
+	Actions      *Actions
+	Sample       Sample
+	Metrics      *Metrics
+	Selected     string // conversation ID
+	SelectedHost string
+	// Terminal is the project terminal the workspace shows, whose row is
+	// selected instead of a conversation's; the shell sets it.
+	Terminal          string
 	ImageStudioActive bool
 	OpenImageStudio   func()
 	Preview           bool
@@ -486,7 +489,7 @@ func (s *State) conversation(c *ui.Context, cv *preview.Conversation, kind rowKi
 		s.renameRow(c, cv)
 		return
 	}
-	selected := cv.ID == s.Selected
+	selected := s.Terminal == "" && cv.ID == s.Selected
 	title := Title(c, cv)
 	b := ui.ButtonBase(c.Key(cv.ID)).Label(title).Height(rowHeight).PaddingStart(indent).PaddingEnd(8).Gap(8).Radius(p.Radius)
 	hovered := b.Hovered()
