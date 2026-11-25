@@ -66,6 +66,8 @@ func View(c *ui.Context, s *State, pr *Project, keys Shortcut) {
 				pr.reveal = func(path string) { s.Show(Tab{Files, path}) }
 			}
 			pr.view(c, t.Kind, t.ID, own, func(path string) { s.Show(Tab{t.Kind, path}) })
+		case Trace:
+			s.traceView(c)
 		case History:
 			s.history(c)
 		case Documents:
@@ -115,6 +117,8 @@ func (s *State) confirmClose(c *ui.Context) {
 // look is a tab's icon and title.
 func (s *State) look(c *ui.Context, t Tab) (*ui.SVG, string) {
 	switch t.Kind {
+	case Trace:
+		return icons.Network, i18n.T(c, "trace_title")
 	case Artifact:
 		if f, ok := s.artifacts[t.ID]; ok {
 			return conversation.FileIcon(f), f.Name()

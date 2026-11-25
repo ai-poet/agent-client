@@ -2608,3 +2608,32 @@ gateway_node_unauthorized: 密钥被拒绝
 gateway_node_http: HTTP %{status}
 gateway_node_unreachable: 无法连通
 gateway_node_invalid_url: URL 无效
+trace_title: 请求轨迹
+trace_view: 查看轨迹
+trace_locate: 在会话中定位
+trace_export: 导出轨迹
+trace_export_saved: 轨迹已保存
+trace_export_limit: 轨迹超过 64 MiB，请缩小导出范围。
+trace_recording: 录制中
+trace_off: 录制已关闭
+trace_retries: 重试
+trace_miss: 缓存未命中
+trace_request: 请求
+trace_response: 响应
+trace_metrics: 用量与计时
+trace_cache_write: 缓存写入
+trace_equal: 等宽
+trace_actual: 实际时间
+trace_scope: 范围
+trace_turn: 选中轮次
+trace_mode: 模式
+trace_shareable: 可分享
+trace_raw: 原始
+trace_raw_confirm: 原始轨迹可能包含提示词、代码及私人会话内容。仍要导出？
+trace_partial: 内容不完整
+trace_load: 加载正文
+trace_events: 按事件拆分
+trace_private: 可能包含私人会话内容。
+trace_dispatch: 调度
+trace_sent: 请求已发送
+trace_gap: 最长间隔

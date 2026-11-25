@@ -2608,3 +2608,32 @@ gateway_node_unauthorized: Key refused
 gateway_node_http: HTTP %{status}
 gateway_node_unreachable: Unreachable
 gateway_node_invalid_url: Invalid URL
+trace_title: Trace des requêtes
+trace_view: Afficher la trace
+trace_locate: Repérer dans la conversation
+trace_export: Exporter la trace
+trace_export_saved: Trace enregistrée
+trace_export_limit: La trace dépasse 64 Mio. Réduisez la portée de l’export.
+trace_recording: Enregistrement en cours
+trace_off: Enregistrement désactivé
+trace_retries: Nouvelles tentatives
+trace_miss: Absences du cache
+trace_request: Requête
+trace_response: Réponse
+trace_metrics: Utilisation et délais
+trace_cache_write: Écriture en cache
+trace_equal: Largeur fixe
+trace_actual: Temps réel
+trace_scope: Portée
+trace_turn: Tour sélectionné
+trace_mode: Mode
+trace_shareable: Partageable
+trace_raw: Brut
+trace_raw_confirm: La trace brute peut contenir des consignes, du code et des échanges privés. Exporter quand même ?
+trace_partial: Capture partielle
+trace_load: Charger le corps
+trace_events: Séparer par événement
+trace_private: Peut contenir des échanges privés.
+trace_dispatch: Répartition
+trace_sent: Requête envoyée
+trace_gap: Intervalle maximal

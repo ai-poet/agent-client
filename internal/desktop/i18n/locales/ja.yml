@@ -2608,3 +2608,32 @@ gateway_node_unauthorized: Key refused
 gateway_node_http: HTTP %{status}
 gateway_node_unreachable: Unreachable
 gateway_node_invalid_url: Invalid URL
+trace_title: リクエストトレース
+trace_view: トレースを表示
+trace_locate: 会話内で表示
+trace_export: トレースを書き出す
+trace_export_saved: トレースを保存しました
+trace_export_limit: 64 MiB を超えています。書き出す範囲を絞ってください。
+trace_recording: 記録中
+trace_off: 記録オフ
+trace_retries: 再試行
+trace_miss: キャッシュミス
+trace_request: リクエスト
+trace_response: レスポンス
+trace_metrics: 使用量と時間
+trace_cache_write: キャッシュ書き込み
+trace_equal: 等幅
+trace_actual: 実時間
+trace_scope: 範囲
+trace_turn: 選択したターン
+trace_mode: モード
+trace_shareable: 共有用
+trace_raw: 生データ
+trace_raw_confirm: 生のトレースにはプロンプト、コード、非公開の会話が含まれる場合があります。書き出しますか？
+trace_partial: 一部のみ
+trace_load: 本文を読み込む
+trace_events: イベント別に表示
+trace_private: 非公開の会話内容を含む場合があります。
+trace_dispatch: ディスパッチ
+trace_sent: 送信完了
+trace_gap: 最大間隔
