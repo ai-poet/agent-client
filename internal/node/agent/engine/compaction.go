@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"slices"
 	"strings"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/output"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/prompt"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/tokens"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
@@ -556,16 +558,34 @@ func (r *Runtime) nativeCompaction(x *execution, binding model.Binding, route mo
 	compacted, err := try()
 	switch {
 	case err == nil:
+		nativeOutcome(binding, route, "native", nil)
 		return compacted, true, nil
 	case errors.Is(err, model.ErrNativeUnsupported):
 		r.nativeRejected.Store(key, true)
+		nativeOutcome(binding, route, "unsupported", err)
 	case errors.Is(err, model.ErrNativeUnusable):
+		nativeOutcome(binding, route, "unusable", err)
 	default:
+		nativeOutcome(binding, route, "failed", err)
 		if x.ctx.Err() != nil {
 			return model.Compacted{}, false, x.ctx.Err()
 		}
 	}
 	return model.Compacted{}, false, nil
+}
+
+func nativeOutcome(binding model.Binding, route model.Route, outcome string, err error) {
+	// The cache key includes the endpoint. Log only its protocol, not a URL
+	// or a provider response that could contain credentials or prompt text.
+	method, _, _ := strings.Cut(route.Native, "\x00")
+	attrs := []slog.Attr{slog.String("area", "agent"), slog.String("operation", "native_compaction"), slog.String("outcome", outcome),
+		slog.String("provider", binding.Provider.ID.String()), slog.String("method", method), slog.String("model", binding.Config.Model)}
+	level := slog.LevelInfo
+	if err != nil {
+		level = slog.LevelWarn
+		attrs = append(attrs, slog.String("reason", string(model.Classify(err).Kind)))
+	}
+	logging.Emit(level, attrs...)
 }
 
 // readableRecords opens opaque checkpoints back up to the original history.
