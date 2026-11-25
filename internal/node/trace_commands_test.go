@@ -144,3 +144,55 @@ func TestTraceArchiveAndInterruptedCleanup(t *testing.T) {
 		t.Fatalf("orphan retained: %v", err)
 	}
 }
+
+func TestTraceProfileControls(t *testing.T) {
+	node := nodeFixture(t)
+	settings := protocol.Command{Kind: "read_trace_settings"}
+	save := protocol.Command{Kind: "save_trace_settings", Data: protocol.TraceSettings{Enabled: true, GatewayEnabled: true}}
+	clear := protocol.Command{Kind: "clear_all_traces"}
+	if got := commandFixture(t, node, settings).Data.(protocol.TraceSettings); got != (protocol.TraceSettings{}) {
+		t.Fatalf("fresh settings: %+v", got)
+	}
+	ctx := t.Context()
+	peer := protocol.NodeID{72}
+	if err := node.profile.Store.Node.Write(ctx, func(db *sql.Conn) error {
+		// The first paired user is an administrator. Exercise a regular member.
+		if _, err := store.CreateUser(ctx, db, "Fixture admin"); err != nil {
+			return err
+		}
+		return store.PairLinkPeer(ctx, db, peer, link.DirectionController)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, cmd := range []protocol.Command{settings, save, clear} {
+		req := protocol.NewRequest(node.ID(), cmd)
+		if got := dispatchFixture(t, node, peer, req); got.Fault == nil || got.Fault.Code != protocol.ErrorCodePermissionDenied {
+			t.Fatalf("peer %s: %+v", cmd.Kind, got)
+		}
+		plugin := protocol.DefaultPluginContext()
+		req.Plugin = &plugin
+		if got := dispatchFixture(t, node, node.ID(), req); got.Fault == nil || got.Fault.Code != protocol.ErrorCodePermissionDenied {
+			t.Fatalf("plugin %s: %+v", cmd.Kind, got)
+		}
+	}
+	if got := commandFixture(t, node, save).Data.(protocol.TraceSettings); got.Revision != 1 || !node.profile.Store.Node.TraceEnabled() || !node.profile.Store.Node.TraceGatewayEnabled() {
+		t.Fatal(got)
+	}
+	if got := dispatchFixture(t, node, node.ID(), protocol.NewRequest(node.ID(), save)); got.Fault == nil || got.Fault.Code != protocol.ErrorCodeRevisionConflict {
+		t.Fatalf("stale save: %+v", got)
+	}
+	req := protocol.NewRequest(node.ID(), clear)
+	if got := dispatchFixture(t, node, node.ID(), req); got.Fault != nil || got.Output.Kind != "all_traces_cleared" {
+		t.Fatal(got)
+	}
+	dir := filepath.Join(node.profile.Ownership.Path, "traces", protocol.NewSessionID().String())
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if got := dispatchFixture(t, node, node.ID(), req); got.Fault != nil {
+		t.Fatal(got.Fault)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("replayed clear removed later traces: %v", err)
+	}
+}

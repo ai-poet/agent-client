@@ -70,6 +70,9 @@ func TestTraceSDKStream(t *testing.T) {
 						t.Fatalf("SDK result: output=%q attempt=%+v err=%v", output.String(), observed, err)
 					}
 					if mode == "disabled" {
+						if observed.Verdict == nil || observed.Verdict.Code != "normal" {
+							t.Fatalf("missing metadata-only diagnosis: %+v", observed.Verdict)
+						}
 						if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
 							t.Fatalf("disabled trace path: %v", err)
 						}

@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
 
@@ -23,15 +24,17 @@ const (
 )
 
 type Attempt struct {
-	RequestID      string
-	RequestStarted time.Time
-	Index          uint64
-	Started        time.Time
-	Finished       time.Time
-	Timing         canonical.Timing
-	FirstToken     *time.Time
-	Usage          canonical.Usage
-	Failure        *Failure
+	MaxGapUs, GapStartUs *uint64
+	Verdict              *protocol.TraceVerdict
+	RequestID            string
+	RequestStarted       time.Time
+	Index                uint64
+	Started              time.Time
+	Finished             time.Time
+	Timing               canonical.Timing
+	FirstToken           *time.Time
+	Usage                canonical.Usage
+	Failure              *Failure
 	// RetryLimit is the last resend allowed if the current failure streak continues.
 	RetryLimit uint64
 	// RetryDelay is the wait before the next attempt; nil on the last attempt.
@@ -115,6 +118,7 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 			}
 		}
 	}
+	var failureSequence []string
 	for index := uint64(0); ; index++ {
 		if err := ctx.Err(); err != nil {
 			return Classify(err)
@@ -130,6 +134,7 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 		var pending []fantasy.StreamPart
 		streamed, escaped, finished, released := false, false, false, false
 		if err == nil && stream != nil {
+			var lastOutput time.Time
 			for part := range stream {
 				attempt.Usage = mergeUsage(attempt.Usage, PartUsage(part))
 				if part.Type == fantasy.StreamPartTypeReasoningDelta && part.Delta != "" {
@@ -143,16 +148,26 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 				if metadata, ok := part.ProviderMetadata[responseMetadataKey].(*responseMetadata); ok {
 					attempt.Status = metadata.Status
 				}
-				firstOutput := attempt.FirstToken == nil && outputPart(part)
+				hasOutput := outputPart(part)
+				firstOutput := attempt.FirstToken == nil && hasOutput
 				if firstOutputTimer != nil && (firstOutput || part.Type == fantasy.StreamPartTypeFinish) {
 					if !firstOutputTimer.Stop() {
 						break
 					}
 					firstOutputTimer = nil
 				}
-				if firstOutput {
-					first := timer.Now()
-					attempt.FirstToken = &first
+				if hasOutput {
+					now := timer.Now()
+					if firstOutput {
+						attempt.FirstToken = &now
+					} else if !lastOutput.IsZero() {
+						gap := uint64(max(0, now.Sub(lastOutput).Microseconds()))
+						if attempt.MaxGapUs == nil || gap > *attempt.MaxGapUs {
+							start := uint64(max(0, lastOutput.Sub(attempt.Started).Microseconds()))
+							attempt.MaxGapUs, attempt.GapStartUs = &gap, &start
+						}
+					}
+					lastOutput = now
 				}
 				if part.Type == fantasy.StreamPartTypeError {
 					err = part.Error
@@ -217,7 +232,14 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 				}
 			}
 		}
-		attempt.finishTransport(err, secrets, capture)
+		if attempt.Failure != nil {
+			entry := string(attempt.Failure.Kind)
+			if attempt.Status != nil {
+				entry = fmt.Sprintf("%s/%d", entry, *attempt.Status)
+			}
+			failureSequence = append(failureSequence, entry)
+		}
+		attempt.finishTransport(err, secrets, capture, failureSequence)
 		if observe != nil {
 			if observationErr := observe(attempt); observationErr != nil {
 				return observationErr

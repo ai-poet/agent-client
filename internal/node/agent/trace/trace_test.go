@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -252,7 +253,11 @@ func TestTraceDiskCeilings(t *testing.T) {
 		a.Request(nil, content)
 		a.Finish(Facts{})
 		row := readFile(t, filepath.Join(base, "active", "trace.jsonl"))
-		if !bytes.Contains(row, []byte(`"req_truncated":true`)) {
+		if size == maxProfile {
+			if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) || !bytes.Contains(row, []byte(`"req_truncated":false`)) {
+				t.Fatalf("global eviction did not preserve new body: %s (%v)", row, err)
+			}
+		} else if !bytes.Contains(row, []byte(`"req_truncated":true`)) {
 			t.Fatalf("cap %d: %s", size, row)
 		}
 		used, err := diskUsage(base, filepath.Join(base, "active"))
@@ -276,4 +281,24 @@ func TestTraceBodyWriteFailureStillIndexesAttempt(t *testing.T) {
 	if !bytes.Contains(row, []byte(`"req_truncated":true`)) || bytes.Contains(row, []byte(`.req.gz`)) {
 		t.Fatalf("missing failed sidecar accounting: %s", row)
 	}
+}
+
+type sizes struct{ total, session int64 }
+
+func diskUsage(base, session string) (s sizes, err error) {
+	err = filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		i, err := d.Info()
+		if err != nil {
+			return err
+		}
+		s.total += i.Size()
+		if strings.HasPrefix(path, session+string(filepath.Separator)) {
+			s.session += i.Size()
+		}
+		return nil
+	})
+	return
 }

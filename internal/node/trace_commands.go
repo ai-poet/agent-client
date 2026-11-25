@@ -17,10 +17,18 @@ func (node *Node) readTrace(ctx context.Context, query protocol.TraceQuery) (pro
 	return protocol.Output{Kind: "trace", Data: page}, err
 }
 
-func (node *Node) clearTrace(job commandJob, err error) link.Response {
-	session := job.request.Command.Data.(*protocol.CommandReadSessionPayload).Session
-	if err == nil {
-		err = trace.Clear(node.profile.Ownership.Path, session.String())
+func (node *Node) applyTraceCommand(ctx context.Context, job commandJob, err error) link.Response {
+	if err != nil {
+		return response(protocol.Output{}, err)
 	}
+	switch job.request.Command.Kind {
+	case "save_trace_settings":
+		value, err := node.profile.Store.Node.SaveTraceSettings(ctx, *job.request.Command.Data.(*protocol.TraceSettings))
+		return response(protocol.Output{Kind: "trace_settings", Data: value}, err)
+	case "clear_all_traces":
+		return response(protocol.Output{Kind: "all_traces_cleared"}, trace.ClearAll(node.profile.Ownership.Path))
+	}
+	session := job.request.Command.Data.(*protocol.CommandReadSessionPayload).Session
+	err = trace.Clear(node.profile.Ownership.Path, session.String())
 	return response(protocol.Output{Kind: "trace_cleared", Data: session}, err)
 }

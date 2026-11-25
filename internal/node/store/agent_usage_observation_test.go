@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -76,7 +77,14 @@ func TestUsageObservationProjectionAndFilters(t *testing.T) {
 			return err
 		}
 		legacy := legacyOutput.Data.(protocol.UsageReport)
-		if len(legacy.Requests.Items) != 2 || legacy.Requests.Items[0].Tokens == nil || !reflect.DeepEqual(report.Totals, legacy.Totals) || !reflect.DeepEqual(report.Groups, legacy.Groups) || !reflect.DeepEqual(report.Days, legacy.Days) || !reflect.DeepEqual(report.Recent, legacy.Recent) {
+		billingGroups := slices.Clone(report.Groups)
+		for i := range billingGroups {
+			if billingGroups[i].Insights == nil {
+				t.Fatal("missing group insights")
+			}
+			billingGroups[i].Insights = nil
+		}
+		if len(legacy.Requests.Items) != 2 || legacy.Requests.Items[0].Tokens == nil || !reflect.DeepEqual(report.Totals, legacy.Totals) || !reflect.DeepEqual(billingGroups, legacy.Groups) || !reflect.DeepEqual(report.Days, legacy.Days) || !reflect.DeepEqual(report.Recent, legacy.Recent) {
 			t.Fatal("v2 observations changed legacy usage totals or billing rows")
 		}
 		old := report.Requests.Items[2]

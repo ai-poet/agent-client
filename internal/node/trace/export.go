@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	capture "github.com/ai-poet/cheaprouter-harness/internal/node/agent/trace"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
@@ -69,15 +70,16 @@ type bodyRef struct {
 	Body string `json:"body,omitempty"`
 }
 type row struct {
-	Version   int                `json:"v"`
-	Session   protocol.SessionID `json:"session"`
-	Turn      protocol.TurnID    `json:"turn"`
-	ID        string             `json:"request_id"`
-	Attempt   int                `json:"attempt"`
-	Timestamp int64              `json:"ts"`
-	Outcome   string             `json:"outcome"`
-	Status    int                `json:"status"`
-	Purpose   string             `json:"purpose,omitempty"`
+	Verdict   *protocol.TraceVerdict `json:"verdict,omitempty"`
+	Version   int                    `json:"v"`
+	Session   protocol.SessionID     `json:"session"`
+	Turn      protocol.TurnID        `json:"turn"`
+	ID        string                 `json:"request_id"`
+	Attempt   int                    `json:"attempt"`
+	Timestamp int64                  `json:"ts"`
+	Outcome   string                 `json:"outcome"`
+	Status    int                    `json:"status"`
+	Purpose   string                 `json:"purpose,omitempty"`
 	Failure   *struct {
 		Kind string `json:"kind"`
 	} `json:"failure,omitempty"`
@@ -118,6 +120,8 @@ func Export(ctx context.Context, profile string, q protocol.TraceExportQuery, w 
 	if q.Session == (protocol.SessionID{}) || (q.Mode != "raw" && q.Mode != "shareable") || (q.Scope != "all" && q.Scope != "failed" && q.Scope != "turn") || ((q.Scope == "turn") != (q.Turn != (protocol.TurnID{}))) {
 		return invalid("invalid trace export selection")
 	}
+	release := capture.ReadLease(profile, q.Session.String())
+	defer release()
 	fs, err := core.OpenFiles(profile, core.RestrictedFiles)
 	if err != nil {
 		return err
@@ -222,6 +226,7 @@ func Export(ctx context.Context, profile string, q protocol.TraceExportQuery, w 
 	if err = scanner.Err(); err != nil {
 		return err
 	}
+	release()
 	// Discover protected text throughout the selection before writing any entry:
 	// a later request can contain a prompt echoed by an earlier attempt.
 	scrub := secrets.replacer()
@@ -239,6 +244,22 @@ func Export(ctx context.Context, profile string, q protocol.TraceExportQuery, w 
 			var meta map[string]any
 			if !decodeJSON(line, &meta) {
 				return invalid("invalid trace metadata")
+			}
+			delete(meta, "segment_hashes_v1")
+			// Detail names can be derived from a protected skill list or tool
+			// schema; masking the original full prompt doesn't mask that fragment.
+			if verdict, ok := meta["verdict"].(map[string]any); ok {
+				if key, ok := verdict["cause_key"].(string); ok {
+					family, _, _ := strings.Cut(key, ":")
+					switch family {
+					case "skill", "tool-def", "tool-call", "tool-result", "message":
+						cause := family
+						if strings.HasSuffix(key, ":volatile") {
+							cause += ":volatile"
+						}
+						verdict["cause_key"], meta["cause_key"] = cause, cause
+					}
+				}
 			}
 			meta = cleanJSON(meta, scrub).(map[string]any)
 			for _, v := range []struct{ key, ref string }{{"request", r.Request.Body}, {"response", r.Response.Body}} {

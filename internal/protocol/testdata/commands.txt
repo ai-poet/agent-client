@@ -157,6 +157,9 @@ read_activity
 read_trace
 export_trace
 clear_trace
+clear_all_traces
+read_trace_settings
+save_trace_settings
 read_turn_capture
 read_turn
 read_tool_detail

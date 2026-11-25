@@ -18,7 +18,7 @@ func (r *Runtime) scopeTrace(call *fantasy.Call, language fantasy.LanguageModel,
 	if call.ProviderOptions == nil {
 		call.ProviderOptions = fantasy.ProviderOptions{}
 	}
-	scope := &trace.Scope{Profile: r.profile, Session: x.inv.Session.ID.String(), Turn: x.inv.Run.Turn.String(), Purpose: string(purpose), Provider: provider, Enabled: r.db.TraceEnabled}
+	scope := &trace.Scope{Profile: r.profile, Session: x.inv.Session.ID.String(), Turn: x.inv.Run.Turn.String(), Purpose: string(purpose), Provider: provider, Enabled: r.db.TraceEnabled, GatewayEnabled: r.db.TraceGatewayEnabled}
 	call.ProviderOptions[trace.ProviderKey] = scope
 	return scope
 }

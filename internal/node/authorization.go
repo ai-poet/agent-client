@@ -66,7 +66,7 @@ var commandPolicies = func() map[string]accessPolicy {
 	add(accessManageProject, `update_project remove_project`)
 	add(accessPersonal, accessPersonalCommands)
 	add(accessCollection, `snapshot read_project_catalog read_resource_catalog read_activity_catalog list_associated_sessions read_usage read_usage_v2`)
-	add(accessMachine, `browse_files manage_files read_power_settings save_power_settings read_telemetry_settings save_telemetry_settings reset_telemetry_identity send_diagnostics report_diagnostic read_network_settings save_network_settings probe_network list_network_presets read_sandbox_settings save_sandbox_settings read_python_settings save_python_settings list_backups read_backup_settings save_backup_settings export_backup restore_backup restore_backup_file upload_backup download_backup inspect_host read_host_metrics stop_host_process install_host read_host_install install_wsl_host read_wsl_host_install cancel_wsl_host_install list_wsl_distributions read_computer_permissions request_computer_permission decide`)
+	add(accessMachine, `read_trace_settings save_trace_settings clear_all_traces browse_files manage_files read_power_settings save_power_settings read_telemetry_settings save_telemetry_settings reset_telemetry_identity send_diagnostics report_diagnostic read_network_settings save_network_settings probe_network list_network_presets read_sandbox_settings save_sandbox_settings read_python_settings save_python_settings list_backups read_backup_settings save_backup_settings export_backup restore_backup restore_backup_file upload_backup download_backup inspect_host read_host_metrics stop_host_process install_host read_host_install install_wsl_host read_wsl_host_install cancel_wsl_host_install list_wsl_distributions read_computer_permissions request_computer_permission decide`)
 	add(accessDevice, `inspect_request count_feature synthesize_speech complete_browser read_installations dismiss_installation cancel_port cancel_file_transfer finish_file_upload finish_attachment_upload cancel_web_fetch cancel_web_search cancel_code_index_query`)
 	add(accessResource, accessResourceCommands)
 	return values
@@ -117,7 +117,7 @@ func (node *Node) authorizeCommand(ctx context.Context, caller protocol.NodeID, 
 }
 
 func (node *Node) authorizeCommandDB(ctx context.Context, db *sql.Conn, caller protocol.NodeID, request protocol.Request) error {
-	if request.Plugin != nil && (request.Command.Kind == "export_trace" || request.Command.Kind == "read_trace" || request.Command.Kind == "clear_trace" || request.Command.Kind == "read_usage_v2") {
+	if request.Plugin != nil && (request.Command.Kind == "export_trace" || request.Command.Kind == "read_trace" || request.Command.Kind == "clear_trace" || request.Command.Kind == "clear_all_traces" || request.Command.Kind == "read_trace_settings" || request.Command.Kind == "save_trace_settings" || request.Command.Kind == "read_usage_v2") {
 		return permissionDenied()
 	}
 	policy, ok := commandPolicies[request.Command.Kind]

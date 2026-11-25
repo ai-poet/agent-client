@@ -141,6 +141,7 @@ func (transport responseTransport) RoundTrip(request *http.Request) (*http.Respo
 			return nil, err
 		}
 		if capture := capturePrepared(request.Context(), raw, true); capture != nil && capture.trace != nil {
+			request = capture.trace.GatewayRequest(request)
 			capture.trace.Request(request.Header, raw)
 		}
 	}

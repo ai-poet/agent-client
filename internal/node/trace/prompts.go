@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	capture "github.com/ai-poet/cheaprouter-harness/internal/node/agent/trace"
 )
 
 func marker(label string, b []byte) string {
@@ -78,6 +80,14 @@ func (p promptSet) replacer() *echoes {
 	return &echoes{direct, strings.NewReplacer(pairs...)}
 }
 
+func promptField(k string) bool {
+	switch k {
+	case "text", "type", "parts", "role", "cache_control", "content":
+		return true
+	}
+	return false
+}
+
 func structural(key string, v any) bool {
 	value, _ := v.(string)
 	switch key {
@@ -103,6 +113,11 @@ func (p promptSet) collect(v any) error {
 		}
 	case map[string]any:
 		for k, val := range x {
+			if !promptField(k) {
+				if err := p.collect(k); err != nil {
+					return err
+				}
+			}
 			// Provider block discriminators are structure, not instruction text.
 			if structural(k, val) {
 				continue
@@ -125,6 +140,30 @@ var separators = strings.NewReplacer("_", "", "-", "")
 
 func normalized(s string) string { return strings.ToLower(separators.Replace(s)) }
 
+// Tool names and enum values remain useful outside definitions. Instructions
+// in tool descriptions, on the other hand, can be quoted by provider errors.
+func (p promptSet) collectToolDescriptions(v any) error {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, val := range x {
+			if strings.EqualFold(k, "description") {
+				if err := p.collect(val); err != nil {
+					return err
+				}
+			} else if err := p.collectToolDescriptions(val); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, val := range x {
+			if err := p.collectToolDescriptions(val); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // Preserve provider content-block framing, fingerprinting decoded text rather
 // than its JSON spelling. Unrecognized protected blocks are masked wholesale.
 func protect(v any, label string) any {
@@ -139,6 +178,12 @@ func protect(v any, label string) any {
 			}
 			return x
 		case map[string]any:
+			for k := range x {
+				if !promptField(k) {
+					data, _ := json.Marshal(x)
+					return marker(label, data)
+				}
+			}
 			for k, val := range x {
 				if structural(k, val) {
 					continue
@@ -189,9 +234,9 @@ func (p promptSet) request(body []byte) ([]byte, bool, error) {
 			for k, val := range x {
 				label := ""
 				switch normalized(k) {
-				case "system", "instructions", "systeminstruction", "systeminstructions", "systemprompt", "developerinstructions":
+				case "system", "instructions", "systeminstruction", "systeminstructions", "systemprompt", "developerinstructions", "developerprompt", "preamble":
 					label = "system prompt"
-				case "tools", "functions", "functiondeclarations":
+				case "tools", "functions", "functiondeclarations", "toolspec", "tooldefinitions":
 					label = "tool schemas"
 				default:
 					if protected && k != "role" {
@@ -205,6 +250,8 @@ func (p promptSet) request(body []byte) ([]byte, bool, error) {
 						if err := p.collect(val); err != nil {
 							return err
 						}
+					} else if err := p.collectToolDescriptions(val); err != nil {
+						return err
 					}
 					x[k] = protect(val, label)
 				} else if err := visit(val); err != nil {
@@ -244,11 +291,13 @@ func cleanJSON(v any, s *echoes) any {
 
 // Keep provider JSON and SSE evidence, not gzip headers or uninterpretable binary.
 func safeEvidence(b []byte, s *echoes) []byte {
-	trim := bytes.TrimSpace(b)
-	if !utf8.Valid(b) {
+	safe, ok := capture.SanitizeBody(b, "", nil)
+	if !ok {
 		return []byte(marker("body omitted", b))
 	}
-	if bytes.HasPrefix(trim, []byte("{")) || bytes.HasPrefix(trim, []byte("[")) {
+	b = safe
+	trim := bytes.TrimSpace(b)
+	if bytes.HasPrefix(trim, []byte("{")) || bytes.HasPrefix(trim, []byte("[")) || bytes.HasPrefix(trim, []byte(`"`)) {
 		var v any
 		if decodeJSON(b, &v) {
 			out, _ := json.Marshal(cleanJSON(v, s))

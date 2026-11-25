@@ -12,7 +12,7 @@ import (
 
 const mask = "[REDACTED]"
 
-var credentialShape = regexp.MustCompile(`(?is)-----BEGIN [A-Z0-9 -]+-----.*?(?:-----END [A-Z0-9 -]+-----|$)|\bBearer[ \t]+[^\s,;"']+|\b(?:sk-|ghp_|AKIA)[a-zA-Z0-9_./+=-]+`)
+var credentialShape = regexp.MustCompile(`(?is)-----BEGIN [A-Z0-9 -]+-----.*?(?:-----END [A-Z0-9 -]+-----|$)|\b(?:Bearer|Basic)[ \t]+[^\s,;"']+|\b(?:sk-|gh[pousr]_|github_pat_|glpat-|xox[baprs]-|AKIA|ASIA|AIza|ya29\.|hf_|npm_)[a-zA-Z0-9_./+=-]+|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`)
 var assignment = regexp.MustCompile(`(?i)\b(api[_-]?key|authorization|(?:access_|refresh_)?token|secret|password|cookie|session)["']?\s*[:=]\s*[^\r\n]+`)
 
 func scrub(s string, secrets []string) string {
@@ -21,7 +21,13 @@ func scrub(s string, secrets []string) string {
 			s = strings.ReplaceAll(s, v, mask)
 		}
 	}
-	return credentialShape.ReplaceAllString(s, mask)
+	return assignment.ReplaceAllString(credentialShape.ReplaceAllString(s, mask), "$1="+mask)
+}
+
+// CredentialShaped is also used by the observation ledger, which can exist
+// without private capture and must never retain a credential as a gateway ID.
+func CredentialShaped(s string) bool {
+	return credentialShape.MatchString(s) || assignment.MatchString(s)
 }
 
 func keySensitive(key string) bool {
@@ -36,7 +42,7 @@ func keySensitive(key string) bool {
 		}
 	}
 	switch k {
-	case "accesstoken", "refreshtoken", "clientsecret", "sessiontoken":
+	case "accesstoken", "refreshtoken", "idtoken", "clientsecret", "sessiontoken", "privatekey", "private_key", "proxy_authorization", "set_cookie", "secretaccesskey", "secret_access_key", "x_goog_api_key":
 		return true
 	}
 	return false
@@ -68,10 +74,11 @@ func headers(h http.Header, secrets []string) headerSnapshot {
 // JSON is already validated. Splice replacements into the original rather than
 // serializing decoded objects: ordering, number spellings and whitespace are evidence.
 type jsonEditor struct {
-	p       []byte
-	i, last int
-	out     bytes.Buffer
-	secrets []string
+	p        []byte
+	i, last  int
+	out      bytes.Buffer
+	secrets  []string
+	channels map[string]*strings.Builder
 }
 
 func (e *jsonEditor) space() {
@@ -105,7 +112,7 @@ func (e *jsonEditor) replace(start int, v string) {
 	}
 	e.last = e.i
 }
-func (e *jsonEditor) value(edit, hide bool) {
+func (e *jsonEditor) value(edit, hide bool, key string) {
 	e.space()
 	start := e.i
 	inside := edit && !hide
@@ -116,12 +123,14 @@ func (e *jsonEditor) value(edit, hide bool) {
 		for e.p[e.i] != '}' {
 			kStart := e.i
 			k := e.str()
-			if v := scrub(k, e.secrets); inside && v != k {
-				e.replace(kStart, v)
+			if inside {
+				if v := scrub(k, e.secrets); v != k {
+					e.replace(kStart, v)
+				}
 			}
 			e.space()
 			e.i++
-			e.value(inside, keySensitive(k))
+			e.value(inside, keySensitive(k), k)
 			e.space()
 			if e.p[e.i] != ',' {
 				break
@@ -134,7 +143,7 @@ func (e *jsonEditor) value(edit, hide bool) {
 		e.i++
 		e.space()
 		for e.p[e.i] != ']' {
-			e.value(inside, false)
+			e.value(inside, false, key)
 			e.space()
 			if e.p[e.i] != ',' {
 				break
@@ -146,8 +155,20 @@ func (e *jsonEditor) value(edit, hide bool) {
 	case '"':
 		v := e.str()
 		if inside {
-			if safe := scrub(v, e.secrets); safe != v {
+			safe := scrub(v, e.secrets)
+			if safe != v {
 				e.replace(start, safe)
+			}
+			if e.channels != nil {
+				switch key {
+				case "content", "text", "delta", "thinking", "arguments", "partial_json", "output_text", "reasoning_content":
+					b := e.channels[key]
+					if b == nil {
+						b = new(strings.Builder)
+						e.channels[key] = b
+					}
+					b.WriteString(safe)
+				}
 			}
 		}
 	default:
@@ -163,13 +184,27 @@ func (e *jsonEditor) value(edit, hide bool) {
 	}
 }
 func redactJSON(p []byte, secrets []string) []byte {
-	e := jsonEditor{p: p, secrets: secrets}
-	e.value(true, false)
+	return editJSON(p, secrets, nil)
+}
+
+func editJSON(p []byte, secrets []string, channels map[string]*strings.Builder) []byte {
+	e := jsonEditor{p: p, secrets: secrets, channels: channels}
+	e.value(true, false, "")
 	if e.last == 0 {
 		return p
 	}
 	e.out.Write(p[e.last:])
 	return e.out.Bytes()
+}
+
+// SanitizeBody applies the current credential policy to both new captures
+// and historical evidence being prepared for sharing.
+func SanitizeBody(p []byte, contentType string, secrets []string) ([]byte, bool) {
+	ct := strings.ToLower(contentType)
+	if strings.HasPrefix(ct, "text/event-stream") || bytes.HasPrefix(bytes.TrimSpace(p), []byte("data:")) || bytes.Contains(p, []byte("\ndata:")) || bytes.Contains(p, []byte("\rdata:")) {
+		return redactSSE(p, secrets)
+	}
+	return payload(p, secrets)
 }
 
 func payload(p []byte, secrets []string) ([]byte, bool) {
@@ -183,7 +218,7 @@ func payload(p []byte, secrets []string) ([]byte, bool) {
 	if len(t) > 0 && (t[0] == '{' || t[0] == '[' || t[0] == '"') && !bytes.Equal(t, []byte("[DONE]")) {
 		return nil, false
 	}
-	return []byte(assignment.ReplaceAllString(scrub(string(p), secrets), "$1="+mask)), true
+	return []byte(scrub(string(p), secrets)), true
 }
 
 // Multiple data fields in one SSE event are one payload joined by LF. Walk
@@ -193,6 +228,7 @@ func redactSSE(p []byte, secrets []string) ([]byte, bool) {
 		return nil, false
 	}
 	var out, joined bytes.Buffer
+	channels := map[string]*strings.Builder{}
 	for len(p) > 0 {
 		event := p
 		joined.Reset()
@@ -215,7 +251,11 @@ func redactSSE(p []byte, secrets []string) ([]byte, bool) {
 		var safe []byte
 		if count > 0 {
 			var ok bool
-			safe, ok = payload(joined.Bytes(), secrets)
+			if p := joined.Bytes(); utf8.Valid(p) && json.Valid(p) {
+				safe, ok = editJSON(p, secrets, channels), true
+			} else {
+				safe, ok = payload(joined.Bytes(), secrets)
+			}
 			if !ok || bytes.Count(safe, []byte("\n")) != count-1 {
 				return nil, false
 			}
@@ -234,12 +274,20 @@ func redactSSE(p []byte, secrets []string) ([]byte, bool) {
 				if bytes.Contains(line, []byte("-----BEGIN ")) {
 					return nil, false
 				}
-				out.WriteString(assignment.ReplaceAllString(scrub(string(line), secrets), "$1="+mask))
+				out.WriteString(scrub(string(line), secrets))
 			}
 			out.Write(end)
 			if out.Len() > maxBody {
 				return nil, false
 			}
+		}
+	}
+	// A provider can split a credential across valid JSON delta frames.
+	// No single frame was unsafe, but their concatenated text may be. Do
+	// not retain reconstructible fragments when that happens.
+	for _, b := range channels {
+		if v := b.String(); scrub(v, secrets) != v {
+			return nil, false
 		}
 	}
 	return out.Bytes(), true

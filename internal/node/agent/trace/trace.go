@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 )
 
@@ -25,6 +26,7 @@ type Scope struct {
 	Profile, Session, Turn, Purpose string
 	Record                          string // Current assistant draft, if one exists.
 	Enabled                         func() bool
+	GatewayEnabled                  func() bool
 	Provider                        Provider
 }
 
@@ -39,6 +41,8 @@ type Provider struct {
 }
 
 type Facts struct {
+	Round                              *Round
+	Verdict                            *Verdict
 	StartedMs                          int64
 	Outcome, EndKind, GatewayRequestID string
 	Status                             int
@@ -48,15 +52,17 @@ type Facts struct {
 }
 
 type Attempt struct {
-	mu       sync.Mutex
-	scope    Scope
-	request  string
-	index    int
-	secrets  []string
-	done     bool
-	req, res capture
-	status   int
-	encoding string
+	segments    []segment
+	fingerprint string
+	mu          sync.Mutex
+	scope       Scope
+	request     string
+	index       int
+	secrets     []string
+	done        bool
+	req, res    capture
+	status      int
+	encoding    string
 }
 
 type capture struct {
@@ -95,7 +101,7 @@ func (c *capture) digest() string {
 // Clear and publication share the admission lock. In-flight attempts invalidated by
 // Clear cannot recreate the directory, even when they finish after a new Begin.
 var publication = struct {
-	sync.Mutex
+	sync.RWMutex
 	active map[*Attempt]bool
 }{active: make(map[*Attempt]bool)}
 
@@ -128,6 +134,26 @@ func (a *Attempt) Request(h http.Header, p []byte) {
 	if a.done {
 		return
 	}
+	// Capture the actual transport credentials as well as configuration
+	// secrets: a protocol adapter may have substituted a per-request token.
+	for k, values := range h {
+		if !keySensitive(k) {
+			continue
+		}
+		for _, value := range values {
+			a.secrets = append(a.secrets, value)
+			if strings.EqualFold(k, "Authorization") || strings.EqualFold(k, "Proxy-Authorization") {
+				if _, token, ok := strings.Cut(value, " "); ok {
+					a.secrets = append(a.secrets, strings.TrimSpace(token))
+				}
+			}
+		}
+	}
+	for _, cookie := range (&http.Request{Header: h}).Cookies() {
+		a.secrets = append(a.secrets, cookie.Value)
+	}
+	slices.SortFunc(a.secrets, func(a, b string) int { return len(b) - len(a) })
+	a.secrets = slices.Compact(a.secrets)
 	a.req = capture{headers: headers(h, a.secrets), seen: true}
 	a.req.add(p)
 }
@@ -185,7 +211,7 @@ func (a *Attempt) Finish(f Facts) {
 	a.done = true
 	a.mu.Unlock()
 
-	defer func() { a.req.data = nil; a.res.data = nil; a.secrets = nil }()
+	defer func() { a.req.data = nil; a.res.data = nil; a.secrets = nil; a.segments = nil; a.fingerprint = "" }()
 	// Compress outside the filesystem lock; transport readers are already detached.
 	req := a.prepare(&a.req, false)
 	res := a.prepare(&a.res, true)
@@ -201,6 +227,9 @@ func (a *Attempt) Finish(f Facts) {
 	}
 	delete(publication.active, a)
 	if a.scope.Enabled != nil && !a.scope.Enabled() {
+		return
+	}
+	if scrub(a.scope.Session, a.secrets) != a.scope.Session || scrub(a.request, a.secrets) != a.request {
 		return
 	}
 	a.publish(f, req, res, maxSession, maxProfile, maxRounds)

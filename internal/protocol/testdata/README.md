@@ -40,7 +40,8 @@ including the explicit `set_session_team` rename of `SetSessionExecution`: the
 (`put_credential`, `revoke_credential`, `set_defaults`,
 `bind_connection_session`, `validate_provider`, `read_catalog_status`,
 `read_file_checkpoint`). The fixture also includes two plugin version operations
-and four controller trace operations: `export_trace`, `read_trace`, `clear_trace`, and
+and the controller trace operations `read_trace_settings`, `save_trace_settings`,
+`clear_all_traces`, `export_trace`, `read_trace`, `clear_trace`, and
 `read_usage_v2` (observation-aware requests, with the same billing totals).
 The Go v1 inventory appends the documented `apply_git_hunk` extension for native
 working-tree review, `synthesize_speech` for read-aloud, `count_feature` for

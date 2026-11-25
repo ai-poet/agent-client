@@ -623,7 +623,7 @@ func externalCommand(command protocol.Command) bool {
 		return true
 	}
 	switch command.Kind {
-	case "clear_trace":
+	case "clear_trace", "clear_all_traces", "save_trace_settings":
 		return true
 	case "configuration_follow":
 		// Applying a manifest updates plugin lifecycles after its transaction.
@@ -652,7 +652,7 @@ func supportedCommand(kind string) bool {
 		return true
 	}
 	switch kind {
-	case "read_trace", "export_trace", "clear_trace", "snapshot", "inspect_request", "read_session", "list_associated_sessions", "read_power_settings", "read_telemetry_settings", "read_plugin_version", "read_activity_catalog", "read_activity",
+	case "read_trace_settings", "save_trace_settings", "clear_all_traces", "read_trace", "export_trace", "clear_trace", "snapshot", "inspect_request", "read_session", "list_associated_sessions", "read_power_settings", "read_telemetry_settings", "read_plugin_version", "read_activity_catalog", "read_activity",
 		"read_media_settings", "list_media_models":
 		return true
 	case "register_project", "report_diagnostic", "save_media_settings":
@@ -750,6 +750,10 @@ func (node *Node) read(ctx context.Context, caller protocol.NodeID, request prot
 			value, err := store.ListAssociatedSessions(ctx, db, request)
 			output = protocol.Output{Kind: "associated_sessions", Data: value}
 			return err
+		case "read_trace_settings":
+			value, err := store.ReadTraceSettings(ctx, db)
+			output = protocol.Output{Kind: "trace_settings", Data: value}
+			return err
 		case "read_power_settings":
 			value, err := store.ReadPower(ctx, db)
 			output = protocol.Output{Kind: "power_settings", Data: value}
@@ -813,8 +817,9 @@ func (node *Node) run(lane *commandLane) {
 		prepareErr := node.profile.Store.Node.Read(ctx, func(db *sql.Conn) error {
 			return node.authorizeCommandDB(ctx, db, job.caller, job.request)
 		})
-		if job.request.Command.Kind == "clear_trace" {
-			result := node.clearTrace(job, prepareErr)
+		switch job.request.Command.Kind {
+		case "clear_trace", "clear_all_traces", "save_trace_settings":
+			result := node.applyTraceCommand(ctx, job, prepareErr)
 			job.completion <- node.settle(job.caller, job.request.ID, result)
 			close(job.completion)
 			continue

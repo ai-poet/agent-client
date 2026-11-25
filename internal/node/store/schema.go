@@ -81,11 +81,12 @@ func Open(ctx context.Context, profile string, node protocol.NodeID) (_ *Store, 
 		if err := definition.initialize(ctx, connection, node); err != nil {
 			return err
 		}
-		var enabled bool
-		if err := connection.QueryRowContext(ctx, "SELECT trace_enabled FROM node WHERE singleton=1").Scan(&enabled); err != nil {
+		value, err := ReadTraceSettings(ctx, connection)
+		if err != nil {
 			return err
 		}
-		handle.traceEnabled.Store(enabled)
+		handle.traceEnabled.Store(value.Enabled)
+		handle.traceGatewayEnabled.Store(value.GatewayEnabled)
 		return nil
 	}); err != nil {
 		return nil, err

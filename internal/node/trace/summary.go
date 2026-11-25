@@ -22,6 +22,13 @@ func safeFailure(s string) string {
 // Report only captured evidence. An HTTP status or missing usage isn't proof of
 // a particular upstream account, cache eviction, or unreported token loss.
 func conclusion(r row) string {
+	if r.Verdict != nil {
+		// Never project arbitrary index strings into the Markdown report.
+		switch r.Verdict.Code {
+		case "normal", "cancelled", "quota", "context_overflow", "authentication", "rate_limited", "unavailable", "invalid_response", "network", "invalid_request", "failed", "slow_first", "slow_output", "no_usage", "prefix_broken", "cache_miss", "cache_partial":
+			return r.Verdict.Code
+		}
+	}
 	if r.failed() {
 		if r.Failure != nil {
 			return safeFailure(r.Failure.Kind)
@@ -47,6 +54,7 @@ func summary(rows []row) []byte {
 	turns := map[protocol.TurnID]*turn{}
 	var order []protocol.TurnID
 	dist := map[string]int{}
+	lost := map[string]uint64{}
 	var failures strings.Builder
 	var times []uint64
 	failed, retries, succeeded := 0, 0, 0
@@ -67,6 +75,9 @@ func summary(rows []row) []byte {
 		}
 		label := conclusion(r)
 		dist[label]++
+		if r.Verdict != nil {
+			lost[label] += r.Verdict.LostTokens
+		}
 		if r.failed() {
 			failed++
 			t.failed++
@@ -83,7 +94,7 @@ func summary(rows []row) []byte {
 	fmt.Fprintf(&b, "# Request trace\n\n## KPIs\n\nAttempts: %d; successful: %d; failed: %d; retry attempts: %d.\n\nFirst-token p50 (us): %s (%d samples).\n\n", len(rows), succeeded, failed, retries, p50(times), len(times))
 	b.WriteString("## Conclusion distribution\n\n")
 	for _, s := range slices.Sorted(maps.Keys(dist)) {
-		fmt.Fprintf(&b, "- %s: %d\n", s, dist[s])
+		fmt.Fprintf(&b, "- %s: %d; estimated lost tokens: %d\n", s, dist[s], lost[s])
 	}
 	b.WriteString("\n## Turns\n\n| Turn | Attempts | Failed | Retry attempts | Elapsed p50 (us) |\n|---|---:|---:|---:|---:|\n")
 	for _, id := range order {

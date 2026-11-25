@@ -21,13 +21,14 @@ const allLeases = math.MaxInt64
 
 // Handle owns one file's writer and its independent read-only connection pool.
 type Handle struct {
-	path            string
-	leases          *semaphore.Weighted
-	mu              sync.Mutex
-	state           *connections
-	stopped         bool
-	traceEnabled    atomic.Bool
-	traceSettingsMu sync.Mutex
+	path                string
+	leases              *semaphore.Weighted
+	mu                  sync.Mutex
+	state               *connections
+	stopped             bool
+	traceEnabled        atomic.Bool
+	traceGatewayEnabled atomic.Bool
+	traceSettingsMu     sync.Mutex
 }
 
 type connections struct {

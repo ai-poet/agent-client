@@ -24,7 +24,7 @@ func TestTraceSettingPersists(t *testing.T) {
 
 func TestTraceSchemaUpgrade(t *testing.T) {
 	profile, node, old := schemaFixture(t)
-	schemaExecute(t, old.Node, "DROP INDEX agent_execution_timing; DROP INDEX agent_observation_outcome; ALTER TABLE node DROP COLUMN trace_enabled")
+	schemaExecute(t, old.Node, "DROP INDEX agent_execution_timing; DROP INDEX agent_observation_outcome; ALTER TABLE node DROP COLUMN trace_enabled; ALTER TABLE node DROP COLUMN trace_gateway_enabled; ALTER TABLE node DROP COLUMN trace_revision")
 	if err := old.Close(); err != nil {
 		t.Fatal(err)
 	}

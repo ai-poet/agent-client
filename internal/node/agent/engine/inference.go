@@ -475,6 +475,7 @@ func (r *Runtime) observationRecord(x *execution, binding model.Binding, purpose
 	observation.Model = binding.Config.Model
 	observation.TimestampMs = attempt.RequestStarted.UnixMilli()
 	observed := protocol.DefaultConversationObservationAttempt()
+	observed.Verdict = attempt.Verdict
 	observed.Index = attempt.Index + 1
 	observed.Transport = "http"
 	observed.HeadersUs, observed.ResponseUs = attempt.ResponseUs, attempt.ResponseUs
@@ -487,9 +488,12 @@ func (r *Runtime) observationRecord(x *execution, binding model.Binding, purpose
 	observed.CacheWrite = attempt.Usage.CacheWrite
 	observed.EndKind = attempt.EndKind
 	observed.GatewayRequestID = attempt.GatewayRequestID
-	if attempt.RetryDelay != nil && attempt.Failure != nil {
-		reason := string(attempt.Failure.Kind)
-		observed.RetryReason = &reason
+	if attempt.Failure != nil {
+		kind := string(attempt.Failure.Kind)
+		observed.FailureKind = &kind
+		if attempt.RetryDelay != nil {
+			observed.RetryReason = &kind
+		}
 	}
 	observed.Outcome = attempt.Outcome()
 	if attempt.Usage.Input != nil && attempt.Usage.Output != nil {

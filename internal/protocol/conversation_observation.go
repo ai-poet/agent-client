@@ -138,6 +138,8 @@ func (value ConversationObservationRequest) MarshalJSON() ([]byte, error) {
 }
 
 type ConversationObservationAttempt struct {
+	Verdict          *TraceVerdict                   `json:"verdict,omitempty"`
+	FailureKind      *string                         `json:"failure_kind,omitempty"`
 	CacheWrite       *uint64                         `json:"cache_write,omitempty"`
 	EndKind          *ConversationObservationEndKind `json:"end_kind,omitempty"`
 	GatewayRequestID *string                         `json:"gateway_request_id,omitempty"`

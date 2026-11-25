@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/trace"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
@@ -49,6 +50,8 @@ func ReadTrace(ctx context.Context, profile string, query protocol.TraceQuery) (
 	} else if query.Limit > 100 {
 		return page, invalid("trace page limit exceeds 100")
 	}
+	release := trace.ReadLease(profile, query.Session.String())
+	defer release()
 	files, err := core.OpenFiles(profile, core.RestrictedFiles)
 	if err != nil {
 		return page, err

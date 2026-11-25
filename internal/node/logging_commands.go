@@ -71,7 +71,7 @@ var transientCommands = func() map[string]observation {
 			"request_provider_http", "discover_models", "list_associated_sessions", "read_usage", "read_usage_v2", "read_activity",
 			"search_conversation", "list_conversation_assets", "list_file_checkpoints", "read_turn_diff", "read_turn_hunks",
 			"read_queued_turn", "list_terminals", "list_terminal_tools", "list_commands", "read_command", "read_terminal_settings",
-			"read_power_settings", "read_telemetry_settings", "send_diagnostics", "read_network_settings", "list_network_presets", "probe_network",
+			"read_trace_settings", "read_power_settings", "read_telemetry_settings", "send_diagnostics", "read_network_settings", "list_network_presets", "probe_network",
 			"read_sandbox_settings", "read_search_settings", "read_backup_settings", "list_backups", "read_python_settings", "read_installations",
 			"decide", "list_shells", "read_plugin_secret",
 			"list_media_models", "read_media_settings", "synthesize_speech", "search_models", "read_model_versions", "resolve_model", "query_knowledge",

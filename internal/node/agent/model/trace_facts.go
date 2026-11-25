@@ -92,17 +92,37 @@ func (a Attempt) endKind(err error) protocol.ConversationObservationEndKind {
 
 // The ledger and private trace both project this completed attempt, including
 // its retry decision. Do not parse usage or time the stream again in the sink.
-func (a *Attempt) finishTransport(err error, secrets []protocol.Secret, c *attemptCapture) {
+func (a *Attempt) finishTransport(err error, secrets []protocol.Secret, c *attemptCapture, sequence []string) {
 	end := a.endKind(err)
 	a.EndKind = &end
 	id := c.gatewayID
 	if id != "" {
 		// Only retain an opaque identifier, never a credential echoed by a gateway.
-		if strings.ContainsAny(id, " \r\n\t") || strings.Contains(id, "sk-") || strings.Contains(id, "ghp_") || strings.Contains(id, "AKIA") || safeDiagnostic(id, secrets) != id {
+		if strings.ContainsAny(id, " \r\n\t") || trace.CredentialShaped(id) || safeDiagnostic(id, secrets) != id {
 			id = "[redacted]"
 		}
 		a.GatewayRequestID = &id
 	}
+	u := a.Usage
+	round := trace.Round{StartedMs: a.Started.UnixMilli(), Outcome: string(a.Outcome()), End: string(end), Gateway: id, FirstUs: a.Timing.FirstTokenUs, ElapsedUs: a.Timing.ElapsedUs, Input: u.Input, Output: u.Output, Read: u.CacheRead, HasUsage: u.Input != nil || u.Output != nil || u.Total != nil || u.CacheRead != nil || u.CacheWrite != nil || u.Reasoning != nil, RetrySequence: sequence}
+	if a.Status != nil {
+		round.Status = int(*a.Status)
+	}
+	round.MaxGapUs, round.GapStartUs = a.MaxGapUs, a.GapStartUs
+	if a.Failure != nil {
+		round.Failure = string(a.Failure.Kind)
+		round.DialTimeout = a.Failure.tcpDialTimeout
+		if delay := retryHint(a.Failure, a.Finished); delay > 0 {
+			ms := uint64(delay.Milliseconds())
+			round.RetryAfterMs = &ms
+		}
+	}
+	if a.RetryDelay != nil {
+		ms := uint64(a.RetryDelay.Milliseconds())
+		round.RetryDelayMs = &ms
+	}
+	v := trace.Diagnose(round, nil)
+	a.Verdict = &v
 	if c.trace == nil {
 		return
 	}
@@ -111,10 +131,11 @@ func (a *Attempt) finishTransport(err error, secrets []protocol.Secret, c *attem
 		Dispatch *uint64 `json:"dispatch_us,omitempty"`
 		Sent     *uint64 `json:"sent_us,omitempty"`
 		Headers  *uint64 `json:"headers_us,omitempty"`
-	}{a.Timing, a.DispatchUs, a.RequestSentUs, a.ResponseUs}
+		MaxGap   *uint64 `json:"max_gap_us,omitempty"`
+	}{a.Timing, a.DispatchUs, a.RequestSentUs, a.ResponseUs, a.MaxGapUs}
 	usage := a.Usage
 	usage.Provider = nil // provider extensions belong in the redacted body
-	f := trace.Facts{StartedMs: a.Started.UnixMilli(), Outcome: string(a.Outcome()), EndKind: string(end), GatewayRequestID: id, Usage: usage, Timing: timing}
+	f := trace.Facts{Round: &round, Verdict: a.Verdict, StartedMs: a.Started.UnixMilli(), Outcome: string(a.Outcome()), EndKind: string(end), GatewayRequestID: id, Usage: usage, Timing: timing}
 	if len(a.Categories) != 0 {
 		f.Categories = a.Categories
 		f.CompleteContext = a.CompleteContext
