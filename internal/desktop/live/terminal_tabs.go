@@ -7,6 +7,7 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preferences"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/shell"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
@@ -76,7 +77,11 @@ func terminalFont(display preferences.Terminal) myterminal.Font {
 }
 
 func (r *Runtime) initTerminalActions() {
-	r.App.Sidebar.Actions.NewTerminal = func(project *viewmodel.Project) { r.newProjectTerminal(project, "") }
+	actions := r.App.Sidebar.Actions
+	actions.NewTerminal = func(project *viewmodel.Project) { r.newProjectTerminal(project, "") }
+	actions.Terminals = r.projectTerminals
+	actions.OpenTerminal = r.showWorkspaceTerminal
+	actions.CloseTerminal = r.closeLiveTerminal
 }
 
 // createLiveTerminal starts a shell in worktree on owner's Node and shows
@@ -227,6 +232,38 @@ func (r *Runtime) newProjectTerminal(project *viewmodel.Project, relative string
 		return
 	}
 	root.createLiveTerminal(owner, worktree.ID, terminalWorkspace)
+}
+
+// projectTerminals lists the running shells in a project's worktrees on its
+// Node, including those another controller such as Mobile started, so this
+// window can open one it has no surface for.
+func (r *Runtime) projectTerminals(project *viewmodel.Project) []shell.ProjectTerminal {
+	owner := r.localRuntime().projectOverviewRuntime(project)
+	if owner == nil {
+		return nil
+	}
+	snapshot := owner.snapshot()
+	paths := map[protocol.WorktreeID]string{}
+	for _, tree := range snapshot.Worktrees {
+		if tree.Project != nil && tree.Project.String() == project.ID {
+			paths[tree.ID] = tree.Path
+		}
+	}
+	terminals := []shell.ProjectTerminal{}
+	for _, info := range snapshot.Terminals {
+		if info.Worktree == nil || info.Ssh != nil || info.Tool != nil || info.Status.Kind != "running" {
+			continue
+		}
+		path, inProject := paths[*info.Worktree]
+		if !inProject {
+			continue
+		}
+		if info.Directory != nil {
+			path = *info.Directory
+		}
+		terminals = append(terminals, shell.ProjectTerminal{ID: info.ID.String(), Title: workspaceString(info.Title), Path: path})
+	}
+	return terminals
 }
 
 // dropTerminalTab removes every surface of a terminal and detaches the window.

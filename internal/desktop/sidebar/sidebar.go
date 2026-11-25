@@ -8,7 +8,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
@@ -17,6 +16,7 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
+	"github.com/egoist/mygo/ui"
 )
 
 // Layout metrics.
@@ -29,10 +29,10 @@ const (
 
 // State is the sidebar's part of the app state.
 type State struct {
-	Data         *viewmodel.Data
-	Actions      *Actions
-	Sample       Sample
-	Metrics      *Metrics
+	Data              *viewmodel.Data
+	Actions           *Actions
+	Sample            Sample
+	Metrics           *Metrics
 	Selected          string // conversation ID
 	SelectedHost      string
 	ImageStudioActive bool
@@ -459,6 +459,7 @@ func (s *State) project(c *ui.Context, pr *preview.Project) {
 				s.limited(c, pr.ID, s.sessions(pr.Conversations), func(cv *preview.Conversation) {
 					s.conversation(c, cv, rowTree)
 				})
+				s.terminals(c, pr)
 			})
 		})
 	})
