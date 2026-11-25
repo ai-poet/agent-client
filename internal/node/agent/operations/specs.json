@@ -1,7 +1,7 @@
 [
   {
     "operation": "files.list",
-    "description": "List a directory in the captured worktree",
+    "description": "List a directory in the captured worktree; with Full permission, an absolute path may name one elsewhere",
     "parameters": {
       "type": "object",
       "properties": {
@@ -253,7 +253,7 @@
   },
   {
     "operation": "files.move",
-    "description": "Move a regular file within the worktree using its current revision; never replace an existing destination",
+    "description": "Move a regular file using its current revision (with Full permission, absolute paths may reach outside the worktree on the same volume); never replace an existing destination",
     "parameters": {
       "type": "object",
       "properties": {
@@ -280,7 +280,7 @@
   },
   {
     "operation": "files.apply",
-    "description": "Apply a patch in the *** Begin Patch format that adds, updates, moves or deletes up to 16 related files with one approval. Context lines match the current file exactly, and updated, moved or deleted files must have been read in this session. Every file is validated first; any failure rejects the whole patch without writing. Files are then written in order; a later failure stops without rollback and each file reports its status",
+    "description": "Apply a patch in the *** Begin Patch format that adds, updates, moves or deletes up to 16 related files with one approval (with Full permission, absolute paths may reach outside the worktree on the same volume). Context lines match the current file exactly, and updated, moved or deleted files must have been read in this session. Every file is validated first; any failure rejects the whole patch without writing. Files are then written in order; a later failure stops without rollback and each file reports its status",
     "parameters": {
       "type": "object",
       "properties": {
@@ -299,7 +299,7 @@
   },
   {
     "operation": "files.mkdir",
-    "description": "Create a directory in an existing parent; an existing directory is unchanged",
+    "description": "Create a directory in an existing parent (with Full permission, an absolute path may name one elsewhere); an existing directory is unchanged",
     "parameters": {
       "type": "object",
       "properties": {

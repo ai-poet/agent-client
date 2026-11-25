@@ -32,6 +32,9 @@ func TestSystemPromptByteStable(t *testing.T) {
 		if !strings.Contains(Policy(protocol.WorkModeCode, permission, false), "Windows retains") {
 			t.Fatal("captured permission policy was not retained")
 		}
+		if permission == protocol.PermissionFull && !strings.Contains(Policy(protocol.WorkModeCode, permission, false), "absolute paths outside the session worktree") {
+			t.Fatal("Full permission policy does not explain file tools for out-of-worktree targets")
+		}
 	}
 	parentInstruction, childInstruction := Instruction(false), Instruction(true)
 	if !strings.HasPrefix(parentInstruction, "You are CheapRouter Harness,") || !strings.Contains(parentInstruction, "Responses\n") || strings.Contains(childInstruction, "Responses\n") {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	pathpkg "path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -28,6 +29,9 @@ type workspaceToolCall struct {
 	prepared       *files.Prepared
 	approval       protocol.ApprovalID
 	commandControl *process.ControlTarget
+	// external is the volume root of a Full-permission call outside the
+	// session worktree (workspace_external.go), or "".
+	external string
 }
 
 func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation) ([]engine.Tool, error) {
@@ -63,6 +67,37 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 			tool.ObserveHistory = observed.update
 		}
 		tool.Prepare = func(ctx context.Context, call canonical.ToolRequest) error {
+			args := call.Arguments
+			worktree := filepath.Clean(inv.Worktree.Path)
+			external := ""
+			if inv.Turn.Config.Permission == protocol.PermissionFull && externalFileOperation(declaration.Operation) {
+				worktree = canonicalPath(worktree)
+				canonical := func(path string) (string, error) { return canonicalPath(path), nil }
+				var err error
+				if args, err = fileArgPaths(declaration.Operation, args, canonical); err != nil {
+					return err
+				}
+				external = externalRoot(worktree, collectFileArgPaths(declaration.Operation, args))
+				if external == "" {
+					local := func(path string) (string, error) { return localPath(worktree, path), nil }
+					if args, err = fileArgPaths(declaration.Operation, args, local); err != nil {
+						return err
+					}
+				}
+			}
+			// Full access is the admitted turn's policy, including for children.
+			// Normalize access before approval captures the command to execute.
+			arguments, err := observed.resolve(declaration.Operation, args)
+			if err != nil {
+				return err
+			}
+			root := worktree
+			if external != "" {
+				root = external
+				if arguments, err = fileArgPaths(declaration.Operation, arguments, func(path string) (string, error) { return rootPath(worktree, external, path) }); err != nil {
+					return err
+				}
+			}
 			sandbox := protocol.DefaultSandboxSettings()
 			if declaration.Operation == protocol.ToolOperationRunCommand {
 				// Each command follows the setting as it is now, not as it
@@ -75,21 +110,19 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 					return err
 				}
 			}
-			// Full access is the admitted turn's policy, including for children.
-			// Normalize access before approval captures the command to execute.
-			arguments, err := observed.resolve(declaration.Operation, call.Arguments)
-			if err != nil {
-				return err
-			}
 			command, err := operations.Command(declaration.Operation, arguments, inv.Run.Worktree, inv.Session.ID, inv.Run.Turn, inv.Worktree.Project, sandbox.Enabled && inv.Turn.Config.Permission != protocol.PermissionFull)
 			if declaration.Operation == protocol.ToolOperationApplyChanges {
 				var patch struct {
 					Input string `json:"input"`
 				}
-				if err = json.Unmarshal(call.Arguments, &patch); err != nil {
+				if err = json.Unmarshal(arguments, &patch); err != nil {
 					return err
 				}
-				changes, e := files.ResolvePatchWithRevisions(ctx, inv.Worktree.Path, patch.Input, observed.paths, core.RestrictedFiles)
+				revisions := observed.paths
+				if external != "" {
+					revisions = rootRevisions(worktree, external, revisions)
+				}
+				changes, e := files.ResolvePatchWithRevisions(ctx, root, patch.Input, revisions, core.RestrictedFiles)
 				if e != nil {
 					return e
 				}
@@ -120,15 +153,15 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 			}
 			request := protocol.NewRequest(node.ID(), command)
 			request.Plugin = &protocol.PluginContext{Turn: &inv.Run.Turn, Package: declaration.Owner, Worktree: &inv.Run.Worktree, Session: &inv.Session.ID, Surface: protocol.PluginDesktopSurface{Kind: "workspace"}}
-			current := &workspaceToolCall{request: request}
+			current := &workspaceToolCall{request: request, external: external}
 			if fileTextMutation(command.Kind) {
-				current.prepared, err = files.Prepare(ctx, inv.Worktree.Path, command, core.RestrictedFiles)
+				current.prepared, err = files.Prepare(ctx, root, command, core.RestrictedFiles)
 				if err != nil {
 					return err
 				}
 			}
 			if files.SupportsMutation(command.Kind) {
-				if err = node.protectWorkspaceMutation(inv.Worktree.Path, inv.Worktree.Path, command, current.prepared); err != nil {
+				if err = node.protectWorkspaceMutation(root, root, command, current.prepared); err != nil {
 					return err
 				}
 			}
@@ -176,6 +209,14 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 				return workspaceToolFault(errors.New("native tool was not prepared"))
 			}
 			request := current.request
+			if current.external != "" {
+				output, err := node.externalFileIO(ctx, inv.Caller, request, current.prepared, current.external)
+				if err != nil {
+					return workspaceToolFault(err)
+				}
+				value := absoluteResult(current.external, node.workspaceToolValue(ctx, request, output, false))
+				return engine.ToolResult{Value: value, ReturnedError: workspaceOutputFailed(output), ReturnedFailure: workspaceOutputFailure(output)}
+			}
 			if !declaration.ReadOnly {
 				body, err := json.Marshal(request)
 				if err != nil {
