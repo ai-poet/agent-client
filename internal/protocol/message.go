@@ -363,6 +363,7 @@ const (
 	ModelFailureRequest                ModelFailure = "request"
 	ModelFailureUnauthorized           ModelFailure = "unauthorized"
 	ModelFailureRateLimited            ModelFailure = "rate_limited"
+	ModelFailureQuota                  ModelFailure = "quota"
 	ModelFailureTimeout                ModelFailure = "timeout"
 	ModelFailureInvalidResponse        ModelFailure = "invalid_response"
 	ModelFailureSharedUsageLimit       ModelFailure = "shared_usage_limit"
@@ -376,7 +377,7 @@ func (value *ModelFailure) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	switch ModelFailure(decoded) {
-	case ModelFailureRequest, ModelFailureUnauthorized, ModelFailureRateLimited, ModelFailureTimeout, ModelFailureInvalidResponse, ModelFailureSharedUsageLimit, ModelFailureSharedUsageUnavailable:
+	case ModelFailureRequest, ModelFailureUnauthorized, ModelFailureRateLimited, ModelFailureQuota, ModelFailureTimeout, ModelFailureInvalidResponse, ModelFailureSharedUsageLimit, ModelFailureSharedUsageUnavailable:
 		*value = ModelFailure(decoded)
 		return nil
 	default:

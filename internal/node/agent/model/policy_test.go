@@ -351,6 +351,66 @@ func TestPermanentErrorTerminal(t *testing.T) {
 		}
 	})
 }
+func TestForbiddenAndBalanceRetries(t *testing.T) {
+	t.Parallel()
+	providerPart := func(status int, body string) fantasy.StreamPart {
+		return fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: &fantasy.ProviderError{StatusCode: status, ResponseBody: []byte(body), ResponseHeaders: map[string]string{"Retry-After": "2"}}}
+	}
+	balance := providerPart(403, `{"error":{"code":"insufficient_balance","message":"insufficient balance"}}`)
+	t.Run("balance_terminal", func(t *testing.T) {
+		fake := &policyModel{responses: [][]fantasy.StreamPart{{balance}}}
+		timer := &policyClock{}
+		err := Run(t.Context(), fake, fantasy.Call{}, Main, timer, nil, nil, nil)
+		failure := Classify(err)
+		if fake.calls != 1 || len(timer.delays) != 0 || failure.Kind != Quota || failure.Exhausted {
+			t.Fatalf("balance terminal: calls=%d failure=%+v", fake.calls, failure)
+		}
+		fault := Fault(err)
+		if fault.Details.Kind != "model_request" || fault.Details.Data.(protocol.FaultDetailsModelRequestPayload).Reason != protocol.ModelFailureQuota || !strings.Contains(fault.Message, "insufficient balance (HTTP 403)") {
+			t.Fatalf("balance fault lost its reason: %+v", fault)
+		}
+	})
+	t.Run("forbidden_recovers", func(t *testing.T) {
+		forbidden := providerPart(403, `{"error":{"message":"forbidden"}}`)
+		fake := &policyModel{responses: [][]fantasy.StreamPart{{forbidden}, {forbidden}, {textPart("ok"), finishPart()}}}
+		timer := &policyClock{}
+		err := Run(t.Context(), fake, fantasy.Call{}, Main, timer, nil, func(fantasy.StreamPart) bool { return true }, nil)
+		if err != nil || fake.calls != 3 || len(timer.delays) != 2 {
+			t.Fatalf("forbidden recovery: err=%v calls=%d delays=%v", err, fake.calls, timer.delays)
+		}
+		for _, delay := range timer.delays {
+			if delay < 2*time.Second {
+				t.Fatalf("Retry-After was not honored: %v", timer.delays)
+			}
+		}
+	})
+	t.Run("forbidden_exhausts", func(t *testing.T) {
+		fake := &policyModel{}
+		for range MainRetries + 1 {
+			fake.responses = append(fake.responses, []fantasy.StreamPart{providerPart(403, `{"error":{"message":"forbidden"}}`)})
+		}
+		timer := &policyClock{}
+		err := Run(t.Context(), fake, fantasy.Call{}, Main, timer, nil, nil, nil)
+		if failure := Classify(err); fake.calls != MainRetries+1 || failure.Kind != Authentication || !failure.Exhausted {
+			t.Fatalf("forbidden exhaustion: calls=%d failure=%+v", fake.calls, failure)
+		}
+		// A message without a declared code is reported as the provider wrote it.
+		if fault := Fault(err); fault.Details.Data.(protocol.FaultDetailsModelRecoveryPayload).Reason != protocol.ConversationRecoveryStopAttemptsExhausted || !strings.Contains(fault.Message, "forbidden (HTTP 403)") {
+			t.Fatalf("forbidden exhaustion reason: %+v", fault)
+		}
+	})
+	for _, body := range []string{`{"error":{"message":"Unauthorized"}}`, `{"error":{"code":"invalid_api_key","message":"Incorrect API key"}}`} {
+		t.Run("rejected_key", func(t *testing.T) {
+			fake := &policyModel{responses: [][]fantasy.StreamPart{{providerPart(401, body)}}}
+			timer := &policyClock{}
+			err := Run(t.Context(), fake, fantasy.Call{}, Main, timer, nil, nil, nil)
+			fault := Fault(err)
+			if fake.calls != 1 || len(timer.delays) != 0 || fault.Details.Kind != "model_request" || fault.Details.Data.(protocol.FaultDetailsModelRequestPayload).Reason != protocol.ModelFailureUnauthorized {
+				t.Fatalf("rejected key retried: calls=%d fault=%+v", fake.calls, fault)
+			}
+		})
+	}
+}
 func TestErrorMapping(t *testing.T) {
 	sdkFailureFixtures(t)
 	for _, row := range []struct {
@@ -358,7 +418,7 @@ func TestErrorMapping(t *testing.T) {
 		status int
 		code   string
 		kind   FailureKind
-	}{{"redirect", 302, "", InvalidRequest}, {"context", 400, "context_length_exceeded", ContextOverflow}, {"unauthorized", 401, "", Authentication}, {"forbidden", 403, "", Authentication}, {"auth_code", 400, "invalid_api_key", Authentication}, {"quota_before_429", 429, "insufficient_quota", Quota}, {"credits", 400, "credits_exhausted", Quota}, {"rate", 429, "", RateLimited}, {"stream_rate", 200, "rate_limit_error", RateLimited}, {"unavailable", 503, "", Unavailable}, {"overloaded", 200, "overloaded_error", Unavailable}, {"bad_request", 400, "", InvalidRequest}} {
+	}{{"redirect", 302, "", InvalidRequest}, {"context", 400, "context_length_exceeded", ContextOverflow}, {"unauthorized", 401, "", Authentication}, {"forbidden", 403, "", Authentication}, {"payment", 402, "", Quota}, {"auth_code", 400, "invalid_api_key", Authentication}, {"quota_before_429", 429, "insufficient_quota", Quota}, {"credits", 400, "credits_exhausted", Quota}, {"rate", 429, "", RateLimited}, {"stream_rate", 200, "rate_limit_error", RateLimited}, {"unavailable", 503, "", Unavailable}, {"overloaded", 200, "overloaded_error", Unavailable}, {"bad_request", 400, "", InvalidRequest}} {
 		t.Run(row.name, func(t *testing.T) {
 			raw, _ := json.Marshal(map[string]any{"error": map[string]any{"code": row.code, "message": "private-long and private"}})
 			failure := Classify(&fantasy.ProviderError{Message: "failed", StatusCode: row.status, ResponseBody: raw, ResponseHeaders: map[string]string{"retry-after": "7"}}, protocol.NewSecret("private"), protocol.NewSecret("private-long"))
