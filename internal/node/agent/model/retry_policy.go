@@ -15,6 +15,7 @@ import (
 const (
 	retryWaitBudget            = 10 * time.Minute
 	mainTCPDialTimeoutAttempts = 3
+	nativeRetries              = 1
 	statusOriginTimeout        = 524
 )
 
@@ -38,6 +39,10 @@ func newRetryPolicy() retryPolicy {
 }
 
 func (policy *retryPolicy) limit(purpose Purpose, attempt Attempt, streamed bool) uint64 {
+	// Native compaction is optional: one quick resend before the handoff.
+	if purpose == NativePurpose {
+		return nativeRetries
+	}
 	if purpose == Main && attempt.Failure.tcpDialTimeout && !streamed && attempt.RequestSentUs == nil && attempt.Status == nil {
 		policy.dialTimeouts++
 		return min(MainRetries, attempt.Index+mainTCPDialTimeoutAttempts-policy.dialTimeouts)

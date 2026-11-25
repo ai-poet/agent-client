@@ -18,6 +18,7 @@ type Purpose string
 const (
 	Main           Purpose = "main"
 	SummaryPurpose Purpose = "summary"
+	NativePurpose  Purpose = "native_compaction"
 )
 
 type Attempt struct {
@@ -87,7 +88,7 @@ const MainRetries = 10
 // Run uses reset to discard provisional output before replaying an interrupted attempt.
 // Without it, main output that escaped to the consumer cannot be retried safely.
 func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.Call, purpose Purpose, timer clock.Clock, observe func(Attempt) error, yield func(fantasy.StreamPart) bool, reset func()) error {
-	buffered := purpose == SummaryPurpose
+	buffered := purpose == SummaryPurpose || purpose == NativePurpose
 	schedule := newRetryPolicy()
 	requestID, requestStarted := protocol.NewRequestID().String(), timer.Now()
 	sdk, _ := languageModel.(*sdkModel)
