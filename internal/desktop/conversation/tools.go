@@ -2,7 +2,9 @@ package conversation
 
 import (
 	"cmp"
+	"encoding/csv"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
@@ -256,7 +258,13 @@ func (s *State) tools(c *ui.Context, calls []Call) {
 		s.disclosure(c, "tool-sequence-"+calls[0].ID, func(hovered, open bool, sw *kit.Sweep) {
 			summary(c, head, hovered, true, open, sw)
 		}, 8, 8, func() {
-			groupRows(c, len(runs), func(i int) { s.run(c, runs[i]) })
+			groupRows(c, len(runs), func(i int) bool {
+				run := runs[i]
+				if len(run) == 1 && !pathList(run[0]) {
+					return s.callOpen(run[0])
+				}
+				return s.opened(s.renderSession + "\x00tool-group-" + run[0].ID)
+			}, func(i int) { s.run(c, runs[i]) })
 		})
 		return
 	}
@@ -267,19 +275,40 @@ func (s *State) tools(c *ui.Context, calls []Call) {
 
 // groupRows lays out ordinary transcript content. Only the mounted body
 // owns the page count, so reopening a group starts on its latest rows.
-func groupRows(c *ui.Context, n int, draw func(int)) {
+func groupRows(c *ui.Context, n int, isOpen func(int) bool, draw func(int)) {
 	box := ui.Column(c.Key("rows")).Gap(railGap)
-	more := ui.Local(box, "earlier", func() int { return 0 })
-	first := max(0, n-shownRows-*more)
+	type page struct{ more, oldest int }
+	p := ui.Local(box, "earlier", func() page { return page{oldest: max(0, n-shownRows)} })
+	first := max(0, n-shownRows-p.more)
+	p.oldest = min(p.oldest, first)
+	// Keep disclosures that this page has shown. Don't resurrect old rows
+	// on a fresh mount; their details are still open if paged back in.
+	var pinned []int
+	add := min(first, earlierPage)
+	for i := first - 1; i >= p.oldest; i-- {
+		if isOpen(i) {
+			pinned = append(pinned, i)
+			if first-i <= add {
+				add = min(first, add+1)
+			}
+		}
+	}
 	box.Children(func() {
-		if first > 0 {
-			count := min(earlierPage, first)
-			revealRow(c, "earlier", "chevron-up", i18n.T(c, "tool_rows_earlier", "count", count), func() { *more += count })
+		if hidden := first - len(pinned); hidden > 0 {
+			label := i18n.T(c, "tool_rows_earlier", "count", min(earlierPage, hidden))
+			revealRow(c, "earlier", "chevron-up", label, func() { p.more += add })
+		}
+		for _, i := range slices.Backward(pinned) {
+			draw(i)
 		}
 		for i := first; i < n; i++ {
 			draw(i)
 		}
 	})
+}
+
+func (s *State) callOpen(call Call) bool {
+	return s.opened(s.renderSession + "\x00tools-" + call.ID)
 }
 
 func revealRow(c *ui.Context, key, icon, label string, click func()) {
@@ -296,10 +325,6 @@ func (s *State) run(c *ui.Context, run []Call) {
 		return
 	}
 	head := Summary(run)
-	if len(run) == 1 && run[0].Output == nil && run[0].BackgroundDetail == nil {
-		plain(c, "tool-group-"+run[0].ID, head)
-		return
-	}
 	s.disclosure(c, "tool-group-"+run[0].ID, func(hovered, open bool, sw *kit.Sweep) {
 		summary(c, head, hovered, true, open, sw)
 	}, 8, 8, func() {
@@ -307,7 +332,7 @@ func (s *State) run(c *ui.Context, run []Call) {
 			s.pathRows(c, run)
 			return
 		}
-		groupRows(c, len(run), func(i int) { s.row(c, run[i]) })
+		groupRows(c, len(run), func(i int) bool { return s.callOpen(run[i]) }, func(i int) { s.row(c, run[i]) })
 	})
 }
 
@@ -319,7 +344,9 @@ func (s *State) pathRows(c *ui.Context, run []Call) {
 			details = append(details, call)
 		}
 	}
-	groupRows(c, len(paths)+len(details), func(i int) {
+	groupRows(c, len(paths)+len(details), func(i int) bool {
+		return i >= len(paths) && s.callOpen(details[i-len(paths)])
+	}, func(i int) {
 		if i < len(paths) {
 			s.pathRow(c, paths[i])
 			return
@@ -492,6 +519,14 @@ func copyOf(o *Output) string {
 			parts = append(parts, string(o.Diff.Op(l))+l.Text)
 		}
 	}
+	if t := o.Table; t != nil {
+		var buf strings.Builder
+		w := csv.NewWriter(&buf)
+		w.Comma = '\t'
+		_ = w.Write(t.Columns)
+		_ = w.WriteAll(t.Rows) // also flushes to the builder
+		parts = append(parts, strings.TrimSuffix(buf.String(), "\n"))
+	}
 	return strings.Join(parts, "\n")
 }
 
@@ -553,7 +588,10 @@ func table(c *ui.Context, t *Table) {
 	height := size + 14
 	box := ui.ScrollHorizontal(c.Key("table"))
 	full := ui.Local(box, "table-full", func() bool { return false })
-	rows, hidden := previewLinesOf(t.Rows, *full, false)
+	rows := t.Rows
+	if !*full {
+		rows = rows[:min(len(rows), previewLines)]
+	}
 	box.Children(func() {
 		cells := func(values []string, head bool) {
 			ui.Row(c).Height(height).BorderWidth(0, 0, 1, 0).BorderColor(p.Border).Children(func() {
@@ -571,7 +609,7 @@ func table(c *ui.Context, t *Table) {
 			cells(r, false)
 		}
 	})
-	previewToggle(c, "table-more", full, len(t.Rows), hidden)
+	previewToggle(c, "table-more", full, len(t.Rows), 0)
 }
 
 func previewToggle(c *ui.Context, key string, full *bool, total, hidden int) {

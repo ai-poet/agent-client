@@ -933,10 +933,12 @@ on its original tool row; closing the disclosure releases the read, not the proc
 Command admission reads current Client state independently of rendering.
 
 Tool groups and outputs share the transcript's vertical scroll. An open group
-shows its latest eight rows; earlier rows open in pages of fifty. Text and
+shows its latest eight rows; open rows stay visible as calls arrive, and each
+earlier page reveals up to fifty still-hidden rows. Text and
 diff previews show twelve lines and expand in place to at most 400, with the
 omitted count shown. Commands preview the tail; other text starts at the head.
-Text wraps, and tables scroll only sideways.
+Text wraps. Tables preview twelve data rows, expand to every row, and scroll
+only sideways. Copy uses the full output, including table headers and rows as TSV.
 
 Background activity stays on the rows that started it. A background command's
 state, exit code and retained output show on its launching call, and a task
