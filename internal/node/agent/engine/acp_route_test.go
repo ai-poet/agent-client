@@ -272,8 +272,11 @@ func TestACPRouteThresholdCompaction(t *testing.T) {
 				}
 			}
 			if !advertised {
-				if commands != 0 || len(sent) != 5 || !sent[4].replay || len(f.received("session/close")) != 1 {
-					t.Fatalf("commands = %d, prompts = %d, last replay = %v", commands, len(sent), sent[len(sent)-1].replay)
+				closed := f.received("session/close")
+				if commands != 0 || len(sent) != 5 || !sent[4].replay || len(closed) != 2 ||
+					closed[0]["params"].(map[string]any)["sessionId"] != sent[3].session ||
+					closed[1]["params"].(map[string]any)["sessionId"] != sent[0].session {
+					t.Fatalf("commands = %d, prompts = %d, last replay = %v, closed = %#v", commands, len(sent), sent[len(sent)-1].replay, closed)
 				}
 				return
 			}
@@ -313,7 +316,9 @@ func TestACPRouteCompactsAHeldSession(t *testing.T) {
 		t.Fatalf("summary prompt = %#v", sent[2])
 	}
 	closed := f.received("session/close")
-	if !sent[3].replay || len(closed) != 1 || closed[0]["params"].(map[string]any)["sessionId"] != sent[0].session {
+	if !sent[3].replay || len(closed) != 2 ||
+		closed[0]["params"].(map[string]any)["sessionId"] != sent[2].session ||
+		closed[1]["params"].(map[string]any)["sessionId"] != sent[0].session {
 		t.Fatalf("after compaction: prompt %#v, closed %#v", sent[3], closed)
 	}
 	for _, prompt := range sent {
