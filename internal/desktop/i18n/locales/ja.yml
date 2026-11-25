@@ -2616,3 +2616,114 @@ gateway_node_unauthorized: Key refused
 gateway_node_http: HTTP %{status}
 gateway_node_unreachable: Unreachable
 gateway_node_invalid_url: Invalid URL
+trace_title: リクエストトレース
+trace_view: トレースを表示
+trace_locate: 会話内で表示
+trace_export: トレースを書き出す
+trace_export_saved: トレースを保存しました
+trace_export_limit: 64 MiB を超えています。書き出す範囲を絞ってください。
+trace_recording: 記録中
+trace_off: 記録オフ
+trace_retries: 再試行
+trace_miss: キャッシュミス
+trace_request: リクエスト
+trace_response: レスポンス
+trace_metrics: 使用量と時間
+trace_cache_write: キャッシュ書き込み
+trace_equal: 等幅
+trace_actual: 実時間
+trace_scope: 範囲
+trace_turn: 選択したターン
+trace_mode: モード
+trace_shareable: 共有用
+trace_raw: 生データ
+trace_raw_confirm: 生のトレースにはプロンプト、コード、非公開の会話が含まれる場合があります。書き出しますか？
+trace_partial: 一部のみ
+trace_load: 本文を読み込む
+trace_events: イベント別に表示
+trace_private: ローカルのトレースにはシステムプロンプトや非公開の会話内容が含まれる場合があります。
+trace_dispatch: ディスパッチ
+trace_sent: 送信完了
+trace_gap: 最大間隔
+trace_dropped_headers: 省略されたヘッダー
+trace_turn_number: ターン %{count}
+approval_cancelled: キャンセル済み
+diagnosis_action_account: 上流アカウントが変わったかゲートウェイ管理者に確認してください。
+diagnosis_action_balance: 残高と割り当てを確認してください。
+diagnosis_action_billing: この応答から料金は推定できません。
+diagnosis_action_compact: 履歴を圧縮するか、より大きいコンテキストを使用してください。
+diagnosis_action_credential: 認証情報と権限を確認してください。
+diagnosis_action_fluctuation: 再試行中にエラーが変化しました。上流の経路を確認してください。
+diagnosis_action_network: DNS、プロキシ、接続を確認してください。
+diagnosis_action_prefix: 前回のリクエストの接頭部と比較してください。
+diagnosis_action_protocol: API モードと応答形式を確認してください。
+diagnosis_action_route: 継続する場合はプロバイダーの状態を確認してください。
+diagnosis_action_timing: リクエストの所要時間を確認してください。
+diagnosis_action_wait: 指定間隔を空けて再試行してください。
+diagnosis_authentication: アクセス拒否
+diagnosis_cache_miss: プロンプトキャッシュミス
+diagnosis_cache_partial: プロンプトキャッシュ部分ヒット
+diagnosis_cancelled: リクエストはキャンセル済み
+diagnosis_context_overflow: コンテキスト長を超過
+diagnosis_failed: リクエスト失敗
+diagnosis_invalid_request: リクエスト拒否
+diagnosis_invalid_response: 応答が不正または中断
+diagnosis_lost: 再利用できなかった推定トークン数
+diagnosis_network: ネットワーク接続失敗
+diagnosis_no_usage: 使用量の報告なし
+diagnosis_normal: 問題なし
+diagnosis_prefix_broken: キャッシュ対象の接頭部が変化
+diagnosis_quota: 残高または割り当てが不足
+diagnosis_rate_limited: レート制限
+diagnosis_slow_first: 最初のトークンが遅延
+diagnosis_slow_output: 生成が低速
+diagnosis_unavailable: プロバイダーまたはゲートウェイが応答不可
+insights_all: すべて
+insights_apply: 絞り込みを適用
+insights_attempts: 試行回数
+insights_cost_coverage: 価格判明率
+insights_credential: 認証情報 ID
+insights_end: 終了理由
+insights_failure: 失敗の種類
+insights_failure_rate: 失敗率（結果判明分）
+insights_groups: 内訳
+insights_host: ノード
+insights_index: トレース
+insights_invalid: 期間、ステータスコード、絞り込みの ID を確認してください。
+insights_outcome: 結果
+insights_provider_id: プロバイダー ID
+insights_samples: '%{count} サンプル'
+insights_session: セッション ID
+insights_start: 開始日
+insights_status: HTTP ステータス
+insights_title: リクエスト分析
+insights_unassigned: 認証情報なし
+insights_until: 終了日
+insights_worktree: ワークツリー ID
+model: モデル
+project: プロジェクト
+session: デスクトップ UI リファクタリング
+trace_all_cleared: 記録したトレースを消去しました
+trace_capture_privacy: 本文にはプロンプト、コード、非公開の会話が含まれる場合があります。
+trace_clear_all: すべてのトレースを消去
+trace_clear_consequence: このノードの全セッションのトレースを削除しますか？会話履歴と使用量は保持されます。
+trace_enable_capture: リクエスト本文を記録
+trace_gateway_allowlist: 記録中、許可された HTTPS ゲートウェイにのみ送信します。
+trace_gateway_header: ゲートウェイにトレース ID を送信
+trace_settings_saved: トレース設定を保存しました
+usage: 使用量
+usage_column_model: モデル
+usage_column_project: プロジェクト
+usage_column_provider: プロバイダ
+usage_cost: 推定費用（米ドル）
+usage_duration: モデル要求の持続時間
+usage_empty: まだ使用していません
+usage_filters: フィルタ
+usage_loading: 読み込み利用率
+usage_query_failed: 使用状況、範囲、フィルタを読み込めませんでした
+usage_range: 時間範囲
+usage_range_days: 最後の%{days}日
+usage_uncached_input: 未キャッシュ入力
+insights_gateway_id: ゲートウェイのリクエスト ID
+usage_column_duration: 持続時間
+usage_column_first_token: TTFT

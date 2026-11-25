@@ -137,9 +137,13 @@ func (r *Runtime) infer(x *execution, captured model.Binding, languageModel fant
 	// Source empty-response recovery is separate from transient HTTP recovery.
 	// Every retry reuses this exact request without prompt rewriting.
 	purpose := canonical.PurposeMain
+	recording := r.scopeTrace(&call, languageModel, x, binding, purpose)
 	newOutput := func() streamOutput {
 		out := streamOutput{record: canonical.NewRecord(x.inv.Run.Turn, "message", canonical.NewMessage(canonical.Assistant), r.clock.Now()), slots: map[string]int{}, calls: map[string]bool{}}
 		out.record.Provenance.Author = "assistant"
+		if recording != nil {
+			recording.Record = out.record.ID
+		}
 		scope := model.Scope(binding)
 		out.record.Metadata.Execution = &canonical.Execution{Source: &scope, Purpose: &purpose}
 		out.record.Metadata.Runtime = &canonical.Runtime{UserVisible: true, AgentVisible: true, Inference: &canonical.Inference{Provider: "sailry:" + binding.Provider.ID.String(), RequestedModel: binding.Config.Model, ReplayPrefix: model.ReplayPrefix(call)}}
@@ -191,7 +195,13 @@ func (r *Runtime) infer(x *execution, captured model.Binding, languageModel fant
 		empty := out.empty()
 		var billing []canonical.Record
 		for _, attempt := range attempts {
-			billing = append(billing, r.observationRecord(x, binding, purpose, attempt))
+			record := r.observationRecord(x, binding, purpose, attempt)
+			if recording != nil {
+				// A final attempt with no output keeps only its observation.
+				// Anchor it to the same draft ID as an attempt with an answer.
+				record.ID = out.record.ID
+			}
+			billing = append(billing, record)
 		}
 		if x.ctx.Err() != nil || err != nil || !empty || emptyAttempt == 3 || out.limited || successfulTool(state.Records) {
 			finish := canonical.Completed
@@ -458,34 +468,34 @@ func (r *Runtime) observationRecord(x *execution, binding model.Binding, purpose
 	message.Usage = &attempt.Usage
 	record := canonical.NewRecord(x.inv.Run.Turn, "message", message, attempt.Finished)
 	record.Provenance.Author = "assistant"
-	elapsed := uint64(max(0, attempt.Finished.Sub(attempt.Started).Microseconds()))
-	timing := canonical.Timing{ElapsedUs: &elapsed}
-	if attempt.FirstToken != nil {
-		first := uint64(max(0, attempt.FirstToken.Sub(attempt.Started).Microseconds()))
-		timing.FirstTokenUs = &first
-	}
+	timing := attempt.Timing
 	observation := protocol.DefaultConversationObservationRequest()
 	observation.ID = attempt.RequestID
 	observation.Turn = x.inv.Run.Turn
 	observation.Model = binding.Config.Model
 	observation.TimestampMs = attempt.RequestStarted.UnixMilli()
 	observed := protocol.DefaultConversationObservationAttempt()
+	observed.Verdict = attempt.Verdict
 	observed.Index = attempt.Index + 1
 	observed.Transport = "http"
 	observed.HeadersUs, observed.ResponseUs = attempt.ResponseUs, attempt.ResponseUs
 	observed.RequestBytes, observed.DispatchUs, observed.RequestSentUs = attempt.RequestBytes, attempt.DispatchUs, attempt.RequestSentUs
 	observed.Categories, observed.CompleteContext = attempt.Categories, attempt.CompleteContext
 	observed.ReasoningStreamed = attempt.ReasoningStreamed
-	observed.ElapsedUs = &elapsed
+	observed.ElapsedUs = timing.ElapsedUs
 	observed.FirstTokenUs = timing.FirstTokenUs
 	observed.Status = attempt.Status
-	observed.Outcome = protocol.ConversationObservationOutcomeSucceeded
+	observed.CacheWrite = attempt.Usage.CacheWrite
+	observed.EndKind = attempt.EndKind
+	observed.GatewayRequestID = attempt.GatewayRequestID
 	if attempt.Failure != nil {
-		observed.Outcome = protocol.ConversationObservationOutcomeFailed
-		if attempt.Failure.Kind == "cancelled" {
-			observed.Outcome = protocol.ConversationObservationOutcomeCancelled
+		kind := string(attempt.Failure.Kind)
+		observed.FailureKind = &kind
+		if attempt.RetryDelay != nil {
+			observed.RetryReason = &kind
 		}
 	}
+	observed.Outcome = attempt.Outcome()
 	if attempt.Usage.Input != nil && attempt.Usage.Output != nil {
 		usage := protocol.ConversationUsage{Input: *attempt.Usage.Input, Output: *attempt.Usage.Output}
 		if attempt.Usage.CacheRead != nil {

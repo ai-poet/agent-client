@@ -2616,3 +2616,114 @@ gateway_node_unauthorized: Key refused
 gateway_node_http: HTTP %{status}
 gateway_node_unreachable: Unreachable
 gateway_node_invalid_url: Invalid URL
+trace_title: Trace des requêtes
+trace_view: Afficher la trace
+trace_locate: Repérer dans la conversation
+trace_export: Exporter la trace
+trace_export_saved: Trace enregistrée
+trace_export_limit: La trace dépasse 64 Mio. Réduisez la portée de l’export.
+trace_recording: Enregistrement en cours
+trace_off: Enregistrement désactivé
+trace_retries: Nouvelles tentatives
+trace_miss: Absences du cache
+trace_request: Requête
+trace_response: Réponse
+trace_metrics: Utilisation et délais
+trace_cache_write: Écriture en cache
+trace_equal: Largeur fixe
+trace_actual: Temps réel
+trace_scope: Portée
+trace_turn: Tour sélectionné
+trace_mode: Mode
+trace_shareable: Partageable
+trace_raw: Brut
+trace_raw_confirm: La trace brute peut contenir des consignes, du code et des échanges privés. Exporter quand même ?
+trace_partial: Capture partielle
+trace_load: Charger le corps
+trace_events: Séparer par événement
+trace_private: Les traces locales peuvent contenir des consignes système et des échanges privés.
+trace_dispatch: Répartition
+trace_sent: Requête envoyée
+trace_gap: Intervalle maximal
+trace_dropped_headers: En-têtes omis
+trace_turn_number: Tour %{count}
+approval_cancelled: Annulé
+diagnosis_action_account: Demandez à l’opérateur si le compte en amont a changé.
+diagnosis_action_balance: Vérifiez le solde et le quota.
+diagnosis_action_billing: Cette réponse ne permet pas d’estimer les frais.
+diagnosis_action_compact: Compactez l’historique ou augmentez le contexte.
+diagnosis_action_credential: Vérifiez les identifiants et les autorisations.
+diagnosis_action_fluctuation: Les erreurs varient selon la tentative. Vérifiez le routage.
+diagnosis_action_network: Vérifiez le DNS, le proxy et la connexion.
+diagnosis_action_prefix: Comparez le préfixe avec la requête précédente.
+diagnosis_action_protocol: Vérifiez le mode API et le format de réponse.
+diagnosis_action_route: Si cela persiste, vérifiez l’état du fournisseur.
+diagnosis_action_timing: Examinez les durées de la requête.
+diagnosis_action_wait: Respectez le délai de nouvelle tentative.
+diagnosis_authentication: Accès refusé
+diagnosis_cache_miss: Préfixe non trouvé en cache
+diagnosis_cache_partial: Préfixe partiellement en cache
+diagnosis_cancelled: Requête annulée
+diagnosis_context_overflow: Fenêtre de contexte dépassée
+diagnosis_failed: Échec de la requête
+diagnosis_invalid_request: Requête rejetée
+diagnosis_invalid_response: Réponse invalide ou interrompue
+diagnosis_lost: Jetons de cache perdus estimés
+diagnosis_network: Échec de connexion réseau
+diagnosis_no_usage: Utilisation non indiquée
+diagnosis_normal: Aucun problème détecté
+diagnosis_prefix_broken: Préfixe de cache modifié
+diagnosis_quota: Solde ou quota épuisé
+diagnosis_rate_limited: Limite de débit atteinte
+diagnosis_slow_first: Premier jeton tardif
+diagnosis_slow_output: Génération lente
+diagnosis_unavailable: Fournisseur ou passerelle indisponible
+insights_all: Tous
+insights_apply: Appliquer les filtres
+insights_attempts: Tentatives
+insights_cost_coverage: Tentatives tarifées
+insights_credential: ID d’identifiant
+insights_end: Motif de fin
+insights_failure: Type d’échec
+insights_failure_rate: Taux d’échec (résultats connus)
+insights_groups: Répartition
+insights_host: Nœud
+insights_index: Traces
+insights_invalid: Vérifiez les dates, le code de statut et les identifiants des filtres.
+insights_outcome: Résultat
+insights_provider_id: ID de fournisseur
+insights_samples: '%{count} échantillons'
+insights_session: ID de session
+insights_start: Date de début
+insights_status: Statut HTTP
+insights_title: Analyse des requêtes
+insights_unassigned: Sans identifiant
+insights_until: Date de fin
+insights_worktree: ID d’arbre de travail
+model: Modèle
+project: Projet
+session: Refonte de l’interface de bureau
+trace_all_cleared: Traces enregistrées effacées
+trace_capture_privacy: Le contenu peut inclure des consignes, du code et des conversations privées.
+trace_clear_all: Effacer toutes les traces
+trace_clear_consequence: Supprimer les traces de toutes les sessions de ce nœud ? L’historique et les données d’utilisation seront conservés.
+trace_enable_capture: Enregistrer le corps des requêtes
+trace_gateway_allowlist: Uniquement pendant l’enregistrement, aux passerelles HTTPS autorisées.
+trace_gateway_header: Envoyer l’identifiant de trace à la passerelle
+trace_settings_saved: Paramètres des traces enregistrés
+usage: Utilisation
+usage_column_model: Modèle
+usage_column_project: Projet
+usage_column_provider: Fournisseur
+usage_cost: Coût estimé (USD)
+usage_duration: Durée de la demande de modèle
+usage_empty: Aucune utilisation pour le moment
+usage_filters: Filtres
+usage_loading: Utilisation de chargement
+usage_query_failed: Impossible de charger l'utilisation, de réduire la plage ou les filtres
+usage_range: Intervalle de temps
+usage_range_days: Derniers %{days} jours
+usage_uncached_input: Entrée non mise en cache
+insights_gateway_id: ID de requête de la passerelle
+usage_column_duration: Durée
+usage_column_first_token: TTFT

@@ -26,6 +26,7 @@ const idleTimeout = 30 * time.Second
 type transferEntry struct {
 	caller     protocol.NodeID
 	root       string
+	session    protocol.SessionID
 	worktree   protocol.WorktreeID
 	state      string
 	expires    time.Time
@@ -671,17 +672,17 @@ func (t *Transfers) DownloadBytes(ctx context.Context, caller protocol.NodeID, r
 	return out, err
 }
 
-// Scope reads the captured worktree before Open consumes the single-use transfer.
+// Scope reads the captured worktree or session before Open consumes the single-use transfer.
 // Ownership is checked here and again when the resource stream is opened.
-func (t *Transfers) Scope(caller protocol.NodeID, id protocol.StreamID) (protocol.WorktreeID, bool, error) {
+func (t *Transfers) Scope(caller protocol.NodeID, id protocol.StreamID) (protocol.WorktreeID, protocol.SessionID, bool, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	entry := t.entries[id]
 	if entry == nil {
-		return protocol.WorktreeID{}, false, nil
+		return protocol.WorktreeID{}, protocol.SessionID{}, false, nil
 	}
 	if entry.caller != caller {
-		return protocol.WorktreeID{}, true, transferMissing()
+		return protocol.WorktreeID{}, protocol.SessionID{}, true, transferMissing()
 	}
-	return entry.worktree, true, nil
+	return entry.worktree, entry.session, true, nil
 }

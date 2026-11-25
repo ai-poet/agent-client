@@ -2616,3 +2616,114 @@ gateway_node_unauthorized: Key refused
 gateway_node_http: HTTP %{status}
 gateway_node_unreachable: Unreachable
 gateway_node_invalid_url: Invalid URL
+trace_title: 요청 추적
+trace_view: 추적 보기
+trace_locate: 대화에서 찾기
+trace_export: 추적 내보내기
+trace_export_saved: 추적 저장됨
+trace_export_limit: 64 MiB를 초과합니다. 범위를 줄이세요.
+trace_recording: 기록 중
+trace_off: 기록 꺼짐
+trace_retries: 재시도
+trace_miss: 캐시 미스
+trace_request: 요청
+trace_response: 응답
+trace_metrics: 사용량 및 시간
+trace_cache_write: 캐시 쓰기
+trace_equal: 균등 너비
+trace_actual: 실제 시간
+trace_scope: 범위
+trace_turn: 선택한 턴
+trace_mode: 모드
+trace_shareable: 공유용
+trace_raw: 원본
+trace_raw_confirm: 원본 추적에 프롬프트, 코드 및 비공개 대화가 포함될 수 있습니다. 내보낼까요?
+trace_partial: 일부만 기록됨
+trace_load: 본문 불러오기
+trace_events: 이벤트별 보기
+trace_private: 로컬 추적에는 시스템 프롬프트와 비공개 대화 내용이 포함될 수 있습니다.
+trace_dispatch: 디스패치
+trace_sent: 요청 전송
+trace_gap: 최장 간격
+trace_dropped_headers: 생략된 헤더
+trace_turn_number: 턴 %{count}
+approval_cancelled: 취소됨
+diagnosis_action_account: 게이트웨이 관리자에게 업스트림 계정 변경 여부를 확인하세요.
+diagnosis_action_balance: 잔액과 할당량을 확인하세요.
+diagnosis_action_billing: 이 응답으로는 비용을 추정할 수 없습니다.
+diagnosis_action_compact: 기록을 압축하거나 더 큰 컨텍스트를 사용하세요.
+diagnosis_action_credential: 인증 정보와 권한을 확인하세요.
+diagnosis_action_fluctuation: 재시도 중 오류가 변경되었습니다. 업스트림 경로를 확인하세요.
+diagnosis_action_network: DNS, 프록시, 네트워크 연결을 확인하세요.
+diagnosis_action_prefix: 이전 요청의 접두부와 비교하세요.
+diagnosis_action_protocol: API 모드와 응답 형식을 확인하세요.
+diagnosis_action_route: 지속되면 공급자 상태를 확인하세요.
+diagnosis_action_timing: 요청 시간 내역을 확인하세요.
+diagnosis_action_wait: 공급자의 재시도 간격을 따르세요.
+diagnosis_authentication: 접근 거부
+diagnosis_cache_miss: 프롬프트 캐시 미스
+diagnosis_cache_partial: 프롬프트 캐시 일부 적중
+diagnosis_cancelled: 요청 취소됨
+diagnosis_context_overflow: 컨텍스트 한도 초과
+diagnosis_failed: 요청 실패
+diagnosis_invalid_request: 요청 거부됨
+diagnosis_invalid_response: 응답 오류 또는 중단
+diagnosis_lost: 재사용되지 않은 추정 토큰
+diagnosis_network: 네트워크 연결 실패
+diagnosis_no_usage: 사용량 미보고
+diagnosis_normal: 이상 없음
+diagnosis_prefix_broken: 캐시 접두부 변경
+diagnosis_quota: 잔액 또는 할당량 부족
+diagnosis_rate_limited: 요청 속도 제한
+diagnosis_slow_first: 첫 토큰 지연
+diagnosis_slow_output: 생성 지연
+diagnosis_unavailable: 공급자 또는 게이트웨이 사용 불가
+insights_all: 전체
+insights_apply: 필터 적용
+insights_attempts: 시도 횟수
+insights_cost_coverage: 가격이 확인된 시도
+insights_credential: 자격 증명 ID
+insights_end: 종료 사유
+insights_failure: 실패 유형
+insights_failure_rate: 실패율(확인된 결과)
+insights_groups: 그룹별 통계
+insights_host: 노드
+insights_index: 추적
+insights_invalid: 기간, 상태 코드와 필터 ID를 확인하세요.
+insights_outcome: 결과
+insights_provider_id: 공급자 ID
+insights_samples: 표본 %{count}개
+insights_session: 세션 ID
+insights_start: 시작일
+insights_status: HTTP 상태
+insights_title: 요청 분석
+insights_unassigned: 자격 증명 없음
+insights_until: 종료일
+insights_worktree: 작업 트리 ID
+model: 모델
+project: 프로젝트
+session: 데스크톱 UI 리팩터링
+trace_all_cleared: 기록된 추적을 삭제했습니다
+trace_capture_privacy: 본문에는 프롬프트, 코드 및 비공개 대화가 포함될 수 있습니다.
+trace_clear_all: 모든 추적 삭제
+trace_clear_consequence: 이 노드의 모든 세션에서 기록된 추적을 삭제할까요? 대화 기록과 사용량은 유지됩니다.
+trace_enable_capture: 요청 본문 기록
+trace_gateway_allowlist: 기록 중에 허용된 HTTPS 게이트웨이로만 보냅니다.
+trace_gateway_header: 게이트웨이에 추적 ID 보내기
+trace_settings_saved: 추적 설정을 저장했습니다
+usage: 사용량
+usage_column_model: 모델
+usage_column_project: 프로젝트
+usage_column_provider: 공급자
+usage_cost: 예상 비용 (USD)
+usage_duration: 모델 요청 기간
+usage_empty: 아직 사용되지 않음
+usage_filters: 필터
+usage_loading: 로딩 사용량
+usage_query_failed: 사용량, 범위 또는 필터를 좁힐 수 없습니다
+usage_range: 시간 범위
+usage_range_days: 마지막 %{days} 일
+usage_uncached_input: 캐시되지 않은 입력
+insights_gateway_id: 게이트웨이 요청 ID
+usage_column_duration: 기간
+usage_column_first_token: TTFT

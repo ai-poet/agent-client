@@ -1,7 +1,6 @@
 package shell
 
 import (
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
@@ -12,6 +11,8 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/settings"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/sidebar"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
+	"strconv"
 )
 
 // header is the band above the rail and the columns: the app's name over the
@@ -101,6 +102,9 @@ func (a *App) header(c *ui.Context, f frame) {
 				}
 				if hasActions(cv) {
 					known += 2 * (HeaderButton + ButtonGap)
+					if a.hasTrace() {
+						known += HeaderButton + ButtonGap
+					}
 				}
 				// The title and the session status share what the other
 				// controls leave: the title at its start, the status at its
@@ -208,10 +212,46 @@ func (a *App) conversationActions(c *ui.Context, cv *preview.Conversation, size 
 	}
 	kit.IconButtonHint(c.Key("find"), icons.Search, i18n.T(c, "chat_search"), a.hint("conversation.find"), size, a.Messages.SearchOpenIn(cv.ID)).
 		OnClick(func() { a.Messages.OpenSearch(cv.ID) })
+	if a.hasTrace() {
+		a.traceButton(c.Key("trace"), cv, size)
+	}
 	entry := a.overviewEntry(cv.ID)
 	overview := a.conversationOverview(c, cv, entry.act)
 	entry.state.Docked = a.overviewDocked(overview)
 	composer.OverviewButton(c, &entry.state, overview, size, &a.OverviewHidden)
+}
+
+func (a *App) hasTrace() bool { return !a.sampled() && a.Hooks.TraceStatus != nil }
+
+func (a *App) traceButton(c *ui.Context, cv *preview.Conversation, size float32) {
+	known, recording, failed := a.Hooks.TraceStatus(cv)
+	p := theme.Of(c)
+	color, state := p.MutedForeground, ""
+	if known {
+		state = i18n.T(c, "trace_off")
+		if recording {
+			color, state = p.Success, i18n.T(c, "trace_recording")
+		}
+	}
+	selected := a.PanelOpen && a.panels.mounted == cv.ID && a.Panel.Active.Kind == panel.Trace
+	ui.Box(c).Size(size, size).Shrink(0).Children(func() {
+		kit.IconButtonHint(c.Key("button"), icons.ListTree, i18n.T(c, "trace_title"), state, size, selected).
+			OnClick(func() { a.OpenTrace(cv.ID) })
+		if failed > 0 {
+			ui.Text(c, strconv.Itoa(failed)).Absolute().Top(0).Right(0).PaddingX(2).Radius(8).FontSize(9).
+				Background(p.Danger).TextColor(p.OnPrimary).PassThrough()
+		} else if known {
+			ui.Box(c).Absolute().Right(2).Top(2).Size(6, 6).Radius(3).Background(color).PassThrough()
+		}
+	})
+}
+
+// OpenTrace mounts the originating conversation before opening its private tab.
+func (a *App) OpenTrace(id string) {
+	a.focusPane(session(id))
+	a.MountPanel()
+	a.Page, a.PanelOpen = ConversationPage, true
+	a.Panel.Show(panel.Tab{Kind: panel.Trace})
 }
 
 // overviewPopover is a conversation's session overview popover, kept while

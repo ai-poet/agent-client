@@ -4,10 +4,54 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
+	"path/filepath"
 	"time"
 
+	"github.com/ai-poet/cheaprouter-harness/internal/core"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/trace"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
+
+// CleanInactiveTraces runs before command admission. A crash between the DB
+// commit and filesystem cleanup must not leave an archived/removed session's
+// payload on disk forever. Do not scan history or create a trace directory.
+func CleanInactiveTraces(ctx context.Context, storage *Store) error {
+	root := filepath.Join(storage.Profile, "traces")
+	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if err := core.PrivateDirectory(root); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return err
+	}
+	return storage.Node.Read(ctx, func(db *sql.Conn) error {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			id, err := protocol.ParseSessionID(entry.Name())
+			if err != nil || id.String() != entry.Name() {
+				continue
+			}
+			var keep bool
+			if err = db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?1 AND state='active')", id.String()).Scan(&keep); err != nil {
+				return err
+			}
+			if !keep {
+				if err = trace.Clear(storage.Profile, id.String()); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+}
 
 // sessionRemovalScope validates a remove_session or remove_sessions command
 // and lists every session it removes: the selected roots and their delegated

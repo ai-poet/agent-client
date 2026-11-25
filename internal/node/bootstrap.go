@@ -10,6 +10,7 @@ import (
 
 	"github.com/ai-poet/cheaprouter-harness/internal/core"
 	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/trace"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 )
 
@@ -31,6 +32,9 @@ func OpenProfile(ctx context.Context, path string) (*Profile, error) {
 		return nil, err
 	}
 	sweepProfile(ownership.Path)
+	if err := trace.Prune(ownership.Path); err != nil {
+		slog.Warn("Private trace retention sweep failed", "error", err)
+	}
 	database, err := store.Open(ctx, ownership.Path, identity.ID())
 	if err != nil {
 		_ = ownership.Close()

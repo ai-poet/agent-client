@@ -3,11 +3,11 @@ package live
 import (
 	"fmt"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/client"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/settings"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 // readSettings reads this Runtime's Node again: prevent sleep while Settings
@@ -16,6 +16,7 @@ import (
 func (r *Runtime) readSettings() {
 	if r.showsSettings() {
 		r.readPower()
+		r.readTraceSettings()
 	}
 	if r.parent == nil {
 		r.readTelemetry()

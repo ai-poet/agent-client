@@ -116,7 +116,15 @@ func (client *Client) watchUsageView(ctx context.Context, query protocol.UsageQu
 }
 
 func (client *Client) ReadUsage(ctx context.Context, query protocol.UsageQuery) (protocol.UsageReport, error) {
-	request := client.Prepare(protocol.Command{Kind: "read_usage", Data: query})
+	return client.readUsage(ctx, query, "read_usage")
+}
+
+func (client *Client) ReadUsageV2(ctx context.Context, query protocol.UsageQuery) (protocol.UsageReport, error) {
+	return client.readUsage(ctx, query, "read_usage_v2")
+}
+
+func (client *Client) readUsage(ctx context.Context, query protocol.UsageQuery, kind string) (protocol.UsageReport, error) {
+	request := client.Prepare(protocol.Command{Kind: kind, Data: query})
 	if selected, scoped := usageScopeFor(ctx, client.Target()); scoped {
 		scope := copyValue(selected.context)
 		if selected.resolve {
@@ -364,7 +372,7 @@ func compareUsagePosition(left, right protocol.UsagePosition) int {
 	if result := bytes.Compare(left.Node[:], right.Node[:]); result != 0 {
 		return result
 	}
-	return cmp.Compare(left.Sequence, right.Sequence)
+	return cmp.Or(cmp.Compare(left.Sequence, right.Sequence), cmp.Compare(left.Ordinal, right.Ordinal))
 }
 
 func addUsageCounter(target *uint64, value uint64) error {

@@ -2616,3 +2616,114 @@ gateway_node_unauthorized: Key refused
 gateway_node_http: HTTP %{status}
 gateway_node_unreachable: Unreachable
 gateway_node_invalid_url: Invalid URL
+trace_title: Rastro de requisições
+trace_view: Ver rastro
+trace_locate: Localizar na conversa
+trace_export: Exportar rastro
+trace_export_saved: Rastro salvo
+trace_export_limit: O rastro excede 64 MiB. Reduza o escopo da exportação.
+trace_recording: Gravando
+trace_off: Gravação desativada
+trace_retries: Novas tentativas
+trace_miss: Falhas de cache
+trace_request: Requisição
+trace_response: Resposta
+trace_metrics: Uso e tempos
+trace_cache_write: Gravação no cache
+trace_equal: Largura uniforme
+trace_actual: Tempo real
+trace_scope: Escopo
+trace_turn: Turno selecionado
+trace_mode: Modo
+trace_shareable: Para compartilhar
+trace_raw: Bruto
+trace_raw_confirm: O rastro bruto pode incluir instruções, código e conversas privadas. Exportar mesmo assim?
+trace_partial: Captura parcial
+trace_load: Carregar corpo
+trace_events: Separar por evento
+trace_private: Os rastros locais podem conter instruções do sistema e conversas privadas.
+trace_dispatch: Despacho
+trace_sent: Requisição enviada
+trace_gap: Maior intervalo
+trace_dropped_headers: Cabeçalhos omitidos
+trace_turn_number: Turno %{count}
+approval_cancelled: Cancelado
+diagnosis_action_account: Consulte o operador sobre mudança de conta no provedor.
+diagnosis_action_balance: Verifique o saldo e a cota.
+diagnosis_action_billing: Esta resposta não permite estimar o custo.
+diagnosis_action_compact: Compacte o histórico ou use um contexto maior.
+diagnosis_action_credential: Verifique as credenciais e permissões.
+diagnosis_action_fluctuation: Os erros variam entre tentativas. Verifique o roteamento.
+diagnosis_action_network: Verifique DNS, proxy e conectividade.
+diagnosis_action_prefix: Compare o prefixo com a solicitação anterior.
+diagnosis_action_protocol: Verifique o modo da API e o formato da resposta.
+diagnosis_action_route: Se persistir, verifique o status do provedor.
+diagnosis_action_timing: Confira a duração da solicitação.
+diagnosis_action_wait: Respeite o intervalo de nova tentativa.
+diagnosis_authentication: Acesso negado
+diagnosis_cache_miss: Falha de cache do prompt
+diagnosis_cache_partial: Acerto parcial de cache
+diagnosis_cancelled: Solicitação cancelada
+diagnosis_context_overflow: Janela de contexto excedida
+diagnosis_failed: Falha na solicitação
+diagnosis_invalid_request: Solicitação rejeitada
+diagnosis_invalid_response: Resposta inválida ou interrompida
+diagnosis_lost: Tokens de cache perdidos estimados
+diagnosis_network: Falha de conexão
+diagnosis_no_usage: Uso não informado
+diagnosis_normal: Nenhum problema detectado
+diagnosis_prefix_broken: Prefixo do cache alterado
+diagnosis_quota: Saldo ou cota esgotados
+diagnosis_rate_limited: Limite de solicitações
+diagnosis_slow_first: Primeiro token lento
+diagnosis_slow_output: Geração lenta
+diagnosis_unavailable: Provedor ou gateway indisponível
+insights_all: Todos
+insights_apply: Aplicar filtros
+insights_attempts: Tentativas
+insights_cost_coverage: Tentativas com preço
+insights_credential: ID da credencial
+insights_end: Motivo do término
+insights_failure: Tipo de falha
+insights_failure_rate: Taxa de falha (resultados conhecidos)
+insights_groups: Detalhamento
+insights_host: Nó
+insights_index: Rastros
+insights_invalid: Confira as datas, o código de status e os IDs dos filtros.
+insights_outcome: Resultado
+insights_provider_id: ID do provedor
+insights_samples: '%{count} amostras'
+insights_session: ID da sessão
+insights_start: Data inicial
+insights_status: Status HTTP
+insights_title: Análise de solicitações
+insights_unassigned: Sem credencial
+insights_until: Data final
+insights_worktree: ID da árvore de trabalho
+model: Modelo
+project: Projeto
+session: Desktop UI refactor
+trace_all_cleared: Rastreamentos gravados apagados
+trace_capture_privacy: O conteúdo pode incluir instruções, código e conversas privadas.
+trace_clear_all: Limpar todos os rastreamentos
+trace_clear_consequence: Apagar os rastreamentos de todas as sessões deste nó? O histórico e os dados de uso serão preservados.
+trace_enable_capture: Registrar corpos das solicitações
+trace_gateway_allowlist: Somente durante a gravação, para gateways HTTPS permitidos.
+trace_gateway_header: Enviar ID de rastreamento ao gateway
+trace_settings_saved: Configurações de rastreamento salvas
+usage: Uso
+usage_column_model: Modelo
+usage_column_project: Projeto
+usage_column_provider: Provedor
+usage_cost: Custo estimado (USD)
+usage_duration: Duração do pedido de modelo
+usage_empty: Nenhum uso ainda
+usage_filters: Filtros
+usage_loading: Carregando o uso
+usage_query_failed: Não foi possível carregar o uso, restringir o intervalo ou os filtros
+usage_range: Intervalo de tempo
+usage_range_days: Últimos %{days} dias
+usage_uncached_input: Entrada sem cache
+insights_gateway_id: ID da solicitação do gateway
+usage_column_duration: Duração
+usage_column_first_token: TTFT

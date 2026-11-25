@@ -1,0 +1,8 @@
+trace_enable_capture: "Registrar cuerpos de solicitud"
+trace_capture_privacy: "Pueden contener instrucciones, código y conversaciones privadas."
+trace_gateway_header: "Enviar ID de traza a la pasarela"
+trace_gateway_allowlist: "Solo durante la grabación y a pasarelas HTTPS autorizadas."
+trace_clear_all: "Borrar todas las trazas"
+trace_clear_consequence: "¿Borrar las trazas de todas las sesiones de este nodo? Se conservarán el historial y los datos de uso."
+trace_settings_saved: "Ajustes de trazas guardados"
+trace_all_cleared: "Trazas grabadas eliminadas"

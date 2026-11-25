@@ -1,0 +1,8 @@
+trace_enable_capture: "Enregistrer le corps des requêtes"
+trace_capture_privacy: "Le contenu peut inclure des consignes, du code et des conversations privées."
+trace_gateway_header: "Envoyer l’identifiant de trace à la passerelle"
+trace_gateway_allowlist: "Uniquement pendant l’enregistrement, aux passerelles HTTPS autorisées."
+trace_clear_all: "Effacer toutes les traces"
+trace_clear_consequence: "Supprimer les traces de toutes les sessions de ce nœud ? L’historique et les données d’utilisation seront conservés."
+trace_settings_saved: "Paramètres des traces enregistrés"
+trace_all_cleared: "Traces enregistrées effacées"

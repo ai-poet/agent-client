@@ -670,6 +670,55 @@ Text estimates remain separate from provider-reported tokens. Attempt-relative
 timings distinguish HTTP dispatch after preparation, successful request write,
 response headers and first model content; unavailable transport facts stay absent.
 
+Separately, a profile can opt into private HTTP traces for SDK inference and
+compaction. The transport copies the prepared request and the response bytes
+the SDK actually consumes. Attempt completion appends observation facts and
+relative gzip body references to `traces/<session>/trace.jsonl`. Credentials
+are masked before persistence; system prompts are not removed. Caps (16 MiB
+per body, 64 MiB or 200 attempts per session, 512 MiB per profile) and storage
+errors never change model output. The ordinary log and backup roots exclude
+these bodies. General settings let an administrator opt in to recording and,
+separately, sending the attempt's request ID to the built-in HTTPS gateways.
+Neither option defaults on. A profile-wide clear uses a durable receipt and
+invalidates in-flight recorders, without deleting conversation history or usage.
+At startup and publication the Node drops sessions whose last append is older
+than 180 days, then evicts least recently used session directories for space.
+Inspection affects capacity eviction order, not the age deadline.
+
+Only a controller with access to the session can list trace records, preview
+a body, export, or clear the trace. The Desktop session panel follows the existing
+conversation watch and requests new index rows after its last cursor. It loads a
+selected body on demand (up to 2 MiB) and drops its private state on close or
+owner change. Retry links use the observation index, not the displayed resend
+counter. `export_trace` prepares a bounded ZIP on the execution Node and returns
+a caller-bound, single-use download stream. The default shareable mode replaces
+system instructions with fingerprints but still contains private conversation
+data. Desktop publishes the verified file only after the download succeeds.
+A clear has a durable command receipt. Archiving
+or removing a session deletes its private trace; startup also checks for
+inactive trace directories after interrupted cleanup. `read_usage_v2` lists
+observed attempts even without token counts. Only reported usage contributes
+to billing totals, independently of whether body capture was enabled.
+
+The Node diagnoses each attempt using HTTP, failure, retry, usage and timing
+facts. Private capture can additionally compare provider-ordered request
+segments with a predecessor for estimated cache loss. The private index stores
+bounded fingerprints of redacted segments, not segment previews. Among compatible
+successful captures from the previous hour, the longest shared prefix wins
+(newest on ties). With no shared prefix, at least half of a predecessor's three
+or more segments must recur. Only the selected sidecar is opened; legacy rows
+without fingerprints can supply a single, subsequently verified fallback.
+Gemini's actual request structure is recognized, but reported cache reads do
+not establish cache eligibility, lifetime or a lost-token estimate. Suspected upstream
+account changes are hints, not verified identities. Shareable export groups
+the selected attempts by verdict. The Insights rail page queries the same
+Node's usage index under the caller's owner/shared-project visibility rules;
+neither the aggregate nor the paginated list opens a body. Opening an attempt
+selects its session, turn and request on the owning Node. A separate
+session-authorized read supplies any retained body. TTFT and elapsed
+percentiles use nearest rank up to 20,000 samples per distribution and fixed
+histogram upper bounds beyond that.
+
 Model request recovery permits up to nine retries and ten minutes of cumulative
 waiting. Network failures use exponential waits from one to thirty seconds;
 rate limits and overload use five seconds to one minute, with jitter. Provider

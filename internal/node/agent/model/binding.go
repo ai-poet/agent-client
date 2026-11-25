@@ -126,7 +126,11 @@ func New(ctx context.Context, binding Binding) (fantasy.LanguageModel, error) {
 	return newSDK(ctx, config)
 }
 func Scope(binding Binding) canonical.ModelSource {
-	return canonical.ModelSource{ID: binding.Provider.ID, Name: binding.Provider.Name, API: binding.Provider.Api, Authentication: binding.Provider.Authentication, Model: binding.Config.Model}
+	credential := binding.Config.Credential
+	if credential == nil {
+		credential = binding.Provider.Credential
+	}
+	return canonical.ModelSource{Credential: credential, ID: binding.Provider.ID, Name: binding.Provider.Name, API: binding.Provider.Api, Authentication: binding.Provider.Authentication, Model: binding.Config.Model}
 }
 func metadata(binding Binding) *protocol.ConversationModel {
 	for i := range binding.Provider.Models {
