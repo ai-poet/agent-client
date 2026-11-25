@@ -258,7 +258,9 @@ func (r *Runtime) traceFrame(c *ui.Context, session string) {
 		v.jump = protocol.TurnID{}
 		return
 	}
-	if state.LoadingOlder || v.paging {
+	// A cross-session jump can precede the first watched transcript.
+	awaitingSnapshot := state.Snapshot.Page.Session != v.id && state.Err == nil && !state.Removed
+	if awaitingSnapshot || state.Loading || state.LoadingOlder || v.paging {
 		return
 	}
 	if state.Snapshot.Page.NextBefore == nil && len(state.Snapshot.Missing) == 0 {

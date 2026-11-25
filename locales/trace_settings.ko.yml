@@ -1,0 +1,8 @@
+trace_enable_capture: "요청 본문 기록"
+trace_capture_privacy: "본문에는 프롬프트, 코드 및 비공개 대화가 포함될 수 있습니다."
+trace_gateway_header: "게이트웨이에 추적 ID 보내기"
+trace_gateway_allowlist: "기록 중에 허용된 HTTPS 게이트웨이로만 보냅니다."
+trace_clear_all: "모든 추적 삭제"
+trace_clear_consequence: "이 노드의 모든 세션에서 기록된 추적을 삭제할까요? 대화 기록과 사용량은 유지됩니다."
+trace_settings_saved: "추적 설정을 저장했습니다"
+trace_all_cleared: "기록된 추적을 삭제했습니다"

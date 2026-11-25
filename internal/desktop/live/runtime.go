@@ -29,6 +29,7 @@ import (
 )
 
 type Runtime struct {
+	insights    *insightsPage
 	tracePanel  *sessionTrace
 	traceBadges map[protocol.SessionID]*traceBadge
 	exportTrace func(protocol.TraceExportQuery)
@@ -305,6 +306,7 @@ func NewWithPreferences(ctx context.Context, controller *client.Client, prefs *p
 	r.App.Hooks.Overview = r.sessionOverview
 	r.App.Hooks.TraceStatus = r.traceStatus
 	r.App.Hooks.TraceFrame = r.traceFrame
+	r.App.Hooks.Insights = r.insightsFrame
 	r.conversationWatches = map[protocol.SessionID]func(){}
 	r.conversationSeen = map[protocol.SessionID]bool{}
 	r.composerInitialized = map[string]bool{}
@@ -567,6 +569,7 @@ func (r *Runtime) attentionFrame() {
 
 func (r *Runtime) afterFrame() {
 	r.finishTraceFrame()
+	r.finishInsightsFrame()
 	for _, bound := range r.bindings {
 		bound.finishFrame()
 		bound.finishConversationFrame()

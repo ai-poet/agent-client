@@ -53,9 +53,14 @@ func (s *State) traceTimeline(c *ui.Context, rows []traceRow) {
 	v := &s.trace
 	p := theme.Of(c)
 	points := tracePoints(rows, s.TraceMarkers)
-	lo, hi := rows[0].TS, rows[0].TS
+	var lo, hi int64
 	for _, r := range rows {
-		lo = min(lo, r.TS)
+		if r.TS <= 0 {
+			continue
+		}
+		if lo == 0 || r.TS < lo {
+			lo = r.TS
+		}
 		hi = max(hi, r.TS+int64(r.Timing["elapsed_us"]/1000))
 	}
 	for _, m := range points {
@@ -106,6 +111,9 @@ func (s *State) traceTimeline(c *ui.Context, rows []traceRow) {
 							return
 						}
 						for i, r := range rows {
+							if v.real && r.TS <= 0 {
+								continue
+							}
 							if (lane == 3) != (r.Purpose == "compaction") {
 								continue
 							}

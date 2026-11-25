@@ -2639,3 +2639,83 @@ trace_sent: Request sent
 trace_gap: Longest gap
 trace_dropped_headers: Omitted headers
 trace_turn_number: Turn %{count}
+approval_cancelled: Cancelled
+diagnosis_action_account: Ask the gateway operator whether the upstream account changed.
+diagnosis_action_balance: Check balance and quota.
+diagnosis_action_billing: Billing cannot be inferred from this response.
+diagnosis_action_compact: Compact history or use a larger context window.
+diagnosis_action_credential: Check credentials and permissions.
+diagnosis_action_fluctuation: Failures changed across retries. Check upstream routing.
+diagnosis_action_network: Check DNS, proxy, and network connectivity.
+diagnosis_action_prefix: Compare the request prefix with the previous attempt.
+diagnosis_action_protocol: Check the API mode and response format.
+diagnosis_action_route: Check provider status if this persists.
+diagnosis_action_timing: Inspect the request timing.
+diagnosis_action_wait: Observe the provider's retry interval.
+diagnosis_authentication: Access refused
+diagnosis_cache_miss: Prompt cache miss
+diagnosis_cache_partial: Partial prompt cache hit
+diagnosis_cancelled: Request cancelled
+diagnosis_context_overflow: Context window exceeded
+diagnosis_failed: Request failed
+diagnosis_invalid_request: Request rejected
+diagnosis_invalid_response: Invalid or interrupted response
+diagnosis_lost: Estimated lost cache tokens
+diagnosis_network: Network connection failed
+diagnosis_no_usage: Usage not reported
+diagnosis_normal: No issue detected
+diagnosis_prefix_broken: Cached prefix changed
+diagnosis_quota: Quota or balance exhausted
+diagnosis_rate_limited: Rate limited
+diagnosis_slow_first: Slow first token
+diagnosis_slow_output: Slow generation
+diagnosis_unavailable: Provider or gateway unavailable
+insights_all: All
+insights_apply: Apply filters
+insights_attempts: Attempts
+insights_cost_coverage: Priced attempts
+insights_credential: Credential ID
+insights_end: End reason
+insights_failure: Failure type
+insights_failure_rate: Failure rate (known outcomes)
+insights_groups: Breakdown
+insights_host: Node
+insights_index: Traces
+insights_invalid: Check the date range, status code and filter IDs.
+insights_outcome: Outcome
+insights_provider_id: Provider ID
+insights_samples: '%{count} samples'
+insights_session: Session ID
+insights_start: Start date
+insights_status: HTTP status
+insights_title: Request insights
+insights_unassigned: No credential
+insights_until: End date
+insights_worktree: Worktree ID
+model: Model
+project: Project
+session: Desktop UI refactor
+trace_all_cleared: Recorded traces cleared
+trace_capture_privacy: Bodies may contain prompts, code and private conversation content.
+trace_clear_all: Clear all traces
+trace_clear_consequence: Delete recorded traces for every session on this node? Conversation history and usage will remain.
+trace_enable_capture: Record request bodies
+trace_gateway_allowlist: Only for allowlisted HTTPS gateways while recording.
+trace_gateway_header: Send gateway trace ID
+trace_settings_saved: Trace settings saved
+usage: Usage
+usage_column_model: Model
+usage_column_project: Project
+usage_column_provider: Provider
+usage_cost: Estimated cost (USD)
+usage_duration: Model request duration
+usage_empty: No usage yet
+usage_filters: Filters
+usage_loading: Loading usage
+usage_query_failed: Could not load usage, narrow the range or filters
+usage_range: Time range
+usage_range_days: Last %{days} days
+usage_uncached_input: Uncached input
+insights_gateway_id: Gateway request ID
+usage_column_duration: Duration
+usage_column_first_token: TTFT

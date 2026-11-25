@@ -2639,3 +2639,83 @@ trace_sent: 已傳送請求
 trace_gap: 最長間隔
 trace_dropped_headers: 已省略的標頭
 trace_turn_number: 第 %{count} 回合
+approval_cancelled: 已取消
+diagnosis_action_account: 請閘道管理員核對上游帳號是否變更。
+diagnosis_action_balance: 檢查餘額及額度。
+diagnosis_action_billing: 無法由此回應推算費用。
+diagnosis_action_compact: 壓縮歷史或改用更大的視窗。
+diagnosis_action_credential: 檢查憑證及權限。
+diagnosis_action_fluctuation: 重試時錯誤類型有變，請檢查上游路由。
+diagnosis_action_network: 檢查 DNS、代理及網路連線。
+diagnosis_action_prefix: 與前次請求比對前綴。
+diagnosis_action_protocol: 檢查 API 模式及回應格式。
+diagnosis_action_route: 若持續發生，請檢查管道狀態。
+diagnosis_action_timing: 查看請求耗時明細。
+diagnosis_action_wait: 依上游建議的間隔重試。
+diagnosis_authentication: 存取遭拒
+diagnosis_cache_miss: 提示詞快取未命中
+diagnosis_cache_partial: 提示詞快取部分命中
+diagnosis_cancelled: 請求已取消
+diagnosis_context_overflow: 超出上下文視窗
+diagnosis_failed: 請求失敗
+diagnosis_invalid_request: 請求遭拒
+diagnosis_invalid_response: 回應無效或中斷
+diagnosis_lost: 估計未重用的 token
+diagnosis_network: 網路連線失敗
+diagnosis_no_usage: 上游未回報用量
+diagnosis_normal: 未發現異常
+diagnosis_prefix_broken: 快取前綴已變更
+diagnosis_quota: 餘額或額度不足
+diagnosis_rate_limited: 請求遭限流
+diagnosis_slow_first: 首個 token 延遲高
+diagnosis_slow_output: 產生速度慢
+diagnosis_unavailable: 上游或閘道無法使用
+insights_all: 全部
+insights_apply: 套用篩選
+insights_attempts: 嘗試次數
+insights_cost_coverage: 已計價嘗試佔比
+insights_credential: 憑證 ID
+insights_end: 結束原因
+insights_failure: 失敗類型
+insights_failure_rate: 失敗率（已知結果）
+insights_groups: 分組統計
+insights_host: 節點
+insights_index: 追蹤
+insights_invalid: 請檢查日期範圍、狀態碼與篩選 ID。
+insights_outcome: 結果
+insights_provider_id: 供應商 ID
+insights_samples: '%{count} 個樣本'
+insights_session: 工作階段 ID
+insights_start: 開始日期
+insights_status: HTTP 狀態碼
+insights_title: 請求洞察
+insights_unassigned: 無憑證
+insights_until: 結束日期
+insights_worktree: 工作樹 ID
+model: 示例模型
+project: cheaprouter
+session: 桌面介面重構
+trace_all_cleared: 已清除記錄的軌跡
+trace_capture_privacy: 本文可能包含提示詞、程式碼和私人對話。
+trace_clear_all: 清除全部軌跡
+trace_clear_consequence: 刪除此節點所有工作階段已記錄的軌跡？對話記錄和用量將會保留。
+trace_enable_capture: 記錄請求本文
+trace_gateway_allowlist: 僅在記錄時傳送至允許清單中的 HTTPS 閘道。
+trace_gateway_header: 傳送閘道軌跡 ID
+trace_settings_saved: 軌跡設定已儲存
+usage: 用量
+usage_column_model: 模型
+usage_column_project: 專案
+usage_column_provider: 供應商
+usage_cost: 估算費用（USD）
+usage_duration: 模型呼叫耗時
+usage_empty: 暫無用量記錄
+usage_filters: 篩選
+usage_loading: 正在讀取用量
+usage_query_failed: 無法讀取用量，請縮小時間範圍或篩選條件
+usage_range: 時間範圍
+usage_range_days: 近 %{days} 天
+usage_uncached_input: 未快取輸入
+insights_gateway_id: 閘道請求 ID
+usage_column_duration: 總耗時
+usage_column_first_token: TTFT

@@ -56,6 +56,7 @@ type Hooks struct {
 	Overview    func(*ui.Context, *viewmodel.Conversation) *composer.Overview
 	TraceStatus func(*viewmodel.Conversation) (known, recording bool, failed int)
 	TraceFrame  func(*ui.Context, string)
+	Insights    func(*ui.Context)
 }
 
 type ConversationActions interface {

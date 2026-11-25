@@ -50,6 +50,8 @@ func (r *Runtime) initNodeSettings() {
 	}
 	m := r.App.Settings
 	m.SavePower = func() { on(func(owner *Runtime) { owner.savePower() }) }
+	m.SaveTrace = func() { on(func(owner *Runtime) { owner.saveTraceSettings() }) }
+	m.ClearAllTraces = func() { on(func(owner *Runtime) { owner.clearAllTraces() }) }
 	m.SaveMedia = func() { on(func(owner *Runtime) { owner.saveMedia() }) }
 	m.SaveCodeIndex = func() { on(func(owner *Runtime) { owner.saveCodeIndex() }) }
 	m.ProviderActions = settings.ProviderActions{
@@ -203,6 +205,7 @@ func (r *Runtime) showNodeSettings(owner *Runtime) {
 	m.CloseNodeDialogs()
 	// Without a Node the controls wait, as the other host pages do.
 	waiting := owner == nil
+	m.Trace, m.TraceReady = settings.Stored[settings.TraceOptions]{Pending: waiting}, false
 	m.Power, m.Compaction, m.Concurrency = settings.Stored[bool]{Pending: waiting}, settings.Stored[float64]{Pending: waiting}, settings.Stored[float64]{Pending: waiting}
 	m.ConcurrencyReadOnly = false
 	m.Media, m.MediaOptions, m.MediaUnavailable = settings.Stored[[4]string]{Pending: waiting}, nil, [4]bool{}
@@ -221,6 +224,7 @@ func (r *Runtime) showNodeSettings(owner *Runtime) {
 
 // enterNodeSettings reads this Runtime's Node for the pages that now show it.
 func (r *Runtime) enterNodeSettings() {
+	r.readTraceSettings()
 	r.initProviders()
 	if r.teams == nil {
 		r.teams = newTeamState()

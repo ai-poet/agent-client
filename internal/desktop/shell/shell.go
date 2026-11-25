@@ -75,6 +75,7 @@ const (
 	ProjectPage
 	PluginPage
 	ImageStudioPage
+	InsightsPage
 )
 
 // App is the window's state.
@@ -294,6 +295,7 @@ func newApp(d *viewmodel.Data, selected string, st *settings.State) *App {
 	}
 	for _, f := range Features {
 		a.features = append(a.features, f.ID)
+		a.unpinned[f.ID] = !f.Fixed && !f.DefaultPinned
 	}
 	// The sidebar's sort menu and the settings' session order are one choice.
 	a.Sidebar.Sort = &st.Model.SessionOrder
@@ -747,7 +749,7 @@ func (a *App) page(c *ui.Context) {
 	case MarketPage:
 		settings.MarketPage(c, a.Settings)
 		return
-	case FilesPage, GitPage, ActivityPage, PluginPage:
+	case FilesPage, GitPage, ActivityPage, PluginPage, InsightsPage:
 		a.featurePage(c)
 		return
 	case HostPage:

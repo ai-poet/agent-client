@@ -2639,3 +2639,83 @@ trace_sent: Anfrage gesendet
 trace_gap: Längste Pause
 trace_dropped_headers: Ausgelassene Header
 trace_turn_number: Gesprächsschritt %{count}
+approval_cancelled: Abgebrochen
+diagnosis_action_account: Beim Gateway-Betreiber nach einem Kontowechsel fragen.
+diagnosis_action_balance: Guthaben und Kontingent prüfen.
+diagnosis_action_billing: Kosten sind aus der Antwort nicht ableitbar.
+diagnosis_action_compact: Verlauf kürzen oder größeres Kontextfenster verwenden.
+diagnosis_action_credential: Zugangsdaten und Rechte prüfen.
+diagnosis_action_fluctuation: Fehler wechseln bei Wiederholungen. Routing prüfen.
+diagnosis_action_network: DNS, Proxy und Netzwerk prüfen.
+diagnosis_action_prefix: Präfix mit der vorherigen Anfrage vergleichen.
+diagnosis_action_protocol: API-Modus und Antwortformat prüfen.
+diagnosis_action_route: Bei Wiederholung Anbieterstatus prüfen.
+diagnosis_action_timing: Zeitverlauf der Anfrage prüfen.
+diagnosis_action_wait: Wiederholungsintervall des Anbieters beachten.
+diagnosis_authentication: Zugriff verweigert
+diagnosis_cache_miss: Prompt-Cache verfehlt
+diagnosis_cache_partial: Teilweiser Cache-Treffer
+diagnosis_cancelled: Anfrage abgebrochen
+diagnosis_context_overflow: Kontextfenster überschritten
+diagnosis_failed: Anfrage fehlgeschlagen
+diagnosis_invalid_request: Anfrage abgelehnt
+diagnosis_invalid_response: Ungültige oder unterbrochene Antwort
+diagnosis_lost: Geschätzte verlorene Cache-Tokens
+diagnosis_network: Netzwerkverbindung fehlgeschlagen
+diagnosis_no_usage: Nutzung nicht gemeldet
+diagnosis_normal: Kein Problem erkannt
+diagnosis_prefix_broken: Cache-Präfix geändert
+diagnosis_quota: Kontingent oder Guthaben erschöpft
+diagnosis_rate_limited: Anfragelimit erreicht
+diagnosis_slow_first: Erstes Token verspätet
+diagnosis_slow_output: Langsame Generierung
+diagnosis_unavailable: Anbieter oder Gateway nicht verfügbar
+insights_all: Alle
+insights_apply: Filter anwenden
+insights_attempts: Versuche
+insights_cost_coverage: Anteil bewerteter Versuche
+insights_credential: Zugangsdaten-ID
+insights_end: Endgrund
+insights_failure: Fehlertyp
+insights_failure_rate: Fehlerquote (bekannte Ergebnisse)
+insights_groups: Aufschlüsselung
+insights_host: Knoten
+insights_index: Traces
+insights_invalid: Datumsbereich, Statuscode und Filter-IDs prüfen.
+insights_outcome: Ergebnis
+insights_provider_id: Anbieter-ID
+insights_samples: '%{count} Messwerte'
+insights_session: Sitzungs-ID
+insights_start: Startdatum
+insights_status: HTTP-Status
+insights_title: Anfrageanalyse
+insights_unassigned: Ohne Zugangsdaten
+insights_until: Enddatum
+insights_worktree: Worktree-ID
+model: Modell
+project: Projekt
+session: Desktop UI Refactor
+trace_all_cleared: Aufgezeichnete Traces gelöscht
+trace_capture_privacy: Die Inhalte können Prompts, Code und private Gespräche enthalten.
+trace_clear_all: Alle Traces löschen
+trace_clear_consequence: Aufgezeichnete Traces aller Sitzungen auf diesem Knoten löschen? Verlauf und Nutzungsdaten bleiben erhalten.
+trace_enable_capture: Anfragetexte aufzeichnen
+trace_gateway_allowlist: Nur während der Aufzeichnung an zugelassene HTTPS-Gateways.
+trace_gateway_header: Trace-ID an Gateway senden
+trace_settings_saved: Trace-Einstellungen gespeichert
+usage: Nutzung
+usage_column_model: Modell
+usage_column_project: Projekt
+usage_column_provider: Anbieter
+usage_cost: Geschätzte Kosten (USD)
+usage_duration: Dauer der Modellanfrage
+usage_empty: Noch keine Nutzung
+usage_filters: Filter
+usage_loading: Laden der Nutzung
+usage_query_failed: Nutzung konnte nicht geladen werden, Bereich oder Filter eingrenzen
+usage_range: Zeitbereich
+usage_range_days: Letzte %{days} Tage
+usage_uncached_input: Nicht gecachte Eingabe
+insights_gateway_id: Gateway-Anfrage-ID
+usage_column_duration: Dauer
+usage_column_first_token: TTFT

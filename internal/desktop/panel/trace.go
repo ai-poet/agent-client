@@ -28,6 +28,7 @@ type traceSide struct {
 }
 
 type traceRow struct {
+	Verdict                        *protocol.TraceVerdict
 	RequestID                      string `json:"request_id"`
 	Attempt                        int
 	TS                             int64
@@ -51,6 +52,9 @@ type traceRow struct {
 }
 
 type tracePresentation struct {
+	// indexed is a metadata-only fallback for the deep-linked attempt,
+	// not a captured record or part of the conversation watch.
+	indexed                                      *traceRow
 	request, filter, query, tab                  string
 	attempt                                      int
 	detail, real, split, export, confirm, reveal bool
@@ -70,6 +74,7 @@ func (s *State) ResetTrace() {
 }
 
 func (s *State) SelectTrace(request string, attempt int) {
+	s.trace.indexed = nil
 	s.trace.request, s.trace.attempt = request, attempt
 	s.trace.query, s.trace.filter, s.trace.tab = "", "", ""
 	s.trace.detail = true
@@ -106,6 +111,12 @@ func (s *State) traceRows(decoded []traceRow, filter, query string) []traceRow {
 	groups := map[string][]traceRow{}
 	var turns []string
 	query = strings.ToLower(strings.TrimSpace(query))
+	decoded = withObservedDiagnoses(decoded, s.TraceRecent)
+	if seed := s.trace.indexed; seed != nil && !slices.ContainsFunc(decoded, func(r traceRow) bool {
+		return r.Turn == seed.Turn && r.RequestID == seed.RequestID && r.Attempt == seed.Attempt
+	}) {
+		decoded = append(slices.Clip(decoded), *seed)
+	}
 	for _, r := range decoded {
 		r.turnNumber = numbers[r.Turn]
 		if req := requests[r.RequestID]; req != nil && req.Turn.String() == r.Turn {
@@ -116,6 +127,9 @@ func (s *State) traceRows(decoded []traceRow, filter, query string) []traceRow {
 				}
 				if len(r.Categories) == 0 {
 					r.Categories = attempt.Categories
+				}
+				if r.Verdict == nil {
+					r.Verdict = attempt.Verdict
 				}
 				r.CompleteContext = attempt.CompleteContext
 				if r.CacheReported == nil {
@@ -325,6 +339,7 @@ func (s *State) traceDetail(c *ui.Context, r traceRow) {
 			traceTiming(c, r)
 		default:
 			r.badge(c)
+			r.diagnosis(c)
 			if r.TS != 0 {
 				ui.Text(c, time.UnixMilli(r.TS).Local().Format("2006-01-02 15:04:05.000 MST -07:00")).FontSize(12)
 			}

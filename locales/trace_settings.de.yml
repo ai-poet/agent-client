@@ -1,0 +1,8 @@
+trace_enable_capture: "Anfragetexte aufzeichnen"
+trace_capture_privacy: "Die Inhalte können Prompts, Code und private Gespräche enthalten."
+trace_gateway_header: "Trace-ID an Gateway senden"
+trace_gateway_allowlist: "Nur während der Aufzeichnung an zugelassene HTTPS-Gateways."
+trace_clear_all: "Alle Traces löschen"
+trace_clear_consequence: "Aufgezeichnete Traces aller Sitzungen auf diesem Knoten löschen? Verlauf und Nutzungsdaten bleiben erhalten."
+trace_settings_saved: "Trace-Einstellungen gespeichert"
+trace_all_cleared: "Aufgezeichnete Traces gelöscht"

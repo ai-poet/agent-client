@@ -141,6 +141,11 @@ type Model struct {
 	TeamActions         *TeamActions
 	SaveTelemetry       func()
 	ResetTelemetry      func()
+	Trace               Stored[TraceOptions]
+	TraceReady          bool
+	traceClearConfirm   bool
+	SaveTrace           func()
+	ClearAllTraces      func()
 	SendDiagnostics     func()
 	SaveTerminal        func()
 	ProviderActions     ProviderActions
@@ -244,18 +249,18 @@ type Model struct {
 	MarketLoad  preview.Fetch
 	SkillMarket SkillMarketState
 	// pageScroll is where the section's page is scrolled, of scrolled.
-	pageScroll    ui.ScrollState
-	scrolled      Section
-	config        pluginConfig
+	pageScroll ui.ScrollState
+	scrolled   Section
+	config     pluginConfig
 	// OpenCheapAccount navigates to the CheapRouter account page from pickers.
 	OpenCheapAccount func()
-	install       pluginInstall
-	download      pluginDownload
-	updates       pluginUpdates
-	checked       bool // the plugins' update check ran: its updates show in the header
-	uninstalling  string
-	skillAdd      skillInstall
-	skillRemoving string
+	install          pluginInstall
+	download         pluginDownload
+	updates          pluginUpdates
+	checked          bool // the plugins' update check ran: its updates show in the header
+	uninstalling     string
+	skillAdd         skillInstall
+	skillRemoving    string
 
 	// Busy names the operations in flight (BusyCatalog and the like): each
 	// one's button shows Kit's pending look and takes no press until the

@@ -127,6 +127,7 @@ var (
 	Square         = load("square")
 	Minimize       = load("minimize")
 	ChartPie       = load("chart-pie")
+	ChartBar       = load("chart-bar")
 	Gauge          = load("gauge")
 	DollarSign     = load("dollar-sign")
 	MemoryStick    = load("memory-stick")
