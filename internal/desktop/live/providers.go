@@ -382,7 +382,7 @@ const defaultUserAgent = "Sailry/0.1"
 // wire protocol.
 var apiBrands = map[protocol.ConversationModelApi]string{
 	"responses": "openai", "chat_completions": "openai", "anthropic": "anthropic", "gemini": "gemini",
-	"deepseek": "deepseek", "open_code_go": "opencode", "open_code_zen": "opencode", "azure_open_ai": "azure-openai", "azure_ai": "azure-ai",
+	"deepseek": "deepseek", "open_code_go": "opencode", "open_code_zen": "opencode", "azure_open_ai": "azure-openai", "azure_ai": "azure-ai", "bedrock": "bedrock", "vertex_ai": "vertexai",
 }
 
 func apiForProtocol(p protocol.ConversationPresetsProtocol) protocol.ConversationModelApi {
@@ -393,6 +393,8 @@ func apiForProtocol(p protocol.ConversationPresetsProtocol) protocol.Conversatio
 		return "chat_completions"
 	case "azure-openai":
 		return "azure_open_ai"
+	case "vertex-ai":
+		return "vertex_ai"
 	case "azure-ai":
 		return "azure_ai"
 	case "opencode-go":
@@ -460,6 +462,12 @@ func (r *Runtime) projectProviderSnapshot() {
 			}
 		}
 		ch.APIVersion = azureVersion(p)
+		if options, ok := p.Options.Bedrock(); ok {
+			ch.Region = options.Region
+		}
+		if options, ok := p.Options.VertexAi(); ok {
+			ch.Project, ch.Location = options.Project, options.Location
+		}
 		ch.Headers = maps.Clone(p.Headers)
 		for _, quota := range snapshot.ProviderQuotas {
 			if quota.Provider == p.ID && p.Credential != nil && quota.Credential == *p.Credential {
@@ -594,6 +602,22 @@ func (r *Runtime) providerDraft(d settings.ProviderDraft) protocol.ConversationP
 	// names none keeps the one the provider has.
 	if p.Api == protocol.ConversationModelApiAzureOpenAi && d.Channel.APIVersion != "" {
 		p.Options = &protocol.ConversationConnectionOptions{Kind: "azure_open_ai", Data: protocol.ConversationConnectionOptionsAzureOpenAiPayload{ApiVersion: d.Channel.APIVersion}}
+	}
+	// A cloud channel's region, or project and location, travel as its
+	// options; the endpoint is the service host they name.
+	switch p.Api {
+	case protocol.ConversationModelApiBedrock:
+		options := protocol.ConversationConnectionOptionsBedrockPayload{Region: d.Channel.Region}
+		p.Options = &protocol.ConversationConnectionOptions{Kind: "bedrock", Data: options}
+		if p.Endpoint == "" {
+			p.Endpoint = options.Endpoint()
+		}
+	case protocol.ConversationModelApiVertexAi:
+		options := protocol.ConversationConnectionOptionsVertexAiPayload{Project: d.Channel.Project, Location: d.Channel.Location}
+		p.Options = &protocol.ConversationConnectionOptions{Kind: "vertex_ai", Data: options}
+		if p.Endpoint == "" {
+			p.Endpoint = options.Endpoint()
+		}
 	}
 	if entry, ok := r.providerPresets[d.Channel.Method]; ok {
 		ref := protocol.ConversationPresetsPresetRef{ID: entry.Preset.ID, Source: entry.Source}

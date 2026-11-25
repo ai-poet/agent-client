@@ -662,6 +662,101 @@ func TestProviderEditor(t *testing.T) {
 			t.Error("another API's model is not named by its ID")
 		}
 	})
+	// A Bedrock route asks for its region and a Vertex AI route for its
+	// project, location and service account; neither asks for an endpoint,
+	// which a save derives from them.
+	t.Run("cloud fields", func(t *testing.T) {
+		m := NewModel(preview.SettingsData())
+		m.Live = true
+		var saved []ProviderDraft
+		m.ProviderActions.Save = func(d ProviderDraft, _ func(bool)) { saved = append(saved, d) }
+		e := &m.provider
+		tester := ui.NewTester(func(c *ui.Context) {
+			providerEditorDialog(c, m)
+		}, 900, 900)
+		field := func(key string) (ui.AccessInfo, bool) {
+			return tester.AccessByRole(ui.RoleTextField, i18n.In("en", key))
+		}
+
+		bedrock := preview.Method{ID: "bedrock", Name: "Amazon Bedrock", Access: "provider_access_endpoint", Keyed: true, Routes: []preview.Route{{ID: "bedrock/0", API: "bedrock", Custom: true}}}
+		e.add(m)
+		e.configure(bedrock)
+		if e.region != "us-east-1" {
+			t.Fatalf("a new Bedrock form starts in region %q", e.region)
+		}
+		tester.Frame()
+		if region, ok := field("provider_region"); !ok || region.Value != "us-east-1" {
+			t.Errorf("the Bedrock region field is %+v, %v", region, ok)
+		}
+		if _, ok := field("provider_endpoint"); ok {
+			t.Error("a Bedrock form asks for an endpoint")
+		}
+		if _, ok := field("provider_project"); ok {
+			t.Error("a Bedrock form asks for a Vertex AI project")
+		}
+		e.key, e.models = "bedrock-key", []modelDraft{{id: "us.anthropic.claude-sonnet-4-6", context: "1000000"}}
+		e.region = " "
+		if got := e.Check(); got != "provider_cloud_required" {
+			t.Errorf("no region: %q", got)
+		}
+		e.region = " eu-west-1 "
+		if got := e.save(m); got != "" || len(saved) != 1 {
+			t.Fatalf("save %q sent %+v", got, saved)
+		}
+		if ch := saved[0].Channel; ch.API != "bedrock" || ch.Region != "eu-west-1" || ch.Endpoint != "https://bedrock-runtime.eu-west-1.amazonaws.com" || ch.Project != "" || saved[0].Key != "bedrock-key" {
+			t.Errorf("Bedrock save sent %+v", saved[0])
+		}
+
+		vertex := preview.Method{ID: "vertex", Name: "Vertex AI", Access: "provider_access_endpoint", Keyed: true, Routes: []preview.Route{{ID: "vertex/0", API: "vertex_ai", Custom: true}}}
+		e.add(m)
+		e.configure(vertex)
+		tester.Frame()
+		for _, key := range []string{"provider_project", "provider_location", "provider_service_account"} {
+			if _, ok := field(key); !ok {
+				t.Errorf("a Vertex AI form has no %s field", key)
+			}
+		}
+		if _, ok := field("provider_region"); ok {
+			t.Error("a Vertex AI form asks for a Bedrock region")
+		}
+		e.key, e.models = `{"type":"service_account"}`, []modelDraft{{id: "gemini-3.5-flash", context: "1048576"}}
+		tester.Frame()
+		if secret, ok := field("provider_service_account"); !ok || !secret.Password || secret.Value != "" || tester.HasText(e.key) {
+			t.Error("the service account key is not masked")
+		}
+		if got := e.Check(); got != "provider_cloud_required" {
+			t.Errorf("no project: %q", got)
+		}
+		e.project, e.location = "proj-123", "us-central1"
+		if got := e.save(m); got != "" || len(saved) != 2 {
+			t.Fatalf("save %q sent %+v", got, saved)
+		}
+		if ch := saved[1].Channel; ch.API != "vertex_ai" || ch.Project != "proj-123" || ch.Location != "us-central1" || ch.Endpoint != "https://us-central1-aiplatform.googleapis.com" || ch.Region != "" || saved[1].Key != e.key {
+			t.Errorf("Vertex AI save sent %+v", saved[1].Channel)
+		}
+
+		// A saved channel opens on its own settings.
+		ch := saved[1].Channel
+		ch.ID, ch.Project, ch.Location, ch.KeySet = "saved", "other-proj", "global", true
+		m.ProviderActions.ReadKey = func(_ string, done func(string)) { done(saved[1].Key) }
+		e.edit(m, &ch)
+		tester.Frame()
+		if project, ok := field("provider_project"); !ok || project.Value != "other-proj" || e.location != "global" {
+			t.Errorf("edit opened project %+v, %v at %q", project, ok, e.location)
+		}
+		e.project = "edited-proj"
+		if got := e.save(m); got != "" || len(saved) != 3 || saved[2].Key != "" || saved[2].Channel.Project != e.project || saved[2].Channel.Endpoint != "https://aiplatform.googleapis.com" {
+			t.Error("a configuration-only edit must preserve the stored credential")
+		}
+		e.add(m)
+		e.configure(vertex)
+		e.key, e.keyShown = "vertex-only", true
+		e.back()
+		e.configure(bedrock)
+		if e.key != "" || e.keyShown {
+			t.Error("another provider inherited the Vertex AI credential or its visibility")
+		}
+	})
 	t.Run("removed model row", func(t *testing.T) {
 		m := NewModel(preview.SettingsData())
 		m.provider = providerEditor{open: true, step: stepConfigure, name: "Provider", keySet: true,

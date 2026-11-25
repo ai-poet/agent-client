@@ -61,6 +61,11 @@ func ResolvedModel(binding Binding) (selected protocol.ConversationModel, estima
 	if listed := metadata(binding); listed != nil {
 		selected = *listed
 	}
+	if selected.Context < providers.MinCatalogContext {
+		if window := catalogContext(binding.Provider.Api, selected.ID); window >= providers.MinCatalogContext {
+			selected.Context = window
+		}
+	}
 	probed, _ := reportedContext(contextKey(binding))
 	limits, estimated := providers.ResolveModelLimits(binding.Provider.Api, selected, probed)
 	selected.Context, selected.Output = limits.Context, limits.Output
@@ -74,6 +79,29 @@ func ResolvedModel(binding Binding) (selected protocol.ConversationModel, estima
 func contextKey(binding Binding) modelLimitKey {
 	p := binding.Provider
 	return modelLimitKey{p.ID, p.Revision, p.Api, p.Endpoint, binding.Config.Model}
+}
+
+// Cloud deployments resolve against their own catalog before the underlying
+// protocol family's catalog. Other routes retain the normal registry policy.
+func catalogContext(api protocol.ConversationModelApi, name string) uint32 {
+	var families []string
+	switch api {
+	case protocol.ConversationModelApiBedrock:
+		families = []string{"aws_bedrock", "anthropic"}
+	case protocol.ConversationModelApiVertexAi:
+		families = []string{"vertexai", "gemini-grpc"}
+	default:
+		return 0
+	}
+	leaf := name[strings.LastIndexByte(name, '/')+1:]
+	for _, family := range families {
+		for _, id := range []string{name, leaf} {
+			if entry, ok := catalogEntry(family, id); ok && entry.Limit.Context >= providers.MinCatalogContext {
+				return entry.Limit.Context
+			}
+		}
+	}
+	return 0
 }
 
 func reportedContext(key modelLimitKey) (providers.ModelLimits, bool) {

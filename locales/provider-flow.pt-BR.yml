@@ -22,3 +22,7 @@ provider_login_claude: "Claude"
 provider_add_model: "Adicionar modelo"
 provider_model_default: "Padrão"
 provider_api_chat_completions: Chat Completions
+provider_project: "ID do projeto"
+provider_location: "Local"
+provider_service_account: "Chave da conta de serviço"
+provider_service_account_hint: "Cole a chave JSON da conta de serviço"

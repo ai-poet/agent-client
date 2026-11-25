@@ -22,3 +22,7 @@ provider_login_claude: "Claude"
 provider_add_model: "Modell hinzufügen"
 provider_model_default: "Standard"
 provider_api_chat_completions: Chat Completions
+provider_project: "Projekt-ID"
+provider_location: "Standort"
+provider_service_account: "Dienstkontoschlüssel"
+provider_service_account_hint: "JSON-Schlüssel des Dienstkontos einfügen"

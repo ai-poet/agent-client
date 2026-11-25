@@ -18,11 +18,29 @@ In the **Linked into** column, D is Desktop, H is Host and M is Mobile.
 | Module | Version | License | Notice files | Linked into |
 | --- | --- | --- | --- | --- |
 | `charm.land/fantasy` | v0.46.0 | Apache-2.0 | `LICENSE`, `NOTICE` | D H |
+| `cloud.google.com/go` | v0.123.0 | Apache-2.0 | `LICENSE` | D H |
+| `cloud.google.com/go/auth` | v0.24.2 | Apache-2.0 | `LICENSE` | D H |
+| `cloud.google.com/go/compute/metadata` | v0.10.0 | Apache-2.0 | `LICENSE` | D H |
 | `dario.cat/mergo` | v1.0.0 | BSD-3-Clause | `LICENSE` | D H |
 | `filippo.io/age` | v1.3.2 | BSD-3-Clause | `LICENSE` | D H |
 | `filippo.io/edwards25519` | v1.2.0 | BSD-3-Clause | `LICENSE` | D H |
 | `filippo.io/hpke` | v0.4.0 | BSD-3-Clause | `LICENSE` | D H |
 | `github.com/anthropics/anthropic-sdk-go` | v1.84.0 | MIT | `LICENSE` | D H |
+| `github.com/aws/aws-sdk-go-v2` | v1.47.5 | Apache-2.0 | `LICENSE.txt`, `NOTICE.txt` | D H |
+| `github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream` | v1.7.25 | Apache-2.0 | `LICENSE.txt` | D H |
+| `github.com/aws/aws-sdk-go-v2/config` | v1.33.12 | Apache-2.0 | `LICENSE.txt` | D H |
+| `github.com/aws/aws-sdk-go-v2/credentials` | v1.20.12 | Apache-2.0 | `LICENSE.txt` | D H |
+| `github.com/aws/aws-sdk-go-v2/feature/ec2/imds` | v1.20.5 | Apache-2.0 | `LICENSE.txt` | D H |
+| `github.com/aws/aws-sdk-go-v2/internal/configsources` | v1.5.8 | Apache-2.0 | `LICENSE.txt` | D H |
+| `github.com/aws/aws-sdk-go-v2/internal/endpoints/v2` | v2.8.8 | Apache-2.0 | `LICENSE.txt` | D H |
+| `github.com/aws/aws-sdk-go-v2/internal/v4a` | v1.5.8 | Apache-2.0 | `LICENSE.txt` | D H |
+| `github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding` | v1.13.23 | Apache-2.0 | `LICENSE.txt` | D H |
+| `github.com/aws/aws-sdk-go-v2/service/internal/presigned-url` | v1.14.8 | Apache-2.0 | `LICENSE.txt` | D H |
+| `github.com/aws/aws-sdk-go-v2/service/signin` | v1.12.0 | Apache-2.0 | `LICENSE.txt` | D H |
+| `github.com/aws/aws-sdk-go-v2/service/sso` | v1.39.0 | Apache-2.0 | `LICENSE.txt` | D H |
+| `github.com/aws/aws-sdk-go-v2/service/ssooidc` | v1.44.0 | Apache-2.0 | `LICENSE.txt` | D H |
+| `github.com/aws/aws-sdk-go-v2/service/sts` | v1.51.6 | Apache-2.0 | `LICENSE.txt` | D H |
+| `github.com/aws/smithy-go` | v1.28.7 | Apache-2.0 | `LICENSE`, `NOTICE` | D H |
 | `github.com/aymerick/douceur` | v0.2.0 | MIT | `LICENSE` | D H |
 | `github.com/bahlo/generic-list-go` | v0.2.0 | BSD-3-Clause | `LICENSE` | D H |
 | `github.com/Bios-Marcel/wastebasket/v2` | v2.0.3 | MPL-2.0 | `LICENSE` | D H |
@@ -49,6 +67,7 @@ In the **Linked into** column, D is Desktop, H is Host and M is Mobile.
 | `github.com/egoist/mygo` | v0.8.4-0.20261109104234-eadf1fce6af3 | MIT | `LICENSE` | D H |
 | `github.com/ELY-Open-Source/CrychicUI` | v0.0.0-20261110123803-1c55e6a884bb | MIT; bundled Lucide icons ISC | `LICENSE`, `THIRD_PARTY_NOTICES.md` | D |
 | `github.com/emirpasic/gods` | v1.18.1 | BSD-2-Clause, ISC | `LICENSE` | D H |
+| `github.com/felixge/httpsnoop` | v1.1.0 | MIT | `LICENSE.txt` | D H |
 | `github.com/firede/limu` | v0.5.0 | MIT | `LICENSE` | D |
 | `github.com/fsnotify/fsnotify` | v1.10.1 | BSD-3-Clause | `LICENSE` | D H |
 | `github.com/gabriel-vasile/mimetype` | v1.4.16 | MIT | `LICENSE` | D H |
@@ -67,9 +86,14 @@ In the **Linked into** column, D is Desktop, H is Host and M is Mobile.
 | `github.com/goccy/go-yaml` | v1.19.2 | MIT | `LICENSE` | D H |
 | `github.com/golang-jwt/jwt/v5` | v5.3.1 | MIT | `LICENSE` | D H |
 | `github.com/golang/groupcache` | v0.0.0-20241129210726-2c02b8208cf8 | Apache-2.0 | `LICENSE` | D H |
+| `github.com/google/go-cmp` | v0.7.0 | BSD-3-Clause | `LICENSE` | D H |
 | `github.com/google/jsonschema-go` | v0.4.3 | MIT | `LICENSE` | D H |
+| `github.com/google/s2a-go` | v0.1.11 | Apache-2.0 | `LICENSE.md` | D H |
 | `github.com/google/uuid` | v1.6.0 | BSD-3-Clause | `LICENSE` | D H M |
+| `github.com/googleapis/enterprise-certificate-proxy` | v0.3.24 | Apache-2.0 | `LICENSE` | D H |
+| `github.com/googleapis/gax-go/v2` | v2.27.0 | BSD-3-Clause | `LICENSE` | D H |
 | `github.com/gorilla/css` | v1.0.1 | BSD-3-Clause | `LICENSE` | D H |
+| `github.com/gorilla/websocket` | v1.5.3 | BSD-2-Clause | `LICENSE` | D H |
 | `github.com/invopop/jsonschema` | v0.14.0 | MIT | `COPYING` | D H |
 | `github.com/jackc/pgpassfile` | v1.0.0 | MIT | `LICENSE` | D H |
 | `github.com/jackc/pgservicefile` | v0.0.0-20240606120523-5a60cdf6a761 | MIT | `LICENSE` | D H |
@@ -145,6 +169,7 @@ In the **Linked into** column, D is Desktop, H is Host and M is Mobile.
 | `github.com/yusufpapurcu/wmi` | v1.2.4 | MIT | `LICENSE` | D H |
 | `github.com/zeebo/xxh3` | v1.1.0 | BSD-2-Clause | `LICENSE` | D H |
 | `go.opentelemetry.io/auto/sdk` | v1.2.1 | Apache-2.0 | `LICENSE` | D H |
+| `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` | v0.72.0 | Apache-2.0, BSD-3-Clause | `LICENSE` | D H |
 | `go.opentelemetry.io/otel` | v1.47.0 | Apache-2.0, BSD-3-Clause | `LICENSE` | D H |
 | `go.opentelemetry.io/otel/log` | v1.47.0 | Apache-2.0, BSD-3-Clause | `LICENSE` | D H |
 | `go.opentelemetry.io/otel/metric` | v1.47.0 | Apache-2.0, BSD-3-Clause | `LICENSE` | D H |
@@ -156,11 +181,16 @@ In the **Linked into** column, D is Desktop, H is Host and M is Mobile.
 | `golang.org/x/image` | v0.47.0 | BSD-3-Clause | `LICENSE`, `PATENTS` | D H |
 | `golang.org/x/mod` | v0.43.0 | BSD-3-Clause | `LICENSE`, `PATENTS` | D H |
 | `golang.org/x/net` | v0.62.0 | BSD-3-Clause | `LICENSE`, `PATENTS` | D H M |
-| `golang.org/x/oauth2` | v0.37.0 | BSD-3-Clause | `LICENSE` | D H |
+| `golang.org/x/oauth2` | v0.38.0 | BSD-3-Clause | `LICENSE` | D H |
 | `golang.org/x/sync` | v0.25.0 | BSD-3-Clause | `LICENSE`, `PATENTS` | D H |
 | `golang.org/x/sys` | v0.50.0 | BSD-3-Clause | `LICENSE`, `PATENTS` | D H M |
 | `golang.org/x/text` | v0.43.0 | BSD-3-Clause | `LICENSE`, `PATENTS` | D H M |
 | `golang.org/x/time` | v0.16.0 | BSD-3-Clause | `LICENSE`, `PATENTS` | D H |
+| `google.golang.org/api` | v0.309.0 | BSD-3-Clause | `LICENSE` | D H |
+| `google.golang.org/genai` | v1.76.0 | Apache-2.0, BSD-3-Clause | `LICENSE` | D H |
+| `google.golang.org/genproto/googleapis/rpc` | v0.0.0-20261026165753-2ffab32bce7e | Apache-2.0 | `LICENSE` | D H |
+| `google.golang.org/grpc` | v1.85.0 | Apache-2.0 | `LICENSE`, `NOTICE.txt` | D H |
+| `google.golang.org/protobuf` | v1.36.12 | BSD-3-Clause | `LICENSE`, `PATENTS` | D H |
 | `gopkg.in/ini.v1` | v1.67.3 | Apache-2.0 | `LICENSE` | D H |
 | `gopkg.in/natefinch/lumberjack.v2` | v2.2.1 | MIT | `LICENSE` | D H |
 | `gopkg.in/warnings.v0` | v0.1.2 | BSD-2-Clause | `LICENSE` | D H |

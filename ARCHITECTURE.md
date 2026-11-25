@@ -554,6 +554,19 @@ An API-key provider's custom headers, set in its advanced settings, replace thes
 defaults of any letter case. Credential and framing headers stay the
 transport's. Account sign-ins keep their own client identity.
 
+Bedrock (`bedrock`) carries Anthropic Messages and Vertex AI (`vertex_ai`)
+carries Gemini. Request parameters, history and attachments follow
+`ConversationModelApi.Family()`; the route owns credentials and transport.
+Desktop derives a service endpoint from the Bedrock region or Vertex location.
+On Bedrock, the Anthropic SDK moves the selected model into the invoke path
+and betas into the body, and decodes EventStream. Only the configured Bedrock
+bearer token is sent, not ambient credentials or Claude Code metadata.
+For Vertex, the Node retains the service-account JSON as a credential, signs
+a JWT for the cloud-platform scope, and caches the access token per key until
+one minute before expiry. The GenAI Vertex client uses the configured project,
+location, endpoint and authorized HTTP transport. Neither route lists deployed
+models; users enter their model IDs and the catalog supplies known metadata.
+
 Anthropic API-key requests carry an opaque, stable session identity so compatible
 account pools do not infer a new route when cache breakpoints move. Replies with
 context-bound thinking retain a digest of the projected request that produced
