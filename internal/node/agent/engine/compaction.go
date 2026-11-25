@@ -178,6 +178,18 @@ func (r *Runtime) compact(x *execution, binding model.Binding, route model.Route
 	if !useful {
 		return nil
 	}
+	return r.summarize(x, binding, route, state, compactionPlan{selection: selection, manual: manual, window: window})
+}
+
+type compactionPlan struct {
+	selection handoff.Selection
+	manual    bool
+	window    uint32
+}
+
+func (r *Runtime) summarize(x *execution, binding model.Binding, route model.Route, state store.AgentState, plan compactionPlan) error {
+	selection, manual, window := plan.selection, plan.manual, plan.window
+	selected := capturedModel(binding)
 	summaryID := protocol.NewRequestID().String()
 	hideCompacting := func() {
 		if !manual {
@@ -191,7 +203,8 @@ func (r *Runtime) compact(x *execution, binding model.Binding, route model.Route
 		progress, _ := json.Marshal(map[string]any{"type": "compacting", "started_ms": r.clock.Now().UnixMilli()})
 		_ = r.feed.Delta(x.inv.Session.ID, protocol.ConversationDraft{ID: summaryID, Turn: x.inv.Run.Turn, Author: "sailry", Parts: []protocol.ConversationPart{{Kind: "resource", Data: json.RawMessage(progress)}}})
 	}
-	binding, err := r.credential(x, binding)
+	var err error
+	binding, err = r.credential(x, binding)
 	if err != nil {
 		hideCompacting()
 		return err
@@ -341,6 +354,11 @@ func (r *Runtime) compact(x *execution, binding model.Binding, route model.Route
 		}
 		return failed(protocol.ConversationCompactionStageSummary, reason, compactionSummaryFault(reason))
 	}
+	return r.saveCompaction(x, binding, route, state, plan, summaryID, summary, usage, attempts)
+}
+
+func (r *Runtime) saveCompaction(x *execution, binding model.Binding, route model.Route, state store.AgentState, plan compactionPlan, summaryID string, summary handoff.Summary, usage canonical.Usage, attempts []model.Attempt) error {
+	selection, manual := plan.selection, plan.manual
 	rendered := summary.Render()
 	boundary := selection.Boundary
 	message := canonical.NewMessage(canonical.User, canonical.Text(0, rendered))
