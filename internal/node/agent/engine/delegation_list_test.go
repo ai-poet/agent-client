@@ -56,3 +56,31 @@ func TestSubagentListingTool(t *testing.T) {
 		t.Fatal("a captured assistant could not prioritize the native list")
 	}
 }
+
+func TestBuiltinToolLabels(t *testing.T) {
+	t.Parallel()
+	f, x := delegationFixture(t)
+	if err := f.r.captureTools(x); err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for name := range builtinIcons {
+		if findTool(x.tools, name) == nil {
+			continue
+		}
+		checked++
+		call := canonical.ToolRequest{ID: name, Name: name, Arguments: json.RawMessage(`{}`)}
+		record := canonical.NewRecord(x.inv.Run.Turn, "message", canonical.NewMessage(canonical.Assistant, canonical.Block{Kind: "tool_request", Data: &call}), f.r.clock.Now())
+		f.r.captureCorePresentation(&record)
+		p := record.Metadata.Presentation
+		if p == nil || p.Displays[name].Label == "" || p.Displays[name].Locales["zh-CN"] == "" {
+			t.Fatalf("%s display = %+v", name, p)
+		}
+		if _, ok := p.Tools[name]; ok {
+			t.Fatalf("%s presentation changed to %q", name, p.Tools[name])
+		}
+	}
+	if checked == 0 {
+		t.Fatal("fixture offers no labelled built-in tool")
+	}
+}
