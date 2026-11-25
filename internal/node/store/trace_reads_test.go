@@ -29,9 +29,26 @@ func TestTracePagesAndBoundedBody(t *testing.T) {
 	if err != nil || len(second.Records) != 1 || string(second.Records[0]) != "{\"attempt\":2}" || second.Next != "" {
 		t.Fatalf("second: %+v, %v", second, err)
 	}
+	appended, err := os.OpenFile(filepath.Join(dir, "trace.jsonl"), os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = appended.WriteString("{\"outcome\":\"failed\"}\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err = appended.Close(); err != nil {
+		t.Fatal(err)
+	}
+	q.After = second.Tail
+	if update, err := ReadTrace(t.Context(), root, q); err != nil || len(update.Records) != 1 || string(update.Records[0]) != "{\"outcome\":\"failed\"}" {
+		t.Fatal("cursor did not resume at the appended record", err)
+	}
+	if status, err := ReadTrace(t.Context(), root, protocol.TraceQuery{Session: q.Session, StatusOnly: true}); err != nil || status.Status == nil || status.Status.Failed != 1 || len(status.Records) != 0 {
+		t.Fatal("invalid header status", err)
+	}
 	var packed bytes.Buffer
 	z := gzip.NewWriter(&packed)
-	if _, err = z.Write(bytes.Repeat([]byte("a"), 300<<10)); err != nil {
+	if _, err = z.Write(bytes.Repeat([]byte("a"), protocol.TracePreviewLimit+1)); err != nil {
 		t.Fatal(err)
 	}
 	if err = z.Close(); err != nil {
@@ -45,6 +62,15 @@ func TestTracePagesAndBoundedBody(t *testing.T) {
 	if err != nil || !body.Truncated || len(body.Content) != 256<<10 || len(body.Records) != 0 {
 		t.Fatalf("body preview bytes=%d truncated=%v: %v", len(body.Content), body.Truncated, err)
 	}
+	q.PreviewBytes = protocol.TracePreviewLimit
+	if body, err = ReadTrace(t.Context(), root, q); err != nil || !body.Truncated || len(body.Content) != protocol.TracePreviewLimit {
+		t.Fatalf("desktop preview bytes=%d truncated=%v: %v", len(body.Content), body.Truncated, err)
+	}
+	q.PreviewBytes++
+	if _, err = ReadTrace(t.Context(), root, q); err == nil {
+		t.Fatal("oversized preview accepted")
+	}
+	q.PreviewBytes = 0
 	for _, q.Body = range []string{"bodies/../../other/bodies/example-1.res.gz", "bodies/..\\other.req.gz", "trace.jsonl"} {
 		if _, err = ReadTrace(t.Context(), root, q); err == nil {
 			t.Fatalf("accepted %q", q.Body)

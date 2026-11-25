@@ -53,7 +53,7 @@ func traceCategories(c *ui.Context, r traceRow) {
 				ui.Text(c, fmt.Sprintf("~%d   %.1f%%", *v.Tokens, 100*float64(*v.Tokens)/total)).FontSize(13).FontFeatures("tnum")
 			})
 		}
-		if !r.complete {
+		if !r.CompleteContext {
 			ui.Text(c, i18n.T(c, "meter_payload_partial")).FontSize(12).TextColor(p.MutedForeground)
 		}
 	})

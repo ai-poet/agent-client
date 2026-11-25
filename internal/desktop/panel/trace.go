@@ -41,7 +41,7 @@ type traceRow struct {
 	Categories                     []protocol.ConversationObservationCategory
 	CacheReported                  *bool `json:"cache_reported"`
 	observedCache                  *uint64
-	complete                       bool
+	CompleteContext                bool `json:"complete_context"`
 	turnNumber                     int
 	Request, Response              traceSide
 	Bytes                          struct {
@@ -117,7 +117,7 @@ func (s *State) traceRows(decoded []traceRow, filter, query string) []traceRow {
 				if len(r.Categories) == 0 {
 					r.Categories = attempt.Categories
 				}
-				r.complete = attempt.CompleteContext
+				r.CompleteContext = attempt.CompleteContext
 				if r.CacheReported == nil {
 					r.CacheReported = &attempt.CacheReported
 				}
@@ -158,9 +158,6 @@ func (r traceRow) metric(k string) string {
 		if r.observedCache != nil {
 			return strconv.FormatUint(*r.observedCache, 10)
 		}
-		if r.CacheReported == nil && string(r.Usage[k]) == "0" {
-			return "-"
-		} // Legacy rows also wrote unreported cache counts as zero.
 	}
 	if v, ok := r.Usage[k]; ok && string(v) != "null" {
 		return string(v)
@@ -220,7 +217,7 @@ func (s *State) traceView(c *ui.Context) {
 		if selected == nil && len(rows) > 0 && (!v.detail || v.request == "") {
 			selected = &rows[0]
 		}
-		ui.Row(c.Key("columns")).Grow(1).MinHeight(0).Children(func() {
+		ui.Row(c.Key("columns")).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
 			if !narrow || !v.detail {
 				list := ui.Column(c.Key("list")).MinHeight(0)
 				if narrow {
@@ -246,11 +243,11 @@ func (s *State) traceView(c *ui.Context) {
 								if r.turnNumber > 0 {
 									label = i18n.T(c, "trace_turn_number", "count", r.turnNumber)
 								}
-								ui.Text(c.Key(i).Key("turn"), label).FontSize(12).SingleLine()
+								ui.Text(c.Key("turn:"+r.Turn), label).FontSize(12).SingleLine()
 								prev = r.Turn
 							}
 							active := selected != nil && selected.RequestID == r.RequestID && selected.Attempt == r.Attempt
-							row := kit.GhostLook(c, ui.ButtonBase(c.Key(r.RequestID).Key(r.Attempt)).Label(fmt.Sprintf("#%d %s %s", r.Attempt, r.Provider.Model, r.Outcome)), active)
+							row := kit.GhostLook(c, ui.ButtonBase(c.Key(fmt.Sprintf("attempt:%s:%d", r.RequestID, r.Attempt))).Label(fmt.Sprintf("#%d %s %s", r.Attempt, r.Provider.Model, r.Outcome)), active)
 							if active && v.reveal {
 								row.ScrollIntoView()
 								v.reveal = false

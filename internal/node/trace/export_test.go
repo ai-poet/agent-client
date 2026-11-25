@@ -189,6 +189,41 @@ func TestTraceExportRejectsSymlinkedSession(t *testing.T) {
 	}
 }
 
+func TestTraceExportSelectNarrowerScopeAt64MiB(t *testing.T) {
+	root := t.TempDir()
+	query := protocol.TraceExportQuery{Session: protocol.NewSessionID(), Scope: "all", Mode: "raw"}
+	dir := filepath.Join(root, "traces", query.Session.String())
+	if err := os.MkdirAll(filepath.Join(dir, "bodies"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	body := compressed(t, bytes.Repeat([]byte("x"), 16<<20))
+	var index bytes.Buffer
+	turn := protocol.NewTurnID()
+	for i := range 5 {
+		name := fmt.Sprintf("bodies/r%d.req.gz", i)
+		data := body
+		outcome := "failed"
+		if i == 4 {
+			data = compressed(t, []byte("x"))
+			outcome = "succeeded"
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(&index, `{"v":1,"session":%q,"turn":%q,"request_id":"r%d","attempt":1,"outcome":%q,"request":{"body":%q}}`+"\n", query.Session.String(), turn.String(), i, outcome, name)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "trace.jsonl"), index.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Export(t.Context(), root, query, io.Discard); err != tooLarge {
+		t.Fatal("64 MiB plus one was not rejected", err)
+	}
+	query.Scope = "failed"
+	if err := Export(t.Context(), root, query, io.Discard); err != nil {
+		t.Fatal("selected 64 MiB should fit", err)
+	}
+}
+
 func TestTraceExportPromptShapesAndStreamEcho(t *testing.T) {
 	const secret = "private-sentinel"
 	for _, body := range []string{

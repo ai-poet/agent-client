@@ -43,6 +43,8 @@ type Facts struct {
 	Outcome, EndKind, GatewayRequestID string
 	Status                             int
 	Timing, Usage, Retry, Failure      any
+	Categories                         any // measured context composition of this attempt
+	CompleteContext                    bool
 }
 
 type Attempt struct {

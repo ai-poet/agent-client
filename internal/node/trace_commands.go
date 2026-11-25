@@ -11,6 +11,9 @@ import (
 
 func (node *Node) readTrace(ctx context.Context, query protocol.TraceQuery) (protocol.Output, error) {
 	page, err := store.ReadTrace(ctx, node.profile.Ownership.Path, query)
+	if page.Status != nil {
+		page.Status.Recording = node.profile.Store.Node.TraceEnabled()
+	}
 	return protocol.Output{Kind: "trace", Data: page}, err
 }
 

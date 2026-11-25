@@ -30,6 +30,15 @@ func CheckTraceSession(ctx context.Context, db *sql.Conn, session protocol.Sessi
 // one regular file under the authorized session's bodies directory.
 func ReadTrace(ctx context.Context, profile string, query protocol.TraceQuery) (protocol.TracePage, error) {
 	page := protocol.TracePage{Session: query.Session, Body: query.Body}
+	if query.PreviewBytes > protocol.TracePreviewLimit || query.PreviewBytes != 0 && query.Body == "" {
+		return page, invalid("invalid trace preview size")
+	}
+	if query.StatusOnly {
+		if query.Body != "" || query.After != "" || query.Limit != 0 {
+			return page, invalid("trace status cannot be combined with a page or body")
+		}
+		page.Status = &protocol.TraceStatus{}
+	}
 	name := "trace.jsonl"
 	if query.Body != "" {
 		base, ok := strings.CutPrefix(query.Body, "bodies/")
@@ -60,8 +69,11 @@ func ReadTrace(ctx context.Context, profile string, query protocol.TraceQuery) (
 			return page, err
 		}
 		defer z.Close()
-		const preview = 256 << 10
-		content, err := io.ReadAll(io.LimitReader(z, preview+1))
+		preview := int(query.PreviewBytes)
+		if preview == 0 {
+			preview = 256 << 10
+		}
+		content, err := io.ReadAll(io.LimitReader(z, int64(preview)+1))
 		if err != nil {
 			return page, err
 		}
@@ -85,6 +97,18 @@ func ReadTrace(ctx context.Context, profile string, query protocol.TraceQuery) (
 			return page, err
 		}
 		line := scan.Bytes()
+		if page.Status != nil {
+			var row struct {
+				Outcome string `json:"outcome"`
+			}
+			if err := json.Unmarshal(line, &row); err != nil {
+				return page, invalid("invalid trace index record")
+			}
+			if row.Outcome == "failed" {
+				page.Status.Failed++
+			}
+			continue
+		}
 		if found && (len(page.Records) == limit || size+len(line) > 2<<20) {
 			page.Next = last
 			break
@@ -99,6 +123,7 @@ func ReadTrace(ctx context.Context, profile string, query protocol.TraceQuery) (
 			return page, invalid("invalid trace index record")
 		}
 		page.Records = append(page.Records, append(json.RawMessage(nil), line...))
+		page.Tail = last
 		size += len(line)
 	}
 	if err := scan.Err(); err != nil {

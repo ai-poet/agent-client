@@ -291,6 +291,10 @@ func (a *Attempt) line(f Facts) ([]byte, error) {
 	if a.scope.Record != "" {
 		m["record"] = a.scope.Record
 	}
+	if f.Categories != nil {
+		m["categories"] = f.Categories
+		m["complete_context"] = f.CompleteContext
+	}
 	raw, err := json.Marshal(m)
 	if err != nil {
 		return nil, err

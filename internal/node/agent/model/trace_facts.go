@@ -115,6 +115,10 @@ func (a *Attempt) finishTransport(err error, secrets []protocol.Secret, c *attem
 	usage := a.Usage
 	usage.Provider = nil // provider extensions belong in the redacted body
 	f := trace.Facts{StartedMs: a.Started.UnixMilli(), Outcome: string(a.Outcome()), EndKind: string(end), GatewayRequestID: id, Usage: usage, Timing: timing}
+	if len(a.Categories) != 0 {
+		f.Categories = a.Categories
+		f.CompleteContext = a.CompleteContext
+	}
 	if a.Status != nil {
 		f.Status = int(*a.Status)
 	}

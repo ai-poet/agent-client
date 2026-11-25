@@ -118,7 +118,7 @@ func (s *State) confirmClose(c *ui.Context) {
 func (s *State) look(c *ui.Context, t Tab) (*ui.SVG, string) {
 	switch t.Kind {
 	case Trace:
-		return icons.Network, i18n.T(c, "trace_title")
+		return icons.ListTree, i18n.T(c, "trace_title")
 	case Artifact:
 		if f, ok := s.artifacts[t.ID]; ok {
 			return conversation.FileIcon(f), f.Name()

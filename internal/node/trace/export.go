@@ -360,7 +360,15 @@ func inflate(blob []byte, remaining int) ([]byte, error) {
 }
 
 const readme = `Sailry request trace
-trace.jsonl contains one captured HTTP attempt per line. Timing is in microseconds.
+trace.jsonl contains one captured HTTP attempt per line:
+  session, turn, request_id, attempt: correlation keys; attempt is one-based within a request.
+  ts: start time in Unix milliseconds. purpose and provider identify the route.
+  status, outcome, response.end: HTTP status (0 if unavailable), model outcome, and transport end.
+  failure, retry: observed failure kind and resend decision (delay_ms in milliseconds).
+  timing: offsets from dispatch preparation to the reported milestones, in microseconds.
+  usage: reported input, output, reasoning, cache read/write tokens (not inferred costs).
+  bytes, digest: original captured byte counts, truncation flags and SHA-256 digests.
+  request, response: allowed headers, names of dropped headers, optional body reference.
 Missing fields are unknown. Paths in request.body and response.body refer to gzip entries.
 manifest.json lists SHA-256 (hex) for each other ZIP entry, over the entry's exact bytes.
 Raw exports retain local capture redactions but may contain system prompts, code, user data

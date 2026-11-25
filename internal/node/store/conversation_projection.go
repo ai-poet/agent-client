@@ -220,6 +220,9 @@ func canonicalEntry(record canonical.Record, sequence uint64, resolve func(canon
 			// Records identify attempts; the observation identifies their shared request.
 			if execution.Observation != nil {
 				object["id"], _ = encode(execution.Observation.ID)
+				if attempts := execution.Observation.Attempts; len(attempts) == 1 {
+					object["trace_attempt"], _ = encode(attempts[0].Index)
+				}
 			}
 			value.Parts = append(value.Parts, resourcePart(object))
 		}

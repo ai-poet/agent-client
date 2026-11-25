@@ -68,7 +68,7 @@ func TestTraceObservationEnrichment(t *testing.T) {
 	page := []json.RawMessage{
 		json.RawMessage(`{"request_id":"r","turn":"` + turn.String() + `","attempt":1,"usage":{"cache_read":0},"categories":[{"kind":"system","tokens":12}],"request":{"dropped_headers":["authorization"]}}`),
 		json.RawMessage(`{"request_id":"r","turn":"` + turn.String() + `","attempt":2,"usage":{"cache_read":0}}`),
-		json.RawMessage(`{"request_id":"other","turn":"older","attempt":1,"usage":{"cache_read":0}}`),
+		json.RawMessage(`{"request_id":"other","turn":"older","attempt":1,"usage":{}}`),
 	}
 	epoch, tokens := uint64(7), uint64(55)
 	s := State{TraceTurnNumbers: map[string]int{"older": 3}, TraceRecent: []protocol.ConversationObservationRequest{{

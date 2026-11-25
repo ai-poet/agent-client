@@ -260,6 +260,7 @@ type Citation struct {
 // ended for Reason before the attempts ran out.
 type Retry struct {
 	Request        string // shared by the attempts of one model request
+	TraceAttempt   int    // one-based observation index, independent of the retry wait counter
 	Attempt, Limit int
 	Reason         string
 	Detail         string // the provider's message, shown when opened

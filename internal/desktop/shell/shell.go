@@ -622,6 +622,9 @@ func (a *App) details(c *ui.Context, f frame, fill ui.Color) {
 				return
 			}
 			a.syncPanel()
+			if a.Panel.Active.Kind == panel.Trace && a.Hooks.TraceFrame != nil && !a.sampled() {
+				a.Hooks.TraceFrame(c, a.FocusedConversation())
+			}
 			panel.View(c, a.Panel, a.project(), kit.KeyText)
 		})
 	})

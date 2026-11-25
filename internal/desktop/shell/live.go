@@ -53,7 +53,9 @@ type Hooks struct {
 	PluginTitle      func(*ui.Context) bool
 	PluginOverlays   func(*ui.Context)
 	// Overview is a conversation's session overview for the header's button.
-	Overview func(*ui.Context, *viewmodel.Conversation) *composer.Overview
+	Overview    func(*ui.Context, *viewmodel.Conversation) *composer.Overview
+	TraceStatus func(*viewmodel.Conversation) (known, recording bool, failed int)
+	TraceFrame  func(*ui.Context, string)
 }
 
 type ConversationActions interface {

@@ -667,7 +667,15 @@ errors never change model output. The ordinary log and backup roots exclude
 these bodies.
 
 Only a controller with access to the session can list trace records, preview
-a body, or clear the trace. A clear has a durable command receipt. Archiving
+a body, export, or clear the trace. The Desktop session panel follows the existing
+conversation watch and requests new index rows after its last cursor. It loads a
+selected body on demand (up to 2 MiB) and drops its private state on close or
+owner change. Retry links use the observation index, not the displayed resend
+counter. `export_trace` prepares a bounded ZIP on the execution Node and returns
+a caller-bound, single-use download stream. The default shareable mode replaces
+system instructions with fingerprints but still contains private conversation
+data. Desktop publishes the verified file only after the download succeeds.
+A clear has a durable command receipt. Archiving
 or removing a session deletes its private trace; startup also checks for
 inactive trace directories after interrupted cleanup. `read_usage_v2` lists
 observed attempts even without token counts. Only reported usage contributes

@@ -41,6 +41,7 @@ var (
 	PanelRight       = load("panel-right")
 	Columns          = load("columns-2")
 	Network          = load("network")
+	ListTree         = load("reicon-business-diagram-tree")
 	Folder           = load("folder")
 	FolderPlus       = load("folder-plus")
 	ListFilter       = load("list-filter")

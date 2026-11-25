@@ -29,6 +29,9 @@ import (
 )
 
 type Runtime struct {
+	tracePanel  *sessionTrace
+	traceBadges map[protocol.SessionID]*traceBadge
+	exportTrace func(protocol.TraceExportQuery)
 	pluginViews *pluginViewState
 	// demoModels is the model each demo conversation's composer is set to,
 	// by conversation: what the statistics package reads as its model.
@@ -300,6 +303,8 @@ func NewWithPreferences(ctx context.Context, controller *client.Client, prefs *p
 	r.App.Hooks.DemoConversation = r.demoConversation
 	r.App.Hooks.RenderChild = r.renderLiveChild
 	r.App.Hooks.Overview = r.sessionOverview
+	r.App.Hooks.TraceStatus = r.traceStatus
+	r.App.Hooks.TraceFrame = r.traceFrame
 	r.conversationWatches = map[protocol.SessionID]func(){}
 	r.conversationSeen = map[protocol.SessionID]bool{}
 	r.composerInitialized = map[string]bool{}
@@ -561,6 +566,7 @@ func (r *Runtime) attentionFrame() {
 }
 
 func (r *Runtime) afterFrame() {
+	r.finishTraceFrame()
 	for _, bound := range r.bindings {
 		bound.finishFrame()
 		bound.finishConversationFrame()
