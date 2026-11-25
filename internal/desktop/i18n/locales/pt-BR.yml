@@ -2633,7 +2633,9 @@ trace_raw_confirm: O rastro bruto pode incluir instruções, código e conversas
 trace_partial: Captura parcial
 trace_load: Carregar corpo
 trace_events: Separar por evento
-trace_private: Pode conter conversas privadas.
+trace_private: Os rastros locais podem conter instruções do sistema e conversas privadas.
 trace_dispatch: Despacho
 trace_sent: Requisição enviada
 trace_gap: Maior intervalo
+trace_dropped_headers: Cabeçalhos omitidos
+trace_turn_number: Turno %{count}

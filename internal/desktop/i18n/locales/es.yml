@@ -2633,7 +2633,9 @@ trace_raw_confirm: La traza sin procesar puede incluir instrucciones, código y 
 trace_partial: Captura parcial
 trace_load: Cargar cuerpo
 trace_events: Separar por evento
-trace_private: Puede incluir conversaciones privadas.
+trace_private: Las trazas locales pueden contener instrucciones del sistema y conversaciones privadas.
 trace_dispatch: Despacho
 trace_sent: Solicitud enviada
 trace_gap: Intervalo máximo
+trace_dropped_headers: Cabeceras omitidas
+trace_turn_number: Turno %{count}

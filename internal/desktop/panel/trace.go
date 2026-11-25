@@ -21,6 +21,7 @@ import (
 type traceSide struct {
 	Body        string
 	Headers     map[string][]string
+	Dropped     []string `json:"dropped_headers"`
 	End         string
 	Gateway     string `json:"gateway_request_id"`
 	ContentType string `json:"content_type"`
@@ -37,6 +38,11 @@ type traceRow struct {
 	Retry                          *struct{ Index int }
 	Usage                          map[string]json.RawMessage
 	Timing                         map[string]uint64
+	Categories                     []protocol.ConversationObservationCategory
+	CacheReported                  *bool `json:"cache_reported"`
+	observedCache                  *uint64
+	complete                       bool
+	turnNumber                     int
 	Request, Response              traceSide
 	Bytes                          struct {
 		ReqTruncated bool `json:"req_truncated"`
@@ -51,13 +57,13 @@ type tracePresentation struct {
 	scope, mode, exportTurn                      string
 	page                                         []json.RawMessage
 	projected                                    []traceRow
-	appliedFilter, appliedQuery                  string
-	preview                                      tracePreview
+
+	preview tracePreview
 }
 
 func (s *State) ResetTrace() {
 	s.TraceReadBody, s.TraceJump, s.TraceExport = nil, nil, nil
-	s.TracePage = nil
+	s.TracePage, s.TraceRecent, s.TraceTurnNumbers, s.TraceMarkers = nil, nil, nil, nil
 	s.TraceContent = protocol.TracePage{}
 	s.TraceError = ""
 	s.trace = tracePresentation{}
@@ -71,17 +77,57 @@ func (s *State) SelectTrace(request string, attempt int) {
 	s.trace.preview = tracePreview{}
 }
 
-func traceRows(page []json.RawMessage, filter, query string) []traceRow {
+func decodeTraceRows(page []json.RawMessage) []traceRow {
 	var out []traceRow
-	groups := map[string][]traceRow{}
-	var turns []string
-	query = strings.ToLower(strings.TrimSpace(query))
+
 	for _, raw := range page {
 		var r traceRow
 		if json.Unmarshal(raw, &r) != nil || r.RequestID == "" {
 			continue
 		}
-		if filter == "failed" && r.Outcome != "failed" || filter == "retry" && r.Attempt <= 1 && r.Retry == nil || filter == "miss" && string(r.Usage["cache_read"]) != "0" {
+		out = append(out, r)
+	}
+	return out
+}
+
+func (s *State) traceRows(decoded []traceRow, filter, query string) []traceRow {
+	requests := make(map[string]*protocol.ConversationObservationRequest, len(s.TraceRecent))
+	numbers := maps.Clone(s.TraceTurnNumbers)
+	if numbers == nil {
+		numbers = map[string]int{}
+	}
+	for i := range s.TraceRecent {
+		req := &s.TraceRecent[i]
+		requests[req.ID] = req
+		if req.TurnIndex != nil && *req.TurnIndex > 0 && numbers[req.Turn.String()] <= 0 {
+			numbers[req.Turn.String()] = int(*req.TurnIndex)
+		}
+	}
+	groups := map[string][]traceRow{}
+	var turns []string
+	query = strings.ToLower(strings.TrimSpace(query))
+	for _, r := range decoded {
+		r.turnNumber = numbers[r.Turn]
+		if req := requests[r.RequestID]; req != nil && req.Turn.String() == r.Turn {
+			for i := range req.Attempts {
+				attempt := &req.Attempts[i]
+				if attempt.Index != uint64(r.Attempt) {
+					continue
+				}
+				if len(r.Categories) == 0 {
+					r.Categories = attempt.Categories
+				}
+				r.complete = attempt.CompleteContext
+				if r.CacheReported == nil {
+					r.CacheReported = &attempt.CacheReported
+				}
+				if attempt.CacheReported && attempt.Usage != nil {
+					r.observedCache = &attempt.Usage.CachedInput
+				}
+				break
+			}
+		}
+		if filter == "failed" && r.Outcome != "failed" || filter == "retry" && r.Attempt <= 1 && r.Retry == nil || filter == "miss" && r.metric("cache_read") != "0" {
 			continue
 		}
 		if query != "" && !strings.Contains(strings.ToLower(strings.Join([]string{r.status(), r.Failure.Kind, r.Failure.Code, r.Provider.Model, r.Response.Gateway}, " ")), query) {
@@ -92,6 +138,7 @@ func traceRows(page []json.RawMessage, filter, query string) []traceRow {
 		}
 		groups[r.Turn] = append(groups[r.Turn], r)
 	}
+	var out []traceRow
 	for _, turn := range turns {
 		out = append(out, groups[turn]...)
 	}
@@ -104,7 +151,18 @@ func (r traceRow) status() string {
 	return strconv.Itoa(r.Status)
 }
 func (r traceRow) metric(k string) string {
-	if v, ok := r.Usage[k]; ok {
+	if k == "cache_read" {
+		if r.CacheReported != nil && !*r.CacheReported {
+			return "-"
+		}
+		if r.observedCache != nil {
+			return strconv.FormatUint(*r.observedCache, 10)
+		}
+		if r.CacheReported == nil && string(r.Usage[k]) == "0" {
+			return "-"
+		} // Legacy rows also wrote unreported cache counts as zero.
+	}
+	if v, ok := r.Usage[k]; ok && string(v) != "null" {
 		return string(v)
 	}
 	return "-"
@@ -146,12 +204,11 @@ func (s *State) traceView(c *ui.Context) {
 		}
 		// Read results are immutable. Repeated frames and timeline hover do not
 		// decode headers or provider metadata again unless the index changes.
-		if v.appliedFilter != v.filter || v.appliedQuery != v.query || !slices.EqualFunc(v.page, s.TracePage, func(a, b json.RawMessage) bool { return bytes.Equal(a, b) }) {
+		if !slices.EqualFunc(v.page, s.TracePage, func(a, b json.RawMessage) bool { return bytes.Equal(a, b) }) {
 			v.page = slices.Clone(s.TracePage)
-			v.appliedQuery, v.appliedFilter = v.query, v.filter
-			v.projected = traceRows(v.page, v.filter, v.query)
+			v.projected = decodeTraceRows(v.page)
 		}
-		rows := v.projected
+		rows := s.traceRows(v.projected, v.filter, v.query)
 		s.traceTimeline(c, rows)
 		var selected *traceRow
 		for i := range rows {
@@ -185,7 +242,11 @@ func (s *State) traceView(c *ui.Context) {
 						prev := ""
 						for i, r := range rows {
 							if i == 0 || prev != r.Turn {
-								ui.Text(c.Key(i).Key("turn"), r.Turn).FontSize(12).SingleLine()
+								label := r.Turn
+								if r.turnNumber > 0 {
+									label = i18n.T(c, "trace_turn_number", "count", r.turnNumber)
+								}
+								ui.Text(c.Key(i).Key("turn"), label).FontSize(12).SingleLine()
 								prev = r.Turn
 							}
 							active := selected != nil && selected.RequestID == r.RequestID && selected.Attempt == r.Attempt
@@ -279,6 +340,7 @@ func (s *State) traceDetail(c *ui.Context, r traceRow) {
 				kit.Ghost(c.Key("gateway"), i18n.T(c, "connections_copy_id"), false).OnClick(func() { c.WriteClipboard(r.Response.Gateway) })
 			}
 			ui.Text(c, i18n.T(c, "meter_input")+" "+r.metric("input")+"   "+i18n.T(c, "meter_output")+" "+r.metric("output"))
+			traceCategories(c, r)
 			for _, pair := range [][3]string{{"cache_read", "input", "meter_cache_read"}, {"reasoning", "output", "meter_reasoning"}} {
 				n, e1 := strconv.ParseUint(r.metric(pair[0]), 10, 64)
 				total, e2 := strconv.ParseUint(r.metric(pair[1]), 10, 64)
@@ -305,58 +367,6 @@ func traceTiming(c *ui.Context, r traceRow) {
 	}
 }
 
-func (s *State) traceTimeline(c *ui.Context, rows []traceRow) {
-	if len(rows) == 0 {
-		return
-	}
-	v := &s.trace
-	// The index records model calls (including compaction), not tool or input spans.
-	lo, hi := rows[0].TS, rows[0].TS
-	for _, r := range rows {
-		lo = min(lo, r.TS)
-		hi = max(hi, r.TS+int64(r.Timing["elapsed_us"]/1000))
-	}
-	ui.Row(c.Key("ruler")).Gap(6).AlignItems(ui.Center).Children(func() {
-		key := "trace_equal"
-		if v.real {
-			key = "trace_actual"
-		}
-		kit.Ghost(c.Key("scale"), i18n.T(c, key), v.real).OnClick(func() { v.real = !v.real })
-		ui.ScrollHorizontal(c.Key("lanes")).Grow(1).Height(35).Children(func() {
-			width := max(float32(240), float32(len(rows))*9)
-			ui.Column(c.Key("tracks")).Width(width).Children(func() {
-				for i, label := range []string{"teams_model", "meter_compacting"} {
-					ui.Row(c.Key(i)).Width(width).Height(17).Children(func() {
-						for n, r := range rows {
-							if (r.Purpose == "compaction") != (i == 1) {
-								continue
-							}
-							x, w := width*float32(n)/float32(len(rows)), width/float32(len(rows))
-							if v.real && hi > lo {
-								x = width * float32(r.TS-lo) / float32(hi-lo)
-								w = width * float32(r.Timing["elapsed_us"]) / 1000 / float32(hi-lo)
-							}
-							tip := fmt.Sprintf("%s #%d %s", i18n.T(c, label), r.Attempt, r.Provider.Model)
-							col := theme.Of(c).Primary
-							if i == 1 {
-								col = theme.Of(c).Warning
-							}
-							if r.Outcome == "failed" {
-								col = theme.Of(c).Danger
-							}
-							bar := ui.ButtonBase(c.Key(n)).Label(tip).Absolute().Left(x).Top(3).Width(max(float32(2), w-1)).Height(10).Background(col)
-							kit.Tooltip(c, bar, tip)
-							bar.OnClick(func() {
-								v.request, v.attempt, v.detail, v.tab = r.RequestID, r.Attempt, true, ""
-								v.preview = tracePreview{}
-							})
-						}
-					})
-				}
-			})
-		})
-	})
-}
 func (s *State) traceExportForm(c *ui.Context, turn string) {
 	v := &s.trace
 	title := i18n.T(c, "trace_export")

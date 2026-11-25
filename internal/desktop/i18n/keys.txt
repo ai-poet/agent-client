@@ -2658,3 +2658,5 @@ trace_private
 trace_dispatch
 trace_sent
 trace_gap
+trace_dropped_headers
+trace_turn_number

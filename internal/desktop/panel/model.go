@@ -102,13 +102,16 @@ func Closed(tabs []Tab, t, active Tab) ([]Tab, Tab) {
 // row of tabs, each an open item, and the resources no project keeps.
 // Files and Git keep theirs in the shown Project, shared with their pages.
 type State struct {
-	TracePage     []json.RawMessage
-	TraceContent  protocol.TracePage
-	TraceError    string
-	TraceReadBody func(string)
-	TraceJump     func(record, turn string)
-	TraceExport   func(scope, mode, turn string)
-	trace         tracePresentation
+	TracePage        []json.RawMessage
+	TraceRecent      []protocol.ConversationObservationRequest
+	TraceTurnNumbers map[string]int
+	TraceMarkers     []TraceMarker
+	TraceContent     protocol.TracePage
+	TraceError       string
+	TraceReadBody    func(string)
+	TraceJump        func(record, turn string)
+	TraceExport      func(scope, mode, turn string)
+	trace            tracePresentation
 
 	createResource  func(Kind) bool
 	Actions         *Actions

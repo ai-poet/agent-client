@@ -2633,7 +2633,9 @@ trace_raw_confirm: Rohdaten können Prompts, Code und private Gesprächsinhalte 
 trace_partial: Unvollständige Aufzeichnung
 trace_load: Inhalt laden
 trace_events: Nach Ereignis aufteilen
-trace_private: Kann private Gesprächsinhalte enthalten.
+trace_private: Lokale Protokolle können Systemprompts und private Gesprächsinhalte enthalten.
 trace_dispatch: Weiterleitung
 trace_sent: Anfrage gesendet
 trace_gap: Längste Pause
+trace_dropped_headers: Ausgelassene Header
+trace_turn_number: Gesprächsschritt %{count}

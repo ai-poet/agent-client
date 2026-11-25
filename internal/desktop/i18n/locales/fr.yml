@@ -2633,7 +2633,9 @@ trace_raw_confirm: La trace brute peut contenir des consignes, du code et des é
 trace_partial: Capture partielle
 trace_load: Charger le corps
 trace_events: Séparer par événement
-trace_private: Peut contenir des échanges privés.
+trace_private: Les traces locales peuvent contenir des consignes système et des échanges privés.
 trace_dispatch: Répartition
 trace_sent: Requête envoyée
 trace_gap: Intervalle maximal
+trace_dropped_headers: En-têtes omis
+trace_turn_number: Tour %{count}

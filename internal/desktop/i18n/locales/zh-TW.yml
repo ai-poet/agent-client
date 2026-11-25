@@ -2633,7 +2633,9 @@ trace_raw_confirm: 原始軌跡可能包含提示詞、程式碼及私人對話�
 trace_partial: 內容不完整
 trace_load: 載入本文
 trace_events: 依事件拆分
-trace_private: 可能包含私人對話內容。
+trace_private: 本機軌跡可能包含系統提示詞和私人對話內容。
 trace_dispatch: 排程
 trace_sent: 已傳送請求
 trace_gap: 最長間隔
+trace_dropped_headers: 已省略的標頭
+trace_turn_number: 第 %{count} 回合

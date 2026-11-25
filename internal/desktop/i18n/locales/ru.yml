@@ -2633,7 +2633,9 @@ trace_raw_confirm: Исходная трассировка может содер
 trace_partial: Неполная запись
 trace_load: Загрузить содержимое
 trace_events: Разбить по событиям
-trace_private: Может содержать личную переписку.
+trace_private: Локальные трассировки могут содержать системные инструкции и личную переписку.
 trace_dispatch: Диспетчеризация
 trace_sent: Запрос отправлен
 trace_gap: Самая долгая пауза
+trace_dropped_headers: Скрытые заголовки
+trace_turn_number: Ход %{count}

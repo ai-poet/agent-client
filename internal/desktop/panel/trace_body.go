@@ -116,6 +116,9 @@ func (s *State) traceBody(c *ui.Context, r traceRow) {
 		}
 	}
 	traceHeaders(c, side.Headers)
+	if len(side.Dropped) > 0 {
+		ui.Text(c, i18n.T(c, "trace_dropped_headers")+": "+strings.Join(side.Dropped, ", ")).FontSize(12)
+	}
 	if partial || side.Body != "" && s.TraceContent.Body == side.Body && s.TraceContent.Truncated {
 		kit.Badge(c, i18n.T(c, "trace_partial"), kit.Caution)
 	}
