@@ -265,6 +265,26 @@ func TestAnthropicNativeCompaction(t *testing.T) {
 			t.Fatal("a refusal marked the route as unsupported")
 		}
 	})
+	t.Run("an ordinary reply without a block falls back and is remembered", func(t *testing.T) {
+		// A gateway that drops the beta, or a model without compaction,
+		// answers the request as a normal turn.
+		f, x, binding, provider := nativeFixture(t, protocol.ConversationModelApiAnthropic, func(writer http.ResponseWriter, request wireRequest) {
+			writeSSE(writer, anthropicText(nativeFixtureHandoff))
+		})
+		if err := compactNow(t, f, x, binding); err != nil {
+			t.Fatal(err)
+		}
+		if _, checkpoint := latestCheckpoint(t, f); checkpoint.Native != nil || !checkpoint.Readable() {
+			t.Fatal("a reply without a compaction block did not fall back to Sailry's handoff")
+		}
+		addExchange(t, f, "Second request")
+		if err := compactNow(t, f, x, binding); err != nil {
+			t.Fatal(err)
+		}
+		if len(provider.all(compacting)) != 1 {
+			t.Fatal("a route that ignored native compaction was asked again")
+		}
+	})
 	t.Run("a rejected beta falls back and is remembered", func(t *testing.T) {
 		f, x, binding, provider := nativeFixture(t, protocol.ConversationModelApiAnthropic, func(writer http.ResponseWriter, request wireRequest) {
 			if compacting(request) {
@@ -331,6 +351,27 @@ func TestAnthropicNativeCompaction(t *testing.T) {
 }
 
 func TestResponsesNativeCompaction(t *testing.T) {
+	t.Run("a successful response with no compaction item is remembered", func(t *testing.T) {
+		f, x, binding, provider := nativeFixture(t, protocol.ConversationModelApiResponses, func(w http.ResponseWriter, request wireRequest) {
+			if compacting(request) {
+				writeJSON(w, http.StatusOK, `{"id":"ordinary","output":[{"type":"message","role":"assistant","content":[]}]}`)
+			} else {
+				writeSSE(w, responsesText(nativeFixtureHandoff))
+			}
+		})
+		for _, question := range []string{"Another exchange", "One more exchange"} {
+			addExchange(t, f, question)
+			if err := compactNow(t, f, x, binding); err != nil {
+				t.Fatal(err)
+			}
+			if _, c := latestCheckpoint(t, f); c.Native != nil || !c.Readable() {
+				t.Fatal("the ordinary response replaced the transcript handoff")
+			}
+		}
+		if len(provider.all(compacting)) != 1 {
+			t.Fatal("retried an ignored native endpoint")
+		}
+	})
 	t.Run("the compacted window carries the next request", func(t *testing.T) {
 		f, x, binding, provider := nativeFixture(t, protocol.ConversationModelApiResponses, func(writer http.ResponseWriter, request wireRequest) {
 			if compacting(request) {

@@ -43,6 +43,9 @@ func (*nativeCompaction) Options() {}
 type nativeOutput struct {
 	Summary string
 	Items   json.RawMessage
+	// Ignored means the request completed without any compaction item.
+	// A present but unusable item does not disable the feature.
+	Ignored bool `json:",omitempty"`
 }
 
 func (*nativeOutput) Options() {}
@@ -121,6 +124,9 @@ func CompactNative(ctx context.Context, languageModel fantasy.LanguageModel, bin
 			return Compacted{}, fmt.Errorf("%w: %w", ErrNativeUnsupported, err)
 		}
 		return Compacted{}, err
+	}
+	if output != nil && output.Ignored {
+		return Compacted{}, ErrNativeUnsupported
 	}
 	if output == nil || len(output.Items) == 0 {
 		return Compacted{}, ErrNativeUnusable

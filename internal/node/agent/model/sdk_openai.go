@@ -328,15 +328,21 @@ func (model *sdkModel) compactResponses(ctx context.Context, body map[string]any
 	}
 	emitter.updateUsage(wireObject(value["usage"]), "responses")
 	output := wireArray(value["output"])
-	part := fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop}
+	result := &nativeOutput{Ignored: true}
+	part := fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop,
+		ProviderMetadata: fantasy.ProviderMetadata{nativeCompactionKey: result}}
 	for _, item := range output {
-		if object := wireObject(item); object["type"] == "compaction" && wireString(object["encrypted_content"]) != "" {
+		if object := wireObject(item); object["type"] == "compaction" {
+			result.Ignored = false
+			if wireString(object["encrypted_content"]) == "" {
+				continue
+			}
 			items, err := json.Marshal(output)
 			if err != nil {
 				emitter.fail(err)
 				return
 			}
-			part.ProviderMetadata = fantasy.ProviderMetadata{nativeCompactionKey: &nativeOutput{Items: items}}
+			result.Items = items
 			break
 		}
 	}

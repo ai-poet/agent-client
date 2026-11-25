@@ -633,7 +633,8 @@ uses `compaction: {type: "summarize"}` and the `compact-2026-09-04` beta;
 Responses uses `/responses/compact`. Other routes, focused requests, and
 overflow recovery use the transcript handoff. Rejected native endpoints
 and features are remembered per provider, protocol, endpoint and model for
-the Node's lifetime. Unusable results fall back without disabling the route.
+the Node's lifetime. A completed reply with no compaction item also disables
+native compaction for that route. An unusable item falls back without disabling it.
 Native attempts are recorded as compaction usage; Messages sums the billed
 iterations. Only the producing provider, API and model receive the native
 items. Another model receives the readable summary; for an opaque Responses
