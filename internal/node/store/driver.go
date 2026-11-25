@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/core"
@@ -20,11 +21,13 @@ const allLeases = math.MaxInt64
 
 // Handle owns one file's writer and its independent read-only connection pool.
 type Handle struct {
-	path    string
-	leases  *semaphore.Weighted
-	mu      sync.Mutex
-	state   *connections
-	stopped bool
+	path            string
+	leases          *semaphore.Weighted
+	mu              sync.Mutex
+	state           *connections
+	stopped         bool
+	traceEnabled    atomic.Bool
+	traceSettingsMu sync.Mutex
 }
 
 type connections struct {

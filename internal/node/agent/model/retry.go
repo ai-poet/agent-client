@@ -10,6 +10,7 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/clock"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model/anthropic"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model/google"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/trace"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
@@ -27,6 +28,7 @@ type Attempt struct {
 	Index          uint64
 	Started        time.Time
 	Finished       time.Time
+	Timing         canonical.Timing
 	FirstToken     *time.Time
 	Usage          canonical.Usage
 	Failure        *Failure
@@ -35,6 +37,8 @@ type Attempt struct {
 	// RetryDelay is the wait before the next attempt; nil on the last attempt.
 	RetryDelay        *time.Duration
 	Status            *uint16
+	EndKind           *protocol.ConversationObservationEndKind
+	GatewayRequestID  *string
 	ResponseUs        *uint64
 	RequestBytes      *uint64
 	DispatchUs        *uint64
@@ -101,6 +105,16 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 			secrets = append(secrets, protocol.NewSecret(sdk.config.Key))
 		}
 	}
+	var scope *trace.Scope
+	var protected []string
+	if sdk != nil {
+		scope, _ = call.ProviderOptions[trace.ProviderKey].(*trace.Scope)
+		if scope != nil {
+			for _, secret := range secrets {
+				protected = append(protected, secret.Expose())
+			}
+		}
+	}
 	for index := uint64(0); ; index++ {
 		if err := ctx.Err(); err != nil {
 			return Classify(err)
@@ -109,6 +123,9 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 		owner, cancel := context.WithCancel(ctx)
 		firstOutputTimer := schedule.firstOutputTimer(attempt.Started, cancel)
 		owner, capture := captureAttempt(owner, call, timer, attempt.Started)
+		if scope != nil {
+			capture.trace = scope.Begin(requestID, int(index+1), protected...)
+		}
 		stream, err := nextModel.Stream(owner, call)
 		var pending []fantasy.StreamPart
 		streamed, escaped, finished, released := false, false, false, false
@@ -173,6 +190,7 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 			nextModel, releaseFallback = languageModel, nil
 		}
 		attempt.Finished = timer.Now()
+		attempt.Timing = attempt.observedTiming()
 		capture.apply(&attempt)
 		exhausted := false
 		if err != nil {
@@ -199,6 +217,7 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 				}
 			}
 		}
+		attempt.finishTransport(err, secrets, capture)
 		if observe != nil {
 			if observationErr := observe(attempt); observationErr != nil {
 				return observationErr

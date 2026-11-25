@@ -140,7 +140,9 @@ func (transport responseTransport) RoundTrip(request *http.Request) (*http.Respo
 		if err != nil {
 			return nil, err
 		}
-		capturePrepared(request.Context(), raw, true)
+		if capture := capturePrepared(request.Context(), raw, true); capture != nil && capture.trace != nil {
+			capture.trace.Request(request.Header, raw)
+		}
 	}
 	owner, cancel := context.WithCancel(request.Context())
 	stalled := &atomic.Bool{}
@@ -159,7 +161,12 @@ func (transport responseTransport) RoundTrip(request *http.Request) (*http.Respo
 		return nil, err
 	}
 	response.Body = &stallBody{ReadCloser: response.Body, limit: transport.stall, timer: timer, cancel: cancel, stalled: stalled}
-	captureHeaders(request.Context(), response.StatusCode)
+	if capture := captureHeaders(request.Context(), response.StatusCode); capture != nil {
+		capture.gatewayID = gatewayRequestID(response.Header)
+		if capture.trace != nil {
+			capture.trace.Response(response)
+		}
+	}
 	if facts, ok := request.Context().Value(factsKey{}).(*responseFacts); ok {
 		facts.status, facts.headers = response.StatusCode, response.Header.Clone()
 		if response.StatusCode >= 400 {

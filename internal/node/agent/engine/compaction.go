@@ -337,6 +337,7 @@ func (r *Runtime) summarize(x *execution, binding model.Binding, route model.Rou
 			if err != nil {
 				return err
 			}
+			r.scopeTrace(&call, languageModel, x, summaryBinding, canonical.PurposeCompaction)
 			return model.Run(x.ctx, languageModel, call, model.SummaryPurpose, r.clock, observe, collect, nil)
 		}
 		err := run(system)
@@ -553,6 +554,7 @@ func (r *Runtime) nativeCompaction(x *execution, binding model.Binding, route mo
 		if err != nil {
 			return model.Compacted{}, err
 		}
+		r.scopeTrace(&call, languageModel, x, binding, canonical.PurposeCompaction)
 		return model.CompactNative(x.ctx, languageModel, binding, call, r.clock, observe)
 	}
 	compacted, err := try()

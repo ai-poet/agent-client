@@ -657,6 +657,15 @@ Text estimates remain separate from provider-reported tokens. Attempt-relative
 timings distinguish HTTP dispatch after preparation, successful request write,
 response headers and first model content; unavailable transport facts stay absent.
 
+Separately, a profile can opt into private HTTP traces for SDK inference and
+compaction. The transport copies the prepared request and the response bytes
+the SDK actually consumes. Attempt completion appends observation facts and
+relative gzip body references to `traces/<session>/trace.jsonl`. Credentials
+are masked before persistence; system prompts are not removed. Caps (16 MiB
+per body, 64 MiB or 200 attempts per session, 512 MiB per profile) and storage
+errors never change model output. The ordinary log and backup roots exclude
+these bodies.
+
 Model request recovery permits up to nine retries and ten minutes of cumulative
 waiting. Network failures use exponential waits from one to thirty seconds;
 rate limits and overload use five seconds to one minute, with jitter. Provider
