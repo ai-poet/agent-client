@@ -1197,8 +1197,8 @@ func providerForm(c *ui.Context, m *Model, e *providerEditor) {
 			}
 			kit.GhostLook(c, ui.ButtonBase(c.Key("advanced")).Label(label).Expanded(e.advanced), false).Height(28).PaddingX(4).Gap(4).AlignSelf(ui.Start).
 				Children(func() {
-					ui.Icon(c, chevron).FontSize(14).TextColor(theme.Of(c).MutedForeground)
 					ui.Text(c, label).FontSize(14).SingleLine()
+					ui.Icon(c, chevron).FontSize(14).TextColor(theme.Of(c).MutedForeground)
 				}).OnClick(func() {
 				e.advanced = !e.advanced
 				// Opening starts a channel without headers on an empty row;
