@@ -15,6 +15,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/egoist/mygo/netproxy"
 	"github.com/openai/openai-go/v3/packages/ssestream"
 )
@@ -75,11 +76,13 @@ type sdkModel struct {
 	client *http.Client
 }
 type responseFacts struct {
-	status   int
-	headers  http.Header
-	body     []byte
-	family   string
-	observer *usageObserverBody
+	// A short-lived token is not known when Run captures the static secrets.
+	accessToken protocol.Secret
+	status      int
+	headers     http.Header
+	body        []byte
+	family      string
+	observer    *usageObserverBody
 }
 type factsKey struct{}
 
@@ -196,6 +199,9 @@ func newSDK(_ context.Context, config transportConfig) (fantasy.LanguageModel, e
 	var transport http.RoundTripper = responseTransport{base: modelTransport(), stall: stallTimeout}
 	if config.Kind == "anthropic" && config.OAuth {
 		transport = claudeTransport{base: transport}
+	}
+	if config.vertex != nil {
+		transport = vertexTransport{base: transport, account: config.vertex}
 	}
 	return &sdkModel{config: config, client: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
@@ -380,7 +386,11 @@ func (emitter *sdkEmitter) fail(cause error) {
 	failure := &fantasy.ProviderError{Message: message, Cause: cause, StatusCode: emitter.facts.status, ResponseHeaders: headers, ResponseBody: emitter.facts.body}
 	lower := strings.ToLower(string(emitter.facts.body))
 	failure.ContextTooLargeErr = strings.Contains(lower, "context_length_exceeded") || strings.Contains(lower, "maximum context length")
-	emitter.emit(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: withResponseHints(failure, emitter.facts.status, emitter.facts.headers)})
+	err := withResponseHints(failure, emitter.facts.status, emitter.facts.headers)
+	if emitter.config.vertex != nil {
+		err = Classify(err, emitter.facts.accessToken)
+	}
+	emitter.emit(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: err})
 }
 
 func decodeSDK(raw string) (map[string]any, error) {

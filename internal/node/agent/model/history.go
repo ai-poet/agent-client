@@ -137,7 +137,7 @@ func BuildCall(binding Binding, request Request) (fantasy.Call, error) {
 				}
 				part := fantasy.ReasoningPart{Text: value.Text, ProviderOptions: fantasy.ProviderOptions{}}
 				if value.Signature != nil {
-					switch binding.Provider.Api {
+					switch binding.Provider.Api.Family() {
 					case "anthropic":
 						part.ProviderOptions[anthropic.Name] = &anthropic.ReasoningOptionMetadata{Signature: *value.Signature}
 					case "responses":
@@ -164,7 +164,7 @@ func BuildCall(binding Binding, request Request) (fantasy.Call, error) {
 					return call, &Failure{Kind: InvalidRequest, Message: "stored tool call is invalid"}
 				}
 				options := fantasy.ProviderOptions{}
-				if keep && binding.Provider.Api == "gemini" && value.Provider != nil {
+				if keep && binding.Provider.Api.Family() == "gemini" && value.Provider != nil {
 					if raw := (*value.Provider)["thoughtSignature"]; len(raw) > 0 {
 						var signature string
 						if json.Unmarshal(raw, &signature) == nil {
@@ -227,7 +227,7 @@ func BuildCall(binding Binding, request Request) (fantasy.Call, error) {
 		flush()
 		appendBackground(background)
 	}
-	if binding.Provider.Api == "anthropic" {
+	if binding.Provider.Api.Family() == protocol.ConversationModelApiAnthropic {
 		remaining := 2
 		for i := len(call.Prompt) - 1; i >= 0 && remaining > 0; i-- {
 			if call.Prompt[i].Role == fantasy.MessageRoleUser || call.Prompt[i].Role == fantasy.MessageRoleTool {
@@ -473,7 +473,7 @@ func keepReasoning(binding Binding, record canonical.Record) bool {
 	return false
 }
 func cacheOptions(binding Binding) fantasy.ProviderOptions {
-	if binding.Provider.Api == "anthropic" {
+	if binding.Provider.Api.Family() == protocol.ConversationModelApiAnthropic {
 		return fantasy.ProviderOptions{anthropic.Name: &anthropic.ProviderCacheControlOptions{CacheControl: anthropic.CacheControl{Type: "ephemeral"}}}
 	}
 	return nil

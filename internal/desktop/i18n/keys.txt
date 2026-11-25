@@ -1176,6 +1176,10 @@ provider_deployment_id
 provider_api_version
 form_api_version_hint
 provider_cloud_required
+provider_project
+provider_location
+provider_service_account
+provider_service_account_hint
 form_model_hint
 provider_context
 form_tokens_hint

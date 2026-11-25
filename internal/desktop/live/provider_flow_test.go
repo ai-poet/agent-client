@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/client"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
@@ -19,6 +18,7 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/link"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/providers"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 // testProviderFlow drives Settings › Providers against a Node that lists
@@ -183,8 +183,8 @@ func testProviderFlow(t *testing.T) {
 			t.Errorf("brand %q (%s) has no mark", b.Name, b.ID)
 		}
 	}
-	want := []string{"Anthropic", "Baidu", "Cohere", "DeepSeek", "Doubao", "Gemini", "Kimi", "MiniMax", "Mistral", "OpenAI", "OpenCode", "Qwen", "xAI", "Zhipu"}
-	if listed := slices.Insert(slices.Clone(want), 6, "GitHub Copilot"); !slices.Equal(brands, listed) || !slices.Equal(keyed, want) {
+	want := []string{"Amazon Bedrock", "Anthropic", "Baidu", "Cohere", "DeepSeek", "Doubao", "Gemini", "Kimi", "MiniMax", "Mistral", "OpenAI", "OpenCode", "Qwen", "Vertex AI", "xAI", "Zhipu"}
+	if listed := slices.Insert(slices.Clone(want), 7, "GitHub Copilot"); !slices.Equal(brands, listed) || !slices.Equal(keyed, want) {
 		t.Errorf("brands %q, with API methods %q, want %q", brands, keyed, want)
 	}
 	if slices.Sort(logins); !slices.Equal(logins, []string{"ChatGPT", "Claude", "Copilot"}) {
@@ -254,7 +254,7 @@ func testProviderFlow(t *testing.T) {
 			options = append(options, x.Name)
 		}
 	}
-	if expected := append(append([]string{zh("provider_all")}, slices.Insert(slices.Clone(want), 6, "GitHub Copilot")...), "OpenRouter"); !slices.Equal(options, expected) {
+	if expected := append(append([]string{zh("provider_all")}, slices.Insert(slices.Clone(want), 7, "GitHub Copilot")...), "OpenRouter"); !slices.Equal(options, expected) {
 		t.Errorf("filter options %q, want %q", options, expected)
 	}
 	if icons.BrandColor("openrouter") == nil {
@@ -419,6 +419,42 @@ func testProviderFlow(t *testing.T) {
 	}
 	if got := azureVersion(p); got != "2025-01-01-preview" {
 		t.Errorf("a saved Azure provider shows version %q", got)
+	}
+	// Bedrock and Vertex AI channels save their region, or project and
+	// location, as connection options the Node accepts.
+	for i, cloud := range []struct{ brand, api, endpoint, model string }{
+		{"Amazon Bedrock", "bedrock", "https://bedrock-runtime.us-east-1.amazonaws.com", "us.anthropic.claude-sonnet-4-6"},
+		{"Vertex AI", "vertex_ai", "https://aiplatform.googleapis.com", "gemini-3.5-flash"},
+	} {
+		if i != 0 {
+			click(ui.RoleButton, zh("settings_add"))
+		}
+		click(ui.RoleButton, cloud.brand)
+		if cloud.api == "bedrock" {
+			typed(zh("provider_api_key"), "bedrock-test")
+		} else {
+			typed(zh("provider_project"), "proj-123")
+			typed(zh("provider_service_account"), `{"type":"service_account"}`)
+		}
+		click(ui.RoleButton, zh("provider_add_model"))
+		typed(zh("provider_model_id"), cloud.model)
+		click(ui.RoleButton, "128K")
+		before := sent()
+		click(ui.RoleButton, zh("provider_save"))
+		await("the cloud save", func() bool { return sent() == before+1 })
+		transport.mu.Lock()
+		p = saves[before].Provider
+		transport.mu.Unlock()
+		bedrock, isBedrock := p.Options.Bedrock()
+		vertex, isVertex := p.Options.VertexAi()
+		if string(p.Api) != cloud.api || p.Preset == nil || p.Endpoint != cloud.endpoint || len(p.Models) != 1 || p.Models[0].ID != cloud.model ||
+			isBedrock && bedrock.Region != "us-east-1" || isVertex && (vertex.Project != "proj-123" || vertex.Location != "global") || isBedrock == isVertex {
+			t.Errorf("the %s save sent %+v with options %+v", cloud.api, p, p.Options)
+		}
+		if err := providers.ValidateConfiguration(p); err != nil {
+			t.Errorf("the Node refuses the %s provider: %v", cloud.api, err)
+		}
+		await("the cloud editor to close", func() bool { _, open := tester.AccessByRole(ui.RoleButton, zh("provider_save")); return !open })
 	}
 }
 

@@ -22,3 +22,7 @@ provider_login_claude: "Claude"
 provider_add_model: "モデルを追加"
 provider_model_default: "デフォルト"
 provider_api_chat_completions: Chat Completions
+provider_project: "プロジェクト ID"
+provider_location: "ロケーション"
+provider_service_account: "サービスアカウントキー"
+provider_service_account_hint: "サービスアカウントの JSON キーを貼り付け"
