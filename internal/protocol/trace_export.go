@@ -2,6 +2,8 @@ package protocol
 
 const MaxTraceExportBytes = 64 << 20
 
+const TraceExportTooLargeMessage = "trace export exceeds the limit; select a narrower scope"
+
 type TraceExportQuery struct {
 	Session SessionID `json:"session"`
 	Scope   string    `json:"scope"`

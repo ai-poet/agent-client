@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ai-poet/cheaprouter-harness/internal/client"
 	"github.com/ai-poet/cheaprouter-harness/internal/link"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
@@ -70,6 +71,29 @@ func TestTraceCommandsRequireVisibleSessionAndController(t *testing.T) {
 	}
 	if _, err = node.Open(ctx, node.ID(), d.Stream); err == nil {
 		t.Fatal("trace stream reused")
+	}
+	controller := client.New(link.NewLocal(node.ID(), node.ID(), node))
+	if err := controller.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var received bytes.Buffer
+	err = controller.DownloadTrace(ctx, q, &received)
+	controller.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := zip.NewReader(bytes.NewReader(received.Bytes()), int64(received.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := archive.Open("manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := io.ReadAll(manifest)
+	manifest.Close()
+	if err != nil || !bytes.Contains(content, []byte(session.ID.String())) {
+		t.Fatal("missing downloaded session manifest", err)
 	}
 	req := protocol.NewRequest(node.ID(), clear)
 	if got := dispatchFixture(t, node, node.ID(), req); got.Fault != nil || got.Output.Kind != "trace_cleared" {

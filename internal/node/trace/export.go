@@ -9,21 +9,18 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/core"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
-var tooLarge = &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "trace export exceeds the limit; select a narrower scope"}
+var tooLarge = &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: protocol.TraceExportTooLargeMessage}
 
 func invalid(s string) error {
 	return &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: s}
@@ -117,45 +114,17 @@ type row struct {
 }
 
 func (r row) failed() bool { return r.Outcome == "failed" }
-func (r *row) share() {
-	// Free-form identifiers and names can themselves contain prompts or secrets.
-	if _, err := protocol.ParseRequestID(r.ID); err != nil {
-		r.ID = digest([]byte(r.ID))
-	}
-	if r.Provider.Model != "" {
-		r.Provider.Model = digest([]byte(r.Provider.Model))
-	}
-	switch r.Purpose {
-	case "main", "summary", "native_compaction":
-	default:
-		r.Purpose = ""
-	}
-	if r.Failure != nil {
-		r.Failure.Kind = safeFailure(r.Failure.Kind)
-	}
-	r.Response.Gateway = ""
-	switch r.Outcome {
-	case "succeeded", "failed", "cancelled":
-	default:
-		r.Outcome = "unknown"
-	}
-	switch r.Response.End {
-	case "completed", "client-abort", "http-error", "stream-truncated", "upstream-timeout", "upstream-unreachable", "upstream-reset", "stream-error":
-	default:
-		r.Response.End = ""
-	}
-}
-
 func Export(ctx context.Context, profile string, q protocol.TraceExportQuery, w io.Writer) error {
 	if q.Session == (protocol.SessionID{}) || (q.Mode != "raw" && q.Mode != "shareable") || (q.Scope != "all" && q.Scope != "failed" && q.Scope != "turn") || ((q.Scope == "turn") != (q.Turn != (protocol.TurnID{}))) {
 		return invalid("invalid trace export selection")
 	}
-	fs, err := core.OpenFiles(filepath.Join(profile, "traces", q.Session.String()), core.RestrictedFiles)
+	fs, err := core.OpenFiles(profile, core.RestrictedFiles)
 	if err != nil {
 		return err
 	}
 	defer fs.Close()
-	f, err := fs.Open("trace.jsonl")
+	prefix := "traces/" + q.Session.String() + "/"
+	f, err := fs.Open(prefix + "trace.jsonl")
 	if err != nil {
 		return err
 	}
@@ -173,7 +142,16 @@ func Export(ctx context.Context, profile string, q protocol.TraceExportQuery, w 
 	a := archive{z: zip.NewWriter(&limitedWriter{w, protocol.MaxTraceExportBytes}), sums: map[string]string{}, left: protocol.MaxTraceExportBytes}
 	var index bytes.Buffer
 	var rows []row
-	names := map[string]string{}
+	type entry struct {
+		name  string
+		data  []byte
+		known bool
+	}
+	bodies := map[string]*entry{}
+	var order []string
+	var records [][]byte
+	secrets := promptSet{}
+	retained := protocol.MaxTraceExportBytes
 	expanded, compressed := protocol.MaxTraceExportBytes, protocol.MaxTraceExportBytes
 	for count := 0; scanner.Scan(); count++ {
 		if err = ctx.Err(); err != nil {
@@ -190,11 +168,9 @@ func Export(ctx context.Context, profile string, q protocol.TraceExportQuery, w 
 		if q.Scope == "failed" && !r.failed() || q.Scope == "turn" && q.Turn != r.Turn {
 			continue
 		}
-		if q.Mode == "shareable" {
-			r.share()
-		}
-		for i, ref := range []*string{&r.Request.Body, &r.Response.Body} {
-			src := *ref
+		records = append(records, bytes.Clone(line))
+		rows = append(rows, r)
+		for i, src := range []string{r.Request.Body, r.Response.Body} {
 			if src == "" {
 				continue
 			}
@@ -202,11 +178,10 @@ func Export(ctx context.Context, profile string, q protocol.TraceExportQuery, w 
 			if !bodyPath.MatchString(src) || !strings.HasSuffix(src, suffix) {
 				return invalid("invalid trace export body reference")
 			}
-			if existing, ok := names[src]; ok {
-				*ref = existing
+			if bodies[src] != nil {
 				continue
 			}
-			file, e := fs.Open(src)
+			file, e := fs.Open(prefix + src)
 			if e != nil {
 				return e
 			}
@@ -220,34 +195,110 @@ func Export(ctx context.Context, profile string, q protocol.TraceExportQuery, w 
 				return tooLarge
 			}
 			compressed -= len(blob)
-			blob, used, e := exportBody(blob, q.Mode, expanded, i == 0)
+			plain, e := inflate(blob, expanded)
 			if e != nil {
 				return e
 			}
-			expanded -= used
+			expanded -= len(plain)
+			ent := &entry{name: src, data: blob}
 			if q.Mode == "shareable" {
-				*ref = fmt.Sprintf("bodies/%04d%s", len(names)+1, suffix)
+				ent.name = fmt.Sprintf("bodies/%04d%s", len(order)+1, suffix)
+				ent.data = plain
+				if i == 0 {
+					ent.data, ent.known, e = secrets.request(plain)
+					if e != nil {
+						return e
+					}
+				}
 			}
-			names[src] = *ref
-			if err = a.add(*ref, blob, zip.Store); err != nil {
-				return err
+			if len(ent.data) > retained {
+				return tooLarge
 			}
+			retained -= len(ent.data)
+			bodies[src] = ent
+			order = append(order, src)
 		}
+	}
+	if err = scanner.Err(); err != nil {
+		return err
+	}
+	// Discover protected text throughout the selection before writing any entry:
+	// a later request can contain a prompt echoed by an earlier attempt.
+	scrub := secrets.replacer()
+	unsafeResponse := map[string]bool{}
+	for i, r := range rows {
+		if err = ctx.Err(); err != nil {
+			return err
+		}
+		line := records[i]
 		if q.Mode == "shareable" {
-			line, err = json.Marshal(r)
+			req := bodies[r.Request.Body]
+			if req == nil || !req.known || r.Bytes.ReqTruncated {
+				unsafeResponse[r.Response.Body] = true
+			}
+			var meta map[string]any
+			if !decodeJSON(line, &meta) {
+				return invalid("invalid trace metadata")
+			}
+			meta = cleanJSON(meta, scrub).(map[string]any)
+			for _, v := range []struct{ key, ref string }{{"request", r.Request.Body}, {"response", r.Response.Body}} {
+				if ent := bodies[v.ref]; ent != nil {
+					side, ok := meta[scrub.Replace(v.key)].(map[string]any)
+					if !ok {
+						return invalid("invalid trace body metadata")
+					}
+					side["body"] = ent.name
+				}
+			}
+			if red, ok := meta["redaction"].(map[string]any); ok {
+				red["system_prompt"] = "fingerprinted"
+			}
+			line, err = json.Marshal(meta)
 			if err != nil {
 				return err
 			}
+			rows[i].Provider.Model = scrub.Replace(r.Provider.Model)
+			rows[i].Response.Gateway = scrub.Replace(r.Response.Gateway)
 		}
 		if len(line)+index.Len()+1 > a.left {
 			return tooLarge
 		}
 		index.Write(line)
 		index.WriteByte('\n')
-		rows = append(rows, r)
 	}
-	if err = scanner.Err(); err != nil {
-		return err
+	sharedBudget := protocol.MaxTraceExportBytes
+	for _, src := range order {
+		if err = ctx.Err(); err != nil {
+			return err
+		}
+		ent := bodies[src]
+		blob := ent.data
+		if q.Mode == "shareable" {
+			var safe []byte
+			switch {
+			case strings.HasSuffix(src, ".req.gz") && !ent.known, unsafeResponse[src]:
+				safe = []byte(marker("body omitted", blob))
+			default:
+				safe = safeEvidence(blob, scrub)
+			}
+			if len(safe) > sharedBudget || len(safe) > 16<<20 {
+				return tooLarge
+			}
+			sharedBudget -= len(safe)
+			var out bytes.Buffer
+			gz := gzip.NewWriter(&out)
+			if _, err = gz.Write(safe); err != nil {
+				return err
+			}
+			if err = gz.Close(); err != nil {
+				return err
+			}
+			blob = out.Bytes()
+		}
+		if err = a.add(ent.name, blob, zip.Store); err != nil {
+			return err
+		}
+		ent.data = nil
 	}
 	if err = a.add("trace.jsonl", index.Bytes(), zip.Deflate); err != nil {
 		return err
@@ -291,33 +342,21 @@ func keys(m map[string]bool) []string {
 	slices.Sort(out)
 	return out
 }
-func exportBody(blob []byte, mode string, remaining int, request bool) ([]byte, int, error) {
+func inflate(blob []byte, remaining int) ([]byte, error) {
 	z, err := gzip.NewReader(bytes.NewReader(blob))
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	defer z.Close()
 	limit := min(remaining, 16<<20)
 	b, err := io.ReadAll(io.LimitReader(z, int64(limit)+1))
 	if len(b) > limit {
-		return nil, 0, tooLarge
+		return nil, tooLarge
 	}
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
-	if mode == "raw" {
-		return blob, len(b), nil
-	}
-	// Unknown provider formats, echoed requests, SSE and arbitrary tool results
-	// cannot be safely scrubbed by looking for particular field names.
-	var out bytes.Buffer
-	g := gzip.NewWriter(&out)
-	_, err = fmt.Fprintf(g, "<body omitted: %d chars, sha256:%s>", utf8.RuneCount(b), digest(b))
-	if err == nil && request {
-		_, err = g.Write(promptMarkers(b))
-	}
-	err = errors.Join(err, g.Close())
-	return out.Bytes(), len(b), err
+	return b, nil
 }
 
 const readme = `Sailry request trace
@@ -326,7 +365,11 @@ Missing fields are unknown. Paths in request.body and response.body refer to gzi
 manifest.json lists SHA-256 (hex) for each other ZIP entry, over the entry's exact bytes.
 Raw exports retain local capture redactions but may contain system prompts, code, user data
 and credentials missed by capture. Do not share raw exports without inspection.
-Shareable exports omit headers, hash model names, and replace each complete captured body
-(including system prompts, tool definitions, user messages and responses) with its character
-count and SHA-256. Timing, identifiers and hashes remain correlatable; review before sharing.
+Shareable exports preserve capture-redacted headers, model, gateway identifiers, ordinary
+messages, and response evidence. System/developer instructions and tool schemas are
+fingerprinted; matching prompt strings are masked in captured evidence. Unsupported request
+formats and responses without a usable captured request receive a whole-body fingerprint.
+Original capture digests describe wire bytes; manifest checksums describe exported files.
+User code, conversation text, endpoint information and other private data can remain.
+Inspect every export before sharing; this is not anonymization.
 `
