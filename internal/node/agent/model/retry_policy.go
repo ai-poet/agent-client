@@ -39,8 +39,9 @@ func newRetryPolicy() retryPolicy {
 }
 
 func (policy *retryPolicy) limit(purpose Purpose, attempt Attempt, streamed bool) uint64 {
-	// Native compaction is optional: one quick resend before the handoff.
-	if purpose == NativePurpose {
+	// Give rate limits and overload the ordinary wait budget. For other
+	// transient failures, prefer the transcript handoff over more resends.
+	if purpose == NativePurpose && (attempt.Failure == nil || !attempt.Failure.overloaded) {
 		return nativeRetries
 	}
 	if purpose == Main && attempt.Failure.tcpDialTimeout && !streamed && attempt.RequestSentUs == nil && attempt.Status == nil {

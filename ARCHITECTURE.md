@@ -636,7 +636,8 @@ and features are remembered per provider, protocol, endpoint and model for
 the Node's lifetime. A completed reply with no compaction item also disables
 native compaction for that route. An unusable item falls back without disabling it.
 Transient native provider errors get one resend before the transcript handoff;
-they do not mark the route unsupported.
+they do not mark the route unsupported. Rate limits and overload instead
+use the ordinary retry and wait budgets, including provider wait hints.
 Native attempts are recorded as compaction usage; Messages sums the billed
 iterations. Only the producing provider, API and model receive the native
 items. Another model receives the readable summary; for an opaque Responses

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model"
@@ -339,6 +340,54 @@ func TestAnthropicNativeCompaction(t *testing.T) {
 			t.Fatalf("native compaction was sent %d times, want one resend", calls)
 		}
 	})
+	for _, n := range []int{1, 3} {
+		t.Run(fmt.Sprintf("native waits for %d rate limits", n), func(t *testing.T) {
+			var mu sync.Mutex
+			limited := n
+			f, x, binding, provider := nativeFixture(t, protocol.ConversationModelApiAnthropic, func(writer http.ResponseWriter, request wireRequest) {
+				mu.Lock()
+				fail := compacting(request) && limited > 0
+				if fail {
+					limited--
+				}
+				mu.Unlock()
+				if fail {
+					writer.Header().Set("Retry-After", "2")
+					writeJSON(writer, http.StatusTooManyRequests, `{"type":"error","error":{"type":"rate_limit_error","message":"Rate limited"}}`)
+					return
+				}
+				if compacting(request) {
+					writeSSE(writer, anthropicCompaction(`"Waited summary"`, "compaction"))
+					return
+				}
+				writeSSE(writer, anthropicText(nativeFixtureHandoff))
+			})
+			done := make(chan error, 1)
+			go func() { done <- compactNow(t, f, x, binding) }()
+			clock := f.r.clock.(*manualClock)
+			for {
+				select {
+				case wait := <-clock.waits:
+					if wait.duration < 2*time.Second {
+						t.Errorf("retry wait %s shortened Retry-After", wait.duration)
+					}
+					close(wait.advance)
+					continue
+				case err := <-done:
+					if err != nil {
+						t.Fatalf("a rate limit failed the native compaction: %v", err)
+					}
+				}
+				break
+			}
+			if _, checkpoint := latestCheckpoint(t, f); checkpoint.Native == nil {
+				t.Fatal("a rate-limited native compaction did not complete natively")
+			}
+			if calls := len(provider.all(compacting)); calls != n+1 {
+				t.Fatalf("native compaction was sent %d times, want %d resends", calls, n)
+			}
+		})
+	}
 	t.Run("a transient failure is retried and leaves the route supported", func(t *testing.T) {
 		var mu sync.Mutex
 		failures := 1
