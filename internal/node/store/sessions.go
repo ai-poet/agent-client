@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/core"
@@ -260,8 +261,8 @@ func createProfiledSession(ctx context.Context, db *sql.Conn, node protocol.Node
 		if err != nil {
 			return protocol.Output{}, nil, err
 		}
-    } else if config.Resource != nil {
-        return protocol.Output{}, nil, invalid("session resource is not available")
+	} else if config.Resource != nil {
+		return protocol.Output{}, nil, invalid("session resource is not available")
 	} else if config.Assistant != nil {
 		value.Worktree, err = assistantWorkspace(ctx, db, profile, *config.Assistant)
 		if err != nil {
@@ -410,35 +411,56 @@ func setSessionRead(ctx context.Context, db *sql.Conn, input protocol.CommandSet
 }
 
 func removeSession(ctx context.Context, db *sql.Conn, id protocol.SessionID, expected uint64) (protocol.Output, []protocol.Event, error) {
-	if _, err := checkedSession(ctx, db, id, expected); err != nil {
+	ids, err := sessionRemovalScope(ctx, db, protocol.Command{Kind: "remove_session", Data: &protocol.CommandRemoveSessionPayload{Session: id, ExpectedRevision: expected}})
+	if err != nil {
 		return protocol.Output{}, nil, err
 	}
-	ids := []protocol.SessionID{id}
-	seen := map[protocol.SessionID]bool{id: true}
-	for index := 0; index < len(ids); index++ {
-		rows, err := db.QueryContext(ctx, "SELECT child.session FROM agent_delegations d JOIN turns child ON child.id=d.turn JOIN turns parent ON parent.id=d.parent_turn WHERE parent.session=?1", ids[index].String())
-		if err != nil {
-			return protocol.Output{}, nil, err
+	return removeSessionTrees(ctx, db, ids, time.Now())
+}
+
+// sessionRemovalTree lists the selected root sessions and all their delegated
+// descendants. A selected child must belong to one of the selected roots.
+func sessionRemovalTree(ctx context.Context, db *sql.Conn, roots, selectedChildren []protocol.SessionID) ([]protocol.SessionID, error) {
+	ids := make([]protocol.SessionID, 0, len(roots))
+	seen := make(map[protocol.SessionID]bool, len(roots))
+	for _, root := range roots {
+		if seen[root] {
+			continue
 		}
-		for rows.Next() {
-			var text string
-			if err := rows.Scan(&text); err != nil {
-				rows.Close()
-				return protocol.Output{}, nil, err
-			}
-			child, err := protocol.ParseSessionID(text)
+		seen[root] = true
+		ids = append(ids, root)
+		for index := len(ids) - 1; index < len(ids); index++ {
+			children, err := readTexts(ctx, db, "SELECT child.session FROM agent_delegations d JOIN turns child ON child.id=d.turn JOIN turns parent ON parent.id=d.parent_turn WHERE parent.session=?1", ids[index].String())
 			if err != nil {
-				rows.Close()
-				return protocol.Output{}, nil, err
+				return nil, err
 			}
-			if !seen[child] {
-				seen[child] = true
-				ids = append(ids, child)
+			for _, text := range children {
+				child, err := protocol.ParseSessionID(text)
+				if err != nil {
+					return nil, err
+				}
+				if !seen[child] {
+					seen[child] = true
+					ids = append(ids, child)
+				}
 			}
 		}
-		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-			return protocol.Output{}, nil, err
+	}
+	for _, id := range selectedChildren {
+		if !seen[id] {
+			return nil, fault(protocol.ErrorCodePermissionDenied, "child conversation is read-only")
 		}
+	}
+	return ids, nil
+}
+
+// removeSessionTrees removes the sessions listed by sessionRemovalScope. A
+// running or stopping turn makes the removal busy; the Node stops those before
+// it records the removal. Input that was never admitted is discarded here, in
+// the removing transaction, so no scheduler can claim it afterwards.
+func removeSessionTrees(ctx context.Context, db *sql.Conn, ids []protocol.SessionID, now time.Time) (protocol.Output, []protocol.Event, error) {
+	if len(ids) == 0 {
+		return protocol.Output{Kind: "sessions_removed", Data: ids}, []protocol.Event{}, nil
 	}
 	private := []protocol.ProviderID{}
 	for _, id := range ids {
@@ -451,11 +473,18 @@ func removeSession(ctx context.Context, db *sql.Conn, id protocol.SessionID, exp
 				private = append(private, provider.ID)
 			}
 		}
-		if err := ensureSessionIdle(ctx, db, id, "stop the session before deleting it"); err != nil {
-			return protocol.Output{}, nil, err
-		}
+	}
+	active, err := activeRemovalRuns(ctx, db, ids)
+	if err != nil {
+		return protocol.Output{}, nil, err
+	}
+	if len(active) > 0 {
+		return protocol.Output{}, nil, fault(protocol.ErrorCodeBusy, "stop the session before deleting it")
 	}
 	for _, id := range ids {
+		if err := discardQueuedRuns(ctx, db, id, now); err != nil {
+			return protocol.Output{}, nil, err
+		}
 		if err := dismissSessionBackground(ctx, db, id); err != nil {
 			return protocol.Output{}, nil, err
 		}
@@ -473,6 +502,13 @@ func removeSession(ctx context.Context, db *sql.Conn, id protocol.SessionID, exp
 }
 
 func batchSessions(ctx context.Context, db *sql.Conn, expected []protocol.SessionRevision, removing bool) (protocol.Output, []protocol.Event, error) {
+	if removing {
+		ids, err := sessionRemovalScope(ctx, db, protocol.Command{Kind: "remove_sessions", Data: &protocol.CommandRemoveSessionsPayload{Expected: expected}})
+		if err != nil {
+			return protocol.Output{}, nil, err
+		}
+		return removeSessionTrees(ctx, db, ids, time.Now())
+	}
 	seen := map[protocol.SessionID]bool{}
 	values := make([]protocol.Session, 0, len(expected))
 	for _, entry := range expected {
@@ -488,16 +524,8 @@ func batchSessions(ctx context.Context, db *sql.Conn, expected []protocol.Sessio
 	}
 	changes := []protocol.Event{}
 	archived := []protocol.Session{}
-	removed := []protocol.SessionID{}
 	for _, value := range values {
-		if removing {
-			output, events, err := removeSession(ctx, db, value.ID, value.Revision)
-			if err != nil {
-				return protocol.Output{}, nil, err
-			}
-			removed = append(removed, output.Data.([]protocol.SessionID)...)
-			changes = append(changes, events...)
-		} else if value.Archived {
+		if value.Archived {
 			archived = append(archived, value)
 		} else {
 			output, events, err := archiveSession(ctx, db, protocol.CommandSetSessionArchivedPayload{Session: value.ID, ExpectedRevision: value.Revision, Archived: true})
@@ -507,9 +535,6 @@ func batchSessions(ctx context.Context, db *sql.Conn, expected []protocol.Sessio
 			archived = append(archived, output.Data.(protocol.Session))
 			changes = append(changes, events...)
 		}
-	}
-	if removing {
-		return protocol.Output{Kind: "sessions_removed", Data: removed}, changes, nil
 	}
 	return protocol.Output{Kind: "sessions_archived", Data: archived}, changes, nil
 }

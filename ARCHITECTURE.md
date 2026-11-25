@@ -197,6 +197,14 @@ History boundaries follow recorded execution order and retain consumed guidance
 with its recipient turn. Queue admission order remains the public history-head
 concurrency token; it does not determine which messages a history action retains.
 
+Removing sessions covers the selected root sessions and their delegated
+descendants. The Node validates the removal first; a stale or invalid removal
+stops nothing. It then stops each running turn on the `stop_turn` path and
+waits for every turn of the removal to settle before recording it, in the
+project lane so other commands are not delayed. The removing transaction
+discards queued input that was never admitted, ending it cancelled outside any
+queue, so no scheduler can claim it later.
+
 ### Personal configuration and credentials
 
 Each controller's local Node owns its personal configuration. Settings pages edit
@@ -637,7 +645,10 @@ listed child session starts a new child turn with its own admission receipt;
 waiting only observes a specific execution.
 
 Input received during a running task is durable guidance, consumed at a model
-boundary. Stop cancels work explicitly. Partial text and reasoning use a bounded
+boundary. A delegated child that fails or is stopped holds its own queue, which
+nothing resumes, so guidance it settles without joining ends cancelled with it;
+the parent sees the child's outcome and can guide it again. Node recovery
+cancels such guidance that earlier versions left queued. Stop cancels work explicitly. Partial text and reasoning use a bounded
 in-memory feed; committed output is canonical. Interrupted streams seal visible
 text into history. Background children and commands publish durable completion
 evidence. The running turn takes a bounded batch between model steps; an idle

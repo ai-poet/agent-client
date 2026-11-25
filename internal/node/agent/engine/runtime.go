@@ -26,13 +26,13 @@ import (
 
 // Options exposes the actual model and clock boundaries to deterministic tests.
 type Options struct {
-	Python            *python.Manager
-	ValidateWorktree  func(context.Context, protocol.WorktreeID) error
-	Attachment        func(context.Context, protocol.TurnID, protocol.AttachmentID) (protocol.Attachment, bool, error)
-	AttachmentBytes   func(context.Context, protocol.Attachment) ([]byte, error)
-	Clock             clock.Clock
-	Model             func(context.Context, model.Binding) (fantasy.LanguageModel, error)
-	AuthorizeProvider func(context.Context, *store.AgentInvocation) error
+	Python             *python.Manager
+	ValidateWorktree   func(context.Context, protocol.WorktreeID) error
+	Attachment         func(context.Context, protocol.TurnID, protocol.AttachmentID) (protocol.Attachment, bool, error)
+	AttachmentBytes    func(context.Context, protocol.Attachment) ([]byte, error)
+	Clock              clock.Clock
+	Model              func(context.Context, model.Binding) (fantasy.LanguageModel, error)
+	AuthorizeProvider  func(context.Context, *store.AgentInvocation) error
 	Tools              []Tool
 	ToolsForTurn       func(context.Context, *store.AgentInvocation) ([]Tool, error)
 	HooksForTurn       func(context.Context, *store.AgentInvocation) *hooks.Binding
@@ -185,6 +185,10 @@ func (r *Runtime) Wake() {
 	default:
 	}
 }
+
+// ActivitySignal returns a channel closed at the next wake, which follows
+// every settled execution. Take it before reading the state it guards.
+func (r *Runtime) ActivitySignal() <-chan struct{} { return r.activitySignal() }
 
 // LockPublication orders commits, their frames and pinned controller snapshots.
 // Acquire decision ownership first; acquire storage leases only after this lock.
