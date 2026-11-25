@@ -24,6 +24,7 @@ const (
 type Scope struct {
 	Profile, Session, Turn, Purpose string
 	Record                          string // Current assistant draft, if one exists.
+	Enabled                         func() bool
 	Provider                        Provider
 }
 
@@ -97,7 +98,7 @@ var publication = struct {
 }{active: make(map[*Attempt]bool)}
 
 func (s *Scope) Begin(request string, index int, secrets ...string) *Attempt {
-	if s == nil || s.Profile == "" || !component(s.Session) || !component(request) || index < 0 {
+	if s == nil || s.Enabled != nil && !s.Enabled() || s.Profile == "" || !component(s.Session) || !component(request) || index < 0 {
 		return nil
 	}
 	if scrub(request, secrets) != request || scrub(s.Session, secrets) != s.Session {
@@ -197,5 +198,8 @@ func (a *Attempt) Finish(f Facts) {
 		return
 	}
 	delete(publication.active, a)
+	if a.scope.Enabled != nil && !a.scope.Enabled() {
+		return
+	}
 	a.publish(f, req, res, maxSession, maxProfile, maxRounds)
 }

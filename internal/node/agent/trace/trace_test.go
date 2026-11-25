@@ -108,7 +108,7 @@ func TestTraceRedactionPreservesSurroundingBytes(t *testing.T) {
 	if !ok || string(got) != want {
 		t.Fatalf("%q", got)
 	}
-	for _, x := range []string{"sk-123", "ghp_456", "AKIA789", "-----BEGIN PRIVATE KEY-----\nprivate\n-----END PRIVATE KEY-----"} {
+	for _, x := range []string{"sk-123", "ghp_456", "AKIA789", "-----BEGIN PRIVATE KEY-----\nprivate\n-----END PRIVATE KEY-----", "-----BEGIN CERTIFICATE-----\ncertificate\n-----END CERTIFICATE-----"} {
 		got, ok := payload([]byte(x), nil)
 		if !ok || string(got) != mask {
 			t.Errorf("%q => %q", x, got)
@@ -116,6 +116,21 @@ func TestTraceRedactionPreservesSurroundingBytes(t *testing.T) {
 	}
 	if _, ok := payload([]byte(`{"token":"unfinished`), nil); ok {
 		t.Fatal("partial structured secret captured")
+	}
+}
+
+func TestTraceDisableDuringRequest(t *testing.T) {
+	enabled := true
+	s := Scope{Profile: t.TempDir(), Session: "s", Enabled: func() bool { return enabled }}
+	a := s.Begin("r", 1)
+	a.Request(nil, []byte("body"))
+	enabled = false
+	a.Finish(Facts{})
+	if s.Begin("r", 2) != nil {
+		t.Fatal("retry admitted after disabling collection")
+	}
+	if _, err := os.Stat(filepath.Join(s.Profile, "traces")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("capture was published: %v", err)
 	}
 }
 

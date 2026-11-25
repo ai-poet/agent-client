@@ -12,7 +12,7 @@ import (
 
 const mask = "[REDACTED]"
 
-var credentialShape = regexp.MustCompile(`(?is)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)|\bBearer[ \t]+[^\s,;"']+|\b(?:sk-|ghp_|AKIA)[a-zA-Z0-9_./+=-]+`)
+var credentialShape = regexp.MustCompile(`(?is)-----BEGIN [A-Z0-9 -]+-----.*?(?:-----END [A-Z0-9 -]+-----|$)|\bBearer[ \t]+[^\s,;"']+|\b(?:sk-|ghp_|AKIA)[a-zA-Z0-9_./+=-]+`)
 var assignment = regexp.MustCompile(`(?i)\b(api[_-]?key|authorization|(?:access_|refresh_)?token|secret|password|cookie|session)["']?\s*[:=]\s*[^\r\n]+`)
 
 func scrub(s string, secrets []string) string {
