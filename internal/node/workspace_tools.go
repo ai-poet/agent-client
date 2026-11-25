@@ -71,7 +71,7 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 			worktree := filepath.Clean(inv.Worktree.Path)
 			external := ""
 			if inv.Turn.Config.Permission == protocol.PermissionFull && externalFileOperation(declaration.Operation) {
-				worktree = canonicalPath(worktree)
+				worktree = resolvedPath(worktree)
 				canonical := func(path string) (string, error) { return canonicalPath(path), nil }
 				var err error
 				if args, err = fileArgPaths(declaration.Operation, args, canonical); err != nil {
@@ -563,7 +563,8 @@ func (r *workspaceRevisions) resolve(operation protocol.ToolOperation, arguments
 	}
 	revision, ok := r.paths[path]
 	if !ok && path != "" {
-		revision, ok = r.paths[pathpkg.Clean(path)]
+		// Results name paths with forward slashes, Windows ones included.
+		revision, ok = r.paths[pathpkg.Clean(filepath.ToSlash(path))]
 	}
 	switch {
 	case operation == protocol.ToolOperationWriteFile:
