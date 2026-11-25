@@ -114,27 +114,30 @@ type execution struct {
 	stopped           []*delegatedChild // the session's children this turn cancelled; guarded by Runtime.mu
 	renewedModel      fantasy.LanguageModel
 	renewedSecret     protocol.Secret
-	childBudget       uint64
-	finishing         bool
-	commandsStopped   bool // guarded by Runtime.publication
-	operations        uint64
-	operationsDone    chan struct{}
-	attachments       map[protocol.AttachmentID]*attachmentMaterial
-	hooks             *hooks.Binding
-	timeline          *timeline
-	inv               *store.AgentInvocation
-	ctx               context.Context
-	cancel            context.CancelFunc
-	done              chan struct{}
-	wake              chan struct{}
-	guidance          chan struct{}
-	tools             []Tool
-	names             *exposure
-	deferredContext   *string
-	toolCleanup       []func() error
-	inputMu           sync.Mutex
-	inputWake         chan struct{}
-	output            output.Cache
+	// sessionRoute: the model keeps the session's history and receives only
+	// new messages, so rewriting earlier ones would replay all of it.
+	sessionRoute    bool
+	childBudget     uint64
+	finishing       bool
+	commandsStopped bool // guarded by Runtime.publication
+	operations      uint64
+	operationsDone  chan struct{}
+	attachments     map[protocol.AttachmentID]*attachmentMaterial
+	hooks           *hooks.Binding
+	timeline        *timeline
+	inv             *store.AgentInvocation
+	ctx             context.Context
+	cancel          context.CancelFunc
+	done            chan struct{}
+	wake            chan struct{}
+	guidance        chan struct{}
+	tools           []Tool
+	names           *exposure
+	deferredContext *string
+	toolCleanup     []func() error
+	inputMu         sync.Mutex
+	inputWake       chan struct{}
+	output          output.Cache
 }
 
 func New(db *store.Handle, node protocol.NodeID, profile string, frames *feed.Hub, publish func(), options Options) *Runtime {

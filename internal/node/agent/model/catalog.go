@@ -33,6 +33,10 @@ type catalogModel struct {
 		BindsContext bool   `json:"binds_context"`
 		ThinkingOff  string `json:"thinking_off"`
 	} `json:"rig"`
+	Limit struct {
+		Context uint32 `json:"context"`
+		Output  uint32 `json:"output"`
+	} `json:"limit"`
 }
 
 func catalogEntry(provider, model string) (catalogModel, bool) {

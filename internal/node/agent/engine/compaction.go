@@ -13,6 +13,7 @@ import (
 	handoff "github.com/ai-poet/cheaprouter-harness/internal/node/agent/compact"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/output"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/prompt"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/tokens"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
@@ -80,6 +81,10 @@ func pendingTokens(records []canonical.Record) uint64 {
 func compactionUsage(record canonical.Record) bool {
 	return record.Kind == "compaction" || record.Metadata.Execution != nil && record.Metadata.Execution.Purpose != nil && *record.Metadata.Execution.Purpose == canonical.PurposeCompaction
 }
+
+// shouldCompact follows the model's window and compaction budget on every
+// route. An agent program's prompt bound limits only a whole-history replay;
+// one that exceeds it fails as a context overflow, which compaction recovers.
 func shouldCompact(binding model.Binding, state store.AgentState, percent uint8) bool {
 	last := lastMessage(state.Records)
 	if last == nil || last.Role == canonical.Assistant {
@@ -155,17 +160,20 @@ func (r *Runtime) compactionFailure(x *execution, binding model.Binding, earlier
 	record.Metadata.Compaction = &canonical.Maintenance{Failure: &detail}
 	return record
 }
-func (r *Runtime) compact(x *execution, binding model.Binding, state store.AgentState, manual bool) error {
+func (r *Runtime) compact(x *execution, binding model.Binding, route model.Route, state store.AgentState, manual bool) error {
 	selected, _ := model.ResolvedModel(binding)
+	// The compacted history reaches the model whole, so its handoff and
+	// retained tail are sized for the window a replay can fill.
+	window := route.ReplayWindow(selected.Context)
 	keepRecent := true
 	if last := lastMessage(state.Records); last != nil && last.Error != nil && last.Error.Code != nil && *last.Error.Code == "context_overflow" {
 		keepRecent = false
 	}
-	selection, useful := handoff.Select(state.Records, uint64(selected.Context), keepRecent)
+	selection, useful := handoff.Select(state.Records, uint64(window), keepRecent)
 	if manual && !useful {
 		// An explicit request can summarize a short conversation whose entire
 		// history would otherwise fit in the retained tail.
-		selection, useful = handoff.Select(state.Records, uint64(selected.Context), false)
+		selection, useful = handoff.Select(state.Records, uint64(window), false)
 	}
 	if !useful {
 		return nil
@@ -189,7 +197,12 @@ func (r *Runtime) compact(x *execution, binding model.Binding, state store.Agent
 		return err
 	}
 	summaryBinding := model.Summary(binding)
-	output := int64(model.SummaryOutputLimit(selected))
+	if route.Session {
+		// A transcript summary runs in an agent session of its own, so it
+		// neither replaces nor resumes the session that holds the history.
+		summaryBinding.Session = protocol.SessionID{}
+	}
+	output := min(int64(model.SummaryOutputLimit(selected)), int64(handoff.Output(uint64(window))))
 	requestText := handoff.Request
 	if manual && strings.TrimSpace(x.inv.Message.Text) != "" {
 		requestText += "\n\nUser focus for the handoff:\n" + x.inv.Message.Text
@@ -218,7 +231,7 @@ func (r *Runtime) compact(x *execution, binding model.Binding, state store.Agent
 	invalidRetry := requestText + "\n\n" + handoff.RetryInvalidOutput
 	emptyRetry := requestText + "\n\n" + handoff.RetryEmptyOutput
 	systemBytes := model.SummarySystemBytes(languageModel, requestText)
-	system, err := handoff.Prepare(selection.Prefix, uint64(selected.Context), uint64(output), requestText, systemBytes, invalidRetry, emptyRetry)
+	system, err := handoff.Prepare(selection.Prefix, uint64(window), uint64(output), requestText, systemBytes, invalidRetry, emptyRetry)
 	if err != nil {
 		return failed(protocol.ConversationCompactionStageBudget, protocol.ConversationCompactionReasonNoFittingPrefix, err)
 	}
@@ -269,7 +282,7 @@ func (r *Runtime) compact(x *execution, binding model.Binding, state store.Agent
 		for shrink := 0; shrink < maxCompactionShrinks && err != nil && x.ctx.Err() == nil && model.Classify(err).Kind == model.ContextOverflow; shrink++ {
 			// The model's actual input limit can be much smaller than the captured
 			// window. Shrink repeatedly until it fits or reaches the minimum budget.
-			smaller, ok := handoff.PrepareSmaller(selection.Prefix, uint64(selected.Context), uint64(output), promptText, system, invalidRetry, emptyRetry)
+			smaller, ok := handoff.PrepareSmaller(selection.Prefix, uint64(window), uint64(output), promptText, system, invalidRetry, emptyRetry)
 			if !ok || smaller == system {
 				break
 			}
@@ -294,7 +307,7 @@ func (r *Runtime) compact(x *execution, binding model.Binding, state store.Agent
 		}
 		return failed(protocol.ConversationCompactionStageRequest, reason, err)
 	}
-	capLimit := handoff.Cap(uint64(selected.Context), uint64(output))
+	capLimit := handoff.Cap(uint64(window), uint64(output))
 	var summary handoff.Summary
 	var usage canonical.Usage
 	promptText := requestText
@@ -365,7 +378,7 @@ func (r *Runtime) compact(x *execution, binding model.Binding, state store.Agent
 	if len(selection.Tail) > 0 {
 		// The original tail remains after Boundary. Projection puts the new
 		// summary before it, so no copied messages or synthetic reply is needed.
-		return r.save(x.ctx, x.inv.Session.ID, records...)
+		return r.compactSession(x, binding, route, r.save(x.ctx, x.inv.Session.ID, records...))
 	}
 	// The continuation is a runtime notice, not an assistant statement or user
 	// input. Automatic compaction interrupts work in progress, so it always
@@ -439,7 +452,56 @@ func (r *Runtime) compact(x *execution, binding model.Binding, state store.Agent
 		carry.Metadata.Runtime = &runtime
 		records = append(records, carry)
 	}
-	return r.save(x.ctx, x.inv.Session.ID, records...)
+	return r.compactSession(x, binding, route, r.save(x.ctx, x.inv.Session.ID, records...))
+}
+
+// compactSession follows a saved handoff on an agent session that holds the
+// history and advertises `/compact`: the agent shrinks its own context and
+// keeps serving the session, as in T3 Code, instead of a new session that
+// replays the handoff. The handoff came first, while the session still held
+// everything; the command is a second pass over that context. A command that
+// fails leaves the recorded handoff, and the next request replays it.
+func (r *Runtime) compactSession(x *execution, binding model.Binding, route model.Route, saved error) error {
+	if saved != nil || !route.Session || !route.Resident || !route.Compact {
+		return saved
+	}
+	state, err := r.load(x.ctx, x.inv.Session.ID)
+	if err != nil {
+		return err
+	}
+	instruction := prompt.Instruction(x.inv.Session.Delegation != nil)
+	system := prompt.System(instruction, state.Context)
+	tools := r.declarations(x, binding, state)
+	schemas := map[string]json.RawMessage{}
+	for _, tool := range tools {
+		if captured := findTool(x.tools, tool.Name); captured != nil && len(captured.SchemaJSON) > 0 {
+			schemas[tool.Name] = captured.SchemaJSON
+		}
+	}
+	projected := x.output.Project(model.Answered(model.VisibleRecords(state.Records)))
+	hydrated, attachmentAssets, err := r.hydrateAttachments(x, projected)
+	if err != nil {
+		return err
+	}
+	projected = hydrated
+	assets, err := r.modelAssetsWith(x.ctx, projected, attachmentAssets)
+	if err != nil {
+		return err
+	}
+	projected, tools, schemas = x.names.request(projected, tools, schemas)
+	if err = r.toolMediaAssets(x.ctx, binding, projected, assets); err != nil {
+		return err
+	}
+	call, err := model.BuildProjectedCall(binding, model.Request{System: system, Records: projected, Tools: tools, ToolSchemas: schemas, Assets: assets, Delegated: x.inv.Session.Delegation != nil})
+	if err != nil {
+		return err
+	}
+	languageModel, err := r.model(x.ctx, binding)
+	if err != nil {
+		return err
+	}
+	_ = model.CompactSession(x.ctx, languageModel, call)
+	return x.ctx.Err()
 }
 func compactionSummaryFault(reason protocol.ConversationCompactionReason) *protocol.Fault {
 	message := "Compaction failed: the model did not return a valid structured handoff JSON after retry. Conversation history was preserved; try compacting again, switching models, or starting a new session."

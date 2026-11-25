@@ -230,6 +230,34 @@ func allocatedContext(ctx context.Context, config transportConfig, name string) 
 	return unknown, nil
 }
 
+// catalogWindow is the window and output limit the bundled catalog records for
+// a model an agent program lists under its vendor's name: a first-party
+// vendor's own entry, else the smallest window any vendor lists for the name
+// with no output limit. ok is false when the catalog does not know the model.
+func catalogWindow(name string) (window, output uint32, ok bool) {
+	for _, vendor := range []string{"gemini-grpc", "anthropic", "openai"} {
+		if entry, found := catalogEntry(vendor, name); found && entry.Limit.Context > 0 {
+			return entry.Limit.Context, min(entry.Limit.Output, entry.Limit.Context), true
+		}
+	}
+	window = catalogWindows()[strings.ToLower(name[strings.LastIndex(name, "/")+1:])]
+	return window, 0, window > 0
+}
+
+var catalogWindows = sync.OnceValue(func() map[string]uint32 {
+	catalogEntry("", "")
+	windows := map[string]uint32{}
+	for _, vendor := range catalog {
+		for name, entry := range vendor.Models {
+			name = strings.ToLower(name[strings.LastIndex(name, "/")+1:])
+			if limit := entry.Limit.Context; limit > 0 && (windows[name] == 0 || limit < windows[name]) {
+				windows[name] = limit
+			}
+		}
+	}
+	return windows
+})
+
 func estimatedContext(name string) uint32 {
 	name = strings.ToLower(name)
 	if strings.Contains(name, "claude-2") || strings.Contains(name, "claude-instant") {

@@ -149,7 +149,7 @@ func TestCompactionHandoff(t *testing.T) {
 			return nil
 		}
 		before, _ := json.Marshal(state.Records)
-		if err := f.r.compact(x, binding, state, true); err != nil {
+		if err := f.r.compact(x, binding, model.Route{}, state, true); err != nil {
 			t.Fatal(err)
 		}
 		if captured.Secret == nil || captured.Secret.Expose() != renewed {
@@ -199,7 +199,7 @@ func TestCompactionHandoff(t *testing.T) {
 					part.ProviderMetadata = fantasy.ProviderMetadata{model.UsageMetadataKey: row.metadata}
 				}
 				f, x, binding, before := compactionFixture(t, &scriptedModel{scripts: []script{response(text(`{"user_intent":["Continue task"]}`), part)}})
-				if err := f.r.compact(x, binding, before, true); err != nil {
+				if err := f.r.compact(x, binding, model.Route{}, before, true); err != nil {
 					t.Fatal(err)
 				}
 				summary := f.state().Records[len(before.Records)].MutableMessage()
@@ -224,7 +224,7 @@ func TestCompactionHandoff(t *testing.T) {
 			m := &scriptedModel{scripts: []script{response(text(string(document)), finish())}}
 			f, x, binding, state := compactionFixture(t, m)
 			binding.Provider.Models[0].Context, binding.Provider.Models[0].Output = row.context, 64000
-			if err := f.r.compact(x, binding, state, true); err != nil {
+			if err := f.r.compact(x, binding, model.Route{}, state, true); err != nil {
 				t.Fatal(err)
 			}
 			request := m.calls[0]
@@ -269,7 +269,7 @@ func TestCompactionHandoff(t *testing.T) {
 					binding.Provider.Models[0].Output = 64
 				}
 				visibleBefore := model.VisibleRecords(before.Records)
-				err := f.r.compact(x, binding, before, true)
+				err := f.r.compact(x, binding, model.Route{}, before, true)
 				if err == nil {
 					t.Fatal("invalid summary replaced context")
 				}
@@ -332,7 +332,7 @@ func TestCompactionHandoff(t *testing.T) {
 				response(text("Handoff:\n~~~JsOn\n{\"GOALS\":\"Keep working\",\"NextStep\":\"Verify\"}\n~~~"), finish()),
 			}}
 			f, x, binding, before := compactionFixture(t, m)
-			if err := f.r.compact(x, binding, before, true); err != nil {
+			if err := f.r.compact(x, binding, model.Route{}, before, true); err != nil {
 				t.Fatal(err)
 			}
 			after := f.state()
@@ -347,7 +347,7 @@ func TestCompactionHandoff(t *testing.T) {
 			if got := summary.Summary.Content[0].Data.(*canonical.TextContent).Text; got != "# Handoff Summary\n\n## Goal\n- Keep working\n\n## Next Steps\nVerify" {
 				t.Fatalf("unexpected rendered handoff: %q", got)
 			}
-			if err := f.r.compact(x, binding, after, true); err != nil {
+			if err := f.r.compact(x, binding, model.Route{}, after, true); err != nil {
 				t.Fatal(err)
 			}
 			if m.count() != 2 || !reflect.DeepEqual(after.Records, f.state().Records) {
@@ -358,7 +358,7 @@ func TestCompactionHandoff(t *testing.T) {
 			doc := "Here is the handoff summary:\n\n```\n{\n  \"goal\": \"Ship compaction fix\",\n  \"state\": \"Parser updated\",\n  \"nextSteps\": \"Run tests\"\n}\n```\n\nReady to continue."
 			m := &scriptedModel{scripts: []script{response(text(doc), finish())}}
 			f, x, binding, before := compactionFixture(t, m)
-			if err := f.r.compact(x, binding, before, true); err != nil {
+			if err := f.r.compact(x, binding, model.Route{}, before, true); err != nil {
 				t.Fatalf("compact failed: %v", err)
 			}
 			if m.count() != 1 {
@@ -386,7 +386,7 @@ func TestCompactionHandoff(t *testing.T) {
 				response(text("```json\n{\"user_intent\":[\"Recovered on retry\"],\"current_work\":\"Verified\"}\n```"), secondDone),
 			}}
 			f, x, binding, before := compactionFixture(t, m)
-			if err := f.r.compact(x, binding, before, true); err != nil {
+			if err := f.r.compact(x, binding, model.Route{}, before, true); err != nil {
 				t.Fatalf("compact retry failed: %v", err)
 			}
 			if m.count() != 2 {
@@ -421,7 +421,7 @@ func TestCompactionHandoff(t *testing.T) {
 			}}
 			f, x, binding, before := compactionFixture(t, m)
 			visibleBefore := model.VisibleRecords(before.Records)
-			err := f.r.compact(x, binding, before, true)
+			err := f.r.compact(x, binding, model.Route{}, before, true)
 			if err == nil {
 				t.Fatal("expected error for non-JSON output on both attempts")
 			}
@@ -486,7 +486,7 @@ func TestCompactionHandoff(t *testing.T) {
 						}}}, nil
 					}
 				}
-				if err := f.r.compact(x, binding, before, false); err == nil {
+				if err := f.r.compact(x, binding, model.Route{}, before, false); err == nil {
 					t.Fatal("failed compaction returned no error")
 				}
 				if row.stage == protocol.ConversationCompactionStageBudget && language.count() != 0 {
@@ -524,7 +524,7 @@ func TestCompactionHandoff(t *testing.T) {
 		fail := func(manual bool) protocol.ConversationCompactionFailure {
 			t.Helper()
 			before := f.state()
-			if err := f.r.compact(x, binding, before, manual); err == nil {
+			if err := f.r.compact(x, binding, model.Route{}, before, manual); err == nil {
 				t.Fatal("refused summary compacted")
 			}
 			added := f.state().Records[len(before.Records):]
@@ -568,7 +568,7 @@ func TestCompactionHandoff(t *testing.T) {
 			t.Fatalf("summary requests = %d", m.count())
 		}
 		// A compaction that succeeds ends the pause.
-		if err := f.r.compact(x, binding, f.state(), true); err != nil {
+		if err := f.r.compact(x, binding, model.Route{}, f.state(), true); err != nil {
 			t.Fatal(err)
 		}
 		if automaticFailures(binding, f.state().Records) != 0 {
@@ -593,7 +593,7 @@ func TestCompactionHandoff(t *testing.T) {
 				state = f.state()
 			}
 			state = compactionOverflow(t, f, x)
-			if err := f.r.compact(x, binding, state, false); err != nil {
+			if err := f.r.compact(x, binding, model.Route{}, state, false); err != nil {
 				t.Fatal(err)
 			}
 			added := f.state().Records[len(state.Records):]
@@ -632,7 +632,7 @@ func TestCompactionHandoff(t *testing.T) {
 					t.Fatal(err)
 				}
 				before := compactionOverflow(t, f, x)
-				if err := f.r.compact(x, binding, before, false); err != nil {
+				if err := f.r.compact(x, binding, model.Route{}, before, false); err != nil {
 					t.Fatal(err)
 				}
 				after := f.state()
@@ -701,7 +701,7 @@ func TestCompactionRetriesContextOverflowWithSmallerTranscript(t *testing.T) {
 			}
 			before := compactionOverflow(t, f, x)
 			originalHistory, _ := json.Marshal(before.Records)
-			err := f.r.compact(x, binding, before, false)
+			err := f.r.compact(x, binding, model.Route{}, before, false)
 			if exhausted && (err == nil || model.Classify(err).Kind != model.ContextOverflow) || !exhausted && err != nil {
 				t.Fatalf("compaction error = %v", err)
 			}
