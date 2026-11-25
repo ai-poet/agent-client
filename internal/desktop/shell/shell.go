@@ -144,10 +144,10 @@ type App struct {
 	OnMode  func(theme.Mode)
 	applied theme.Mode
 
-	Sidebar           *sidebar.State
-	Settings          *settings.State
-	Messages          *conversation.State
-	ImageStudio       *imagestudio.State
+	Sidebar          *sidebar.State
+	Settings         *settings.State
+	Messages         *conversation.State
+	ImageStudio      *imagestudio.State
 	accountOpen      bool
 	accountGroupLane string
 	accountNodesOpen bool
@@ -366,9 +366,9 @@ func (a *App) View(c *ui.Context) {
 		return
 	}
 	a.shortcuts(c)
-	a.MountPanel()
 	a.followSelection()
 	a.followPanes()
+	a.MountPanel()
 	a.sweepOverviews()
 	if a.paged() != "" {
 		a.SetPluginWorkspace(a.feature(), 0, 260, 320)
@@ -674,6 +674,9 @@ func (a *App) togglePanel() {
 		a.Metrics = !a.Metrics
 		return
 	}
+	if a.panelOwner() != a.panels.mounted {
+		return
+	}
 	a.PanelOpen = !a.PanelOpen
 }
 
@@ -706,6 +709,9 @@ func (a *App) pane(c *ui.Context, e ui.Element, ref *ui.Handle, closes bool, clo
 // panel for the next, or the panel itself with none left, the focus then
 // going back to the conversation.
 func (a *App) closeTab(c *ui.Context) {
+	if a.Page != ConversationPage || !a.PanelOpen || a.panelOwner() != a.panels.mounted {
+		return
+	}
 	if a.Panel.Active != (panel.Tab{}) && a.Panel.Close(a.Panel.Active) {
 		a.panelPane.Focus(c)
 		return
