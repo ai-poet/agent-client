@@ -16,6 +16,7 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/prompt"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/process"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
@@ -332,7 +333,7 @@ func (r *Runtime) turn(x *execution) error {
 	if addition := capabilityInstructions(x, policy, state.LoadedTools); addition != "" {
 		policy += "\n\n" + addition
 	}
-	environment := prompt.Environment(r.clock.Now(), inv.Turn.Config.Model, os.Getenv("SHELL"), inv.Worktree.Project != nil)
+	environment := prompt.Environment(r.clock.Now(), inv.Turn.Config.Model, process.NewEnvironment(os.Environ()).Shell(), inv.Worktree.Project != nil)
 	personal, err := prompt.CapturePersonal(x.ctx, r.profile)
 	if err != nil {
 		return err
