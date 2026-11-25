@@ -405,7 +405,7 @@ type BackgroundDetail struct {
 
 // Output is a call's result, one or more of its parts.
 type Output struct {
-	// Text is plain output; Command keeps only its last 100 lines.
+	// Text is the full plain output; Command previews it from the tail.
 	Text    string
 	Command bool
 	// Paths lists the files a search or read touched.

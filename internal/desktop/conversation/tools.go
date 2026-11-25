@@ -14,10 +14,7 @@ import (
 )
 
 // Layout metrics.
-const (
-	detailMax = 480      // mono details
-	diffRow   = 13 * 1.6 // Kit's code line, as the diff viewer's
-)
+const detailMax = 480 // mono details
 
 // textSize is the size of the transcript's content text in DIPs: the
 // message text size setting (kit.MessageTextSize, 14 unless set), which the
@@ -32,9 +29,6 @@ func textSize(c *ui.Context) float32 { return kit.MessageTextSize(c) }
 func rowHeight(size float32) float32 { return size + 10 }
 func rowIcon(size float32) float32   { return size + 2 }
 func caretSize(size float32) float32 { return size - 2 }
-
-// outputMax is five lines of a call's output, 20 DIPs each at 14.
-func outputMax(size float32) float32 { return 100 * size / 14 }
 
 // railMargin puts the rail's 1 DIP line under the icon's middle, and
 // railPad starts the body where the label does, past the icon and the
@@ -256,33 +250,51 @@ func Rail(c *ui.Context) ui.Element {
 }
 
 func (s *State) tools(c *ui.Context, calls []Call) {
-	if Sequence(calls) {
+	runs := Runs(calls)
+	if len(runs) > 1 {
 		head := Summary(calls)
 		s.disclosure(c, "tool-sequence-"+calls[0].ID, func(hovered, open bool, sw *kit.Sweep) {
 			summary(c, head, hovered, true, open, sw)
-		}, 8, 8, func() { s.groups(c, calls) })
+		}, 8, 8, func() {
+			groupRows(c, len(runs), func(i int) { s.run(c, runs[i]) })
+		})
 		return
 	}
-	s.groups(c, calls)
+	if len(runs) != 0 {
+		s.run(c, runs[0])
+	}
 }
 
-// groups builds runs of calls of the same name. More than one run only shows
-// on a sequence's rail, so they are a rail's 8 DIPs apart, as its rows are
-// from the summary above and as a group's own rows are once it opens.
-func (s *State) groups(c *ui.Context, calls []Call) {
-	ui.Column(c).Gap(railGap).Children(func() {
-		for _, run := range Runs(calls) {
-			if len(run) == 1 && !pathList(run[0]) {
-				s.row(c, run[0])
-				continue
-			}
-			s.group(c, run)
+// groupRows lays out ordinary transcript content. Only the mounted body
+// owns the page count, so reopening a group starts on its latest rows.
+func groupRows(c *ui.Context, n int, draw func(int)) {
+	box := ui.Column(c.Key("rows")).Gap(railGap)
+	more := ui.Local(box, "earlier", func() int { return 0 })
+	first := max(0, n-shownRows-*more)
+	box.Children(func() {
+		if first > 0 {
+			count := min(earlierPage, first)
+			revealRow(c, "earlier", "chevron-up", i18n.T(c, "tool_rows_earlier", "count", count), func() { *more += count })
+		}
+		for i := first; i < n; i++ {
+			draw(i)
 		}
 	})
 }
 
-// group is calls of one name under the last one's summary.
-func (s *State) group(c *ui.Context, run []Call) {
+func revealRow(c *ui.Context, key, icon, label string, click func()) {
+	row := rowSize(ui.ButtonBase(c.Key(key)).Label(label), textSize(c), false).Gap(8).AlignSelf(ui.Start).
+		MaxWidthPercent(100).Justify(ui.Start).Cursor(ui.CursorPointer)
+	hovered := row.Hovered() || row.FocusVisible()
+	row.Children(func() { summary(c, Call{Label: label, Icon: icon}, hovered, false, false, &kit.Sweep{}) }).OnClick(click)
+}
+
+// run groups calls of one name under the last one's summary.
+func (s *State) run(c *ui.Context, run []Call) {
+	if len(run) == 1 && !pathList(run[0]) {
+		s.row(c, run[0])
+		return
+	}
 	head := Summary(run)
 	if len(run) == 1 && run[0].Output == nil && run[0].BackgroundDetail == nil {
 		plain(c, "tool-group-"+run[0].ID, head)
@@ -291,21 +303,32 @@ func (s *State) group(c *ui.Context, run []Call) {
 	s.disclosure(c, "tool-group-"+run[0].ID, func(hovered, open bool, sw *kit.Sweep) {
 		summary(c, head, hovered, true, open, sw)
 	}, 8, 8, func() {
-		if paths := uniquePaths(run); len(paths) > 0 && pathList(run[len(run)-1]) {
-			for _, path := range paths {
-				s.pathRow(c, path)
-			}
-			for _, call := range run {
-				if call.Background != nil || call.BackgroundDetail != nil {
-					s.row(c, call)
-				} else if call.Output != nil && call.Output.Failure != "" {
-					notice(c, call.Output.Failure, failureTone(c, call.Output))
-				}
-			}
+		if pathList(run[len(run)-1]) {
+			s.pathRows(c, run)
 			return
 		}
-		for _, call := range run {
+		groupRows(c, len(run), func(i int) { s.row(c, run[i]) })
+	})
+}
+
+func (s *State) pathRows(c *ui.Context, run []Call) {
+	paths := uniquePaths(run)
+	var details []Call
+	for _, call := range run {
+		if call.Background != nil || call.BackgroundDetail != nil || call.Output != nil && call.Output.Failure != "" {
+			details = append(details, call)
+		}
+	}
+	groupRows(c, len(paths)+len(details), func(i int) {
+		if i < len(paths) {
+			s.pathRow(c, paths[i])
+			return
+		}
+		call := details[i-len(paths)]
+		if call.Background != nil || call.BackgroundDetail != nil {
 			s.row(c, call)
+		} else {
+			notice(c, call.Output.Failure, failureTone(c, call.Output))
 		}
 	})
 }
@@ -431,18 +454,12 @@ func (s *State) output(c *ui.Context, o *Output) {
 			s.diff(c, o.Diff)
 		}
 		if o.Text != "" {
-			text, hidden := o.Text, 0
-			if o.Command {
-				text, hidden = lastLines(text)
-			}
-			if hidden > 0 {
-				ui.Text(c, i18n.T(c, "tool_output_earlier", "count", hidden)).FontSize(size).
-					Padding(0, 12, 8, 12).TextColor(p.MutedForeground)
-			}
-			ui.ScrollBoth(c).MaxHeight(outputMax(size)).Children(func() {
-				ui.Text(c, text).Font("monospace").FontSize(size).LineHeight(20.0 / 14).NoWrap().
-					Selectable().TextColor(p.MutedForeground).PaddingEnd(28)
-			})
+			full := ui.Local(box, "text-full", func() bool { return false })
+			lines := strings.Split(strings.TrimSuffix(o.Text, "\n"), "\n")
+			shown, hidden := previewLinesOf(lines, *full, o.Command)
+			ui.Text(c, strings.Join(shown, "\n")).Font("monospace").FontSize(size).LineHeight(20.0 / 14).
+				Selectable().TextColor(p.MutedForeground).PaddingEnd(28)
+			previewToggle(c, "text-more", full, len(lines), hidden)
 		}
 		if len(o.Images) > 0 {
 			s.thumbnails(c, "output-images", o.Images, false)
@@ -453,13 +470,12 @@ func (s *State) output(c *ui.Context, o *Output) {
 		if o.Partial {
 			notice(c, i18n.T(c, "tool_partial"), p.MutedForeground)
 		}
-		copyText := copyOf(o)
 		b := kit.IconButton(c.Key("copy"), icons.Copy, i18n.T(c, "tool_copy"), 20, false).
 			TextColor(p.MutedForeground).Absolute().Top(4).Right(4)
 		if !hovered && !b.FocusVisible() {
 			b.Opacity(0)
 		}
-		b.OnClick(func() { c.WriteClipboard(copyText) })
+		b.OnClick(func() { c.WriteClipboard(copyOf(o)) })
 	})
 }
 
@@ -488,7 +504,7 @@ func (*Diff) Op(l DiffLine) byte {
 }
 
 // diff is a file change preview: an outlined box, its header the file name
-// and +N −M, its body up to five rows of the diff in Kit's code size. The
+// and +N −M, its body fitted to the visible diff in Kit's code size. The
 // name opens the file as a link of the content does (State.follow) when the
 // application opens files.
 func (s *State) diff(c *ui.Context, d *Diff) {
@@ -517,22 +533,28 @@ func (s *State) diff(c *ui.Context, d *Diff) {
 				}
 			})
 		})
-		// MyGo's diff viewer, unified, at most five rows in view.
-		rows := min(max(len(d.Lines), 1), 5)
-		old, new := d.Texts()
-		box := ui.Scroll(c.Key("diff")).MaxHeight(float32(rows) * diffRow)
+		box := ui.Column(c.Key("diff"))
+		full := ui.Local(box, "diff-full", func() bool { return false })
+		lines, hidden := previewLinesOf(d.Lines, *full, false)
+		old, new := (&Diff{Lines: lines}).Texts()
 		kit.Diff(c, box, old, new, kit.DiffOptions{Language: editor.LanguageFor(d.Path), Fit: true, NoNumbers: true})
+		if len(d.Lines) > previewLines {
+			ui.Column(c).PaddingX(12).BorderWidth(1, 0, 0, 0).BorderColor(p.Border).Children(func() {
+				previewToggle(c, "diff-more", full, len(d.Lines), hidden)
+			})
+		}
 	})
 }
 
-// table is tabular output: 180 DIP columns, at most five rows in view,
-// each 28 DIPs at 14.
+// Table columns scroll sideways; rows take their height in the transcript.
 func table(c *ui.Context, t *Table) {
 	p := theme.Of(c)
 	size := textSize(c)
 	height := size + 14
-	rows := min(max(len(t.Rows), 1), 5)
-	ui.ScrollBoth(c).MaxHeight(float32(rows+1) * height).Children(func() {
+	box := ui.ScrollHorizontal(c.Key("table"))
+	full := ui.Local(box, "table-full", func() bool { return false })
+	rows, hidden := previewLinesOf(t.Rows, *full, false)
+	box.Children(func() {
 		cells := func(values []string, head bool) {
 			ui.Row(c).Height(height).BorderWidth(0, 0, 1, 0).BorderColor(p.Border).Children(func() {
 				for _, v := range values {
@@ -545,10 +567,25 @@ func table(c *ui.Context, t *Table) {
 			})
 		}
 		cells(t.Columns, true)
-		for _, r := range t.Rows {
+		for _, r := range rows {
 			cells(r, false)
 		}
 	})
+	previewToggle(c, "table-more", full, len(t.Rows), hidden)
+}
+
+func previewToggle(c *ui.Context, key string, full *bool, total, hidden int) {
+	if total <= previewLines {
+		return
+	}
+	if *full {
+		if hidden > 0 {
+			notice(c, i18n.T(c, "diff_more_lines", "count", hidden), theme.Of(c).MutedForeground)
+		}
+		revealRow(c, key, "chevron-up", i18n.T(c, "output_show_less"), func() { *full = false })
+		return
+	}
+	revealRow(c, key, "chevron-down", i18n.T(c, "output_show_all", "count", total), func() { *full = true })
 }
 
 // steps is a task's progress.
@@ -658,7 +695,7 @@ func (s *State) question(c *ui.Context, q *Question) {
 		return
 	}
 	s.wrapping(c, "question-"+q.CallID, true, func(hovered, open bool, sw *kit.Sweep) { summary(c, head, hovered, true, open, sw) }, 4, 8, func() {
-		ui.Scroll(c).MaxHeight(outputMax(size)).Gap(4).Children(func() {
+		ui.Scroll(c).MaxHeight(100 * size / 14).Gap(4).Children(func() {
 			for _, a := range q.Answers {
 				ui.Text(c, a).FontSize(size).Selectable().TextColor(p.Foreground)
 			}

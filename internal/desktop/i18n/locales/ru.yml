@@ -137,6 +137,10 @@ tool_failed: Не удалось выполнить инструмент
 approval_pending: Ожидается утверждение
 content_copied: Копировано
 tool_copy: Копировать
+tool_rows_earlier: Показать предыдущие записи (%{count})
+output_show_all: Показать все строки (%{count})
+output_show_less: Свернуть
+diff_more_lines: '%{count} больше строк'
 tool_interrupted: Результат не подтвержден
 tool_not_executed: Утверждение прервано; не выполнено
 tool_not_found: Цель не найдена
