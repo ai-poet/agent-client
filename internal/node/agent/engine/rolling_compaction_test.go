@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,7 +11,38 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
+
+func TestRollingNativeCompactionKeepsOpaquePrefix(t *testing.T) {
+	f, x, binding, provider := nativeFixture(t, protocol.ConversationModelApiResponses, func(w http.ResponseWriter, request wireRequest) {
+		if compacting(request) {
+			writeJSON(w, http.StatusOK, compactedWindow)
+		} else {
+			writeSSE(w, responsesText(nativeFixtureHandoff))
+		}
+	})
+	if err := compactNow(t, f, x, binding); err != nil {
+		t.Fatal(err)
+	}
+	addExchange(t, f, "Second requirement")
+	if err := compactNow(t, f, x, binding); err != nil {
+		t.Fatal(err)
+	}
+	native := provider.all(compacting)
+	if len(native) != 2 || !strings.Contains(native[1].raw, "opaque-window") {
+		t.Fatal("rolling native compaction omitted the previous opaque prefix")
+	}
+	addExchange(t, f, "Third requirement")
+	x.inv.Message.Text = "Keep requirements"
+	if err := compactNow(t, f, x, binding); err != nil {
+		t.Fatal(err)
+	}
+	transcript := provider.all(func(r wireRequest) bool { return !compacting(r) })
+	if len(transcript) != 1 || strings.Contains(transcript[0].raw, "opaque-window") || !strings.Contains(transcript[0].raw, "Original task") || !strings.Contains(transcript[0].raw, "Second requirement") || !strings.Contains(transcript[0].raw, x.inv.Message.Text) {
+		t.Fatal("focused compaction did not rebuild the handoff from original history")
+	}
+}
 
 func compactionOverflow(t *testing.T, f *engineFixture, x *execution) store.AgentState {
 	t.Helper()

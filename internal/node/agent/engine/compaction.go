@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 
 	"charm.land/fantasy"
@@ -178,14 +179,22 @@ func (r *Runtime) compact(x *execution, binding model.Binding, route model.Route
 	if !useful {
 		return nil
 	}
-	return r.summarize(x, binding, route, state, compactionPlan{selection: selection, manual: manual, window: window})
+	return r.summarize(x, binding, route, state, compactionPlan{selection: selection, manual: manual, window: window, native: keepRecent && !route.Session && route.Native != "" && (!manual || strings.TrimSpace(x.inv.Message.Text) == "")})
 }
 
 type compactionPlan struct {
 	selection handoff.Selection
 	manual    bool
 	window    uint32
+	native    bool
+	carry     *canonical.NativeCompaction
 }
+
+// handoffFailure means the summary failed without changing the checkpoint.
+// A threshold is advisory: the next normal request can still use the history.
+type handoffFailure struct{ error }
+
+func (e handoffFailure) Unwrap() error { return e.error }
 
 func (r *Runtime) summarize(x *execution, binding model.Binding, route model.Route, state store.AgentState, plan compactionPlan) error {
 	selection, manual, window := plan.selection, plan.manual, plan.window
@@ -235,7 +244,51 @@ func (r *Runtime) summarize(x *execution, binding model.Binding, route model.Rou
 		if e := r.save(context.WithoutCancel(x.ctx), x.inv.Session.ID, records...); e != nil {
 			return e
 		}
-		return failure
+		return handoffFailure{failure}
+	}
+	var observationErr error
+	observeAttempt := func(source model.Binding, attempt model.Attempt) error {
+		x.timeline.attempt(attempt)
+		if attempt.RetryDelay != nil {
+			observationErr = r.save(context.WithoutCancel(x.ctx), x.inv.Session.ID, r.retryRecord(x, source, canonical.PurposeCompaction, attempt))
+			return observationErr
+		}
+		attempts = append(attempts, attempt)
+		return nil
+	}
+	if plan.native {
+		compacted, ok, err := r.nativeCompaction(x, binding, route, state, selection, func(a model.Attempt) error {
+			return observeAttempt(binding, a)
+		})
+		if observationErr != nil {
+			hideCompacting()
+			return observationErr
+		}
+		if ok {
+			return r.saveCompaction(x, binding, route, state, plan, summaryID, compacted.Summary, nil, &compacted.Native, attempts[len(attempts)-1].Usage, attempts)
+		}
+		var records []canonical.Record
+		for _, a := range attempts {
+			records = append(records, r.observationRecord(x, binding, canonical.PurposeCompaction, a))
+		}
+		if e := r.save(context.WithoutCancel(x.ctx), x.inv.Session.ID, records...); e != nil {
+			hideCompacting()
+			return e
+		}
+		attempts = nil
+		if err != nil {
+			hideCompacting()
+			return err
+		}
+	}
+	if previous, ok := selection.Prefix[0].Data.(*canonical.Compaction); ok && !previous.Readable() && previous.Native != nil {
+		// A transcript can't summarize encrypted items. Expand the original
+		// records up to this plan's boundary, not the retained tail.
+		readable, err := readableSelection(state.Records, selection.Boundary.ID)
+		if err != nil {
+			return failed(protocol.ConversationCompactionStageBudget, protocol.ConversationCompactionReasonNoFittingPrefix, err)
+		}
+		selection.Prefix = readable.Prefix
 	}
 	languageModel, err := r.model(x.ctx, summaryBinding)
 	if err != nil {
@@ -254,14 +307,8 @@ func (r *Runtime) summarize(x *execution, binding model.Binding, route model.Rou
 		limited, textBlock := false, false
 		var usage canonical.Usage
 		observe := func(attempt model.Attempt) error {
-			x.timeline.attempt(attempt)
-			// An attempt that waits to be sent again shows as a main request's does.
-			if attempt.RetryDelay != nil {
-				return r.save(context.WithoutCancel(x.ctx), x.inv.Session.ID, r.retryRecord(x, summaryBinding, canonical.PurposeCompaction, attempt))
-			}
 			usage = attempt.Usage
-			attempts = append(attempts, attempt)
-			return nil
+			return observeAttempt(summaryBinding, attempt)
 		}
 		collect := func(part fantasy.StreamPart) bool {
 			switch part.Type {
@@ -326,6 +373,10 @@ func (r *Runtime) summarize(x *execution, binding model.Binding, route model.Rou
 	promptText := requestText
 	for round := range 2 {
 		rawText, limited, roundUsage, err := requestSummary(promptText)
+		if observationErr != nil {
+			hideCompacting()
+			return observationErr
+		}
 		if err != nil {
 			return failRequest(err)
 		}
@@ -354,26 +405,21 @@ func (r *Runtime) summarize(x *execution, binding model.Binding, route model.Rou
 		}
 		return failed(protocol.ConversationCompactionStageSummary, reason, compactionSummaryFault(reason))
 	}
-	return r.saveCompaction(x, binding, route, state, plan, summaryID, summary, usage, attempts)
+	return r.saveCompaction(x, binding, route, state, plan, summaryID, summary.Render(), compactedFiles(summary), plan.carry, usage, attempts)
 }
 
-func (r *Runtime) saveCompaction(x *execution, binding model.Binding, route model.Route, state store.AgentState, plan compactionPlan, summaryID string, summary handoff.Summary, usage canonical.Usage, attempts []model.Attempt) error {
+func (r *Runtime) saveCompaction(x *execution, binding model.Binding, route model.Route, state store.AgentState, plan compactionPlan, summaryID, rendered string, files []canonical.CompactedFile, native *canonical.NativeCompaction, usage canonical.Usage, attempts []model.Attempt) error {
 	selection, manual := plan.selection, plan.manual
-	rendered := summary.Render()
 	boundary := selection.Boundary
-	message := canonical.NewMessage(canonical.User, canonical.Text(0, rendered))
+	message := canonical.NewMessage(canonical.User)
+	if rendered != "" {
+		message = canonical.NewMessage(canonical.User, canonical.Text(0, rendered))
+	}
 	message.Model = &binding.Config.Model
 	message.Usage = &usage
 	// The last summary attempt is billed on the summary; earlier attempts retain
 	// their independent observations.
-	compacted := canonical.Compaction{Boundary: boundary.ID, Summary: message, Start: state.Records[0].Created, End: boundary.Created}
-	for _, file := range summary.Files {
-		description := file.Summary
-		if file.KeyCode != nil {
-			description += "\n" + *file.KeyCode
-		}
-		compacted.Files = append(compacted.Files, canonical.CompactedFile{Path: file.Path, Summary: &description})
-	}
+	compacted := canonical.Compaction{Boundary: boundary.ID, Summary: message, Start: state.Records[0].Created, End: boundary.Created, Files: files, Native: native}
 	record := canonical.NewRecord(x.inv.Run.Turn, "compaction", &compacted, r.clock.Now())
 	record.ID = summaryID
 	record.Provenance.Author = "system"
@@ -393,7 +439,7 @@ func (r *Runtime) saveCompaction(x *execution, binding model.Binding, route mode
 		record.Metadata.Execution = last.Metadata.Execution
 	}
 	records = append(records, record)
-	if len(selection.Tail) > 0 {
+	if len(selection.Tail) > 0 || plan.carry != nil {
 		// The original tail remains after Boundary. Projection puts the new
 		// summary before it, so no copied messages or synthetic reply is needed.
 		return r.compactSession(x, binding, route, r.save(x.ctx, x.inv.Session.ID, records...))
@@ -473,6 +519,122 @@ func (r *Runtime) saveCompaction(x *execution, binding model.Binding, route mode
 	return r.compactSession(x, binding, route, r.save(x.ctx, x.inv.Session.ID, records...))
 }
 
+func compactedFiles(summary handoff.Summary) []canonical.CompactedFile {
+	var files []canonical.CompactedFile
+	for _, file := range summary.Files {
+		description := file.Summary
+		if file.KeyCode != nil {
+			description += "\n" + *file.KeyCode
+		}
+		files = append(files, canonical.CompactedFile{Path: file.Path, Summary: &description})
+	}
+	return files
+}
+
+func (r *Runtime) nativeCompaction(x *execution, binding model.Binding, route model.Route, state store.AgentState, selection handoff.Selection, observe func(model.Attempt) error) (model.Compacted, bool, error) {
+	key := binding.Provider.ID.String() + "\x00" + route.Native
+	if _, rejected := r.nativeRejected.Load(key); rejected {
+		return model.Compacted{}, false, nil
+	}
+	try := func() (model.Compacted, error) {
+		languageModel, err := r.model(x.ctx, binding)
+		if err != nil {
+			return model.Compacted{}, err
+		}
+		// Select already applied visibility and put the prior checkpoint first.
+		state.Records = selection.Prefix
+		request, err := r.mainRequest(x, binding, state, prompt.Instruction(x.inv.Session.Delegation != nil))
+		if err != nil {
+			return model.Compacted{}, err
+		}
+		call, err := model.BuildProjectedCall(binding, request)
+		if err != nil {
+			return model.Compacted{}, err
+		}
+		return model.CompactNative(x.ctx, languageModel, binding, call, r.clock, observe)
+	}
+	compacted, err := try()
+	switch {
+	case err == nil:
+		return compacted, true, nil
+	case errors.Is(err, model.ErrNativeUnsupported):
+		r.nativeRejected.Store(key, true)
+	case errors.Is(err, model.ErrNativeUnusable):
+	default:
+		if x.ctx.Err() != nil {
+			return model.Compacted{}, false, x.ctx.Err()
+		}
+	}
+	return model.Compacted{}, false, nil
+}
+
+// readableRecords opens opaque checkpoints back up to the original history.
+// A previous readable checkpoint still bounds the transcript.
+func readableRecords(records []canonical.Record) []canonical.Record {
+	return slices.DeleteFunc(slices.Clone(records), func(record canonical.Record) bool {
+		c, ok := record.Data.(*canonical.Compaction)
+		return ok && c.Native != nil && !c.Readable()
+	})
+}
+
+func readableSelection(records []canonical.Record, boundary string) (handoff.Selection, error) {
+	records = readableRecords(records)
+	cut := slices.IndexFunc(records, func(record canonical.Record) bool { return record.ID == boundary })
+	if cut < 0 {
+		return handoff.Selection{}, &model.Failure{Kind: model.InvalidRequest, Message: "compacted history has no readable boundary"}
+	}
+	selection := handoff.Selection{Boundary: records[cut]}
+	before := make(map[string]bool, cut+1)
+	for _, record := range records[:cut+1] {
+		before[record.ID] = true
+	}
+	var previous *canonical.Record
+	for i := range records {
+		if records[i].Kind == "compaction" {
+			previous = &records[i]
+		}
+	}
+	for _, record := range handoff.Visible(records) {
+		if previous != nil && record.ID == previous.ID {
+			// Preserve the checkpoint kind so Prepare pins, rather than trims, it.
+			summary := *previous.Data.(*canonical.Compaction)
+			summary.Summary = *record.Message()
+			record.Kind, record.Data = "compaction", &summary
+			selection.Prefix = append(selection.Prefix, record)
+		} else if before[record.ID] {
+			selection.Prefix = append(selection.Prefix, record)
+		} else {
+			selection.Tail = append(selection.Tail, record)
+		}
+	}
+	if len(selection.Prefix) == 0 {
+		return handoff.Selection{}, &model.Failure{Kind: model.InvalidRequest, Message: "compacted history has no visible prefix"}
+	}
+	return selection, nil
+}
+
+// readableCheckpoint adds a handoff at the same boundary, without making
+// another continuation or losing the native items for the producing route.
+func (r *Runtime) readableCheckpoint(x *execution, binding model.Binding, route model.Route, state store.AgentState, force bool) (bool, error) {
+	for i := len(state.Records) - 1; i >= 0; i-- {
+		record := state.Records[i]
+		if record.Kind != "compaction" {
+			continue
+		}
+		c := record.Data.(*canonical.Compaction)
+		if c.Native == nil || c.Readable() || (!force && model.ReplaysNative(binding, record)) {
+			return false, nil
+		}
+		selection, err := readableSelection(state.Records, c.Boundary)
+		if err != nil {
+			return false, handoffFailure{err}
+		}
+		plan := compactionPlan{selection: selection, carry: c.Native, window: route.ReplayWindow(capturedModel(binding).Context)}
+		return true, r.summarize(x, binding, route, state, plan)
+	}
+	return false, nil
+}
+
 // compactSession follows a saved handoff on an agent session that holds the
 // history and advertises `/compact`: the agent shrinks its own context and
 // keeps serving the session, as in T3 Code, instead of a new session that
@@ -488,29 +650,11 @@ func (r *Runtime) compactSession(x *execution, binding model.Binding, route mode
 		return err
 	}
 	instruction := prompt.Instruction(x.inv.Session.Delegation != nil)
-	system := prompt.System(instruction, state.Context)
-	tools := r.declarations(x, binding, state)
-	schemas := map[string]json.RawMessage{}
-	for _, tool := range tools {
-		if captured := findTool(x.tools, tool.Name); captured != nil && len(captured.SchemaJSON) > 0 {
-			schemas[tool.Name] = captured.SchemaJSON
-		}
-	}
-	projected := x.output.Project(model.Answered(model.VisibleRecords(state.Records)))
-	hydrated, attachmentAssets, err := r.hydrateAttachments(x, projected)
+	request, err := r.mainRequest(x, binding, state, instruction)
 	if err != nil {
 		return err
 	}
-	projected = hydrated
-	assets, err := r.modelAssetsWith(x.ctx, projected, attachmentAssets)
-	if err != nil {
-		return err
-	}
-	projected, tools, schemas = x.names.request(projected, tools, schemas)
-	if err = r.toolMediaAssets(x.ctx, binding, projected, assets); err != nil {
-		return err
-	}
-	call, err := model.BuildProjectedCall(binding, model.Request{System: system, Records: projected, Tools: tools, ToolSchemas: schemas, Assets: assets, Delegated: x.inv.Session.Delegation != nil})
+	call, err := model.BuildProjectedCall(binding, request)
 	if err != nil {
 		return err
 	}

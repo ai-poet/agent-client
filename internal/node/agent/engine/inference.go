@@ -107,37 +107,19 @@ func (r *Runtime) infer(x *execution, captured model.Binding, languageModel fant
 		state.Records = append(state.Records, *contextRecord)
 	}
 	instruction := prompt.Instruction(x.inv.Session.Delegation != nil)
-	system := prompt.System(instruction, state.Context)
-	tools := r.declarations(x, binding, state)
-	schemas := map[string]json.RawMessage{}
-	for _, tool := range tools {
-		if captured := findTool(x.tools, tool.Name); captured != nil && len(captured.SchemaJSON) > 0 {
-			schemas[tool.Name] = captured.SchemaJSON
-		}
-	}
-	projected := x.output.Project(model.Answered(model.VisibleRecords(state.Records)))
-	hydrated, attachmentAssets, err := r.hydrateAttachments(x, projected)
+	request, err := r.mainRequest(x, binding, state, instruction)
 	if err != nil {
 		return err
 	}
-	projected = hydrated
-	assets, err := r.modelAssetsWith(x.ctx, projected, attachmentAssets)
+	call, err := model.BuildProjectedCall(binding, request)
 	if err != nil {
 		return err
 	}
-	projected, tools, schemas = x.names.request(projected, tools, schemas)
-	if err = r.toolMediaAssets(x.ctx, binding, projected, assets); err != nil {
-		return err
-	}
-	call, err := model.BuildProjectedCall(binding, model.Request{System: system, Records: projected, Tools: tools, ToolSchemas: schemas, Assets: assets, Delegated: x.inv.Session.Delegation != nil})
-	if err != nil {
-		return err
-	}
-	inventory := &observation.Inventory{System: system}
+	inventory := &observation.Inventory{System: request.System}
 	for _, part := range prompt.SystemParts(instruction, state.Context)[1:] {
 		inventory.Sources = append(inventory.Sources, observation.Source{Kind: protocol.ConversationObservationCategoryKindInjected, Text: part})
 	}
-	for _, record := range handoff.Pending(projected) {
+	for _, record := range handoff.Pending(request.Records) {
 		if runtime := record.Metadata.Runtime; runtime != nil && runtime.TurnContext {
 			var parts []string
 			for _, block := range record.Message().Content {
@@ -282,6 +264,34 @@ func (r *Runtime) infer(x *execution, captured model.Binding, languageModel fant
 		}
 	}
 	return nil
+}
+
+// mainRequest materializes only the visible history, using the same tools,
+// attachments and tool names for inference and native compaction.
+func (r *Runtime) mainRequest(x *execution, binding model.Binding, state store.AgentState, instruction string) (model.Request, error) {
+	system := prompt.System(instruction, state.Context)
+	tools := r.declarations(x, binding, state)
+	schemas := map[string]json.RawMessage{}
+	for _, tool := range tools {
+		if captured := findTool(x.tools, tool.Name); captured != nil && len(captured.SchemaJSON) > 0 {
+			schemas[tool.Name] = captured.SchemaJSON
+		}
+	}
+	projected := x.output.Project(model.Answered(model.VisibleRecords(state.Records)))
+	hydrated, attachmentAssets, err := r.hydrateAttachments(x, projected)
+	if err != nil {
+		return model.Request{}, err
+	}
+	projected = hydrated
+	assets, err := r.modelAssetsWith(x.ctx, projected, attachmentAssets)
+	if err != nil {
+		return model.Request{}, err
+	}
+	projected, tools, schemas = x.names.request(projected, tools, schemas)
+	if err = r.toolMediaAssets(x.ctx, binding, projected, assets); err != nil {
+		return model.Request{}, err
+	}
+	return model.Request{System: system, Records: projected, Tools: tools, ToolSchemas: schemas, Assets: assets, Delegated: x.inv.Session.Delegation != nil}, nil
 }
 
 func (out *streamOutput) slot(id, kind string) *canonical.Block {

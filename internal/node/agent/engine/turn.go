@@ -399,8 +399,20 @@ func (r *Runtime) turn(x *execution) error {
 		if err != nil {
 			return err
 		}
+		route := model.RouteOf(languageModel, inv.Session.ID)
+		if written, err := r.readableCheckpoint(x, binding, route, state, false); err != nil {
+			if _, ok := errors.AsType[handoffFailure](err); !ok || x.ctx.Err() != nil || inv.Run.Kind == protocol.ConversationRunKindCompaction {
+				return err
+			}
+			// If building the portable handoff failed, this turn can still
+			// read the original history. Never send a foreign opaque window.
+			state.Records = readableRecords(state.Records)
+			compacted = true
+		} else if written {
+			continue
+		}
 		if inv.Run.Kind == protocol.ConversationRunKindCompaction {
-			return r.compact(x, binding, model.RouteOf(languageModel, inv.Session.ID), state, true)
+			return r.compact(x, binding, route, state, true)
 		}
 		err = r.db.Read(x.ctx, func(db *sql.Conn) error {
 			var err error
@@ -450,7 +462,7 @@ func (r *Runtime) turn(x *execution) error {
 		last := lastMessage(state.Records)
 		if last != nil && last.Error != nil {
 			if last.Error.Code != nil && *last.Error.Code == "context_overflow" && recoveries < 2 {
-				if err = r.compact(x, binding, model.RouteOf(languageModel, inv.Session.ID), state, false); err != nil {
+				if err = r.compact(x, binding, route, state, false); err != nil {
 					return err
 				}
 				recoveries++
@@ -476,8 +488,10 @@ func (r *Runtime) turn(x *execution) error {
 			}
 		}
 		if !compacted && shouldCompact(binding, state, inv.CompactionPercent) {
-			if err = r.compact(x, binding, model.RouteOf(languageModel, inv.Session.ID), state, false); err != nil {
-				return err
+			if err = r.compact(x, binding, route, state, false); err != nil {
+				if _, ok := errors.AsType[handoffFailure](err); !ok || x.ctx.Err() != nil {
+					return err
+				}
 			}
 			// The carried user input can itself exceed the threshold. Try the
 			// main request before considering another threshold compaction.

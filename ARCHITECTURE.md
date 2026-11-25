@@ -613,7 +613,7 @@ instructions are never truncated or summarized: when their offline token estimat
 already fills the captured model's context window, the turn reports that capacity
 problem before inference instead of attempting an ineffective history compaction.
 
-Compaction merges the previous summary and older messages into one bounded text
+Sailry's transcript compaction merges the previous summary and older messages into one bounded text
 handoff, retaining recent complete exchanges and tool-call/result groups in their
 original records. The retained tail targets at most 20,000 estimated tokens or
 20% of the model window, whichever is smaller; the newest indivisible exchange
@@ -627,6 +627,18 @@ silently omitted to make the summary request fit. A complete response must
 contain a populated handoff object, which may be fenced or surrounded by prose.
 Empty or invalid output gets one format-correction request. Truncated output
 and a failed retry leave the original context intact; plain prose never replaces it.
+
+For an unfocused compaction within the replay window, Anthropic Messages
+uses `compaction: {type: "summarize"}` and the `compact-2026-09-04` beta;
+Responses uses `/responses/compact`. Other routes, focused requests, and
+overflow recovery use the transcript handoff. Rejected native endpoints
+and features are remembered per provider, protocol, endpoint and model for
+the Node's lifetime. Unusable results fall back without disabling the route.
+Native attempts are recorded as compaction usage; Messages sums the billed
+iterations. Only the producing provider, API and model receive the native
+items. Another model receives the readable summary; for an opaque Responses
+window Sailry writes this summary lazily from the original records, without
+replacing the producing model's encrypted window.
 
 Hidden history is filtered before attachment materialization. A successful
 compaction must reach a main request before another threshold compaction.

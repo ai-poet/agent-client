@@ -85,7 +85,9 @@ func visible(records []canonical.Record, keepEmpty bool) []canonical.Record {
 			}
 			projected.Content = append(projected.Content, block)
 		}
-		if !keepEmpty && len(projected.Content) == 0 && projected.Error == nil {
+		// A native checkpoint can have no text. Keep its place so Select
+		// pins the opaque window instead of losing the history it replaced.
+		if !keepEmpty && record.Kind != "compaction" && len(projected.Content) == 0 && projected.Error == nil {
 			return
 		}
 		runtime := canonical.DefaultRuntime()

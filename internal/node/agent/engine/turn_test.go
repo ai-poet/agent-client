@@ -985,6 +985,29 @@ func TestThresholdCompactionSkipsWhenAllHistoryIsRetained(t *testing.T) {
 	mustHaveText(t, f.state().Records, "Done")
 }
 
+func TestFailedThresholdCompactionStillAnswers(t *testing.T) {
+	m := &scriptedModel{scripts: []script{
+		response(text("First answer"), finish()),
+		response(text("invalid handoff"), finish()),
+		response(text("still invalid"), finish()),
+		response(text("Second answer"), finish()),
+	}}
+	f := newFixture(t, m)
+	f.start()
+	f.waitRun(f.submit(strings.Repeat("An older requirement. ", 1800)), protocol.ConversationStatusCompleted)
+	if err := f.db.Node.Write(f.ctx, func(db *sql.Conn) error {
+		_, err := db.ExecContext(f.ctx, "UPDATE providers SET body=json_set(body,'$.provider.models[0].compaction_tokens',200)")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.waitRun(f.submit("Continue with the earlier requirements."), protocol.ConversationStatusCompleted)
+	if m.count() != 4 {
+		t.Fatalf("requests = %d, want two main requests and two handoff attempts", m.count())
+	}
+	mustHaveText(t, f.state().Records, "Second answer")
+}
+
 func TestThresholdCompactionKeepsReactiveRecoveryBounded(t *testing.T) {
 	overflow := response(text("New partial evidence"), fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: &model.Failure{Kind: model.ContextOverflow, Message: "context full"}})
 	summary := response(text(`{"user_intent":["Continue task"]}`), finish())

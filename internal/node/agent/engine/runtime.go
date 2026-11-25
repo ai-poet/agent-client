@@ -88,6 +88,7 @@ type Runtime struct {
 	statistics        map[protocol.SessionID]bool
 	statisticsOwners  sync.WaitGroup
 	statisticsStopped bool
+	nativeRejected    sync.Map // provider + route keys, for this Node's lifetime
 }
 
 // TurnObservation is what one execution saw that storage does not keep apart:
