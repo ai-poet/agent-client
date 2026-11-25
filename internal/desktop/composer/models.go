@@ -3,7 +3,6 @@ package composer
 import (
 	"fmt"
 	"maps"
-	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -35,9 +34,9 @@ const (
 	teamRow          = 40
 )
 
-// The model picker's columns: the rail, the list and the efforts, a hairline
-// in a gap of 8 on each side between them. The list is what the page has
-// beside the others: listWidth where the window has room for it. Below
+// The model picker has a gap after the rail and a hairline with two gaps
+// between the models and the efforts. The list is what the page has beside
+// the others: listWidth where the window has room for it. Below
 // compactPickerMin the vendor rail shrinks to icons alone so the model list
 // keeps room to read and select models even at narrow widths.
 const (
@@ -50,7 +49,7 @@ const (
 	listWidth        = 236
 	effortWidth      = 132
 	columnGap        = 8
-	pickerWidth      = railWidth + listWidth + effortWidth + 2*(2*columnGap+1)
+	pickerWidth      = railWidth + listWidth + effortWidth + 3*columnGap + 1
 	// The model controls use the same inset and gap on every page.
 	modelPopoverPadding = 12
 	modelPopoverGap     = 8
@@ -59,28 +58,18 @@ const (
 )
 
 // effortState is the model picker's effort column: the model whose efforts
-// it lists and how the pointer and the keys reach it.
+// it lists and how a click and the keys reach it.
 type effortState struct {
-	// model is the model whose efforts show: the one whose row the pointer
-	// or the keys were on last, the chosen one until then.
+	// model is the model whose efforts show: the one whose row was clicked
+	// or that the keys were on last, the chosen one until then.
 	model string
 	// focused is the model row that had the keyboard focus last frame, so
 	// the focus takes the column once, as it comes to a row.
 	focused string
-	// pointer is where the pointer was in the window in the last frame, and
-	// seen tells that it is known: a row takes the column from a pointer
-	// that moved since, so one at rest takes nothing from the keys, nor
-	// does a row the list brings under it.
-	pointer [2]int
-	seen    bool
-	// from is where the pointer last was on the column's model's row, or
-	// since then when its way was read, and direct tells that it has stayed
-	// on model rows since: on its way to the column it keeps that model.
-	from   [2]int
-	direct bool
-	// enter gives the chosen model's row the focus as the picker opens, and
-	// back gives the shown model's row the focus the column had.
-	enter, back bool
+	// enter gives the chosen model's row the focus as the picker opens,
+	// back gives the shown model's row the focus the column had, and open
+	// gives the column the focus once a model's row opened it.
+	enter, back, open bool
 }
 
 // layer is the page the model popover shows.
@@ -769,7 +758,11 @@ func (s *State) modelPicker(c *ui.Context, ctx *Context) {
 		shown = recent
 	}
 	if field.Submitted() && len(shown) > 0 {
-		s.pick(shown[0], s.carried(shown[0], chosen))
+		effort := defaultEffort(shown[0])
+		if shown[0].ID == chosen.ID {
+			effort = s.carried(shown[0], chosen)
+		}
+		s.pick(shown[0], effort)
 		c.Invalidate()
 	}
 	line := func(key string) {
@@ -824,7 +817,6 @@ func (s *State) modelPicker(c *ui.Context, ctx *Context) {
 					}
 				}
 			})
-		line("rail-line")
 		rows := map[string]ui.Element{}
 		listKey := s.family
 		if query != "" {
@@ -866,39 +858,22 @@ func (s *State) modelPicker(c *ui.Context, ctx *Context) {
 			first.Focus()
 		}
 		if _, listed := rows[e.model]; !listed {
-			e.model, e.direct = chosen.ID, false
+			e.model = chosen.ID
 			if query != "" && len(shown) > 0 {
 				e.model = shown[0].ID
 			}
 		}
-		// The focus takes the column as it comes to a row, the pointer as it
-		// moves onto one or on it. The picker reads the pointer wherever it
-		// is, so the first move onto a row is known for one.
-		x, y, _ := picker.PointerPosition()
-		box := picker.Bounds()
-		at := [2]int{int(math.Round(float64(box.X + x))), int(math.Round(float64(box.Y + y)))}
-		moved := e.seen && at != e.pointer
-		e.pointer, e.seen = at, true
-		focused, hovered := "", false
+		// The focus takes the column as it comes to a row; the pointer only
+		// by a click on one.
+		focused := ""
 		for id, row := range rows {
 			if row.Focused() {
 				if focused = id; e.focused != id {
-					e.model, e.direct = id, false
-				}
-			}
-		}
-		e.focused = focused
-		for id, row := range rows {
-			if row.Hovered() {
-				hovered = true
-				if e.aim(id, at, moved) {
 					e.model = id
 				}
 			}
 		}
-		if !hovered {
-			e.direct = false
-		}
+		e.focused = focused
 		column := byID[e.model]
 		if query != "" && len(shown) == 0 {
 			column = Model{}
@@ -928,39 +903,10 @@ func (s *State) modelPicker(c *ui.Context, ctx *Context) {
 		e.back = false
 		if len(levels) > 0 {
 			line("effort-line")
-			s.effortColumn(c, column, chosen, right || tab)
+			s.effortColumn(c, column, chosen, right || tab || e.open)
 		}
+		e.open = false
 	})
-}
-
-// aimStep is how far the pointer goes before its way tells where it is
-// headed.
-const aimStep = 6
-
-// aim follows the pointer to at, in the window, on the row of the model id,
-// and reports whether the row takes the effort column: it does once the
-// pointer moved. From the column's own row, a pointer headed for the
-// column, more to the right than up or down, crosses the rows between
-// without giving them the column.
-func (e *effortState) aim(id string, at [2]int, moved bool) bool {
-	switch {
-	case id == e.model:
-		e.from, e.direct = at, true
-		return false
-	case !moved:
-		return false
-	}
-	if dx, dy := at[0]-e.from[0], at[1]-e.from[1]; e.direct {
-		if dx*dx+dy*dy < aimStep*aimStep {
-			return false
-		}
-		if dx > max(dy, -dy) {
-			e.from = at
-			return false
-		}
-	}
-	e.from, e.direct = at, true
-	return true
 }
 
 // rowPad is a picker row's padding at each end: its score ends there.
@@ -1080,24 +1026,24 @@ func (s *State) modelRow(c *ui.Context, m, chosen Model, vendor, source string) 
 		if m.Score != nil {
 			score(c, m.Score)
 		}
-	}).OnClick(func() { s.pick(m, s.carried(m, chosen)) })
+	}).OnClick(func() {
+		if len(efforts(m)) == 0 {
+			s.pick(m, 0)
+			return
+		}
+		s.efforts.model, s.efforts.open = m.ID, true
+	})
 	return b
 }
 
-// carried is the effort a model is chosen at from its row, the one its
-// column checks: the effort chosen now where the model has one of its name,
-// which the chosen model does, else the model's default.
+// carried is the effort its column checks for a model: the chosen model's
+// current effort, else another model's first.
 func (s *State) carried(m, chosen Model) int {
-	list, now := efforts(m), efforts(chosen)
-	if len(list) == 0 {
+	list := efforts(m)
+	if len(list) == 0 || m.ID != chosen.ID {
 		return 0
 	}
-	if len(now) > 0 {
-		if i := slices.Index(list, now[min(max(int(*s.controlEffort()), 0), len(now)-1)]); i >= 0 {
-			return i
-		}
-	}
-	return defaultEffort(m)
+	return min(max(int(*s.controlEffort()), 0), len(list)-1)
 }
 
 // effortColumn is the efforts of a model under their heading, as high and as

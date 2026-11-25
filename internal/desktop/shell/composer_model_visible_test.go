@@ -91,8 +91,7 @@ func TestComposerModelAlwaysVisibleAcrossBreakpoints(t *testing.T) {
 				}
 				pressButton(t, tt, zh("provider_openai"))
 				rest(tt)
-				row := modelRow(t, tt, "GPT-5.2")
-				point(tt, row)
+				pressButton(t, tt, "GPT-5.2")
 				pressEffort(t, tt, "high")
 				if comp.Model != "gpt-5.2" || composer.Efforts[int(comp.Effort)] != "high" {
 					t.Fatalf("%s@%d: chose %q at effort %v, want gpt-5.2 at high", host, width, comp.Model, comp.Effort)
