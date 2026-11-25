@@ -55,7 +55,7 @@ var transientCommands = func() map[string]observation {
 			"list_plugin_models", "read_model_catalog", "read_model_scores", "read_project_catalog",
 		},
 		workspaceRead: {"list_directory", "inspect_git", "list_worktrees"},
-		transfer: {
+		transfer: {"export_trace",
 			"open_port", "cancel_port", "upload_plugin", "download_backup", "upload_backup",
 			"download_file", "upload_file", "upload_attachment", "download_attachment", "download_image", "cancel_file_transfer",
 		},

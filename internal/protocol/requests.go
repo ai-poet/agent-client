@@ -138,7 +138,7 @@ func (command Command) Durable() bool {
 		"list_associated_sessions",
 		"read_usage", "read_usage_v2",
 		"read_activity",
-		"read_trace",
+		"read_trace", "export_trace",
 		"read_turn_capture",
 		"read_turn",
 		"read_tool_detail",

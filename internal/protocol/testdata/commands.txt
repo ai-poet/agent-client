@@ -155,6 +155,7 @@ read_usage_v2
 read_activity_catalog
 read_activity
 read_trace
+export_trace
 clear_trace
 read_turn_capture
 read_turn

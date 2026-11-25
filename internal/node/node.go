@@ -652,7 +652,7 @@ func supportedCommand(kind string) bool {
 		return true
 	}
 	switch kind {
-	case "read_trace", "clear_trace", "snapshot", "inspect_request", "read_session", "list_associated_sessions", "read_power_settings", "read_telemetry_settings", "read_plugin_version", "read_activity_catalog", "read_activity",
+	case "read_trace", "export_trace", "clear_trace", "snapshot", "inspect_request", "read_session", "list_associated_sessions", "read_power_settings", "read_telemetry_settings", "read_plugin_version", "read_activity_catalog", "read_activity",
 		"read_media_settings", "list_media_models":
 		return true
 	case "register_project", "report_diagnostic", "save_media_settings":
@@ -671,6 +671,10 @@ func (node *Node) read(ctx context.Context, caller protocol.NodeID, request prot
 	ctx, accessErr = node.authorizeCommand(ctx, caller, request)
 	if accessErr != nil {
 		return response(protocol.Output{}, accessErr)
+	}
+	if q, ok := request.Command.Data.(*protocol.TraceExportQuery); ok {
+		out, err := node.transfers.DownloadTrace(ctx, caller, *q)
+		return response(protocol.Output{Kind: "trace_download", Data: out}, err)
 	}
 	if input, ok := request.Command.Data.(*protocol.TraceQuery); ok {
 		return response(node.readTrace(ctx, *input))
