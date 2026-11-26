@@ -1,6 +1,7 @@
 package live
 
 import (
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -104,4 +105,19 @@ func TestCheapGatewayOriginSwitchUpdatesProvidersAndRollsBackOnFailure(t *testin
 	if slices.Contains(altGW.requests(), "POST /auth/logout") {
 		t.Fatalf("logout leaked to altGW: %v", altGW.requests())
 	}
+}
+
+func TestCheapGatewayOriginRejectionLogsInvalidation(t *testing.T) {
+	login := newCheapGateway(t)
+	alt := newCheapGateway(t)
+	alt.set(func() { alt.groupsBody = `{"code":401,"message":"sensitive-response-fixture"}` })
+	checkLog := captureCheapInvalidation(t)
+	d := openCheapDesktop(t, func(d *cheapDesktop) {
+		d.signedIn(login.URL, cheapTestAccess, time.Hour)
+	})
+	d.await("initial sync ready", func() bool { return d.account().Stage == cheapauthui.Ready })
+	d.account().SelectOrigin(alt.URL)
+	d.await("rejected origin signs out", func() bool { return d.account().Stage == cheapauthui.SignedOut })
+	// An envelope can signal rejection even when its HTTP response was OK.
+	checkLog("origin_switch", "/groups/available", http.StatusOK, false)
 }

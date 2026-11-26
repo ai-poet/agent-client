@@ -44,6 +44,7 @@ var fields = []struct {
 	{"parse_event", local}, {"parse_line", local}, {"parse_column", local}, {"code", public}, {"status", local},
 	{"duration_us", public}, {"first_token_us", local}, {"bytes", local}, {"count", public}, {"durable", local},
 	{"elapsed_us", public}, {"last_content_us", local},
+	{"auth_flow", local}, {"auth_interface", local}, {"gateway_matches_login", local}, {"disable_succeeded", local},
 }
 
 var known = func() map[string]bool {

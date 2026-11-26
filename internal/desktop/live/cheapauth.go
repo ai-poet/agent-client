@@ -14,6 +14,7 @@ import (
 	cheapauthui "github.com/ai-poet/cheaprouter-harness/internal/desktop/cheapauth"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/providers"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/egoist/mygo/ui"
@@ -281,6 +282,9 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 			_, gatewayErr = r.resolveCheapProvider(ctx, account)
 		}
 		account.effects.Unlock()
+		// A rejected refresh can clear the endpoint before Account returns.
+		login := account.service.Endpoint()
+		sameOrigin := account.service.GatewayOriginConfig().ResolveAPIOrigin(login) == login
 		user, accountErr := account.service.Account(ctx)
 		var gateway core.Gateway
 		var groups []core.Group
@@ -353,12 +357,7 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 			if cheapAuthRejected(authErr) {
 				account.effects.Lock()
 				if ctx.Err() == nil {
-					// Refresh rejection is already cleared by Service. A
-					// bearer rejection from /me or the gateway clears here.
-					authErr = errors.Join(authErr, account.service.Invalidate())
-					// The session is over as after a sign-out: its gateway
-					// stops routing, and nothing else of the Node changes.
-					disableErr = r.disableCheapGateway(account, generation)
+					authErr, disableErr = r.invalidateCheapSession(account, generation, authErr, "sync", sameOrigin)
 				}
 				account.effects.Unlock()
 			} else if gatewayErr == nil {
@@ -444,6 +443,27 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 
 func cheapAuthRejected(err error) bool {
 	return errors.Is(err, core.ErrRefresh) || errors.Is(err, core.ErrUnauthorized)
+}
+
+// Called under account.effects after the generation check, just like sign-out.
+func (r *Runtime) invalidateCheapSession(account *cheapAuthRuntime, generation *cheapAuthGeneration, cause error, flow string, sameOrigin bool) (error, error) {
+	clearErr := account.service.Invalidate()
+	disableErr := r.disableCheapGateway(account, generation)
+	operation, status := "unknown", 0
+	var auth *core.AuthError
+	if errors.As(cause, &auth) {
+		status = auth.Status
+		// Only known interface names may leave the process; never emit URLs,
+		// query parameters, server text, or the errors from cleanup.
+		path, _, _ := strings.Cut(auth.Op, "?")
+		switch path {
+		case "/auth/me", "/auth/refresh", "/groups/available", "/models/catalog", "/keys":
+			operation = path
+		}
+	}
+	slog.Warn(logging.Target, "area", "cheaprouter", "phase", "session_invalidation",
+		"auth_flow", flow, "auth_interface", operation, "upstream_status", status, "gateway_matches_login", sameOrigin, "disable_succeeded", disableErr == nil)
+	return errors.Join(cause, clearErr), disableErr
 }
 
 func (r *Runtime) saveCheapGateway(ctx context.Context, account *cheapAuthRuntime, generation *cheapAuthGeneration, gateway core.Gateway) (int, error) {

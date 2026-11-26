@@ -29,6 +29,7 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/shell"
 	"github.com/ai-poet/cheaprouter-harness/internal/link"
 	"github.com/ai-poet/cheaprouter-harness/internal/node"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/providers"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/egoist/mygo/ui"
@@ -577,6 +578,49 @@ func TestCheapSignInAddsProviderAndSignOutDisablesOnlyIt(t *testing.T) {
 	d.workspace("after signing out")
 }
 
+// Capture the default structured sink before startup (a restored session may
+// already have finished invalidating by the time openCheapDesktop returns).
+func captureCheapInvalidation(t *testing.T) func(string, string, int, bool) {
+	t.Helper()
+	profile := filepath.Join(t.TempDir(), "profile")
+	stop, err := logging.Install(profile, "desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(stop)
+	return func(flow, op string, status int, sameOrigin bool) {
+		t.Helper()
+		path := filepath.Join(profile, "logs", "desktop", "current.log")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := fmt.Sprintf("WARN desktop area=cheaprouter phase=session_invalidation upstream_status=%d auth_flow=%s auth_interface=%s gateway_matches_login=%t disable_succeeded=true", status, flow, op, sameOrigin)
+		count := 0
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.Contains(line, " phase=session_invalidation ") {
+				count++
+				_, record, _ := strings.Cut(line, " ")
+				if record != want {
+					t.Errorf("invalidation record = %q, want %q", record, want)
+				}
+			}
+		}
+		if count != 1 {
+			t.Errorf("got %d invalidation warnings, want one", count)
+		}
+		tail, err := logging.Tail(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, field := range []string{"auth_flow", "auth_interface", "upstream_status", "gateway_matches_login", "disable_succeeded"} {
+			if strings.Contains(string(tail), `"`+field+`"`) {
+				t.Errorf("local field %s appeared in diagnostics", field)
+			}
+		}
+	}
+}
+
 // A session the service rejects ends as a sign-out does: the credentials are
 // removed and the CheapRouter provider alone is disabled, in a window that
 // shows the workspace throughout.
@@ -585,13 +629,15 @@ func TestCheapSessionRejectionDisablesOnlyGateway(t *testing.T) {
 		access  string
 		expires time.Duration
 		failure core.ErrorKind
+		op      string
 	}{
-		"refresh token refused": {cheapTestAccess, -time.Hour, core.ErrorRefresh},
-		"access token refused":  {"stale-access", time.Hour, core.ErrorUnauthorized},
+		"refresh token refused": {cheapTestAccess, -time.Hour, core.ErrorRefresh, "/auth/refresh"},
+		"access token refused":  {"stale-access", time.Hour, core.ErrorUnauthorized, "/auth/me"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			gateway := newCheapGateway(t)
 			gateway.rejected = true
+			checkLog := captureCheapInvalidation(t)
 			var enabled protocol.ConversationProvider
 			d := openCheapDesktop(t, func(d *cheapDesktop) {
 				d.signedIn(gateway.URL, fixture.access, fixture.expires)
@@ -599,6 +645,7 @@ func TestCheapSessionRejectionDisablesOnlyGateway(t *testing.T) {
 			})
 			d.workspace("startup with a rejected session")
 			d.await("the session to end", func() bool { return d.account().Stage == cheapauthui.SignedOut && d.account().Failure != "" })
+			checkLog("sync", fixture.op, http.StatusUnauthorized, true)
 			failure := (&core.AuthError{Kind: fixture.failure, Status: http.StatusUnauthorized}).Error()
 			if d.account().Failure != failure {
 				t.Fatalf("the rejected session is reported as %q, want %q", d.account().Failure, failure)
