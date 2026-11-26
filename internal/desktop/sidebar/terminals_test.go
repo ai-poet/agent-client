@@ -1,11 +1,38 @@
 package sidebar
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 	"github.com/egoist/mygo/ui"
 )
+
+func TestTerminalRowsSortByShownTitle(t *testing.T) {
+	pr := &viewmodel.Project{ID: "project", Name: "Project"}
+	s := New(&viewmodel.Data{Projects: []*viewmodel.Project{pr}}, "")
+	*s.Sort = int(SortName)
+	s.Actions = &Actions{Terminals: func(*viewmodel.Project) []Terminal {
+		return []Terminal{
+			{ID: "1", Title: "alice@host:~/zeta"},
+			{ID: "2", Title: "~/beta"},
+			{ID: "3", Title: "zed@host:~/alpha"},
+		}
+	}}
+	tt := ui.NewTester(func(c *ui.Context) { View(c, s) }, 320, 600)
+	tt.SetLocale("en")
+	tt.Frame()
+	want := []string{"~/alpha", "~/beta", "~/zeta"}
+	var rows []string
+	for _, text := range tt.Texts() {
+		if slices.Contains(want, text) {
+			rows = append(rows, text)
+		}
+	}
+	if got := slices.Compact(rows); !slices.Equal(got, want) {
+		t.Fatalf("terminal rows = %q, want %q", got, want)
+	}
+}
 
 func TestTerminalTitleDropsShellPrompt(t *testing.T) {
 	for title, want := range map[string]string{
