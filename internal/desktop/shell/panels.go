@@ -201,6 +201,19 @@ func (a *App) DropPanelTab(t panel.Tab) {
 	}
 }
 
+// TakePanelTab moves a tab out of its panel without leaving an empty column.
+func (a *App) TakePanelTab(t panel.Tab) {
+	if len(a.Panel.Tabs) == 1 && a.Panel.Tabs[0] == t {
+		a.PanelOpen = false
+	}
+	for _, kept := range a.panels.parked {
+		if len(kept.Tabs) == 1 && kept.Tabs[0] == t {
+			kept.Open = false
+		}
+	}
+	a.DropPanelTab(t)
+}
+
 // MovePanelTab gives t to conversation id's panel, behind its shown tab: a
 // tab opened for a conversation that is not on screen, as the page its agent
 // opened.

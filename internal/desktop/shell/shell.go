@@ -20,7 +20,6 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/onboarding"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
-	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panes"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/settings"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/sidebar"
@@ -540,10 +539,7 @@ func (a *App) nav(c *ui.Context, f frame, panel ui.Color) {
 			} else if a.Page == PluginPage && a.PluginNavigation != nil {
 				a.PluginNavigation(c)
 			} else {
-				a.Sidebar.Terminal = ""
-				if t := a.panes.Active; t.Kind == panes.Terminal && a.HasWorkspaceTerminal(t.ID) {
-					a.Sidebar.Terminal = t.ID
-				}
+				a.Sidebar.Terminal = a.ActiveTerminal()
 				sidebar.View(c, a.Sidebar)
 			}
 			a.accountFooter(c)
@@ -636,13 +632,22 @@ func (a *App) details(c *ui.Context, f frame, fill ui.Color) {
 // in the header and its content in the column are built.
 func (a *App) syncPanel() {
 	a.Panel.Paged = a.paged()
-	a.Panel.HasProject = a.Data.ProjectOf(a.Sidebar.Selected) != nil
-	a.Panel.Cwd = ""
-	if pr := a.Data.ProjectOf(a.Sidebar.Selected); pr != nil {
-		a.Panel.Cwd = pr.Path
-	}
-	if cv := a.Data.Find(a.Sidebar.Selected); cv != nil && cv.WorktreePath != "" {
-		a.Panel.Cwd = cv.WorktreePath
+	if a.ActiveTerminal() == "" {
+		a.Panel.HasProject = a.Data.ProjectOf(a.Sidebar.Selected) != nil
+		a.Panel.Cwd = ""
+		if pr := a.Data.ProjectOf(a.Sidebar.Selected); pr != nil {
+			a.Panel.Cwd = pr.Path
+		}
+		if cv := a.Data.Find(a.Sidebar.Selected); cv != nil && cv.WorktreePath != "" {
+			a.Panel.Cwd = cv.WorktreePath
+		}
+	} else if a.sampled() {
+		// Live terminals get their workspace from their Node.
+		pr := a.panelProject()
+		a.Panel.HasProject, a.Panel.Cwd = pr != nil, ""
+		if pr != nil {
+			a.Panel.Cwd = pr.Path
+		}
 	}
 	a.Panel.Focus = func(c *ui.Context) { a.panelPane.Focus(c) }
 }

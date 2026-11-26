@@ -21,8 +21,7 @@ var pageFeatures = map[string]Page{
 	"page:settings_plugins": MarketPage,
 }
 
-// project returns the state of the selected conversation's project, nil
-// when it has none.
+// project returns the active pane's project, nil when it has none.
 func (a *App) project() *panel.Project {
 	if !a.sampled() {
 		if a.Hooks.WorkspaceProject != nil {
@@ -30,7 +29,7 @@ func (a *App) project() *panel.Project {
 		}
 		return nil
 	}
-	pr := a.Data.ProjectOf(a.Sidebar.Selected)
+	pr := a.panelProject()
 	if pr == nil {
 		return nil
 	}
