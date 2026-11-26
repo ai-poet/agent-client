@@ -202,7 +202,7 @@ func (c *Client) CreateKey(ctx context.Context, accessToken, name string) (APIKe
 // CreateKeyForGroup mints a gateway key optionally bound to groupID.
 func (c *Client) CreateKeyForGroup(ctx context.Context, accessToken, name string, groupID *int64) (APIKey, error) {
 	var key APIKey
-	payload := map[string]any{"name": name}
+	payload := map[string]any{"name": name, "client_source": CheapRouterClientSource}
 	if groupID != nil {
 		payload["group_id"] = *groupID
 	}

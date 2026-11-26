@@ -574,6 +574,10 @@ func (s *Service) ReadSetup(ctx context.Context) (User, error, Gateway, error) {
 // that owns none, matching the name the Rust client uses.
 const CheapRouterKeyName = "CheapRouter desktop"
 
+// CheapRouterClientSource marks keys this desktop mints so the portal can hide
+// them from the user's manual key list (sub2api api_keys.client_source).
+const CheapRouterClientSource = "cheaprouter-desktop"
+
 // Gateway fetches catalog and keys after login, honoring all bound lanes (or
 // legacy single GroupID / account default when no lane is bound).
 func (s *Service) Gateway(ctx context.Context) (Gateway, error) {
