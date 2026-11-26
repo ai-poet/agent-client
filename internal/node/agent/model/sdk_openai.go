@@ -360,6 +360,15 @@ func (model *sdkModel) streamChat(ctx context.Context, raw []byte, call fantasy.
 	stream := service.NewStreaming(ctx, openaisdk.ChatCompletionNewParams{}, option.WithRequestBody("application/json", raw))
 	defer stream.Close()
 	tools := map[int64]*chatTool{}
+	finished := map[int64]bool{}
+	var options struct {
+		N int `json:"n"`
+	}
+	if err := json.Unmarshal(raw, &options); err != nil {
+		emitter.fail(err)
+		return
+	}
+	want := int64(max(options.N, 1))
 	reason := ""
 	// Reasoning a model writes inline in its content is reasoning. A provider
 	// that also reports reasoning in its own field is read from that field.
@@ -439,6 +448,14 @@ func (model *sdkModel) streamChat(ctx context.Context, raw []byte, call fantasy.
 				}
 			}
 			if finish, ok := choice["finish_reason"].(string); ok && finish != "" {
+				switch finish {
+				case "stop", "tool_calls", "function_call", "length", "content_filter":
+					if index := wireInt(choice["index"]); index != nil && *index >= 0 && *index < want {
+						finished[*index] = true
+					} else if choice["index"] == nil && want == 1 {
+						finished[0] = true
+					}
+				}
 				reason = finish
 			}
 		}
@@ -448,8 +465,11 @@ func (model *sdkModel) streamChat(ctx context.Context, raw []byte, call fantasy.
 		return
 	}
 	if err := stream.Err(); err != nil {
-		emitter.fail(err)
-		return
+		// Connection loss after all choices finished loses only the trailer.
+		if ctx.Err() != nil || int64(len(finished)) != want || !http2ConnectionLost(err) {
+			emitter.fail(err)
+			return
+		}
 	}
 	if reason == "" {
 		emitter.fail(io.ErrUnexpectedEOF)
