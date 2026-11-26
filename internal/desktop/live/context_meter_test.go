@@ -3,6 +3,7 @@ package live
 import (
 	"testing"
 
+	"github.com/ai-poet/cheaprouter-harness/internal/node/mcp"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
@@ -48,8 +49,13 @@ func TestContextStats(t *testing.T) {
 	if d.Parts[0].Key != "meter_system" || *d.Parts[0].Tokens != 20 {
 		t.Errorf("system across the steps is %+v, want 20", d.Parts[0])
 	}
-	if len(d.Tools) != 2 || d.Tools[0].Name != "read" || d.Tools[0].Count != 3 || *d.ToolCalls != 4 {
-		t.Errorf("tools %+v (%d calls), want read 3 then search 1", d.Tools, *d.ToolCalls)
+	if len(d.Tools) != 2 || d.Tools[0].Name != "read" || d.Tools[0].Count != 3 || d.Tools[1].Name != "mcp_search" || *d.ToolCalls != 4 {
+		t.Errorf("tools %+v (%d calls), want read 3 then mcp_search 1", d.Tools, *d.ToolCalls)
+	}
+	// An MCP tool reads as its calls show it, by server and tool.
+	alias := mcp.Alias("github", "github", "actions_list")
+	if name, shown := contextToolName(alias), mcp.Display("github", "actions_list").Label; name != shown {
+		t.Errorf("meter names %s %q, its calls %q", alias, name, shown)
 	}
 	if d.Cost != "0.14" || d.Speed == nil || *d.Speed != 20 {
 		t.Errorf("cost %q, speed %v", d.Cost, d.Speed)

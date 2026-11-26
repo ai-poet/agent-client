@@ -10,6 +10,7 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/mcp"
 	nodeproviders "github.com/ai-poet/cheaprouter-harness/internal/node/providers"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/egoist/mygo/ui"
@@ -278,17 +279,15 @@ func contextAggregate(steps []conversation.ContextStep) ([]conversation.ContextP
 }
 
 // Model-facing tool aliases carry package and MCP digests; the meter counts
-// a tool by its own name.
-var (
-	pluginToolAlias = regexp.MustCompile(`^plugin_[0-9a-f]{16}_(.+)$`)
-	mcpToolAlias    = regexp.MustCompile(`^mcp_(.+)_[0-9a-f]{24}$`)
-)
+// a tool by its own name, an MCP tool's as its calls show it.
+var pluginToolAlias = regexp.MustCompile(`^plugin_[0-9a-f]{16}_(.+)$`)
 
 func contextToolName(name string) string {
-	for _, alias := range []*regexp.Regexp{pluginToolAlias, mcpToolAlias} {
-		if m := alias.FindStringSubmatch(name); m != nil {
-			return m[1]
-		}
+	if m := pluginToolAlias.FindStringSubmatch(name); m != nil {
+		return m[1]
+	}
+	if display, ok := mcp.AliasDisplay(name); ok {
+		return display.Label
 	}
 	return name
 }
