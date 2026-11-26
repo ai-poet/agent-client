@@ -3,6 +3,70 @@
 Release entries supply the corresponding GitHub Release notes. A version is
 released only after its entry is here.
 
+## [0.5.3](https://github.com/ai-poet/cheaprouter-harness/releases/tag/v0.5.3) — 2026-11-26
+
+新增请求轨迹与请求洞察，可逐次查看模型请求的诊断、正文与耗时；接入 Amazon Bedrock 与 Vertex AI，按模型路由原生压缩上下文；另含大量模型请求重试与稳定性修复。
+
+Adds request traces and request insights to inspect each model attempt's diagnosis, bodies and timing; adds Amazon Bedrock and Vertex AI with native context compaction per model route; plus many retry and stability fixes.
+
+### 新增 / Added
+
+- 请求轨迹：会话面板逐次列出模型请求，含时间轴、失败与缓存诊断、请求/响应正文（语法高亮、可搜索）、用量与计时瀑布图；可按全部、失败或选中轮次导出可分享或原始 ZIP
+
+  Request traces: the session panel lists every model attempt with a timeline, failure and cache diagnosis, highlighted and searchable request/response bodies, and a usage and timing waterfall; export all, failed or the selected turn as a shareable or raw ZIP
+
+- 请求洞察页：按供应商、模型、凭据等汇总尝试次数、失败率与 TTFT / 耗时分位，点击可跳到对应会话的请求
+
+  The request insights page aggregates attempts, failure rate and TTFT / duration percentiles by provider, model, credential and more, and opens the matching request in its session
+
+- 「设置 › 通用」可开启记录请求正文和向内置网关发送轨迹 ID，均默认关闭
+
+  Settings › General can record request bodies and send trace IDs to the built-in gateways; both are off by default
+
+- 接入 Amazon Bedrock 与 Vertex AI 模型路由；按模型路由使用原生上下文压缩，不支持时回退到内置摘要
+
+  Amazon Bedrock and Vertex AI model routes; native context compaction per model route, falling back to the built-in summary
+
+- ACP 代理：一个进程服务多个会话，进程丢失后保留会话，超出并发时排队，工具调用格式错误时在同一会话内重试
+
+  ACP agents: one process serves several sessions, sessions survive process loss, requests queue beyond the declared concurrency, and malformed tool calls are asked again in the same session
+
+- 模型选择器按供应商可折叠分组；侧边栏列出项目中运行的终端，头部标签可拖动排序
+
+  The model picker groups models under collapsible provider headers; the sidebar lists running project terminals, and header tabs reorder by dragging
+
+- 使用已下线 CheapRouter 路由的角色可一键迁移；登录失效后引导重新登录
+
+  Agents on retired CheapRouter routes offer a one-step migration; an expired CheapRouter session guides you back to sign-in
+
+### 修复 / Fixed
+
+- 模型请求：首次快速失败静默重试一次，重试上限增至 10 次；中断的流与丢失的 HTTP/2 连接会重试，403 与额度错误按状态码和错误码分类，卡死检测缩短至 300 秒
+
+  Model requests: a first fast failure retries quietly once and the retry limit rises to 10; interrupted streams and lost HTTP/2 connections retry, 403 and quota errors classify by status and code, and stall detection drops to 300 seconds
+
+- Anthropic、OpenAI 与 Claude OAuth 的客户端身份、beta 标志与模型发现请求头对齐；修正推理 token、缓存写入与 Bedrock 一小时缓存计费
+
+  Anthropic, OpenAI and Claude OAuth client identity, beta flags and discovery headers are aligned; reasoning tokens, cache writes and Bedrock one-hour cache pricing are corrected
+
+- 与当前会话无关的角色不再阻断会话创建，创建失败时区分模型、角色与登录原因；修复切换认证方式时供应商编辑器的回归
+
+  Unrelated agents no longer block session creation, and a failure names its model, agent or sign-in cause; the provider editor no longer regresses when switching authentication methods
+
+- 稳定性：慢速写入不再卡住 Node 与界面；删除会话时停止进行中的轮次；Windows 网络共享路径、工作区路径隔离、插件运行时内存与压缩预算均已加固
+
+  Stability: slow admission writes no longer stall the Node or the interface; removing a session stops its running turns; Windows network shares, workspace path isolation, plugin runtime memory and compaction budgets are hardened
+
+### 说明 / Notes
+
+- 请求轨迹只保存在本机，可能包含系统提示词与私人会话内容，分享导出文件前请确认
+
+  Request traces stay on this computer and may contain system prompts and private conversation content; check an export before sharing it
+
+- 移动端 App 本版无变化
+
+  The mobile app is unchanged in this release
+
 ## [0.5.2](https://github.com/ai-poet/cheaprouter-harness/releases/tag/v0.5.2) — 2026-11-24
 
 创作工作台支持参考图编辑与局部重绘，Agent 也能直接画图和改图；另含一批稳定性修复。
