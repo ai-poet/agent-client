@@ -522,8 +522,8 @@ another model replied since the session last answered, is the whole history
 replayed into a new session; `replay_bytes` bounds that replay, and a larger
 one is a context overflow handled by compaction. A replaced session is closed
 when the agent offers `session/close`. A program whose copy of a session is
-older than the record, because another program continued it, resumes the
-session as recorded and neither continues nor closes its copy. Transcript
+older than the record, because another program continued it, closes its
+outdated copy where supported before resuming the recorded session. Transcript
 summary requests, discovery and a request whose agent session is busy
 share any compatible program with room, each in an agent session of its own
 that ends with the request. A package runs at most

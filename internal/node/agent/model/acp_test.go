@@ -786,9 +786,10 @@ func TestACPSessionContinuation(t *testing.T) {
 		if result := fixture.run(t.Context(), acpRequest(t, "", third), nil); result.failure != nil {
 			t.Fatalf("reply = %#v", result)
 		}
-		prompts := fixture.received("session/prompt")
-		if len(fixture.received("session/new")) != 1 || len(fixture.received("session/close")) != 0 || fixture.prompt(2) != "again" || sessionOf(prompts[2]) != sessionOf(prompts[0]) {
-			t.Fatalf("sessions = %d, closed = %d, prompt = %q", len(fixture.received("session/new")), len(fixture.received("session/close")), fixture.prompt(2))
+		// This program closes its outdated copy, then resumes the recorded one.
+		prompts, closed := fixture.received("session/prompt"), fixture.received("session/close")
+		if len(fixture.received("session/new")) != 1 || len(closed) != 1 || sessionOf(closed[0]) != sessionOf(prompts[0]) || fixture.prompt(2) != "again" || sessionOf(prompts[2]) != sessionOf(prompts[0]) {
+			t.Fatalf("sessions = %d, closed = %d, prompt = %q", len(fixture.received("session/new")), len(closed), fixture.prompt(2))
 		}
 	})
 
