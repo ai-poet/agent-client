@@ -42,6 +42,9 @@ type UsageMetadata struct {
 	CandidateOutput *int64          `json:"candidate_output,omitempty"`
 	ToolInput       *int64          `json:"tool_input,omitempty"`
 	Raw             json.RawMessage `json:"raw,omitempty"`
+	// Context is what the last request occupied when the counts above sum
+	// several requests of one reply.
+	Context *int64 `json:"context,omitempty"`
 }
 
 func (*UsageMetadata) Options() {}
@@ -227,9 +230,14 @@ func (model *sdkModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.S
 	if err != nil {
 		return nil, err
 	}
-	raw, err := sourceRequestBytes(model.config, call, body)
-	if err != nil {
-		return nil, err
+	// `/responses/compact` takes a few members of the body as they are; the
+	// ordered main-request encoding would be discarded.
+	compactWindow := model.config.Kind == "responses" && nativeRequest(call) != nil
+	var raw []byte
+	if !compactWindow {
+		if raw, err = sourceRequestBytes(model.config, call, body); err != nil {
+			return nil, err
+		}
 	}
 	return func(yield func(fantasy.StreamPart) bool) {
 		owner, cancel := context.WithCancel(ctx)
@@ -248,7 +256,7 @@ func (model *sdkModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.S
 		case "google":
 			model.streamGoogle(owner, raw, call, emitter)
 		case "responses":
-			if nativeRequest(call) != nil {
+			if compactWindow {
 				model.compactResponses(owner, body, call, emitter)
 				return
 			}
@@ -437,6 +445,26 @@ func (emitter *sdkEmitter) updateUsage(value map[string]any, family string) {
 		decoder.Decode(&merged)
 	}
 	mergeUsageFields(merged, value)
+	if iterations := wireArray(merged["iterations"]); family == "anthropic" && len(iterations) > 0 {
+		// The cache write breakdown follows the iteration totals below, so
+		// that pricing can tell five-minute from one-hour writes.
+		creation := map[string]any{}
+		for _, key := range []string{"ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"} {
+			var sum int64
+			found := false
+			for _, iteration := range iterations {
+				if count := wireInt(wireObject(wireObject(iteration)["cache_creation"])[key]); count != nil {
+					sum, found = sum+*count, true
+				}
+			}
+			if found {
+				creation[key] = json.Number(fmt.Sprint(sum))
+			}
+		}
+		if len(creation) > 0 {
+			merged["cache_creation"] = creation
+		}
+	}
 	raw, _ := json.Marshal(merged)
 	emitter.usage.Raw = raw
 	keys := map[string]**int64{}

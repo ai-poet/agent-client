@@ -588,15 +588,20 @@ const (
 func (e *providerEditor) connection(ch *preview.Channel) {
 	ch.Endpoint, ch.APIVersion = e.endpoint, ""
 	ch.Region, ch.Project, ch.Location = "", "", ""
+	derive := strings.TrimSpace(e.endpoint) == "" || string(protocol.CloudEndpointApi(e.endpoint)) == e.current().API
 	switch {
 	case e.azure():
 		ch.APIVersion = strings.TrimSpace(e.apiVersion)
 	case e.bedrock():
 		ch.Region = strings.TrimSpace(e.region)
-		ch.Endpoint = protocol.ConversationConnectionOptionsBedrockPayload{Region: ch.Region}.Endpoint()
+		if derive {
+			ch.Endpoint = protocol.ConversationConnectionOptionsBedrockPayload{Region: ch.Region}.Endpoint()
+		}
 	case e.vertex():
 		ch.Project, ch.Location = strings.TrimSpace(e.project), strings.TrimSpace(e.location)
-		ch.Endpoint = protocol.ConversationConnectionOptionsVertexAiPayload{Location: ch.Location}.Endpoint()
+		if derive {
+			ch.Endpoint = protocol.ConversationConnectionOptionsVertexAiPayload{Location: ch.Location}.Endpoint()
+		}
 	}
 }
 
@@ -666,10 +671,17 @@ func (e *providerEditor) switchRoute(i int) {
 			i = j
 		}
 	}
-	if e.endpoint == cur.Endpoint {
+	cloud := func(api string) bool { return api == "bedrock" || api == "vertex_ai" }
+	if e.endpoint == cur.Endpoint || routes[i].API != cur.API && (cloud(cur.API) || cloud(routes[i].API)) {
 		e.endpoint = routes[i].Endpoint
 	}
 	e.route = i
+	if e.region == "" {
+		e.region = bedrockDefaultRegion
+	}
+	if e.location == "" {
+		e.location = vertexDefaultLocation
+	}
 	e.refreshImageGeneration()
 	if !slices.ContainsFunc(e.models, func(d modelDraft) bool { return !d.seeded || d.id != d.model.ID }) {
 		e.models, e.def = nil, 0

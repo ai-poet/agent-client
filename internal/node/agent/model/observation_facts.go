@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"net/http/httptrace"
+	"slices"
 	"sync"
 	"time"
 
@@ -28,6 +29,22 @@ type attemptCapture struct {
 	status       *uint16
 	trace        *trace.Attempt
 	gatewayID    string
+	secrets      []protocol.Secret
+}
+
+// captureSecret adds a transport credential to this attempt's redactions.
+func captureSecret(ctx context.Context, secret protocol.Secret) {
+	if capture, ok := ctx.Value(attemptCaptureKey{}).(*attemptCapture); ok {
+		capture.mu.Lock()
+		capture.secrets = append(capture.secrets, secret)
+		capture.mu.Unlock()
+	}
+}
+
+func (capture *attemptCapture) redact(route []protocol.Secret) []protocol.Secret {
+	capture.mu.Lock()
+	defer capture.mu.Unlock()
+	return append(slices.Clip(route), capture.secrets...)
 }
 
 func captureAttempt(ctx context.Context, call fantasy.Call, timer clock.Clock, started time.Time) (context.Context, *attemptCapture) {

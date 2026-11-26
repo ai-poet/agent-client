@@ -60,7 +60,7 @@ func ValidateConfiguration(provider protocol.ConversationProvider) error {
 	if _, err := OAuthFields(provider); err != nil {
 		return err
 	}
-	if err := validateHeaders(provider); err != nil {
+	if err := ValidateHeaders(provider); err != nil {
 		return err
 	}
 	if provider.Api == protocol.ConversationModelApiPlugin && (provider.Binding == nil || *provider.Binding == nil || (**provider.Binding).Adapter == nil) {
@@ -74,11 +74,11 @@ func ValidateConfiguration(provider protocol.ConversationProvider) error {
 			return invalid("connection options do not match the provider")
 		}
 		var options protocol.ConversationConnectionOptionsAzureOpenAiPayload
-		if unionData(provider.Options.Data, &options) != nil || !cloudSegment(options.ApiVersion) {
+		if unionData(provider.Options.Data, &options) != nil || !PathSegment(options.ApiVersion) {
 			return invalid("connection options do not match the provider")
 		}
 		for _, model := range provider.Models {
-			if !cloudSegment(model.ID) {
+			if !PathSegment(model.ID) {
 				return invalid("connection options do not match the provider")
 			}
 		}
@@ -263,7 +263,10 @@ func ValidateBinding(provider protocol.ConversationProvider) error {
 	}
 	return nil
 }
-func cloudSegment(value string) bool {
+
+// PathSegment reports a value safe to place as one URL path segment, such as
+// an Azure API version, deployment or a provider's job ID.
+func PathSegment(value string) bool {
 	if value == "" || len(value) > 128 || value == "." || value == ".." {
 		return false
 	}

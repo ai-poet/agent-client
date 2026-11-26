@@ -514,7 +514,11 @@ func (r *Runtime) observationRecord(x *execution, binding model.Binding, purpose
 	if !estimated {
 		observation.ContextLimit = &selected.Context
 	}
-	record.Metadata.Execution = &canonical.Execution{Source: &scope, Purpose: &purpose, Timing: &timing, Observation: &observation, ContextTokens: attempt.Usage.Total}
+	occupied := attempt.Usage.Total
+	if attempt.Context != nil {
+		occupied = attempt.Context
+	}
+	record.Metadata.Execution = &canonical.Execution{Source: &scope, Purpose: &purpose, Timing: &timing, Observation: &observation, ContextTokens: occupied}
 	runtime := canonical.DefaultRuntime()
 	runtime.UserVisible = false
 	runtime.AgentVisible = false

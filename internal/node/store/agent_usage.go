@@ -595,8 +595,9 @@ func estimateAgentCost(ctx context.Context, db *sql.Conn, prices modelPrices, pr
 				return nil, nil
 			}
 			hourlyWrite = *creation.OneHour
-			if hourlyWrite > 0 && supplier != "anthropic" {
-				// A compatible API does not imply Anthropic's cache pricing.
+			if hourlyWrite > 0 && supplier != "anthropic" && supplier != "amazon-bedrock" {
+				// A compatible API does not imply Anthropic's cache pricing;
+				// Bedrock bills Claude's one-hour writes the same way.
 				return nil, nil
 			}
 		}

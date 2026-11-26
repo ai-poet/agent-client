@@ -201,7 +201,9 @@ Removing sessions covers the selected root sessions and their delegated
 descendants. The Node validates the removal first; a stale or invalid removal
 stops nothing. It then stops each running turn on the `stop_turn` path and
 waits for every turn of the removal to settle before recording it, in the
-project lane so other commands are not delayed. The removing transaction
+project lane so other commands are not delayed. If the scheduler starts another
+turn before the removal commits, the attempt rolls back and the Node stops and
+awaits that turn under the same removal request. The removing transaction
 discards queued input that was never admitted, ending it cancelled outside any
 queue, so no scheduler can claim it later.
 
@@ -516,12 +518,17 @@ seen, under the package's `program-sessions` data; the record holds no
 conversation text and the least recently written of 256 per program leave
 first. A program started again after an idle stop, an eviction or a Node
 restart reopens that session with `session/resume`, then `session/load`,
-where the agent advertises them. Only when neither succeeds, or when earlier
-history or the system text differs (an edit, rewind or compaction), is the
-whole history replayed into a new session; `replay_bytes` bounds that replay,
-and a larger one is a context overflow handled by compaction. A replaced
-session is closed when the agent offers `session/close`. Transcript summary
-requests and discovery use programs no session holds. A package runs at most
+where the agent advertises them. Only when neither succeeds, when earlier
+history or the system text differs (an edit, rewind or compaction), or when
+another model replied since the session last answered, is the whole history
+replayed into a new session; `replay_bytes` bounds that replay, and a larger
+one is a context overflow handled by compaction. A replaced session is closed
+when the agent offers `session/close`. A program whose copy of a session is
+older than the record, because another program continued it, closes its
+outdated copy where supported before resuming the recorded session. Transcript
+summary requests, discovery and a request whose agent session is busy
+share any compatible program with room, each in an agent session of its own
+that ends with the request. A package runs at most
 four programs for each user across every session. One program serves as many
 requests at once as its adapter's `concurrency` declares, one by default, each
 Sailry session in its own agent session; updates are routed by agent session.
@@ -557,13 +564,16 @@ transport's. Account sign-ins keep their own client identity.
 Bedrock (`bedrock`) carries Anthropic Messages and Vertex AI (`vertex_ai`)
 carries Gemini. Request parameters, history and attachments follow
 `ConversationModelApi.Family()`; the route owns credentials and transport.
-Desktop derives a service endpoint from the Bedrock region or Vertex location.
+Desktop derives a public service endpoint from the Bedrock region or Vertex
+location unless the channel has a private endpoint. Saving refuses a service path.
 On Bedrock, the Anthropic SDK moves the selected model into the invoke path
 and betas into the body, and decodes EventStream. Only the configured Bedrock
 bearer token is sent, not ambient credentials or Claude Code metadata.
 For Vertex, the Node retains the service-account JSON as a credential, signs
-a JWT for the cloud-platform scope, and caches the access token per key until
-one minute before expiry. The GenAI Vertex client uses the configured project,
+a JWT with its RSA key for the cloud-platform scope, and refreshes the cached
+token within one minute of expiry. While one request mints a token, others
+can use an unexpired token or cancel their wait. A 401 invalidates only the
+refused token. Attempt diagnostics redact minted tokens. The GenAI Vertex client uses the configured project,
 location, endpoint and authorized HTTP transport. Neither route lists deployed
 models; users enter their model IDs and the catalog supplies known metadata.
 
@@ -645,12 +655,15 @@ For an unfocused compaction within the replay window, Anthropic Messages
 uses `compaction: {type: "summarize"}` and the `compact-2026-09-04` beta;
 Responses uses `/responses/compact`. Other routes, focused requests, and
 overflow recovery use the transcript handoff. Rejected native endpoints
-and features are remembered per provider, protocol, endpoint and model for
-the Node's lifetime. A completed reply with no compaction item also disables
+and features are remembered for the current provider revision, protocol,
+endpoint and model (at most 256 routes). Editing the channel permits a new
+native attempt. A completed reply with no compaction item also disables
 native compaction for that route. An unusable item falls back without disabling it.
-Transient native provider errors get one resend before the transcript handoff;
-they do not mark the route unsupported. Rate limits and overload instead
-use the ordinary retry and wait budgets, including provider wait hints.
+Transient native provider errors get one resend before the transcript handoff,
+even after waiting for load. They do not mark the route unsupported. Rate
+limits, overload and retryable account refusals use the ordinary retry and
+wait budgets. Exhausting those budgets, a spent balance, invalid credentials
+or cancellation ends the compaction without another summary request.
 Native attempts are recorded as compaction usage; Messages sums the billed
 iterations. Only the producing provider, API and model receive the native
 items. Another model receives the readable summary; for an opaque Responses
@@ -662,7 +675,9 @@ compaction must reach a main request before another threshold compaction.
 Provider-reported usage alone enters usage and cost totals; local token estimates
 inform context budgeting without inventing billed usage. After a checkpoint,
 context estimates count the summary and retained tail until a new main-model
-measurement is available.
+measurement is available. A reply that took several requests, such as an ACP
+reply with correction prompts, bills them all but measures the window of its
+last request, which an adapter reports as `context_tokens`.
 
 Request observations retain the final serialized body size, attributed text
 character counts and excluded opaque payload sizes, never request bodies.
@@ -967,7 +982,11 @@ split groups with conversations. The header shows a title for one workspace entr
 and tabs for multiple entries; selecting a split-group tab restores its focused
 pane. The right panel's tabs, shown tab and open state belong to the active pane:
 each conversation and each main terminal has its own, and a pane that never
-opened the panel shows it closed. Terminal tabs opened in the right panel stay
+opened the panel shows it closed. A main terminal's panel shows the project and
+worktree its shell runs in, not the selected conversation's, and moving a
+panel's only terminal to the main workspace closes that panel. The sidebar
+selects a main terminal's row only while the conversation page shows it.
+Terminal tabs opened in the right panel stay
 with that pane and do not join splits. A terminal ID has one surface at a
 time; moving it keeps its Node attachment. Closing a main surface releases its
 observation while the Node process continues, available through terminal activity.

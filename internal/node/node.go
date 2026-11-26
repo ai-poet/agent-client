@@ -45,43 +45,46 @@ import (
 
 // Node owns one profile, admitted operations and their committed event feed.
 type Node struct {
-	accessMu          sync.Mutex
-	accessObservers   map[*accessObservation]struct{}
-	pluginStatus      *pluginStatusService
-	terminals         *terminal.Service
-	auth              *authControls
-	plugins           *pluginControls
-	dispatch          *dispatchControls
-	tasks             *tasks.Supervisor
-	network           *link.Link
-	networkUpdate     sync.Mutex
-	networkDirectory  *networkDirectory
-	networkProbes     *networkProbes
-	hostSampler       *host.Sampler
-	wsl               *wsl.Service
-	ports             *ports.Service
-	browsers          browserRegistry
-	externalBrowser   *externalbrowser.Browsers
-	power             *power.Service
-	telemetry         *telemetry.Control
-	logs              bool
-	knowledge         *knowledgeservice.Service
-	knowledgeAdjust   func(*knowledgeservice.Options) // replaces model capabilities in tests
-	cancel            context.CancelFunc
-	web               *workspaceWeb
-	transfers         *files.Transfers
-	git               *workspacegit.Service
-	processes         *process.Service
-	watches           *workspaceWatches
-	codeIndex         *codeIndexControls
-	computerOverlay   computer.Overlay
-	environment       process.Environment
-	processAfter      func(time.Duration) <-chan time.Time
-	locks             workspaceLocks
-	stored            storedFiles
-	keptWorktrees     keptWorktrees
-	profile           *Profile
-	ctx               context.Context
+	accessMu         sync.Mutex
+	accessObservers  map[*accessObservation]struct{}
+	pluginStatus     *pluginStatusService
+	terminals        *terminal.Service
+	auth             *authControls
+	plugins          *pluginControls
+	dispatch         *dispatchControls
+	tasks            *tasks.Supervisor
+	network          *link.Link
+	networkUpdate    sync.Mutex
+	networkDirectory *networkDirectory
+	networkProbes    *networkProbes
+	hostSampler      *host.Sampler
+	wsl              *wsl.Service
+	ports            *ports.Service
+	browsers         browserRegistry
+	externalBrowser  *externalbrowser.Browsers
+	power            *power.Service
+	telemetry        *telemetry.Control
+	logs             bool
+	knowledge        *knowledgeservice.Service
+	knowledgeAdjust  func(*knowledgeservice.Options) // replaces model capabilities in tests
+	cancel           context.CancelFunc
+	web              *workspaceWeb
+	transfers        *files.Transfers
+	git              *workspacegit.Service
+	processes        *process.Service
+	watches          *workspaceWatches
+	codeIndex        *codeIndexControls
+	computerOverlay  computer.Overlay
+	environment      process.Environment
+	processAfter     func(time.Duration) <-chan time.Time
+	locks            workspaceLocks
+	stored           storedFiles
+	keptWorktrees    keptWorktrees
+	profile          *Profile
+	ctx              context.Context
+	// admitting orders durable writes with their lane enqueue. Stop takes it
+	// before mu so it cannot drain a lane while an admission is in flight.
+	admitting         sync.Mutex
 	mu                sync.Mutex
 	stopped           bool
 	lanes             [2]commandLane
@@ -299,6 +302,7 @@ const shutdownGrace = 5 * time.Second
 // returns core.ErrShutdownTimeout naming it, with the profile released, and
 // the caller exits. Go cannot abort a goroutine, so the exit is what ends it.
 func (node *Node) Stop(ctx context.Context) error {
+	node.admitting.Lock()
 	node.mu.Lock()
 	if !node.stopped {
 		node.stopped = true
@@ -316,6 +320,7 @@ func (node *Node) Stop(ctx context.Context) error {
 	}
 	done := node.stopDone
 	node.mu.Unlock()
+	node.admitting.Unlock()
 	select {
 	case <-done:
 		node.mu.Lock()
@@ -543,16 +548,21 @@ func (node *Node) admitCommand(ctx context.Context, caller protocol.NodeID, requ
 		go func() { defer node.work.Done(); defer close(completion); completion <- node.read(ctx, caller, request) }()
 		return accepted, nil
 	}
+	node.admitting.Lock()
 	node.mu.Lock()
-	defer node.mu.Unlock()
-	if node.stopped {
+	stopped := node.stopped
+	node.mu.Unlock()
+	if stopped {
+		node.admitting.Unlock()
 		return link.Admission{}, unavailable()
 	}
 	if err := ctx.Err(); err != nil {
+		node.admitting.Unlock()
 		return link.Admission{}, nodeFault(err)
 	}
 	if !externalCommand(request.Command) {
 		result, err := node.execute(commandJob{user: userFromContext(ctx), scope: ctx, caller: caller, request: request, body: encoded}, store.PreparedPaths{}, nil)
+		node.admitting.Unlock()
 		if err != nil {
 			return link.Admission{}, nodeFault(err)
 		}
@@ -562,6 +572,7 @@ func (node *Node) admitCommand(ctx context.Context, caller protocol.NodeID, requ
 		close(completion)
 		return accepted, nil
 	}
+	defer node.admitting.Unlock()
 	var previous *link.Response
 	err = node.profile.Store.Node.Write(ctx, func(db *sql.Conn) error {
 		var err error
@@ -585,7 +596,9 @@ func (node *Node) admitCommand(ctx context.Context, caller protocol.NodeID, requ
 	if projectEffect(request.Command.Kind) || sessionRemoval(request.Command.Kind) {
 		lane = &node.lanes[projectLane]
 	}
+	node.mu.Lock()
 	lane.queue = append(lane.queue, commandJob{user: userFromContext(ctx), scope: ctx, caller: caller, request: request, admitted: true, completion: completion})
+	node.mu.Unlock()
 	node.signal(lane)
 	return accepted, nil
 }
@@ -848,7 +861,13 @@ func (node *Node) run(lane *commandLane) {
 		if projectEffect {
 			registered = node.locks.registration()
 		}
-		result, err := node.execute(job, prepared, prepareErr)
+		var result link.Response
+		var err error
+		if sessionRemoval(job.request.Command.Kind) {
+			result, err = node.executeSessionRemoval(ctx, job, prepared, prepareErr)
+		} else {
+			result, err = node.execute(job, prepared, prepareErr)
+		}
 		registered()
 		if err != nil {
 			result = node.unapplied(job.caller, job.request.ID, err)
@@ -932,6 +951,10 @@ func (node *Node) execute(job commandJob, prepared store.PreparedPaths, prepareE
 			default:
 				output, changes, operationErr = store.ExecuteCommand(ctx, db, node.ID(), job.caller, node.profile.Ownership.Path, job.request, prepared)
 			}
+		}
+		if errors.Is(operationErr, store.ErrSessionRemovalActive) {
+			// Do not complete the receipt; executeSessionRemoval stops the new turn.
+			return operationErr
 		}
 		if operationErr == nil && (job.request.Command.Kind == "continue_turn" || SupportsConfigurationFollow(job.request.Command.Kind)) {
 			changes, operationErr = node.followKnowledgeStorage(ctx, db, job.request, changes)

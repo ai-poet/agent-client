@@ -91,7 +91,7 @@ func (r *Runtime) readProviderKey(id string, done func(string)) {
 }
 func (r *Runtime) discoverModels(d settings.ProviderDraft, done func([]viewmodel.ChannelModel)) {
 	draft := r.providerDraft(d)
-	source := protocol.ConversationDiscoverySource{Kind: "draft", Data: protocol.ConversationDiscoveryDraft{Provider: draft.ID, Api: draft.Api, Endpoint: draft.Endpoint, Preset: draft.Preset, Credential: draft.Credential}}
+	source := protocol.ConversationDiscoverySource{Kind: "draft", Data: protocol.ConversationDiscoveryDraft{Provider: draft.ID, Api: draft.Api, Endpoint: draft.Endpoint, Preset: draft.Preset, Headers: draft.Headers, Credential: draft.Credential}}
 	if draft.Authentication != protocol.AuthenticationApiKey && d.ExpectedRevision != 0 {
 		source = protocol.ConversationDiscoverySource{Kind: "saved", Data: protocol.ConversationDiscoverySourceSavedPayload{Provider: draft.ID, ExpectedRevision: d.ExpectedRevision, Oauth: draft.Oauth}}
 	}

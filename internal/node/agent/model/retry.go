@@ -34,7 +34,9 @@ type Attempt struct {
 	Timing               canonical.Timing
 	FirstToken           *time.Time
 	Usage                canonical.Usage
-	Failure              *Failure
+	// Context is the window occupied by the last prompt of a multi-prompt reply.
+	Context *uint64
+	Failure *Failure
 	// RetryLimit is the last resend allowed if the current failure streak continues.
 	RetryLimit uint64
 	// RetryDelay is the wait before the next attempt; nil on the last attempt.
@@ -137,6 +139,10 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 			var lastOutput time.Time
 			for part := range stream {
 				attempt.Usage = mergeUsage(attempt.Usage, PartUsage(part))
+				if metadata, ok := part.ProviderMetadata[UsageMetadataKey].(*UsageMetadata); ok && metadata != nil && metadata.Context != nil && *metadata.Context >= 0 {
+					window := uint64(*metadata.Context)
+					attempt.Context = &window
+				}
 				if part.Type == fantasy.StreamPartTypeReasoningDelta && part.Delta != "" {
 					attempt.ReasoningStreamed = true
 				}
@@ -207,9 +213,10 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 		attempt.Finished = timer.Now()
 		attempt.Timing = attempt.observedTiming()
 		capture.apply(&attempt)
+		attemptSecrets := capture.redact(secrets)
 		exhausted := false
 		if err != nil {
-			attempt.Failure = Classify(err, secrets...)
+			attempt.Failure = Classify(err, attemptSecrets...)
 			if waitExhausted {
 				if attempt.Failure.Kind == Cancelled || attempt.Failure.truncated {
 					attempt.Failure = &Failure{Kind: Network, Message: "Model retry timed out waiting for output after HTTP 524"}
@@ -239,7 +246,7 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 			}
 			failureSequence = append(failureSequence, entry)
 		}
-		attempt.finishTransport(err, secrets, capture, failureSequence)
+		attempt.finishTransport(err, attemptSecrets, capture, failureSequence)
 		if observe != nil {
 			if observationErr := observe(attempt); observationErr != nil {
 				return observationErr

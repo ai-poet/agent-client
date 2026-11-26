@@ -44,6 +44,11 @@ func contextTokens(records []canonical.Record) uint64 {
 					// Reasoning tokens that are not replayed back into the next request do not consume the next prompt window.
 					used = *message.Usage.Input + (*message.Usage.Output - *message.Usage.Reasoning)
 				}
+				// A reply that took several requests sums their usage; its
+				// window is what the last one occupied.
+				if execution := records[i].Metadata.Execution; execution != nil && execution.ContextTokens != nil && *execution.ContextTokens < used {
+					used = *execution.ContextTokens
+				}
 				return used + pendingTokens(records[i+1:])
 			}
 			// Only the latest observation can describe the current context. An
@@ -232,16 +237,17 @@ func (r *Runtime) summarize(x *execution, binding model.Binding, route model.Rou
 		requestText += "\n\nUser focus for the handoff:\n" + x.inv.Message.Text
 	}
 	var attempts []model.Attempt
+	failureBinding := summaryBinding
 	// A compaction that ends without a summary leaves its billed attempts and
 	// one record saying where and why it stopped; a stopped turn is no failure.
 	failed := func(stage protocol.ConversationCompactionStage, reason protocol.ConversationCompactionReason, failure error) error {
 		hideCompacting()
 		var records []canonical.Record
 		for _, attempt := range attempts {
-			records = append(records, r.observationRecord(x, summaryBinding, canonical.PurposeCompaction, attempt))
+			records = append(records, r.observationRecord(x, failureBinding, canonical.PurposeCompaction, attempt))
 		}
 		if x.ctx.Err() == nil {
-			records = append(records, r.compactionFailure(x, summaryBinding, state.Records, manual, stage, reason, attempts, failure))
+			records = append(records, r.compactionFailure(x, failureBinding, state.Records, manual, stage, reason, attempts, failure))
 		}
 		if e := r.save(context.WithoutCancel(x.ctx), x.inv.Session.ID, records...); e != nil {
 			return e
@@ -249,6 +255,22 @@ func (r *Runtime) summarize(x *execution, binding model.Binding, route model.Rou
 		return handoffFailure{failure}
 	}
 	var observationErr error
+	failRequest := func(err error) error {
+		reason := protocol.ConversationCompactionReasonRequestFailed
+		switch model.Classify(err).Kind {
+		case model.RateLimited, model.Quota:
+			reason = protocol.ConversationCompactionReasonRateLimited
+		case model.Authentication, model.NotConfigured:
+			reason = protocol.ConversationCompactionReasonAuthorizationFailed
+		case model.ContextOverflow:
+			reason = protocol.ConversationCompactionReasonContextOverflow
+		case model.InvalidRequest, model.Unsupported:
+			reason = protocol.ConversationCompactionReasonServiceRejected
+		case model.InvalidResponse:
+			reason = protocol.ConversationCompactionReasonIncompleteResponse
+		}
+		return failed(protocol.ConversationCompactionStageRequest, reason, err)
+	}
 	observeAttempt := func(source model.Binding, attempt model.Attempt) error {
 		x.timeline.attempt(attempt)
 		if attempt.RetryDelay != nil {
@@ -269,6 +291,10 @@ func (r *Runtime) summarize(x *execution, binding model.Binding, route model.Rou
 		if ok {
 			return r.saveCompaction(x, binding, route, state, plan, summaryID, compacted.Summary, nil, &compacted.Native, attempts[len(attempts)-1].Usage, attempts)
 		}
+		if err != nil {
+			failureBinding = binding
+			return failRequest(err)
+		}
 		var records []canonical.Record
 		for _, a := range attempts {
 			records = append(records, r.observationRecord(x, binding, canonical.PurposeCompaction, a))
@@ -278,10 +304,6 @@ func (r *Runtime) summarize(x *execution, binding model.Binding, route model.Rou
 			return e
 		}
 		attempts = nil
-		if err != nil {
-			hideCompacting()
-			return err
-		}
 	}
 	if previous, ok := selection.Prefix[0].Data.(*canonical.Compaction); ok && !previous.Readable() && previous.Native != nil {
 		// A transcript can't summarize encrypted items. Expand the original
@@ -353,22 +375,6 @@ func (r *Runtime) summarize(x *execution, binding model.Binding, route model.Rou
 			err = run(system)
 		}
 		return text.String(), limited, usage, err
-	}
-	failRequest := func(err error) error {
-		reason := protocol.ConversationCompactionReasonRequestFailed
-		switch model.Classify(err).Kind {
-		case model.RateLimited, model.Quota:
-			reason = protocol.ConversationCompactionReasonRateLimited
-		case model.Authentication, model.NotConfigured:
-			reason = protocol.ConversationCompactionReasonAuthorizationFailed
-		case model.ContextOverflow:
-			reason = protocol.ConversationCompactionReasonContextOverflow
-		case model.InvalidRequest, model.Unsupported:
-			reason = protocol.ConversationCompactionReasonServiceRejected
-		case model.InvalidResponse:
-			reason = protocol.ConversationCompactionReasonIncompleteResponse
-		}
-		return failed(protocol.ConversationCompactionStageRequest, reason, err)
 	}
 	capLimit := handoff.Cap(uint64(window), uint64(output))
 	var summary handoff.Summary
@@ -535,8 +541,7 @@ func compactedFiles(summary handoff.Summary) []canonical.CompactedFile {
 }
 
 func (r *Runtime) nativeCompaction(x *execution, binding model.Binding, route model.Route, state store.AgentState, selection handoff.Selection, observe func(model.Attempt) error) (model.Compacted, bool, error) {
-	key := binding.Provider.ID.String() + "\x00" + route.Native
-	if _, rejected := r.nativeRejected.Load(key); rejected {
+	if model.NativeRejected(binding, route.Native) {
 		return model.Compacted{}, false, nil
 	}
 	try := func() (model.Compacted, error) {
@@ -563,7 +568,6 @@ func (r *Runtime) nativeCompaction(x *execution, binding model.Binding, route mo
 		nativeOutcome(binding, route, "native", nil)
 		return compacted, true, nil
 	case errors.Is(err, model.ErrNativeUnsupported):
-		r.nativeRejected.Store(key, true)
 		nativeOutcome(binding, route, "unsupported", err)
 	case errors.Is(err, model.ErrNativeUnusable):
 		nativeOutcome(binding, route, "unusable", err)
@@ -571,6 +575,15 @@ func (r *Runtime) nativeCompaction(x *execution, binding model.Binding, route mo
 		nativeOutcome(binding, route, "failed", err)
 		if x.ctx.Err() != nil {
 			return model.Compacted{}, false, x.ctx.Err()
+		}
+		// A replacement transcript would hit the same limit or account failure.
+		failure := model.Classify(err)
+		switch failure.Kind {
+		case model.Cancelled, model.RateLimited, model.Quota, model.Authentication, model.NotConfigured:
+			return model.Compacted{}, false, err
+		}
+		if failure.Exhausted || failure.WaitExhausted {
+			return model.Compacted{}, false, err
 		}
 	}
 	return model.Compacted{}, false, nil
