@@ -546,6 +546,7 @@ func (r *Runtime) readProviderCredentials(expected string) {
 			}
 			state.credentialKey = expected
 			r.projectProviderSnapshot()
+			r.projectModels()
 		})
 	})
 }

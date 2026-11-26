@@ -672,6 +672,7 @@ location_create: 新しいワークツリー
 git_no_matches: マッチしません
 composer_model_settings: モデルと努力
 composer_model_empty: 適合するモデルがありません
+composer_model_search_more: 入力を続けて絞り込んでください
 composer_models_recent: 最近使ったモデル
 composer_effort_reset: デフォルトに戻す
 composer_feature_description: 追加料金の可能性あり

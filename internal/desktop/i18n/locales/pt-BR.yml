@@ -672,6 +672,7 @@ location_create: Nova árvore de trabalho
 git_no_matches: Não há correspondências
 composer_model_settings: Modelo e esforço
 composer_model_empty: Nenhum modelo correspondente disponível
+composer_model_search_more: Continue digitando para refinar os resultados
 composer_models_recent: Modelos recentes
 composer_effort_reset: Redefinir
 composer_feature_description: Pode custar mais

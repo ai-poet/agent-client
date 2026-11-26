@@ -122,6 +122,148 @@ func pickerVendors(c *ui.Context, models []Model, overrides []Family) ([]Family,
 	return vendors, names
 }
 
+func providerGroupKey(m Model) string {
+	if m.ProviderID != "" {
+		return m.ProviderID
+	}
+	return m.Provider
+}
+
+func hasMultipleProviders(models []Model) bool {
+	seen := ""
+	hasFirst := false
+	for _, m := range models {
+		key := providerGroupKey(m)
+		if !hasFirst {
+			seen, hasFirst = key, true
+			continue
+		}
+		if key != seen {
+			return true
+		}
+	}
+	return false
+}
+
+type providerGroup struct {
+	Key            string
+	Name           string
+	Icon           *ui.SVG
+	Tag            string
+	Models         []Model
+	ContainsChosen bool
+	ContainsRecent bool
+	Unavailable    bool
+}
+
+func groupModelsByProvider(models []Model, chosenID string, recent map[string]bool) []providerGroup {
+	if len(models) == 0 {
+		return nil
+	}
+	index := make(map[string]int)
+	var groups []providerGroup
+	for _, m := range models {
+		key := providerGroupKey(m)
+		i, ok := index[key]
+		if !ok {
+			name := m.Provider
+			if name == "" {
+				name = m.ProviderID
+			}
+			i = len(groups)
+			index[key] = i
+			groups = append(groups, providerGroup{
+				Key:         key,
+				Name:        name,
+				Icon:        m.ProviderIcon,
+				Tag:         m.ProviderTag,
+				Unavailable: m.Unavailable,
+			})
+		}
+		g := &groups[i]
+		if g.Icon == nil && m.ProviderIcon != nil {
+			g.Icon = m.ProviderIcon
+		}
+		if g.Tag == "" && m.ProviderTag != "" {
+			g.Tag = m.ProviderTag
+		}
+		if !m.Unavailable {
+			g.Unavailable = false
+		}
+		if chosenID != "" && m.ID == chosenID {
+			g.ContainsChosen = true
+		}
+		if recent[m.ID] {
+			g.ContainsRecent = true
+		}
+		g.Models = append(g.Models, m)
+	}
+	for i := range groups {
+		g := &groups[i]
+		if !g.ContainsChosen || len(g.Models) <= 1 {
+			continue
+		}
+		if idx := slices.IndexFunc(g.Models, func(m Model) bool { return m.ID == chosenID && m.Unavailable }); idx > 0 {
+			chosen := g.Models[idx]
+			copy(g.Models[1:idx+1], g.Models[0:idx])
+			g.Models[0] = chosen
+		}
+	}
+	rank := func(g providerGroup) int {
+		switch {
+		case g.ContainsChosen:
+			return 0
+		case g.ContainsRecent:
+			return 1
+		default:
+			return 2
+		}
+	}
+	slices.SortStableFunc(groups, func(a, b providerGroup) int { return rank(a) - rank(b) })
+	return groups
+}
+
+func truncateProviderGroups(groups []providerGroup, limit int) ([]providerGroup, bool) {
+	if limit <= 0 {
+		return groups, false
+	}
+	total := 0
+	for _, g := range groups {
+		total += len(g.Models)
+	}
+	if total <= limit {
+		return groups, false
+	}
+	remaining := limit
+	out := make([]providerGroup, 0, len(groups))
+	for _, g := range groups {
+		if remaining == 0 {
+			break
+		}
+		if len(g.Models) > remaining {
+			g.Models = g.Models[:remaining]
+		}
+		remaining -= len(g.Models)
+		out = append(out, g)
+	}
+	return out, true
+}
+
+func providerSearchTerms(m Model) string {
+	extra := ""
+	switch strings.ToLower(strings.TrimSpace(m.ProviderTag)) {
+	case "bedrock":
+		extra = "aws"
+	case "vertex":
+		extra = "vertexai vertex_ai gcp"
+	case "acp":
+		extra = "plugin"
+	case "local":
+		extra = "localhost"
+	}
+	return m.ProviderTag + " " + m.ProviderID + " " + extra
+}
+
 func matchingModels(models []Model, names map[string]string, query, vendor string) ([]Model, map[string]bool) {
 	terms := strings.Fields(strings.ToLower(query))
 	visible := make(map[string]bool)
@@ -129,7 +271,7 @@ func matchingModels(models []Model, names map[string]string, query, vendor strin
 	for _, m := range models {
 		id := vendorID(m)
 		if len(terms) > 0 {
-			fields := strings.ToLower(m.Name + " " + m.ID + " " + m.Provider + " " + id + " " + names[id])
+			fields := strings.ToLower(m.Name + " " + m.ID + " " + m.Provider + " " + providerSearchTerms(m) + " " + id + " " + names[id])
 			if slices.ContainsFunc(terms, func(term string) bool { return !strings.Contains(fields, term) }) {
 				continue
 			}

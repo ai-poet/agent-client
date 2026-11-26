@@ -96,6 +96,10 @@ type PluginMode struct {
 // Model is a model the picker offers, as the backend lists it.
 type Model struct {
 	ID, Name, Provider string
+	ProviderID         string
+	ProviderIcon       *ui.SVG
+	ProviderTag        string
+	Unavailable        bool
 	ContextWindow      uint32
 	ContextUnknown     bool
 	// Reasoning makes it take an effort: Efforts, or the package's

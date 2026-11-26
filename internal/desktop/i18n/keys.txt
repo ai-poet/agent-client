@@ -690,6 +690,7 @@ location_create
 git_no_matches
 composer_model_settings
 composer_model_empty
+composer_model_search_more
 composer_models_recent
 composer_effort_reset
 composer_feature_description

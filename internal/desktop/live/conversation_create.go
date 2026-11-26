@@ -199,6 +199,9 @@ func (r *Runtime) memberModels(offered []composer.Model) []composer.Model {
 	}
 	own := []composer.Model{}
 	for _, model := range offered {
+		if model.Unavailable {
+			continue
+		}
 		provider, _, _ := strings.Cut(model.ID, "/")
 		if slices.ContainsFunc(r.snapshot().Providers, func(p protocol.ConversationProvider) bool { return p.ID.String() == provider }) {
 			own = append(own, model)
