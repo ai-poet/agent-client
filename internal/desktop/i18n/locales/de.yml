@@ -672,6 +672,7 @@ location_create: Neuer Worktree
 git_no_matches: Keine Treffer gefunden
 composer_model_settings: Modell und Aufwand
 composer_model_empty: Keine passenden verfügbaren Modelle
+composer_model_search_more: Weiter tippen, um die Ergebnisse einzugrenzen
 composer_models_recent: Zuletzt verwendete Modelle
 composer_effort_reset: Zurücksetzen
 composer_feature_description: Kann mehr kosten

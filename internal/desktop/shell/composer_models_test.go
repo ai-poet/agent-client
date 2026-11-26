@@ -835,6 +835,61 @@ func composerModels(t *testing.T) {
 		}
 		still("a model's score", score.X+score.W/2, score.Y+score.H/2)
 	})
+
+	// Multiple providers in the same family group under collapsible disclosure
+	// headers: only the chosen model's provider starts expanded, clicking another
+	// header toggles it without stealing the effort column, and search expands
+	// all matching groups.
+	t.Run("multi-provider groups", func(t *testing.T) {
+		tt, comp, _ := modelPickerAt(t, 960, func(_ *composer.State, ctx *composer.Context) {
+			ctx.Models = append(slices.Clone(ctx.Models),
+				composer.Model{
+					ID: "bedrock/claude-sonnet-5-5", Name: "Bedrock Sonnet 5.5",
+					Provider: "AWS Bedrock", ProviderID: "bedrock", ProviderTag: "Bedrock",
+					Family: "anthropic", Reasoning: true, Efforts: []string{"low", "high"}, DefaultEffort: "low",
+				},
+			)
+		})
+		direct, ok := tt.AccessByRole(ui.RoleDisclosure, "Anthropic")
+		if !ok || !direct.Expanded {
+			t.Fatalf("chosen provider group not expanded: %+v", direct)
+		}
+		bedrock, ok := tt.AccessByRole(ui.RoleDisclosure, "AWS Bedrock")
+		if !ok || bedrock.Expanded {
+			t.Fatalf("other provider group should start collapsed: %+v", bedrock)
+		}
+		if _, ok := tt.AccessByRole(ui.RoleButton, "Bedrock Sonnet 5.5"); ok {
+			t.Fatal("collapsed provider's model should not be listed")
+		}
+		clickRest(tt, bedrock)
+		if _, ok := tt.AccessByRole(ui.RoleButton, "Bedrock Sonnet 5.5"); !ok {
+			t.Fatalf("clicking disclosure header did not expand Bedrock: %q", tt.Texts())
+		}
+		if comp.Model != "claude-opus-5-5" {
+			t.Fatalf("clicking disclosure header changed model to %q", comp.Model)
+		}
+		// Effort column still reflects chosen Claude Opus 5.5 (5 default efforts).
+		if names, _ := effortNames(tt); !slices.Equal(names, composer.Efforts) {
+			t.Fatalf("clicking disclosure header altered effort column: %q", names)
+		}
+		// Re-collapse Bedrock, then search "sonnet" to confirm search force-expands both groups.
+		bedrock, _ = tt.AccessByRole(ui.RoleDisclosure, "AWS Bedrock")
+		clickRest(tt, bedrock)
+		box, ok := tt.Find(zh("search"))
+		if !ok {
+			t.Fatalf("missing search field: %q", tt.Texts())
+		}
+		tt.ClickAt(box.X+box.W/2, box.Y+box.H/2)
+		tt.Frame()
+		tt.Type("sonnet")
+		rest(tt)
+		if h, ok := tt.AccessByRole(ui.RoleDisclosure, "AWS Bedrock"); !ok || !h.Expanded {
+			t.Fatalf("search did not expand Bedrock group: %+v", h)
+		}
+		if _, ok := tt.AccessByRole(ui.RoleButton, "Bedrock Sonnet 5.5"); !ok {
+			t.Fatalf("search did not reveal Bedrock Sonnet 5.5: %q", tt.Texts())
+		}
+	})
 }
 
 // pickerInShell is the model picker in the app's window, at its first size

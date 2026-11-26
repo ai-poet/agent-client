@@ -672,6 +672,7 @@ location_create: 新建工作樹並繼續
 git_no_matches: 無匹配項
 composer_model_settings: 模型與強度
 composer_model_empty: 沒有匹配的可用模型
+composer_model_search_more: 繼續輸入以縮小範圍
 composer_models_recent: 最近使用的模型
 composer_effort_reset: 恢復預設
 composer_feature_description: 可能額外計費
