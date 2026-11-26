@@ -30,7 +30,11 @@ func TestRoleCaptureCommandLog(t *testing.T) {
 	commandFixture(t, node, protocol.Command{Kind: "put_role", Data: protocol.CommandPutRolePayload{Role: role}})
 
 	var fields logging.Fields
+	var degraded []logging.Fields
 	logging.SetReport(func(_ slog.Level, values logging.Fields) {
+		if values["area"] == "role_capture" {
+			degraded = append(degraded, values)
+		}
 		if values["command"] == "set_session_team" || values["command"] == "create_session" {
 			fields = values
 		}
@@ -61,6 +65,23 @@ func TestRoleCaptureCommandLog(t *testing.T) {
 			request := protocol.NewRequest(node.ID(), command)
 			fields = nil
 			result := dispatchFixture(t, node, node.ID(), request)
+			if test.model == nil {
+				if result.Fault != nil || len(degraded) != 1 {
+					t.Fatalf("capture fault=%v, warnings=%v", result.Fault, degraded)
+				}
+				warning := degraded[0]
+				if warning["phase"] != "degraded" || warning["role"] != role.ID.String() || warning["provider"] != wantProvider.String() || warning["reason"] != string(test.reason) {
+					t.Fatalf("wrong degradation warning: %v", warning)
+				}
+				selected := session.Config
+				selected.Provider, selected.Model, selected.Credential = provider.ID, provider.DefaultModel, provider.Credential
+				command.Data = protocol.CommandCreateSessionPayload{Config: &selected}
+				rejected := dispatchFixture(t, node, node.ID(), protocol.NewRequest(node.ID(), command))
+				if rejected.Fault == nil || rejected.Fault.ConfigurationReason() != protocol.ConfigurationProviderDisabled || rejected.Fault.Message != "selected model provider is unavailable" {
+					t.Fatalf("disabled lead was not rejected as a selected-model failure: %v", rejected.Fault)
+				}
+				return
+			}
 			if result.Fault == nil || result.Fault.Code != protocol.ErrorCodeNotConfigured || result.Fault.ConfigurationReason() != test.reason {
 				t.Fatalf("unexpected fault: %+v", result.Fault)
 			}

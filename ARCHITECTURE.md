@@ -760,6 +760,10 @@ coordination under the same permission model. Package modes map to a core mode
 without escalating access.
 `spawn_agent`, `guide_agent` and `wait_agent` use the same execution and history
 path. Children inherit captured scope and permission; read-only roles use Plan.
+An unavailable default role model stays in the frozen roster with its provider
+metadata (or its absence). It does not block unrelated work. Explicit references
+and delegations resolve against that same snapshot and report the unavailable
+model instead of running it with the parent's model.
 Team settings control child concurrency, with a default of eight per root session.
 
 `list_subagents` reads a bounded page of direct child sessions from durable
@@ -959,6 +963,13 @@ fields and feedback with Lobe's semantic tokens, scoped to a `ui.Themed` subtree
 of the page. Connected account settings and other pages retain Kit. Presentation
 state and callbacks still belong to the existing CheapRouter controller; the
 component library owns no credentials or network work.
+
+A business API bearer rejection on the login origin triggers one serialized
+renewal and a retry of the rejected request. A refused refresh ends the login;
+a network failure does not. During gateway sync, a different origin cannot
+invalidate the account: Desktop first restores routing to the login origin
+and resyncs its account, catalog and keys before updating Node providers. A
+confirmed rejection there after renewal ends the session.
 
 The account's Kit payment sheet uses `internal/cheapauth` to renew the session
 at the login endpoint and to call `/pay` at the selected API origin. The live

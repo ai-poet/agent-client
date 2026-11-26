@@ -90,7 +90,7 @@ func PrepareSessionForward(ctx context.Context, db *sql.Conn, node, caller proto
 	}
 	// The explicit selection remains authoritative, including no credential.
 	bundle.Provider.Credential = input.Config.Credential
-	bundle.Roles, err = CaptureSessionRoles(ctx, db, node, protocol.ConversationExecutionTeam, nil, nil)
+	bundle.Roles, err = captureAllSessionRoles(ctx, db, node, nil, input.Config)
 	if err != nil {
 		return protocol.Request{}, err
 	}
@@ -125,7 +125,7 @@ func importedAuthorization(authentication protocol.Authentication, secret protoc
 // cachedForwardProvider resolves the retained controller revision and its current
 // runtime credential. A forward cannot materialize configuration or bypass a
 // missing cache by attaching a secret to the session request.
-func cachedForwardProvider(ctx context.Context, db *sql.Conn, node protocol.NodeID, source protocol.ConversationProvider) (protocol.ConversationProvider, error) {
+func cachedForwardProvider(ctx context.Context, db *sql.Conn, node protocol.NodeID, source protocol.ConversationProvider, inUse bool) (protocol.ConversationProvider, error) {
 	record, err := readConfigurationCacheRecord(ctx, db, "providers", source.ID.String(), source.Revision)
 	if err != nil {
 		return protocol.ConversationProvider{}, err
@@ -137,20 +137,24 @@ func cachedForwardProvider(ctx context.Context, db *sql.Conn, node protocol.Node
 	if err := json.Unmarshal(record.Body, &provider); err != nil {
 		return provider, err
 	}
-	provider, err = CaptureProvider(ctx, db, provider)
-	if err != nil {
-		return provider, err
+	if inUse {
+		provider, err = CaptureProvider(ctx, db, provider)
+		if err != nil {
+			return provider, err
+		}
 	}
 	// Owner/projection metadata differs across Nodes. The explicit credential
 	// is selected independently of the provider's current default account.
 	expected := source
 	expected.Owner, expected.Shared, expected.Source, expected.Consent = nil, false, nil, nil
 	provider.Owner, provider.Shared, provider.Source, provider.Consent = nil, false, nil, nil
-	provider.Credential = source.Credential
+	if inUse {
+		provider.Credential = source.Credential
+	}
 	if !reflect.DeepEqual(provider, expected) {
 		return provider, fault(protocol.ErrorCodeRevisionConflict, "captured controller provider differs from its cached revision")
 	}
-	if provider.Credential != nil {
+	if inUse && provider.Credential != nil {
 		if _, err := ReadRuntimeProviderCredential(ctx, db, node, provider, *provider.Credential); err != nil {
 			// Expiry is recoverable at the next unsent model step. Identity,
 			// revocation and missing-cache faults still reject the capture.
@@ -207,7 +211,7 @@ func cachedForwardRoles(ctx context.Context, db *sql.Conn, node protocol.NodeID,
 		if _, exists := providers[source.ID]; exists {
 			return snapshot, invalid("session role providers must be distinct")
 		}
-		provider, err := cachedForwardProvider(ctx, db, node, source)
+		provider, err := cachedForwardProvider(ctx, db, node, source, servesRoster(source, snapshot))
 		if err != nil {
 			return snapshot, err
 		}
@@ -220,13 +224,22 @@ func cachedForwardRoles(ctx context.Context, db *sql.Conn, node protocol.NodeID,
 
 func completeCapturedRoleSnapshot(snapshot protocol.RoleSnapshot, providers map[protocol.ProviderID]protocol.ConversationProvider) (protocol.RoleSnapshot, error) {
 	ids, keys, used := map[protocol.RoleID]bool{}, map[string]bool{}, map[protocol.ProviderID]bool{}
-	validate := func(model protocol.RoleModel) error {
+	validate := func(model protocol.RoleModel, explicit bool) error {
 		provider, ok := providers[model.Provider]
 		if !ok {
+			// A missing provider freezes an implicit role as unavailable; it cannot inherit the parent model.
+			if !explicit {
+				return nil
+			}
 			return invalid("session role providers do not match the selected models")
 		}
 		used[provider.ID] = true
-		return validateRoleModel(provider, model)
+		err := validateRoleModel(provider, model)
+		var f *protocol.Fault
+		if !explicit && errors.As(err, &f) && f.Code == protocol.ErrorCodeNotConfigured {
+			return nil
+		}
+		return err
 	}
 	for _, role := range snapshot.Profiles {
 		if err := ValidateRole(role); err != nil {
@@ -237,7 +250,7 @@ func completeCapturedRoleSnapshot(snapshot protocol.RoleSnapshot, providers map[
 		}
 		ids[role.ID], keys[role.Key] = true, true
 		if role.Model != nil {
-			if err := validate(*role.Model); err != nil {
+			if err := validate(*role.Model, false); err != nil {
 				return snapshot, err
 			}
 		}
@@ -246,7 +259,7 @@ func completeCapturedRoleSnapshot(snapshot protocol.RoleSnapshot, providers map[
 		if !ids[id] {
 			return snapshot, invalid("member model requires a role in the session roster")
 		}
-		if err := validate(model); err != nil {
+		if err := validate(model, true); err != nil {
 			return snapshot, err
 		}
 	}
@@ -277,7 +290,7 @@ func importSession(ctx context.Context, db *sql.Conn, node, caller protocol.Node
 		bundle.Secret != nil || bundle.ExpiresAtMs != nil || len(bundle.RoleCredentials) != 0 {
 		return protocol.Output{}, nil, invalid("session imports use cached controller credentials")
 	}
-	provider, err := cachedForwardProvider(ctx, db, node, bundle.Provider)
+	provider, err := cachedForwardProvider(ctx, db, node, bundle.Provider, true)
 	if err != nil {
 		return protocol.Output{}, nil, err
 	}
