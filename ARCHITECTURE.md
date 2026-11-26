@@ -760,6 +760,10 @@ coordination under the same permission model. Package modes map to a core mode
 without escalating access.
 `spawn_agent`, `guide_agent` and `wait_agent` use the same execution and history
 path. Children inherit captured scope and permission; read-only roles use Plan.
+An unavailable default role model stays in the frozen roster with its provider
+metadata (or its absence). It does not block unrelated work. Explicit references
+and delegations resolve against that same snapshot and report the unavailable
+model instead of running it with the parent's model.
 Team settings control child concurrency, with a default of eight per root session.
 
 `list_subagents` reads a bounded page of direct child sessions from durable

@@ -126,6 +126,9 @@ func (r *Runtime) selectedAgent(x *execution, state store.AgentState) (bool, err
 	if role < 0 {
 		return false, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "selected role is absent from the frozen roster"}
 	}
+	if err := store.CapturedRoleAvailability(x.inv.Turn.Roles, x.inv.Turn.Roles.Profiles[role]); err != nil {
+		return false, err
+	}
 	task := x.inv.Message.Text
 	if strings.TrimSpace(task) == "" {
 		task = "Complete the request using the selected context"
@@ -168,7 +171,7 @@ func (r *Runtime) delegationRoster(x *execution, state store.AgentState) string 
 	}
 	var roster []string
 	for _, role := range x.inv.Turn.Roles.Profiles {
-		if r.usableRole(x, role) {
+		if r.usableRole(x, role) && store.CapturedRoleAvailability(x.inv.Turn.Roles, role) == nil {
 			line := role.Key + " (" + role.Name + ")"
 			if role.ReadOnly {
 				line += " [read only]"

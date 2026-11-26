@@ -237,7 +237,7 @@ func createProfiledSession(ctx context.Context, db *sql.Conn, node protocol.Node
 	if capturedRoles != nil {
 		value.Roles = *capturedRoles
 	} else {
-		value.Roles, err = CaptureSessionRoles(ctx, db, node, protocol.ConversationExecutionTeam, nil, nil)
+		value.Roles, err = captureAllSessionRoles(ctx, db, node, nil, config)
 		if err != nil {
 			return protocol.Output{}, nil, err
 		}
