@@ -60,6 +60,9 @@ type Tool struct {
 	// Exposed is the name an MCP tool is offered under when no other tool
 	// owns it. A package tool is offered under its declared name.
 	Exposed string
+	// Display is how the turn's records show a call of a tool that no package
+	// declaration describes, such as one an MCP server lists.
+	Display *protocol.ToolDisplay
 	// SearchLabels are the captured display labels and translations used only
 	// for discovery. They do not enlarge the model's tool declarations.
 	SearchLabels []string
