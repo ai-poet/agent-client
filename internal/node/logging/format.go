@@ -30,7 +30,7 @@ var fields = []struct {
 }{
 	{"area", public}, {"phase", public}, {"node", local}, {"caller", local}, {"request", local}, {"incident", local},
 	{"plugin_version", local}, {"app_version", version}, {"platform", local}, {"exception", local}, {"session", local},
-	{"turn", local}, {"worktree", local}, {"provider", local}, {"provider_name", local}, {"model", local},
+	{"turn", local}, {"worktree", local}, {"role", local}, {"provider", local}, {"provider_name", local}, {"model", local},
 	{"package", local}, {"digest", local}, {"settings_revision", local}, {"handler", local}, {"invocation", local},
 	{"call", local}, {"artifact_id", local}, {"attachment_id", local}, {"revision", local}, {"command", local},
 	{"operation", public}, {"stage", local}, {"detail", local}, {"source_kind", local}, {"reason", local},

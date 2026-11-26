@@ -1027,6 +1027,9 @@ func (node *Node) execute(job commandJob, prepared store.PreparedPaths, prepareE
 			node.refreshKnowledgeStorage(job.request.Command, changes)
 		}
 	}
+	if err == nil {
+		rememberRoleCapture(job.scope, operationErr)
+	}
 	return response(output, operationErr), err
 }
 
