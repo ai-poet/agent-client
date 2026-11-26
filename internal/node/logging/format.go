@@ -38,6 +38,7 @@ var fields = []struct {
 	{"cause_code", public}, {"cause_component", local}, {"cause_category", local}, {"upstream_status", local},
 	{"websocket_close_code", local}, {"attempt", local}, {"limit", local}, {"request_mode", local}, {"transport", local},
 	{"connection_reused", local}, {"communication_outcome", local}, {"execution_outcome", local},
+	{"cheaprouter_managed", local}, {"cheaprouter_lane", local}, {"provider_present", local}, {"provider_enabled", local}, {"model_present", local},
 	{"recovery_decision", local}, {"wait_ms", local}, {"end_to_end_us", local}, {"rtt_ms", local}, {"generation", local},
 	{"sequence", local}, {"fallback_reason", local}, {"continuation", local}, {"stream", local}, {"budget", local},
 	{"parse_layer", local}, {"parse_category", local}, {"parse_cause", local}, {"parse_field", local},
