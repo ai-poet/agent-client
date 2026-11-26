@@ -1209,10 +1209,11 @@ func projectResource(reply *conversation.Reply, data any, compacting *time.Time,
 		return
 	}
 	var resource struct {
-		Kind string          `json:"kind"`
-		Type string          `json:"type"`
-		ID   string          `json:"id"`
-		Data json.RawMessage `json:"data"`
+		Kind         string          `json:"kind"`
+		Type         string          `json:"type"`
+		ID           string          `json:"id"`
+		TraceAttempt int             `json:"trace_attempt"`
+		Data         json.RawMessage `json:"data"`
 	}
 	if json.Unmarshal(raw, &resource) != nil {
 		return
@@ -1224,10 +1225,12 @@ func projectResource(reply *conversation.Reply, data any, compacting *time.Time,
 	switch kind {
 	case "model_retry":
 		var r protocol.ConversationRecoveryRetry
-		if json.Unmarshal(raw, &r) == nil {
+		// The Node numbers its quiet first resend 0, which shows no row.
+		if json.Unmarshal(raw, &r) == nil && (r.Fallback || r.Attempt > 0) {
 			v := &conversation.Retry{Attempt: int(r.Attempt)}
 			if !r.Fallback {
 				v.Request = resource.ID
+				v.TraceAttempt = resource.TraceAttempt
 			}
 			if r.Limit != nil {
 				v.Limit = int(*r.Limit)

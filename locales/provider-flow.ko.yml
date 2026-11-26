@@ -22,3 +22,7 @@ provider_login_claude: "Claude"
 provider_add_model: "모델 추가"
 provider_model_default: "기본값"
 provider_api_chat_completions: Chat Completions
+provider_project: "프로젝트 ID"
+provider_location: "위치"
+provider_service_account: "서비스 계정 키"
+provider_service_account_hint: "서비스 계정 JSON 키 붙여넣기"

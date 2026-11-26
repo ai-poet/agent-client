@@ -1,0 +1,8 @@
+trace_enable_capture: "Registrar corpos das solicitações"
+trace_capture_privacy: "O conteúdo pode incluir instruções, código e conversas privadas."
+trace_gateway_header: "Enviar ID de rastreamento ao gateway"
+trace_gateway_allowlist: "Somente durante a gravação, para gateways HTTPS permitidos."
+trace_clear_all: "Limpar todos os rastreamentos"
+trace_clear_consequence: "Apagar os rastreamentos de todas as sessões deste nó? O histórico e os dados de uso serão preservados."
+trace_settings_saved: "Configurações de rastreamento salvas"
+trace_all_cleared: "Rastreamentos gravados apagados"

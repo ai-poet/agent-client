@@ -32,6 +32,9 @@ func TestSystemPromptByteStable(t *testing.T) {
 		if !strings.Contains(Policy(protocol.WorkModeCode, permission, false), "Windows retains") {
 			t.Fatal("captured permission policy was not retained")
 		}
+		if permission == protocol.PermissionFull && !strings.Contains(Policy(protocol.WorkModeCode, permission, false), "absolute paths outside the session worktree") {
+			t.Fatal("Full permission policy does not explain file tools for out-of-worktree targets")
+		}
 	}
 	parentInstruction, childInstruction := Instruction(false), Instruction(true)
 	if !strings.HasPrefix(parentInstruction, "You are CheapRouter Harness,") || !strings.Contains(parentInstruction, "Responses\n") || strings.Contains(childInstruction, "Responses\n") {
@@ -238,5 +241,28 @@ func TestLegacyContextAddsBaselineWithoutRewritingHistory(t *testing.T) {
 	after, err := json.Marshal(restored)
 	if err != nil || string(before) != string(after) {
 		t.Fatal("legacy context changed during upgrade")
+	}
+}
+
+// Shared rules state which instruction wins where two could be read as
+// conflicting: the user's format over response defaults, a child's own
+// verification scope over general checks, and task authorization apart from
+// runtime tool approvals.
+func TestInstructionPrecedenceIsExplicit(t *testing.T) {
+	t.Parallel()
+	for _, child := range []bool{false, true} {
+		text := Instruction(child)
+		for _, phrase := range []string{
+			"the user's requested format takes precedence",
+			"A delegated child follows the verification scope in its delegation instructions",
+			"separate from runtime tool approvals",
+		} {
+			if !strings.Contains(text, phrase) {
+				t.Errorf("child=%t prompt is missing %q", child, phrase)
+			}
+		}
+	}
+	if parent := Instruction(false); !strings.Contains(parent, "Name a file outside the worktree by its absolute path") || strings.Contains(parent, "at the start of the task") {
+		t.Error("parent prompt lost the outside-worktree reference rule or still front-loads questions")
 	}
 }

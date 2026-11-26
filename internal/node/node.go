@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"log/slog"
 	"strings"
 	"sync"
@@ -104,8 +105,9 @@ type Node struct {
 }
 
 // commandLane is one ordered queue of admitted jobs and its worker. Project
-// effects, which may clone a repository, have their own lane so that they do
-// not delay turns and provider commands.
+// effects, which may clone a repository, and session removals, which wait for
+// the turns they stop, have their own lane so that they do not delay turns and
+// provider commands.
 type commandLane struct {
 	queue []commandJob
 	wake  chan struct{}
@@ -197,6 +199,9 @@ func StartWithOptions(ctx context.Context, path string, options Options) (*Node,
 	}
 	// No command is admitted yet, so no upload is between its file and its row.
 	value.collectAttachments(ctx)
+	if err := store.CleanInactiveTraces(ctx, profile.Store); err != nil {
+		log.Printf("inactive session trace cleanup failed: %v", err)
+	}
 	if err := value.initPlugins(ctx, options.MCP); err != nil {
 		cancel()
 		_ = value.tasks.Close(context.Background())
@@ -577,7 +582,7 @@ func (node *Node) admitCommand(ctx context.Context, caller protocol.NodeID, requ
 	// Admission is durable. Cancellation of its observer cannot cancel this
 	// job, and a busy worker cannot hold up the admission of the next one.
 	lane := &node.lanes[generalLane]
-	if projectEffect(request.Command.Kind) {
+	if projectEffect(request.Command.Kind) || sessionRemoval(request.Command.Kind) {
 		lane = &node.lanes[projectLane]
 	}
 	lane.queue = append(lane.queue, commandJob{user: userFromContext(ctx), scope: ctx, caller: caller, request: request, admitted: true, completion: completion})
@@ -618,6 +623,8 @@ func externalCommand(command protocol.Command) bool {
 		return true
 	}
 	switch command.Kind {
+	case "clear_trace", "clear_all_traces", "save_trace_settings":
+		return true
 	case "configuration_follow":
 		// Applying a manifest updates plugin lifecycles after its transaction.
 		// Those owners may admit work and must run outside the admission lock.
@@ -625,6 +632,9 @@ func externalCommand(command protocol.Command) bool {
 	case "submit_turn", "submit_task", "continue_turn", "compact_context", "start_queued_turn", "send_queued_turn", "replace_turn":
 		return true
 	case "create_project", "register_project", "update_project", "remove_project", "register_worktree":
+		return true
+	case "remove_session", "remove_sessions":
+		// A removal can wait for the turns it stops, so it runs in a lane.
 		return true
 	case "create_session":
 		input := command.Data.(*protocol.CommandCreateSessionPayload)
@@ -642,7 +652,7 @@ func supportedCommand(kind string) bool {
 		return true
 	}
 	switch kind {
-	case "snapshot", "inspect_request", "read_session", "list_associated_sessions", "read_power_settings", "read_telemetry_settings", "read_plugin_version", "read_activity_catalog", "read_activity",
+	case "read_trace_settings", "save_trace_settings", "clear_all_traces", "read_trace", "export_trace", "clear_trace", "snapshot", "inspect_request", "read_session", "list_associated_sessions", "read_power_settings", "read_telemetry_settings", "read_plugin_version", "read_activity_catalog", "read_activity",
 		"read_media_settings", "list_media_models":
 		return true
 	case "register_project", "report_diagnostic", "save_media_settings":
@@ -661,6 +671,13 @@ func (node *Node) read(ctx context.Context, caller protocol.NodeID, request prot
 	ctx, accessErr = node.authorizeCommand(ctx, caller, request)
 	if accessErr != nil {
 		return response(protocol.Output{}, accessErr)
+	}
+	if q, ok := request.Command.Data.(*protocol.TraceExportQuery); ok {
+		out, err := node.transfers.DownloadTrace(ctx, caller, *q)
+		return response(protocol.Output{Kind: "trace_download", Data: out}, err)
+	}
+	if input, ok := request.Command.Data.(*protocol.TraceQuery); ok {
+		return response(node.readTrace(ctx, *input))
 	}
 	if input, ok := request.Command.Data.(*protocol.CommandReadToolOutputPayload); ok && input.Stream != nil {
 		if request.Plugin != nil {
@@ -733,6 +750,10 @@ func (node *Node) read(ctx context.Context, caller protocol.NodeID, request prot
 			value, err := store.ListAssociatedSessions(ctx, db, request)
 			output = protocol.Output{Kind: "associated_sessions", Data: value}
 			return err
+		case "read_trace_settings":
+			value, err := store.ReadTraceSettings(ctx, db)
+			output = protocol.Output{Kind: "trace_settings", Data: value}
+			return err
 		case "read_power_settings":
 			value, err := store.ReadPower(ctx, db)
 			output = protocol.Output{Kind: "power_settings", Data: value}
@@ -796,12 +817,22 @@ func (node *Node) run(lane *commandLane) {
 		prepareErr := node.profile.Store.Node.Read(ctx, func(db *sql.Conn) error {
 			return node.authorizeCommandDB(ctx, db, job.caller, job.request)
 		})
+		switch job.request.Command.Kind {
+		case "clear_trace", "clear_all_traces", "save_trace_settings":
+			result := node.applyTraceCommand(ctx, job, prepareErr)
+			job.completion <- node.settle(job.caller, job.request.ID, result)
+			close(job.completion)
+			continue
+		}
 		var prepared store.PreparedPaths
 		if prepareErr == nil {
 			prepared, prepareErr = node.prepare(ctx, job.request.Command)
 		}
 		if prepareErr == nil && job.request.Command.Kind == "remove_project" {
 			prepared.TerminalsClosed, prepareErr = node.closeProjectResources(job.request.Command)
+		}
+		if prepareErr == nil && sessionRemoval(job.request.Command.Kind) {
+			prepareErr = node.stopRemovedSessions(ctx, job.request.Command)
 		}
 		if prepareErr == nil {
 			prepareErr = node.renewCommandProvider(ctx, job.request)

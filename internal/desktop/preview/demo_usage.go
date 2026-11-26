@@ -14,8 +14,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/google/uuid"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"github.com/google/uuid"
 )
 
 // The demo's usage is a year of model responses over the demo's projects,
@@ -603,7 +603,7 @@ func (u *Usage) Report(node protocol.NodeID, query protocol.UsageQuery) (protoco
 		request.ScopeName = u.scope(s)
 		request.Worktree = s.worktree
 		request.Provider, request.ProviderName, request.Model = u.provider, u.name, m.id
-		request.Tokens = r.tokens
+		request.Tokens = &r.tokens
 		cost, elapsed := r.cost.Input+r.cost.Output+r.cost.CacheRead+r.cost.CacheWrite, r.elapsed
 		request.UsdMicros, request.ElapsedUs = &cost, &elapsed
 		if r.first <= r.elapsed {

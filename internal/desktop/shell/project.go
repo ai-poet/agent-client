@@ -3,13 +3,13 @@ package shell
 import (
 	"strings"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/sidebar"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
+	"github.com/egoist/mygo/ui"
 )
 
 type ProjectRepository struct {
@@ -29,6 +29,10 @@ type ProjectActions struct {
 	// Controls draws the controls packages add to the page, after its own.
 	Controls func(*ui.Context)
 }
+
+// ProjectTerminal is a running terminal in one of a project's worktrees, the
+// sidebar's row of it.
+type ProjectTerminal = sidebar.Terminal
 
 type projectOverview struct {
 	node, project string

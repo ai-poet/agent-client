@@ -137,6 +137,10 @@ tool_failed: Не удалось выполнить инструмент
 approval_pending: Ожидается утверждение
 content_copied: Копировано
 tool_copy: Копировать
+tool_rows_earlier: Показать предыдущие записи (%{count})
+output_show_all: Показать все строки (%{count})
+output_show_less: Свернуть
+diff_more_lines: '%{count} больше строк'
 tool_interrupted: Результат не подтвержден
 tool_not_executed: Утверждение прервано; не выполнено
 tool_not_found: Цель не найдена
@@ -1156,6 +1160,10 @@ provider_deployment_id: Имя развертывания
 provider_api_version: API версия
 form_api_version_hint: например 2024-10-21
 provider_cloud_required: Введите конфигурацию облачного поставщика
+provider_project: ID проекта
+provider_location: Расположение
+provider_service_account: Ключ сервисного аккаунта
+provider_service_account_hint: Вставьте JSON-ключ сервисного аккаунта
 form_model_hint: Идентификация модели
 provider_context: Контекстное ограничение (Token)
 form_tokens_hint: Число Token
@@ -2637,3 +2645,114 @@ gateway_node_unauthorized: Key refused
 gateway_node_http: HTTP %{status}
 gateway_node_unreachable: Unreachable
 gateway_node_invalid_url: Invalid URL
+trace_title: Трассировка запросов
+trace_view: Показать трассировку
+trace_locate: Найти в диалоге
+trace_export: Экспорт трассировки
+trace_export_saved: Трассировка сохранена
+trace_export_limit: Размер больше 64 МиБ. Уменьшите область экспорта.
+trace_recording: Идёт запись
+trace_off: Запись выключена
+trace_retries: Повторы
+trace_miss: Промахи кеша
+trace_request: Запрос
+trace_response: Ответ
+trace_metrics: Расход и время
+trace_cache_write: Запись в кеш
+trace_equal: Равная ширина
+trace_actual: По времени
+trace_scope: Область
+trace_turn: Выбранный ход
+trace_mode: Режим
+trace_shareable: Для отправки
+trace_raw: Исходные данные
+trace_raw_confirm: Исходная трассировка может содержать инструкции, код и личную переписку. Всё равно экспортировать?
+trace_partial: Неполная запись
+trace_load: Загрузить содержимое
+trace_events: Разбить по событиям
+trace_private: Локальные трассировки могут содержать системные инструкции и личную переписку.
+trace_dispatch: Диспетчеризация
+trace_sent: Запрос отправлен
+trace_gap: Самая долгая пауза
+trace_dropped_headers: Скрытые заголовки
+trace_turn_number: Ход %{count}
+approval_cancelled: Отменено
+diagnosis_action_account: Уточните у оператора шлюза, менялся ли аккаунт провайдера.
+diagnosis_action_balance: Проверьте баланс и квоту.
+diagnosis_action_billing: По этому ответу нельзя оценить стоимость.
+diagnosis_action_compact: Сожмите историю или увеличьте окно контекста.
+diagnosis_action_credential: Проверьте учётные данные и права.
+diagnosis_action_fluctuation: Ошибки различаются между попытками. Проверьте маршрутизацию.
+diagnosis_action_network: Проверьте DNS, прокси и соединение.
+diagnosis_action_prefix: Сравните префикс с предыдущим запросом.
+diagnosis_action_protocol: Проверьте режим API и формат ответа.
+diagnosis_action_route: Если повторяется, проверьте состояние провайдера.
+diagnosis_action_timing: Посмотрите длительность этапов запроса.
+diagnosis_action_wait: Соблюдайте интервал повтора провайдера.
+diagnosis_authentication: Доступ запрещён
+diagnosis_cache_miss: Промах кэша промпта
+diagnosis_cache_partial: Частичное попадание в кэш
+diagnosis_cancelled: Запрос отменён
+diagnosis_context_overflow: Превышен размер контекста
+diagnosis_failed: Ошибка запроса
+diagnosis_invalid_request: Запрос отклонён
+diagnosis_invalid_response: Ответ некорректен или прерван
+diagnosis_lost: Оценка потерь токенов кэша
+diagnosis_network: Ошибка сетевого соединения
+diagnosis_no_usage: Расход не указан
+diagnosis_normal: Проблем не обнаружено
+diagnosis_prefix_broken: Изменился префикс кэша
+diagnosis_quota: Баланс или квота исчерпаны
+diagnosis_rate_limited: Сработало ограничение частоты
+diagnosis_slow_first: Задержка первого токена
+diagnosis_slow_output: Медленная генерация
+diagnosis_unavailable: Провайдер или шлюз недоступен
+insights_all: Все
+insights_apply: Применить фильтры
+insights_attempts: Попытки
+insights_cost_coverage: Попытки с известной ценой
+insights_credential: ID учётных данных
+insights_end: Причина завершения
+insights_failure: Тип сбоя
+insights_failure_rate: Доля ошибок (известные исходы)
+insights_groups: Группировка
+insights_host: Узел
+insights_index: Трассировки
+insights_invalid: Проверьте даты, код статуса и идентификаторы фильтров.
+insights_outcome: Исход
+insights_provider_id: ID провайдера
+insights_samples: 'Число измерений: %{count}'
+insights_session: ID сеанса
+insights_start: Начальная дата
+insights_status: Статус HTTP
+insights_title: Анализ запросов
+insights_unassigned: Без учётных данных
+insights_until: Конечная дата
+insights_worktree: ID рабочего дерева
+model: Модель
+project: Проект
+session: Рабочий стол
+trace_all_cleared: Записанные трассировки удалены
+trace_capture_privacy: Они могут содержать инструкции, код и личную переписку.
+trace_clear_all: Очистить все трассировки
+trace_clear_consequence: Удалить трассировки всех сеансов этого узла? История переписки и данные об использовании сохранятся.
+trace_enable_capture: Записывать тела запросов
+trace_gateway_allowlist: Только при записи и только разрешённым HTTPS-шлюзам.
+trace_gateway_header: Отправлять ID трассировки шлюзу
+trace_settings_saved: Настройки трассировки сохранены
+usage: Использование
+usage_column_model: Модель
+usage_column_project: Проект
+usage_column_provider: Поставщик
+usage_cost: Сметная стоимость (долл. США)
+usage_duration: Продолжительность запроса модели
+usage_empty: Еще не используется
+usage_filters: Фильтры
+usage_loading: Использование загрузки
+usage_query_failed: Не удалось загрузить данные об использовании, сузить диапазон или фильтры
+usage_range: Диапазон времени
+usage_range_days: Последние %{days} дня
+usage_uncached_input: Некэшированный ввод
+insights_gateway_id: ID запроса шлюза
+usage_column_duration: Продолжительность
+usage_column_first_token: TTFT

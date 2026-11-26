@@ -3,22 +3,24 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"unicode"
 
-	"github.com/egoist/mygo"
 	"github.com/ai-poet/cheaprouter-harness/internal/client"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/exporter"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/reader"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"github.com/egoist/mygo"
 )
 
 func bindConversation(ctx context.Context, entry *desktopWindow, speech *reader.Service, pause func() func()) {
 	runtime := entry.live
+	bindTrace(ctx, entry, pause)
 	runtime.SetReaderActive(speech.Active)
 	runtime.SetReadAloud(func(session, turn, text string) {
 		if err := speech.Toggle(turn, text, runtime.ReportReaderFailure); err != nil {
@@ -129,6 +131,13 @@ func bindConversation(ctx context.Context, entry *desktopWindow, speech *reader.
 // Publication uses a sibling temporary file, preserving a previous destination
 // if writing or syncing fails. The system save panel owns overwrite consent.
 func saveConversation(destination string, data []byte) error {
+	return publishExport(destination, func(w io.Writer) error {
+		_, err := w.Write(data)
+		return err
+	})
+}
+
+func publishExport(destination string, write func(io.Writer) error) error {
 	temporary, err := os.CreateTemp(filepath.Dir(destination), ".sailry-export-")
 	if err != nil {
 		return err
@@ -136,7 +145,7 @@ func saveConversation(destination string, data []byte) error {
 	name := temporary.Name()
 	defer os.Remove(name)
 	if err = temporary.Chmod(0600); err == nil {
-		_, err = temporary.Write(data)
+		err = write(temporary)
 	}
 	if err == nil {
 		err = temporary.Sync()

@@ -34,7 +34,7 @@ func TestUsagePaginationAcrossNodes(t *testing.T) {
 	err = storage.Node.Read(ctx, func(db *sql.Conn) error {
 		query := protocol.DefaultUsageQuery()
 		query.StartMs, query.EndMs, query.Dimension = now.Add(-time.Hour).UnixMilli(), now.Add(time.Hour).UnixMilli(), protocol.UsageDimensionModel
-		baseline, err := readAgentUsage(ctx, db, node, query)
+		baseline, err := readAgentUsage(ctx, db, node, query, false)
 		if err != nil {
 			return err
 		}
@@ -61,7 +61,7 @@ func TestUsagePaginationAcrossNodes(t *testing.T) {
 		} {
 			t.Run(test.name, func(t *testing.T) {
 				query.Before = &test.before
-				report, err := readAgentUsage(ctx, db, node, query)
+				report, err := readAgentUsage(ctx, db, node, query, false)
 				if err != nil {
 					t.Fatal(err)
 				}

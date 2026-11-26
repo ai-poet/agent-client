@@ -1,12 +1,24 @@
 package conversation
 
 import (
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
 )
+
+// JumpToTurn uses the same virtual transcript list as search and the turn rail.
+// False means the owner may need to page older history first.
+func (s *State) JumpToTurn(session string, turns []Turn, id string) bool {
+	for index, turn := range turns {
+		if turn.ID == id {
+			s.List(session).ScrollTo(index, ui.Center)
+			return true
+		}
+	}
+	return false
+}
 
 // jump is Kit MessageScroller's button: it shows while the transcript is
 // scrolled off its end, with no threshold, as any scroll up stops the list

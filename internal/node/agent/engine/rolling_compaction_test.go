@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,7 +11,38 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
+
+func TestRollingNativeCompactionKeepsOpaquePrefix(t *testing.T) {
+	f, x, binding, provider := nativeFixture(t, protocol.ConversationModelApiResponses, func(w http.ResponseWriter, request wireRequest) {
+		if compacting(request) {
+			writeJSON(w, http.StatusOK, compactedWindow)
+		} else {
+			writeSSE(w, responsesText(nativeFixtureHandoff))
+		}
+	})
+	if err := compactNow(t, f, x, binding); err != nil {
+		t.Fatal(err)
+	}
+	addExchange(t, f, "Second requirement")
+	if err := compactNow(t, f, x, binding); err != nil {
+		t.Fatal(err)
+	}
+	native := provider.all(compacting)
+	if len(native) != 2 || !strings.Contains(native[1].raw, "opaque-window") {
+		t.Fatal("rolling native compaction omitted the previous opaque prefix")
+	}
+	addExchange(t, f, "Third requirement")
+	x.inv.Message.Text = "Keep requirements"
+	if err := compactNow(t, f, x, binding); err != nil {
+		t.Fatal(err)
+	}
+	transcript := provider.all(func(r wireRequest) bool { return !compacting(r) })
+	if len(transcript) != 1 || strings.Contains(transcript[0].raw, "opaque-window") || !strings.Contains(transcript[0].raw, "Original task") || !strings.Contains(transcript[0].raw, "Second requirement") || !strings.Contains(transcript[0].raw, x.inv.Message.Text) {
+		t.Fatal("focused compaction did not rebuild the handoff from original history")
+	}
+}
 
 func compactionOverflow(t *testing.T, f *engineFixture, x *execution) store.AgentState {
 	t.Helper()
@@ -60,7 +92,7 @@ func TestRollingCompactionPreservesTailAcrossUpdatesAndFailure(t *testing.T) {
 	check := func(before store.AgentState, tail []canonical.Record, manual bool) canonical.Record {
 		t.Helper()
 		original, _ := json.Marshal(before.Records)
-		if err := f.r.compact(x, binding, before, manual); err != nil {
+		if err := f.r.compact(x, binding, model.Route{}, before, manual); err != nil {
 			t.Fatal(err)
 		}
 		after := f.state()
@@ -82,7 +114,7 @@ func TestRollingCompactionPreservesTailAcrossUpdatesAndFailure(t *testing.T) {
 	firstTail := firstState.Records[len(firstState.Records)-3:]
 	first := check(firstState, firstTail, false)
 	beforeSkip := f.state()
-	if err := f.r.compact(x, binding, beforeSkip, false); err != nil || modelScript.count() != 1 || len(f.state().Records) != len(beforeSkip.Records) {
+	if err := f.r.compact(x, binding, model.Route{}, beforeSkip, false); err != nil || modelScript.count() != 1 || len(f.state().Records) != len(beforeSkip.Records) {
 		t.Fatal("unchanged retained tail caused another summary request")
 	}
 	secondTail := []canonical.Record{message(canonical.User, canonical.Text(0, "Newest task"))}
@@ -113,7 +145,7 @@ func TestRollingCompactionPreservesTailAcrossUpdatesAndFailure(t *testing.T) {
 	}
 	beforeFailure := f.state()
 	visibleBefore := model.VisibleRecords(beforeFailure.Records)
-	if err := f.r.compact(x, binding, beforeFailure, false); err == nil {
+	if err := f.r.compact(x, binding, model.Route{}, beforeFailure, false); err == nil {
 		t.Fatal("malformed rolling summary was accepted")
 	}
 	afterFailure := f.state()
@@ -141,7 +173,7 @@ func TestRollingCompactionAdvancesWithinOneLongToolTurn(t *testing.T) {
 	}
 	before := f.state()
 	tail = before.Records[len(before.Records)-2:]
-	if err := f.r.compact(x, binding, before, false); err != nil {
+	if err := f.r.compact(x, binding, model.Route{}, before, false); err != nil {
 		t.Fatal(err)
 	}
 	after := f.state()

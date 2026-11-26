@@ -1,0 +1,8 @@
+trace_enable_capture: "リクエスト本文を記録"
+trace_capture_privacy: "本文にはプロンプト、コード、非公開の会話が含まれる場合があります。"
+trace_gateway_header: "ゲートウェイにトレース ID を送信"
+trace_gateway_allowlist: "記録中、許可された HTTPS ゲートウェイにのみ送信します。"
+trace_clear_all: "すべてのトレースを消去"
+trace_clear_consequence: "このノードの全セッションのトレースを削除しますか？会話履歴と使用量は保持されます。"
+trace_settings_saved: "トレース設定を保存しました"
+trace_all_cleared: "記録したトレースを消去しました"

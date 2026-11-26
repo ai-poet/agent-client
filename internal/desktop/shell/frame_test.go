@@ -640,7 +640,7 @@ func TestSidebarToggleAndPrefs(t *testing.T) {
 		stale.Features = []string{"page:git", "page:gone", "page:conversation"}
 		b = New(preview.Load())
 		b.SetPrefs(stale)
-		if want := []string{"page:conversation", "page:git", "page:gone", "page:image_studio", "page:activity", "page:files", "page:settings_plugins"}; !slices.Equal(b.features, want) {
+		if want := []string{"page:conversation", "page:git", "page:gone", "page:image_studio", "page:insights", "page:activity", "page:files", "page:settings_plugins"}; !slices.Equal(b.features, want) {
 			t.Errorf("stale order merged to %v, want %v", b.features, want)
 		}
 
@@ -1049,7 +1049,7 @@ func TestMoreDragShowsInsertionLine(t *testing.T) {
 	tt.Release(px+160, center(files)+10)
 	tt.Frame()
 	tt.Frame()
-	want := []string{"page:conversation", "page:image_studio", "page:files", "page:activity", "page:git", "page:settings_plugins"}
+	want := []string{"page:conversation", "page:image_studio", "page:insights", "page:files", "page:activity", "page:git", "page:settings_plugins"}
 	if !slices.Equal(a.features, want) {
 		t.Errorf("order %v, want %v", a.features, want)
 	}

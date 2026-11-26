@@ -33,8 +33,17 @@ func (a *App) OpenWorkspaceTerminal(id, title string) {
 	a.focusPane(panes.Target{Kind: panes.Terminal, ID: id})
 }
 
-// DropWorkspaceTerminal closes only a main terminal's surface. Its running
-// process remains in the Node's inventory and can be opened from terminal activity.
+// KeepWorkspaceTerminal keeps an open main terminal's tab, as a double click
+// on its passing tab does.
+func (a *App) KeepWorkspaceTerminal(id string) {
+	if a.workspaceTerminal(id) != nil {
+		a.panes.Keep(panes.Target{Kind: panes.Terminal, ID: id})
+	}
+}
+
+// DropWorkspaceTerminal closes only a main terminal's surface and its pane's
+// right panel. Its running process remains in the Node's inventory and can be
+// opened from terminal activity.
 func (a *App) DropWorkspaceTerminal(id string) {
 	w := &a.panes
 	t := panes.Target{Kind: panes.Terminal, ID: id}
@@ -42,6 +51,7 @@ func (a *App) DropWorkspaceTerminal(id string) {
 	w.terminals = slices.DeleteFunc(w.terminals, func(t WorkspaceTerminal) bool { return t.ID == id })
 	delete(w.focus, t)
 	delete(w.groupFocus, t)
+	a.dropTerminalPanel(id)
 	if w.Active == t {
 		w.Active = session(a.Sidebar.Selected)
 	}

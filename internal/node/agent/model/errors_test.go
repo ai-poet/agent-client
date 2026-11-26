@@ -33,6 +33,7 @@ func TestFailureRetryHints(t *testing.T) {
 		{"gateway timeout", 504, "", Unavailable, false},
 		{"quota before rate limit", 429, "insufficient_quota", Quota, false},
 		{"quota before overload status", 529, "insufficient_quota", Quota, false},
+		{"forbidden before overload code", 403, "overloaded_error", Authentication, false},
 		{"authentication before overload code", 401, "overloaded_error", Authentication, false},
 		{"context before overload status", 529, "context_length_exceeded", ContextOverflow, false},
 		{"invalid request", 400, "invalid_request", InvalidRequest, false},
@@ -70,8 +71,42 @@ func TestExhaustedProviderAccountPoolDoesNotRetry(t *testing.T) {
 		StatusCode:   502,
 		ResponseBody: []byte(`{"error":{"code":"server_error","message":"All available accounts exhausted"}}`),
 	})
-	if failure.Kind != Quota || failure.Retryable() {
-		t.Fatalf("exhausted provider pool classification: kind=%s retryable=%t", failure.Kind, failure.Retryable())
+	if failure.Kind != Quota || failure.Retryable() || failure.overloaded {
+		t.Fatalf("exhausted provider pool classification: kind=%s retryable=%t overloaded=%t", failure.Kind, failure.Retryable(), failure.overloaded)
+	}
+}
+
+func TestBalanceAndPermissionClassification(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name      string
+		status    int
+		body      string
+		kind      FailureKind
+		retryable bool
+		reason    protocol.ModelFailure
+	}{
+		{"403 insufficient balance message", 403, `{"error":{"message":"insufficient balance"}}`, Authentication, true, protocol.ModelFailureRequest},
+		{"403 insufficient balance code", 403, `{"error":{"code":"insufficient_balance","message":"request denied"}}`, Quota, false, protocol.ModelFailureQuota},
+		{"403 localized message", 403, `{"error":{"message":"账户余额不足"}}`, Authentication, true, protocol.ModelFailureRequest},
+		{"402 payment required", 402, `{"error":{"message":"Payment Required"}}`, Quota, false, protocol.ModelFailureQuota},
+		{"stream rate limit quota", 200, `{"error":{"code":"rate_limit_exceeded","message":"request quota per minute reached"}}`, RateLimited, true, protocol.ModelFailureRateLimited},
+		{"403 permission", 403, `{"error":{"code":"permission_denied","message":"You do not have access to this model"}}`, Authentication, true, protocol.ModelFailureRequest},
+		{"403 invalid key with balance text", 403, `{"error":{"code":"invalid_api_key","message":"insufficient balance"}}`, Authentication, false, protocol.ModelFailureUnauthorized},
+		{"401", 401, `{"error":{"message":"Unauthorized"}}`, Authentication, false, protocol.ModelFailureUnauthorized},
+		{"401 quota text", 401, `{"error":{"message":"no quota for this key"}}`, Authentication, false, protocol.ModelFailureUnauthorized},
+		{"invalid key code", 400, `{"error":{"code":"invalid_api_key","message":"Incorrect API key"}}`, Authentication, false, protocol.ModelFailureUnauthorized},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			failure := Classify(&fantasy.ProviderError{StatusCode: test.status, ResponseBody: []byte(test.body)})
+			if failure.Kind != test.kind || failure.Retryable() != test.retryable || failure.overloaded != (test.kind == RateLimited) {
+				t.Fatalf("classification: kind=%s retryable=%t overloaded=%t", failure.Kind, failure.Retryable(), failure.overloaded)
+			}
+			fault := Fault(failure)
+			if fault.Details == nil || fault.Details.Kind != "model_request" || fault.Details.Data.(protocol.FaultDetailsModelRequestPayload).Reason != test.reason {
+				t.Fatalf("fault = %+v", fault)
+			}
+		})
 	}
 }
 

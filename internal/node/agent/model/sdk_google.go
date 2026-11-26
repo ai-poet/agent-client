@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"net/url"
 	"strings"
@@ -15,12 +16,58 @@ import (
 	"github.com/MoeForge/moego/base64"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model/google"
 	"github.com/google/uuid"
+	"google.golang.org/genai"
 )
 
 func (model *sdkModel) streamGoogle(ctx context.Context, raw []byte, call fantasy.Call, emitter *sdkEmitter) {
 	name := model.config.Model
 	if name == "" || strings.ContainsAny(name, "?&") || strings.Contains(name, "..") {
 		emitter.fail(fmt.Errorf("invalid Gemini model parameter"))
+		return
+	}
+	headers := http.Header{}
+	for key, value := range model.config.Headers {
+		headers.Set(key, value)
+	}
+	for key, value := range call.Headers {
+		headers.Set(key, value)
+	}
+	if call.UserAgent != "" {
+		headers.Set("User-Agent", call.UserAgent)
+	}
+	if model.config.vertex != nil {
+		client, err := genai.NewClient(ctx, &genai.ClientConfig{
+			Backend: genai.BackendVertexAI, Project: model.config.Project, Location: model.config.Location,
+			HTTPClient: model.client, HTTPOptions: genai.HTTPOptions{BaseURL: model.config.Endpoint + "/", Headers: headers},
+		})
+		if err != nil {
+			emitter.fail(err)
+			return
+		}
+		body, err := decodeSDK(string(raw))
+		if err != nil {
+			emitter.fail(err)
+			return
+		}
+		// Sailry has already shaped the complete Gemini request, and owns
+		// continuation and retry. The SDK supplies the Vertex resource path.
+		attempts, continuation := int32(1), false
+		options := &genai.GenerateContentConfig{AutomaticContinuation: &continuation, HTTPOptions: &genai.HTTPOptions{
+			ExtrasRequestProvider: func(map[string]any) map[string]any { return body },
+			RetryOptions:          &genai.HTTPRetryOptions{Attempts: &attempts},
+		}}
+		consumeGoogle(emitter, func(yield func(string, error) bool) {
+			for chunk, err := range client.Models.GenerateContentStream(ctx, name, nil, options) {
+				if err != nil {
+					yield("", err)
+					return
+				}
+				raw, err := json.Marshal(chunk)
+				if !yield(string(raw), err) {
+					return
+				}
+			}
+		})
 		return
 	}
 	if !strings.HasPrefix(name, "models/") && !strings.HasPrefix(name, "tunedModels/") {
@@ -38,15 +85,7 @@ func (model *sdkModel) streamGoogle(ctx context.Context, raw []byte, call fantas
 		emitter.fail(err)
 		return
 	}
-	for key, value := range model.config.Headers {
-		request.Header.Set(key, value)
-	}
-	for key, value := range call.Headers {
-		request.Header.Set(key, value)
-	}
-	if call.UserAgent != "" {
-		request.Header.Set("User-Agent", call.UserAgent)
-	}
+	request.Header = headers
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("x-goog-api-key", model.config.Key)
 	response, err := model.client.Do(request)
@@ -60,16 +99,28 @@ func (model *sdkModel) streamGoogle(ctx context.Context, raw []byte, call fantas
 		return
 	}
 
+	consumeGoogle(emitter, func(yield func(string, error) bool) {
+		scanner := bufio.NewScanner(response.Body)
+		scanner.Buffer(make([]byte, 1024), 256*1024*1024)
+		for scanner.Scan() {
+			if data, ok := strings.CutPrefix(scanner.Text(), "data:"); ok && !yield(data, nil) {
+				return
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			yield("", err)
+		}
+	})
+}
+
+func consumeGoogle(emitter *sdkEmitter, chunks iter.Seq2[string, error]) {
 	terminal, tools := false, false
 	finish := fantasy.FinishReasonStop
-	scanner := bufio.NewScanner(response.Body)
-	scanner.Buffer(make([]byte, 1024), 256*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data:") {
-			continue
+	for data, err := range chunks {
+		if err != nil {
+			emitter.fail(err)
+			return
 		}
-		data := strings.TrimPrefix(line, "data:")
 		value, err := decodeSDK(data)
 		if err != nil {
 			emitter.fail(err)
@@ -148,10 +199,6 @@ func (model *sdkModel) streamGoogle(ctx context.Context, raw []byte, call fantas
 				}
 			}
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		emitter.fail(err)
-		return
 	}
 	if !terminal {
 		emitter.fail(io.ErrUnexpectedEOF)

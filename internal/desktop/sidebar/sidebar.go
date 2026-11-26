@@ -8,7 +8,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
@@ -17,6 +16,7 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
+	"github.com/egoist/mygo/ui"
 )
 
 // Layout metrics.
@@ -33,8 +33,11 @@ type State struct {
 	Actions      *Actions
 	Sample       Sample
 	Metrics      *Metrics
-	Selected          string // conversation ID
-	SelectedHost      string
+	Selected     string // conversation ID
+	SelectedHost string
+	// Terminal is the project terminal the workspace shows, whose row is
+	// selected instead of a conversation's; the shell sets it.
+	Terminal          string
 	ImageStudioActive bool
 	OpenImageStudio   func()
 	Preview           bool
@@ -459,6 +462,7 @@ func (s *State) project(c *ui.Context, pr *preview.Project) {
 				s.limited(c, pr.ID, s.sessions(pr.Conversations), func(cv *preview.Conversation) {
 					s.conversation(c, cv, rowTree)
 				})
+				s.terminals(c, pr)
 			})
 		})
 	})
@@ -485,7 +489,7 @@ func (s *State) conversation(c *ui.Context, cv *preview.Conversation, kind rowKi
 		s.renameRow(c, cv)
 		return
 	}
-	selected := cv.ID == s.Selected
+	selected := s.Terminal == "" && cv.ID == s.Selected
 	title := Title(c, cv)
 	b := ui.ButtonBase(c.Key(cv.ID)).Label(title).Height(rowHeight).PaddingStart(indent).PaddingEnd(8).Gap(8).Radius(p.Radius)
 	hovered := b.Hovered()

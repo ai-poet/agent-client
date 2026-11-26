@@ -5,7 +5,10 @@ CREATE TABLE IF NOT EXISTS node (
     plugin_defaults INTEGER NOT NULL DEFAULT 0 CHECK(plugin_defaults IN (0,1)),
     tool_defaults INTEGER NOT NULL DEFAULT 0 CHECK(tool_defaults IN (0,1)),
     tool_metadata_names INTEGER NOT NULL DEFAULT 0 CHECK(tool_metadata_names IN (0,1)),
-    request_pruned_through TEXT NOT NULL DEFAULT ''
+    request_pruned_through TEXT NOT NULL DEFAULT '',
+    trace_enabled INTEGER NOT NULL DEFAULT 0 CHECK(trace_enabled IN (0,1)),
+    trace_gateway_enabled INTEGER NOT NULL DEFAULT 0 CHECK(trace_gateway_enabled IN (0,1)),
+    trace_revision INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE counters (
     namespace TEXT PRIMARY KEY,
@@ -393,6 +396,15 @@ CREATE INDEX IF NOT EXISTS agent_events_turn ON agent_events(turn,sequence);
 CREATE INDEX IF NOT EXISTS agent_visibility ON agent_events(
     json_extract(body,'$.message'),sequence DESC
 ) WHERE json_extract(body,'$.kind')='operation' AND json_extract(body,'$.operation')='visibility';
+CREATE INDEX IF NOT EXISTS agent_observation_outcome ON agent_events(
+    turn,json_extract(body,'$.metadata.execution.observation.attempts[0].outcome')
+) WHERE json_type(body,'$.metadata.execution.observation')='object';
+CREATE INDEX IF NOT EXISTS agent_observation_time ON agent_events(
+    substr(json_extract(body,'$.created'),1,19),sequence
+) WHERE json_type(body,'$.metadata.execution.observation.attempts[0]')='object';
+CREATE INDEX IF NOT EXISTS agent_execution_timing ON agent_events(
+    json_extract(body,'$.metadata.execution.timing.first_token_us'),json_extract(body,'$.metadata.execution.timing.elapsed_us')
+) WHERE json_type(body,'$.metadata.execution.timing')='object';
 CREATE INDEX IF NOT EXISTS agent_usage ON agent_events(
     turn,
     max(0,coalesce(json_extract(body,'$.usage.input'),json_extract(body,'$.summary.usage.input'))),

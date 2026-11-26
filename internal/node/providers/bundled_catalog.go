@@ -24,6 +24,9 @@ func BundledCatalog() (*CatalogDownload, error) {
 // BundledCatalogProvider returns the namespace for an unambiguous known
 // endpoint. This hint is optional when a downloaded catalog is usable.
 func BundledCatalogProvider(endpoint string) string {
+	if cloud := cloudNamespace(endpoint); cloud != "" {
+		return cloud
+	}
 	catalog, err := BundledCatalog()
 	if err != nil {
 		return ""

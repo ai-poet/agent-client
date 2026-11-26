@@ -1,0 +1,8 @@
+trace_enable_capture: "Record request bodies"
+trace_capture_privacy: "Bodies may contain prompts, code and private conversation content."
+trace_gateway_header: "Send gateway trace ID"
+trace_gateway_allowlist: "Only for allowlisted HTTPS gateways while recording."
+trace_clear_all: "Clear all traces"
+trace_clear_consequence: "Delete recorded traces for every session on this node? Conversation history and usage will remain."
+trace_settings_saved: "Trace settings saved"
+trace_all_cleared: "Recorded traces cleared"

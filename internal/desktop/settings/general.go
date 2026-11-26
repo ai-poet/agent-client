@@ -49,6 +49,7 @@ func general(c *ui.Context, m *Model) {
 		})
 	})
 	telemetry(c, m)
+	traceSettings(c, m)
 	migration(c, m)
 }
 

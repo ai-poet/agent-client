@@ -1,0 +1,8 @@
+trace_enable_capture: "記錄請求本文"
+trace_capture_privacy: "本文可能包含提示詞、程式碼和私人對話。"
+trace_gateway_header: "傳送閘道軌跡 ID"
+trace_gateway_allowlist: "僅在記錄時傳送至允許清單中的 HTTPS 閘道。"
+trace_clear_all: "清除全部軌跡"
+trace_clear_consequence: "刪除此節點所有工作階段已記錄的軌跡？對話記錄和用量將會保留。"
+trace_settings_saved: "軌跡設定已儲存"
+trace_all_cleared: "已清除記錄的軌跡"

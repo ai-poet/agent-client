@@ -1,12 +1,15 @@
 package model
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
@@ -98,7 +101,7 @@ func TestACPLeaseIdentity(t *testing.T) {
 				t.Fatal(err)
 			}
 			// A matching session must never outrank an incompatible identity.
-			agent.claimed, agent.owner = true, fixture.model.binding.Session
+			agent.give(fixture.model.reserve(t.Context(), agent))
 			fixture.model.capture.Pool.Release(first, true)
 			next := cloneACPModel(t, fixture.model)
 			probe.mutate(t, next)
@@ -151,7 +154,7 @@ func TestACPLeaseReusesCompatibleCapture(t *testing.T) {
 	if claimed != entry || reused != agent {
 		t.Fatal("compatible discovery process was not reused for inference")
 	}
-	agent.claimed, agent.owner = true, next.binding.Session
+	agent.give(next.reserve(t.Context(), agent))
 	next.capture.Pool.Release(claimed, true)
 	continued, same, err := next.lease(t.Context(), false)
 	if err != nil {
@@ -174,9 +177,12 @@ func TestACPDiscoveryIdentityAndPackageLimit(t *testing.T) {
 	key := protocol.NewSecret("rotated-unused-fixture-token")
 	next.binding.Secret = &key
 	// The first lease still occupies the package's only slot, even though
-	// this channel has a different credential and cannot reuse it.
-	if _, _, err := next.lease(t.Context(), true); Classify(err) == nil || Classify(err).Kind != Unavailable {
-		t.Fatal("another identity bypassed the package process limit")
+	// this channel has a different credential and cannot reuse it; the lease
+	// waits for it.
+	waiting, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if _, _, err := next.lease(waiting, true); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("another identity bypassed the package process limit: %v", err)
 	}
 	fixture.model.capture.Pool.Release(entry, true)
 	replaced, other, err := next.lease(t.Context(), true)

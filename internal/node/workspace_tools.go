@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	pathpkg "path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -28,6 +29,7 @@ type workspaceToolCall struct {
 	prepared       *files.Prepared
 	approval       protocol.ApprovalID
 	commandControl *process.ControlTarget
+	fileScope      externalFileScope
 }
 
 func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation) ([]engine.Tool, error) {
@@ -59,10 +61,48 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 		calls := map[string]*workspaceToolCall{}
 		tool := engine.Tool{Definition: fantasy.FunctionTool{Name: declaration.Name, Description: declaration.Description, InputSchema: schema}, SchemaJSON: declaration.Parameters, ReadOnly: declaration.ReadOnly, Concurrent: declaration.Concurrent, Deferred: !declaration.Initial, Approval: !declaration.ReadOnly, Binding: &store.ApprovalBinding{Owner: declaration.Owner, Tool: declaration.Name, Operation: &declaration.Operation}}
 		var observed workspaceRevisions
+		fullFiles := inv.Turn.Config.Permission == protocol.PermissionFull && externalFileOperation(declaration.Operation)
+		if fullFiles {
+			observed.worktree = inv.Worktree.Path
+		}
 		if observesRevisions(declaration.Operation) {
 			tool.ObserveHistory = observed.update
 		}
 		tool.Prepare = func(ctx context.Context, call canonical.ToolRequest) error {
+			args := call.Arguments
+			worktree := filepath.Clean(inv.Worktree.Path)
+			var scope externalFileScope
+			if fullFiles {
+				worktree = resolvedPath(worktree)
+				canonical := func(path string) (string, error) { return localPath(worktree, canonicalPath(path)), nil }
+				var err error
+				if args, err = fileArgPaths(declaration.Operation, args, canonical); err != nil {
+					return err
+				}
+				paths := collectFileArgPaths(declaration.Operation, args)
+				scope.root = externalRoot(worktree, paths)
+				if scope.root != "" {
+					for _, path := range paths {
+						if !filepath.IsAbs(path) {
+							scope.worktree = worktree
+							break
+						}
+					}
+				}
+			}
+			// Full access is the admitted turn's policy, including for children.
+			// Normalize access before approval captures the command to execute.
+			arguments, err := observed.resolve(declaration.Operation, args)
+			if err != nil {
+				return err
+			}
+			root := worktree
+			if scope.root != "" {
+				root = scope.root
+				if arguments, err = fileArgPaths(declaration.Operation, arguments, func(path string) (string, error) { return rootPath(worktree, root, path) }); err != nil {
+					return err
+				}
+			}
 			sandbox := protocol.DefaultSandboxSettings()
 			if declaration.Operation == protocol.ToolOperationRunCommand {
 				// Each command follows the setting as it is now, not as it
@@ -75,21 +115,19 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 					return err
 				}
 			}
-			// Full access is the admitted turn's policy, including for children.
-			// Normalize access before approval captures the command to execute.
-			arguments, err := observed.resolve(declaration.Operation, call.Arguments)
-			if err != nil {
-				return err
-			}
 			command, err := operations.Command(declaration.Operation, arguments, inv.Run.Worktree, inv.Session.ID, inv.Run.Turn, inv.Worktree.Project, sandbox.Enabled && inv.Turn.Config.Permission != protocol.PermissionFull)
 			if declaration.Operation == protocol.ToolOperationApplyChanges {
 				var patch struct {
 					Input string `json:"input"`
 				}
-				if err = json.Unmarshal(call.Arguments, &patch); err != nil {
+				if err = json.Unmarshal(arguments, &patch); err != nil {
 					return err
 				}
-				changes, e := files.ResolvePatchWithRevisions(ctx, inv.Worktree.Path, patch.Input, observed.paths, core.RestrictedFiles)
+				revisions := observed.paths
+				if scope.root != "" {
+					revisions = rootRevisions(worktree, root, revisions)
+				}
+				changes, e := files.ResolvePatchWithRevisions(ctx, root, patch.Input, revisions, core.RestrictedFiles)
 				if e != nil {
 					return e
 				}
@@ -120,15 +158,19 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 			}
 			request := protocol.NewRequest(node.ID(), command)
 			request.Plugin = &protocol.PluginContext{Turn: &inv.Run.Turn, Package: declaration.Owner, Worktree: &inv.Run.Worktree, Session: &inv.Session.ID, Surface: protocol.PluginDesktopSurface{Kind: "workspace"}}
-			current := &workspaceToolCall{request: request}
+			current := &workspaceToolCall{request: request, fileScope: scope}
 			if fileTextMutation(command.Kind) {
-				current.prepared, err = files.Prepare(ctx, inv.Worktree.Path, command, core.RestrictedFiles)
+				current.prepared, err = files.Prepare(ctx, root, command, core.RestrictedFiles)
 				if err != nil {
 					return err
 				}
 			}
 			if files.SupportsMutation(command.Kind) {
-				if err = node.protectWorkspaceMutation(inv.Worktree.Path, inv.Worktree.Path, command, current.prepared); err != nil {
+				target := root
+				if scope.worktree != "" {
+					target = inv.Worktree.Path
+				}
+				if err = node.protectWorkspaceMutation(target, target, command, current.prepared, scope); err != nil {
 					return err
 				}
 			}
@@ -176,6 +218,15 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 				return workspaceToolFault(errors.New("native tool was not prepared"))
 			}
 			request := current.request
+			scope := current.fileScope
+			if scope.root != "" && scope.worktree == "" {
+				output, err := node.externalFileIO(ctx, inv.Caller, request, current.prepared, scope.root)
+				if err != nil {
+					return workspaceToolFault(err)
+				}
+				value := node.workspaceToolValue(ctx, request, scope.result(output), false)
+				return engine.ToolResult{Value: value, ReturnedError: workspaceOutputFailed(output), ReturnedFailure: workspaceOutputFailure(output)}
+			}
 			if !declaration.ReadOnly {
 				body, err := json.Marshal(request)
 				if err != nil {
@@ -193,8 +244,8 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 					if previous != nil {
 						return &protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown, Message: "tool effect was already admitted and will not replay"}
 					}
-					if current.prepared != nil {
-						return store.CaptureFileCheckpointsRequest(ctx, db, inv.Run.Turn, current.approval, request, current.prepared)
+					if current.prepared != nil && current.prepared.Rejected == nil {
+						return store.CaptureFileCheckpointsRequest(ctx, db, inv.Run.Turn, current.approval, request, scope.checkpoints(current.prepared))
 					}
 					return nil
 				})
@@ -203,7 +254,7 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 					return workspaceToolFault(err)
 				}
 			}
-			effect := &workspaceCompletion{commandControl: current.commandControl}
+			effect := &workspaceCompletion{commandControl: current.commandControl, fileScope: scope}
 			defer effect.close()
 			output, effectErr := node.workspaceIO(ctx, inv.Caller, request, current.prepared, effect)
 			if !declaration.ReadOnly {
@@ -400,9 +451,10 @@ func (node *Node) workspaceToolValue(ctx context.Context, request protocol.Reque
 // workspaceRevisions follows the canonical history visible to this turn. Receipts
 // from a successful write are observations of its new revision, like reads.
 type workspaceRevisions struct {
-	paths map[string]string
-	count int
-	last  string
+	paths    map[string]string
+	count    int
+	last     string
+	worktree string
 }
 
 func (r *workspaceRevisions) update(records []canonical.Record) {
@@ -451,6 +503,7 @@ func (r *workspaceRevisions) observe(response *canonical.ToolResponse) {
 	data := value.Data
 	if value.Kind == "file_changes" {
 		for _, file := range data.Files {
+			file.Path, file.Destination = r.pathKey(file.Path), r.pathKey(file.Destination)
 			switch file.Status {
 			case protocol.ChangeStatusUnknown:
 				delete(r.paths, file.Path)
@@ -478,14 +531,14 @@ func (r *workspaceRevisions) observe(response *canonical.ToolResponse) {
 	switch value.Kind {
 	case "file_content", "file_lines", "file_written", "notebook_page":
 		if data.Revision != "" {
-			r.paths[data.Path] = data.Revision
+			r.paths[r.pathKey(data.Path)] = data.Revision
 		}
 	case "entry_trashed":
-		r.invalidateTree(data.Path)
+		r.invalidateTree(r.pathKey(data.Path))
 	case "entry_moved":
 		// Generic entry operations may move directories across roots.
-		r.invalidateTree(data.From)
-		r.invalidateTree(data.To)
+		r.invalidateTree(r.pathKey(data.From))
+		r.invalidateTree(r.pathKey(data.To))
 	}
 }
 
@@ -522,7 +575,7 @@ func (r *workspaceRevisions) resolve(operation protocol.ToolOperation, arguments
 	}
 	revision, ok := r.paths[path]
 	if !ok && path != "" {
-		revision, ok = r.paths[pathpkg.Clean(path)]
+		revision, ok = r.paths[r.pathKey(path)]
 	}
 	switch {
 	case operation == protocol.ToolOperationWriteFile:
@@ -533,6 +586,20 @@ func (r *workspaceRevisions) resolve(operation protocol.ToolOperation, arguments
 		return nil, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: path + " has not been read in this conversation; read it first or pass expected_revision"}
 	}
 	return json.Marshal(values)
+}
+
+func (r *workspaceRevisions) pathKey(path string) string {
+	if filepath.IsAbs(path) {
+		path = filepath.Clean(path)
+		if r.worktree != "" {
+			path = localPath(r.worktree, path)
+		}
+		return filepath.ToSlash(path)
+	}
+	if path == "" {
+		return ""
+	}
+	return pathpkg.Clean(filepath.ToSlash(path))
 }
 
 func (r *workspaceRevisions) invalidateTree(path string) {

@@ -95,7 +95,8 @@ type Channel struct {
 	Method                        string
 	API, Endpoint                 string
 	// APIVersion is the Azure OpenAI API version, "" for every other API.
-	APIVersion string
+	APIVersion                string
+	Region, Project, Location string
 	// Headers are the request headers an API-key channel adds to model calls.
 	Headers                   map[string]string
 	Auth                      Auth

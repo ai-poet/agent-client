@@ -191,7 +191,8 @@ Use `errorCode(error.message)` for model and configuration failures. It accounts
 
 `listModels()` includes an optional `api` field on each configured provider model
 (`responses`, `anthropic`, `gemini`, or another model protocol) and its
-`authentication` method. Packages can filter choices by protocol and login method
+`authentication` method. Amazon Bedrock (`bedrock`) carries Anthropic Messages
+and Vertex AI (`vertex_ai`) carries Gemini. Packages can filter choices by protocol and login method
 without receiving provider endpoints or credentials.
 
 Pure host exports may be listed in `host.read_only`, a unique subset of
@@ -753,7 +754,8 @@ A model adapter names a program with `acp` instead of `script`. It declares
 | `acp` member | Meaning |
 | --- | --- |
 | `program` | The `programs` entry to run |
-| `replay_bytes` | Largest prompt in bytes, 4096 to 8 MiB. A larger history is a context overflow |
+| `replay_bytes` | Largest prompt in bytes, 4096 to 8 MiB, that replays a whole history into a new agent session. A larger replay is a context overflow, which compaction recovers. Prompts that continue a session are not bounded by it, and it does not move the compaction threshold |
+| `concurrency` | Requests, 1 to 16, that one program serves at once, each Sailry session in its own agent session. A user runs at most four programs of the package; requests beyond their shares wait for one to finish. Default 1 |
 | `sign_in` | The instruction shown when the agent reports that it is signed out |
 | `system_meta` | Dotted `_meta` path of `session/new` that takes the system text. Without it, or when the agent does not advertise it, the system text opens the first prompt |
 | `efforts` | Effort level (`minimal` to `max`) to model identifier suffix. Variants fold into one model |

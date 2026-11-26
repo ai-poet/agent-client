@@ -25,10 +25,11 @@ type Feature struct {
 var Features = []Feature{
 	{ID: "page:conversation", Icon: icons.Chat, Label: "shell_sessions", Fixed: true},
 	{ID: "page:image_studio", Icon: icons.Image, Label: "image_studio", DefaultPinned: true},
-	{ID: "page:activity", Icon: icons.Grid, Label: "activity"},
-	{ID: "page:files", Icon: icons.Folder, Label: "files"},
-	{ID: "page:git", Icon: icons.Network, Label: "git"},
-	{ID: "page:settings_plugins", Icon: icons.Puzzle, Label: "market_title", Last: true},
+	{ID: "page:insights", Icon: icons.ChartBar, Label: "insights_title"},
+	{ID: "page:activity", Icon: icons.Grid, Label: "activity", DefaultPinned: true},
+	{ID: "page:files", Icon: icons.Folder, Label: "files", DefaultPinned: true},
+	{ID: "page:git", Icon: icons.Network, Label: "git", DefaultPinned: true},
+	{ID: "page:settings_plugins", Icon: icons.Puzzle, Label: "market_title", Last: true, DefaultPinned: true},
 }
 
 func featureOf(id string) (Feature, bool) {

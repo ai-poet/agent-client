@@ -6,11 +6,11 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
 )
 
 // The @ and / pickers and the inline chips: typing @ or / after a space opens
@@ -271,7 +271,7 @@ func (s *State) choose(c *ui.Context, ctx *Context, actions Actions, r Reference
 		s.replace("")
 	case ModelCommand:
 		next := modelOf(ctx, r.Insert)
-		s.Model, s.Effort = r.Insert, float64(s.carried(next, s.Chosen(ctx.Models)))
+		s.Model, s.Effort = r.Insert, float64(defaultEffort(next))
 		s.replace("")
 	case EffortCommand:
 		if i := slices.Index(efforts(s.Chosen(ctx.Models)), r.Insert); i >= 0 {

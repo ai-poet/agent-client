@@ -51,11 +51,22 @@ type Failure struct {
 	tcpDialTimeout bool
 	// A transport EOF can recover; other invalid responses remain permanent.
 	truncated bool
+	// forbidden marks an Authentication failure the provider refused with
+	// HTTP 403 rather than a rejected key. Relay gateways that pool upstream
+	// accounts answer 403 while they rotate to another account, so it is
+	// retried; a 401 or an invalid key never recovers by resending.
+	forbidden bool
 }
 
 func (f *Failure) Error() string { return f.Message }
 func (f *Failure) Retryable() bool {
-	return f.Kind == RateLimited || f.Kind == Network || f.Kind == Unavailable || f.truncated
+	return f.Kind == RateLimited || f.Kind == Network || f.Kind == Unavailable || f.truncated || f.Kind == Authentication && f.forbidden
+}
+
+// loadRetryable is a retry that waits out provider load. A permission refusal
+// is retried too, but it is not overload.
+func (f *Failure) loadRetryable() bool {
+	return f.Retryable() && f.Kind != Quota && f.Kind != Authentication
 }
 
 // httpResponseFailure carries only retry advice across a transport's decoding
@@ -110,7 +121,7 @@ func (f *Failure) retainResponseHints(err error) {
 	if f.status != nil || len(f.retryAfter) > 0 || f.retryAfterMs != nil {
 		f.tcpDialTimeout = false
 	}
-	f.overloaded = f.Retryable() && (f.overloaded || f.Kind == RateLimited || f.status != nil && *f.status == 529)
+	f.overloaded = f.loadRetryable() && (f.overloaded || f.Kind == RateLimited || f.status != nil && *f.status == 529)
 }
 
 func overloadedCode(code string) bool {
@@ -205,13 +216,20 @@ func Classify(err error, secrets ...protocol.Secret) *Failure {
 		case overflow || strings.Contains(lower, "maximum context length") ||
 			strings.Contains(strings.ToLower(message), "input exceeds the context window"):
 			f.Kind = ContextOverflow
-		case status == 401 || status == 403 || provider.AuthError || containsCode(code, "invalid_api_key", "authentication_error", "invalid_authentication", "unauthorized", "permission_denied"):
-			f.Kind = Authentication
-		case containsCode(code, "insufficient_quota", "credits_exhausted", "billing_not_active", "quota_exceeded", "billing_hard_limit_reached") || strings.Contains(lower, "all available accounts exhausted"):
+		case !invalidKeyCode(code) && (status == 402 || containsCode(code, "insufficient_quota", "credits_exhausted", "billing_not_active", "quota_exceeded", "billing_hard_limit_reached", "insufficient_balance", "insufficient_credits", "payment_required") ||
+			strings.Contains(lower, "all available accounts exhausted")):
+			// A declared balance code is checked before the authentication
+			// rule, since gateways send it with 403. A refusal stated only in
+			// prose stays a 403 and is shown with the provider's own message.
 			f.Kind = Quota
-		case status == 429 || containsCode(code, "rate_limit_exceeded", "rate_limit_error", "too_many_requests"):
+		case status == 401 || status == 403 || provider.AuthError || invalidKeyCode(code) || containsCode(code, "authentication_error", "unauthorized", "permission_denied"):
+			f.Kind = Authentication
+			f.forbidden = status == 403 && !invalidKeyCode(code)
+		case status == 429 || rateLimitCode(code):
 			f.Kind = RateLimited
-		case status == 408 || status >= 500 && status <= 599 || overloaded || usageMissing || containsCode(code, "upstream_bad_gateway", "upstream_unavailable", "upstream_timeout", "server_error", "internal_error", "internal_server_error", "bad_gateway", "gateway_timeout", "service_unavailable", "service_unavailable_error"):
+		// Bedrock reports stream exceptions by type after a 200 response.
+		case status == 408 || status >= 500 && status <= 599 || overloaded || usageMissing || containsCode(code, "upstream_bad_gateway", "upstream_unavailable", "upstream_timeout", "server_error", "internal_error", "internal_server_error", "bad_gateway", "gateway_timeout", "service_unavailable", "service_unavailable_error",
+			"serviceUnavailableException", "internalServerException", "modelStreamErrorException", "modelTimeoutException"):
 			f.Kind = Unavailable
 		case errors.Is(provider.Cause, context.Canceled):
 			f.Kind = Cancelled
@@ -243,6 +261,14 @@ func Classify(err error, secrets ...protocol.Secret) *Failure {
 	f.retainResponseHints(err)
 	f.Message = safeDiagnostic(f.Message, secrets)
 	return f
+}
+
+func rateLimitCode(code string) bool {
+	return containsCode(code, "rate_limit_exceeded", "rate_limit_error", "too_many_requests", "throttlingException")
+}
+
+func invalidKeyCode(code string) bool {
+	return containsCode(code, "invalid_api_key", "invalid_authentication")
 }
 
 func contextOverflowCode(code string) bool {
@@ -335,7 +361,12 @@ func Fault(err error) *protocol.Fault {
 	}
 	if failure.Exhausted || failure.WaitExhausted {
 		reason := protocol.ConversationRecoveryStopAttemptsExhausted
-		if failure.WaitExhausted {
+		switch {
+		case failure.Kind == Quota:
+			// A spent balance outlasted the retries: that, not the attempt
+			// count, is what the user can act on.
+			reason = protocol.ConversationRecoveryStopQuotaExceeded
+		case failure.WaitExhausted:
 			reason = protocol.ConversationRecoveryStopWaitExhausted
 		}
 		return &protocol.Fault{Code: code, Message: failure.Message, Details: &protocol.FaultDetails{Kind: "model_recovery", Data: protocol.FaultDetailsModelRecoveryPayload{Reason: reason}}}
@@ -343,9 +374,15 @@ func Fault(err error) *protocol.Fault {
 	reason := protocol.ModelFailureRequest
 	switch failure.Kind {
 	case Authentication:
-		reason = protocol.ModelFailureUnauthorized
-	case RateLimited, Quota:
+		// A 403 is not known to be a credential failure: its title stays
+		// generic and the provider's message says why.
+		if !failure.forbidden {
+			reason = protocol.ModelFailureUnauthorized
+		}
+	case RateLimited:
 		reason = protocol.ModelFailureRateLimited
+	case Quota:
+		reason = protocol.ModelFailureQuota
 	}
 	// The code and reason are Rust's. An overflow is stated beside them, so
 	// that a reader of the run can tell it from an outage.

@@ -19,7 +19,7 @@ func (node *Node) Open(ctx context.Context, caller protocol.NodeID, id protocol.
 	if err != nil {
 		return nil, err
 	}
-	worktree, found, err := node.transfers.Scope(caller, id)
+	worktree, session, found, err := node.transfers.Scope(caller, id)
 	if err != nil {
 		return nil, err
 	}
@@ -28,6 +28,14 @@ func (node *Node) Open(ctx context.Context, caller protocol.NodeID, id protocol.
 		current, err := node.authenticate(store.WithUser(next, user), caller)
 		if err != nil {
 			return err
+		}
+		if session != (protocol.SessionID{}) {
+			return node.profile.Store.Node.Read(current, func(db *sql.Conn) error {
+				if err := store.CheckSessionAccess(current, db, session); err != nil {
+					return err
+				}
+				return store.CheckTraceSession(current, db, session)
+			})
 		}
 		if !found || worktree == (protocol.WorktreeID{}) {
 			return nil

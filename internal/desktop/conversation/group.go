@@ -145,11 +145,22 @@ func uniquePaths(calls []Call) []string {
 	return out
 }
 
-// lastLines keeps a command's last 100 lines, returning how many it hid.
-func lastLines(text string) (string, int) {
-	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
-	if len(lines) <= 100 {
-		return strings.Join(lines, "\n"), 0
+const (
+	shownRows     = 8
+	earlierPage   = 50
+	previewLines  = 12
+	expandedLines = 400
+)
+
+// Commands show their result at the tail; other previews start at the head.
+func previewLinesOf[T any](lines []T, full, tail bool) ([]T, int) {
+	limit := previewLines
+	if full {
+		limit = expandedLines
 	}
-	return strings.Join(lines[len(lines)-100:], "\n"), len(lines) - 100
+	hidden := max(0, len(lines)-limit)
+	if tail {
+		return lines[hidden:], hidden
+	}
+	return lines[:len(lines)-hidden], hidden
 }

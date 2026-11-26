@@ -1,7 +1,6 @@
 package model
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,174 +16,30 @@ import (
 	"charm.land/fantasy"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/compact"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model/acpfixture"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/program"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
-// The test binary is its own agent: started with SAILRY_ACP_FIXTURE it
-// speaks the Agent Client Protocol on its standard streams, replies from
-// script.json in its working directory and logs every line it receives to
-// requests.log there.
+// The test binary is its own agent: started with the fixture variable it
+// speaks the Agent Client Protocol (acpfixture).
 func TestMain(suite *testing.M) {
-	if scenario, fixture := os.LookupEnv("SAILRY_ACP_FIXTURE"); fixture {
-		acpFixtureAgent(scenario)
+	if scenario, fixture := os.LookupEnv(acpfixture.Variable); fixture {
+		acpfixture.Serve(scenario)
 		return
 	}
 	os.Exit(suite.Run())
 }
 
-type acpFixtureReply struct {
-	Thoughts   []string       `json:"thoughts"`
-	Chunks     []string       `json:"chunks"`
-	Stop       string         `json:"stop"`
-	Usage      map[string]any `json:"usage"`
-	Permission bool           `json:"permission"`
-	Hang       bool           `json:"hang"`
-	Crash      bool           `json:"crash"`
-}
+type acpFixtureReply = acpfixture.Reply
 
-func acpFixtureAgent(scenario string) {
-	previous, _ := os.ReadFile("requests.log")
-	prompts := strings.Count(string(previous), `"method":"session/prompt"`)
-	log, err := os.OpenFile("requests.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+func mustJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(value)
 	if err != nil {
-		os.Exit(2)
+		t.Fatal(err)
 	}
-	record := func(value any) {
-		line, _ := json.Marshal(value)
-		log.Write(append(line, '\n'))
-	}
-	record(map[string]any{"started": os.Args[1:], "pid": os.Getpid(), "key": os.Getenv("FIXTURE_KEY"), "home": os.Getenv("HOME"), "leak": os.Getenv("FIXTURE_LEAK")})
-	var script []acpFixtureReply
-	if raw, err := os.ReadFile("script.json"); err == nil {
-		json.Unmarshal(raw, &script)
-	}
-	send := func(value map[string]any) {
-		value["jsonrpc"] = "2.0"
-		line, _ := json.Marshal(value)
-		os.Stdout.Write(append(line, '\n'))
-	}
-	has := func(flag string) bool { return strings.Contains(","+scenario+",", ","+flag+",") }
-	sessions, authenticated := 0, false
-	var pending json.RawMessage
-	var waiting *acpFixtureReply
-	session := ""
-	answer := func(reply acpFixtureReply) {
-		update := func(kind, text string) {
-			send(map[string]any{"method": "session/update", "params": map[string]any{"sessionId": session, "update": map[string]any{
-				"sessionUpdate": kind, "content": map[string]any{"type": "text", "text": text}}}})
-		}
-		for _, text := range reply.Thoughts {
-			update("agent_thought_chunk", text)
-		}
-		for _, text := range reply.Chunks {
-			update("agent_message_chunk", text)
-		}
-		if reply.Crash {
-			fmt.Fprintln(os.Stderr, "fixture agent crashed")
-			os.Exit(3)
-		}
-		if reply.Hang {
-			return
-		}
-		stop := reply.Stop
-		if stop == "" {
-			stop = "end_turn"
-		}
-		result := map[string]any{"stopReason": stop}
-		if reply.Usage != nil {
-			result["usage"] = reply.Usage
-		}
-		send(map[string]any{"id": pending, "result": result})
-		pending = nil
-	}
-	lines := bufio.NewScanner(os.Stdin)
-	lines.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
-	for lines.Scan() {
-		log.Write(append(append([]byte(nil), lines.Bytes()...), '\n'))
-		var message struct {
-			ID     json.RawMessage `json:"id"`
-			Method string          `json:"method"`
-			Params struct {
-				SessionID string `json:"sessionId"`
-			} `json:"params"`
-		}
-		if json.Unmarshal(lines.Bytes(), &message) != nil {
-			continue
-		}
-		switch message.Method {
-		case "initialize":
-			capabilities := map[string]any{"promptCapabilities": map[string]any{"image": true}}
-			if has("meta") {
-				capabilities["_meta"] = map[string]any{"vendor": map[string]any{"systemPrompt": map[string]any{"append": true}}}
-			}
-			send(map[string]any{"id": message.ID, "result": map[string]any{"protocolVersion": 1, "agentCapabilities": capabilities, "authMethods": []any{}}})
-		case "authenticate":
-			authenticated = true
-			send(map[string]any{"id": message.ID, "result": map[string]any{}})
-		case "session/new":
-			if has("signed-out") || has("login") && !authenticated {
-				send(map[string]any{"id": message.ID, "error": map[string]any{"code": -32000, "message": "Authentication required"}})
-				continue
-			}
-			sessions++
-			session = fmt.Sprintf("session-%d-%d", os.Getpid(), sessions)
-			result := map[string]any{"sessionId": session}
-			switch {
-			case has("variants"):
-				result["models"] = map[string]any{"availableModels": []any{
-					map[string]any{"modelId": "captured-low", "name": "Captured (Low)"},
-					map[string]any{"modelId": "captured-high", "name": "Captured (High)"},
-					map[string]any{"modelId": "plain", "name": "Plain"},
-				}}
-			case has("options"):
-				result["configOptions"] = []any{
-					map[string]any{"id": "model", "category": "model", "type": "select", "currentValue": "other", "options": []any{
-						map[string]any{"value": "captured", "name": "Captured"}, map[string]any{"value": "other", "name": "Other"}}},
-					map[string]any{"id": "thought_level", "category": "thought_level", "type": "select", "currentValue": "low", "options": []any{
-						map[string]any{"value": "low", "name": "Low"}, map[string]any{"value": "high", "name": "High"}}},
-				}
-			case !has("unlisted"):
-				result["models"] = map[string]any{"availableModels": []any{map[string]any{"modelId": "captured", "name": "Captured"}}}
-			}
-			send(map[string]any{"id": message.ID, "result": result})
-		case "session/set_model":
-			send(map[string]any{"id": message.ID, "result": map[string]any{}})
-		case "session/set_config_option":
-			send(map[string]any{"id": message.ID, "result": map[string]any{"configOptions": []any{}}})
-		case "session/prompt":
-			reply := acpFixtureReply{Chunks: []string{"ok"}}
-			if prompts < len(script) {
-				reply = script[prompts]
-			}
-			prompts++
-			pending, session = message.ID, message.Params.SessionID
-			if reply.Permission {
-				waiting = &reply
-				send(map[string]any{"id": 900, "method": "session/request_permission", "params": map[string]any{"sessionId": session,
-					"toolCall": map[string]any{"toolCallId": "builtin"},
-					"options":  []any{map[string]any{"optionId": "yes", "name": "Allow", "kind": "allow_once"}, map[string]any{"optionId": "no", "name": "Reject", "kind": "reject_once"}}}})
-				continue
-			}
-			answer(reply)
-		case "session/cancel":
-			if pending != nil {
-				send(map[string]any{"id": pending, "result": map[string]any{"stopReason": "cancelled"}})
-				pending = nil
-			}
-		case "":
-			// The answer to the permission request releases the held reply.
-			if waiting != nil {
-				reply := *waiting
-				waiting = nil
-				answer(reply)
-			}
-		default:
-			if message.ID != nil {
-				send(map[string]any{"id": message.ID, "error": map[string]any{"code": -32601, "message": "Method not found"}})
-			}
-		}
-	}
+	return raw
 }
 
 type acpFixture struct {
@@ -222,7 +77,7 @@ func acpFixtureModel(t *testing.T, scenario string, script []acpFixtureReply, mu
 		SignIn: "Run fixture-agent once to sign in", Efforts: map[string]string{"low": "-low", "high": "-high"}}
 	pool := program.NewPool(2, time.Minute)
 	t.Cleanup(pool.Close)
-	capture := ACPCapture{Adapter: declaration, Owner: "fixture", Dir: dir, Version: "0.0.0", Pool: pool,
+	capture := ACPCapture{Adapter: declaration, Owner: "fixture", Dir: dir, Sessions: filepath.Join(t.TempDir(), "sessions"), Version: "0.0.0", Pool: pool,
 		Host: []string{"PATH=" + bin, "HOME=" + dir, "FIXTURE_LEAK=host"},
 		Program: protocol.PluginProgramDeclaration{ID: "agent", Command: "fixture-agent", Args: []string{"acp"},
 			Env:   map[string]string{"SAILRY_ACP_FIXTURE": scenario},
@@ -511,16 +366,103 @@ func TestACPRoute(t *testing.T) {
 		}
 	})
 
-	t.Run("reports a malformed call and a reply cut inside a call as errors", func(t *testing.T) {
+	t.Run("repairs raw control characters and trailing commas in a call", func(t *testing.T) {
 		fixture := acpFixtureModel(t, "meta", []acpFixtureReply{
-			{Chunks: []string{`<tool_call>{"name":</tool_call><tool_call>{"name":"read","arguments":{}}</tool_call>`}},
-			{Chunks: []string{`<tool_call>{"name":"read","argu`}},
+			{Chunks: []string{"<tool_call>{\"name\":\"read\",\"arguments\":{\"path\":\"a\n\tb\",},}</tool_call>"}},
 		}, nil)
+		result := fixture.run(t.Context(), acpRequest(t, "", acpUser, "read"), nil)
+		if result.failure != nil || len(result.calls) != 1 || result.calls[0].ToolCallInput != `{"path":"a\n\tb"}` || result.finish != fantasy.FinishReasonToolCalls {
+			t.Fatalf("reply = %#v", result)
+		}
+		if prompts := fixture.received("session/prompt"); len(prompts) != 1 {
+			t.Fatalf("a repaired call was asked for again: %d prompts", len(prompts))
+		}
+	})
+
+	t.Run("asks again in the same session for a call it cannot read", func(t *testing.T) {
+		fixture := acpFixtureModel(t, "meta", []acpFixtureReply{
+			{Chunks: []string{`<tool_call>{"name":"read","arguments":{}}</tool_call><tool_call>{"name":</tool_call><tool_call>{"name":"read","arguments":{"path":"x"}}</tool_call>`}},
+			{Chunks: []string{`Sorry. <tool_call>{"name":"read","arguments":{"path":"y"}}</tool_call>`}},
+		}, nil)
+		result := fixture.run(t.Context(), acpRequest(t, "", acpUser, "read"), nil)
+		if result.failure != nil || len(result.calls) != 2 || result.calls[0].ToolCallInput != `{}` || result.calls[1].ToolCallInput != `{"path":"y"}` ||
+			result.text != "" || result.finish != fantasy.FinishReasonToolCalls {
+			t.Fatalf("reply = %#v", result)
+		}
+		prompts := fixture.received("session/prompt")
+		if len(prompts) != 2 || !strings.Contains(fixture.prompt(1), "Tool call 2 ") || len(fixture.received("session/new")) != 1 {
+			t.Fatalf("prompts = %d, correction = %q", len(prompts), fixture.prompt(1))
+		}
+		if prompts[0]["params"].(map[string]any)["sessionId"] != prompts[1]["params"].(map[string]any)["sessionId"] {
+			t.Fatal("the correction went to another session")
+		}
+	})
+
+	t.Run("counts the usage of every prompt of a corrected reply", func(t *testing.T) {
+		fixture := acpFixtureModel(t, "meta", []acpFixtureReply{
+			{Chunks: []string{`<tool_call>{"name":</tool_call><tool_call>{}</tool_call>`}, Usage: map[string]any{"inputTokens": 10, "outputTokens": 4}},
+			{Chunks: []string{`<tool_call>{"name":"read","arguments":{}}</tool_call>`}, Usage: map[string]any{"inputTokens": 12, "outputTokens": 3}},
+		}, nil)
+		result := fixture.run(t.Context(), acpRequest(t, "", acpUser, "read"), nil)
+		if result.failure != nil || len(result.calls) != 1 || result.usage.InputTokens != 22 || result.usage.OutputTokens != 7 {
+			t.Fatalf("reply = %#v", result)
+		}
+	})
+
+	t.Run("names the JSON error of a last call that closed", func(t *testing.T) {
+		fixture := acpFixtureModel(t, "meta", []acpFixtureReply{
+			{Chunks: []string{`<tool_call>{"name":</tool_call>`}},
+			{Chunks: []string{`<tool_call>{"name":"read","arguments":{}}</tool_call>`}},
+		}, nil)
+		if result := fixture.run(t.Context(), acpRequest(t, "", acpUser, "read"), nil); result.failure != nil || len(result.calls) != 1 {
+			t.Fatalf("reply = %#v", result)
+		}
+		if correction := fixture.prompt(1); strings.Contains(correction, "ended inside it") || !strings.Contains(correction, "Tool call 1 ") {
+			t.Fatalf("correction = %q", correction)
+		}
+	})
+
+	t.Run("ends the agent session of a request without a session", func(t *testing.T) {
+		fixture := acpFixtureModel(t, "meta,close", nil, nil)
+		binding, err := Capture(fixture.model.binding.Provider, fixture.model.binding.Config, fixture.model.binding.Secret, protocol.SessionID{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		language, err := NewACP(binding, fixture.model.capture)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessionless := &acpFixture{t: t, model: language.(*acpModel), dir: fixture.dir}
 		for range 2 {
-			result := fixture.run(t.Context(), acpRequest(t, "", acpUser, "read"), nil)
-			if result.failure == nil || result.failure.Kind != InvalidResponse || len(result.calls) != 0 {
+			if result := sessionless.run(t.Context(), acpRequest(t, "", acpUser), nil); result.failure != nil || result.text != "ok" {
 				t.Fatalf("reply = %#v", result)
 			}
+		}
+		if opened, closed := len(fixture.received("session/new")), len(fixture.received("session/close")); opened != 2 || closed != 2 {
+			t.Fatalf("sessions opened = %d, closed = %d", opened, closed)
+		}
+		entry, agent, err := sessionless.model.lease(t.Context(), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		agent.mu.Lock()
+		slots, commands := len(agent.slots), len(agent.commands)
+		agent.mu.Unlock()
+		sessionless.model.capture.Pool.Release(entry, true)
+		if slots != 0 || commands != 0 {
+			t.Fatalf("a sessionless request left slots = %d, commands = %d", slots, commands)
+		}
+	})
+
+	t.Run("reports a call still malformed after its corrections", func(t *testing.T) {
+		cut := acpFixtureReply{Chunks: []string{`<tool_call>{"name":"read","argu`}}
+		fixture := acpFixtureModel(t, "meta", []acpFixtureReply{cut, cut, cut}, nil)
+		result := fixture.run(t.Context(), acpRequest(t, "", acpUser, "read"), nil)
+		if result.failure == nil || result.failure.Kind != InvalidResponse || len(result.calls) != 0 {
+			t.Fatalf("reply = %#v", result)
+		}
+		if prompts := fixture.received("session/prompt"); len(prompts) != 1+acpResends {
+			t.Fatalf("prompts = %d", len(prompts))
 		}
 	})
 
@@ -567,6 +509,175 @@ func TestACPRoute(t *testing.T) {
 		// The next step starts the program again.
 		if result := fixture.run(t.Context(), acpRequest(t, "", acpUser), nil); result.failure != nil || len(fixture.received("initialize")) != 2 {
 			t.Fatalf("reply after the idle stop = %#v", result)
+		}
+	})
+}
+
+func TestACPSessionContinuation(t *testing.T) {
+	t.Parallel()
+	const second = `[{"role":"user","parts":[{"kind":"text","text":"hi"}]},{"role":"assistant","parts":[{"kind":"text","text":"one"}]},{"role":"user","parts":[{"kind":"text","text":"more"}]}]`
+	restart := func(fixture *acpFixture) { fixture.model.capture.Pool.Invalidate(fixture.model.capture.Owner) }
+
+	t.Run("passes a reply quoting tool tags through when no tools are offered", func(t *testing.T) {
+		summary := `{"user_intent":["Explain the <tool_call> convention"],"notes":"<tool_call>{\"name\":"}`
+		fixture := acpFixtureModel(t, "meta", []acpFixtureReply{{Chunks: []string{summary[:30], summary[30:]}}, {Chunks: []string{summary}}}, nil)
+		result := fixture.run(t.Context(), acpRequest(t, "Summarize", acpUser), nil)
+		if result.failure != nil || result.text != summary || result.finish != fantasy.FinishReasonStop || len(result.calls) != 0 {
+			t.Fatalf("summary = %#v", result)
+		}
+		// With tools offered, the same reply ends inside a call.
+		if offered := fixture.run(t.Context(), acpRequest(t, "Summarize", acpUser, "read"), nil); offered.failure == nil || offered.failure.Kind != InvalidResponse {
+			t.Fatalf("reply with tools = %#v", offered)
+		}
+	})
+
+	t.Run("reports residency and the prompt bound", func(t *testing.T) {
+		fixture := acpFixtureModel(t, "meta", []acpFixtureReply{{Chunks: []string{"one"}}}, nil)
+		session := fixture.model.binding.Session
+		if route := RouteOf(fixture.model, session); !route.Session || route.Resident || route.PromptBytes != 64*1024 {
+			t.Fatalf("route before a request = %#v", route)
+		}
+		if result := fixture.run(t.Context(), acpRequest(t, "", acpUser), nil); result.failure != nil {
+			t.Fatal(result.failure)
+		}
+		if route := RouteOf(fixture.model, session); !route.Resident || route.ReplayWindow(1_000_000) != 16*1024 {
+			t.Fatalf("route of the held session = %#v", route)
+		}
+		if route := RouteOf(fixture.model, protocol.NewSessionID()); route.Resident || route.ReplayWindow(1_000_000) != 16*1024 {
+			t.Fatalf("route of another session = %#v", route)
+		}
+		// Without a resumable session a restarted program must replay.
+		restart(fixture)
+		if route := RouteOf(fixture.model, session); route.Resident {
+			t.Fatalf("route after the program stopped = %#v", route)
+		}
+		if route := RouteOf(&pluginModel{}, session); route != (Route{}) || route.ReplayWindow(1_000_000) != 1_000_000 {
+			t.Fatalf("translated route = %#v", route)
+		}
+	})
+
+	for _, method := range []string{"resume", "load"} {
+		t.Run("continues a restarted program by session/"+method, func(t *testing.T) {
+			fixture := acpFixtureModel(t, "meta,"+method, []acpFixtureReply{{Chunks: []string{"one"}}, {Chunks: []string{"two"}}}, nil)
+			if result := fixture.run(t.Context(), acpRequest(t, "", acpUser), nil); result.failure != nil {
+				t.Fatal(result.failure)
+			}
+			first := fixture.received("session/prompt")[0]["params"].(map[string]any)["sessionId"]
+			restart(fixture)
+			if route := RouteOf(fixture.model, fixture.model.binding.Session); !route.Resident {
+				t.Fatalf("a resumable session is not resident: %#v", route)
+			}
+			result := fixture.run(t.Context(), acpRequest(t, "", second), nil)
+			if result.failure != nil || result.text != "two" {
+				t.Fatalf("reply = %#v", result)
+			}
+			resumed := fixture.received("session/" + method)
+			if len(fixture.received("initialize")) != 2 || len(fixture.received("session/new")) != 1 || len(resumed) != 1 {
+				t.Fatalf("the restarted program did not %s the session", method)
+			}
+			if id := resumed[0]["params"].(map[string]any)["sessionId"]; id != first || fixture.prompt(1) != "more" {
+				t.Fatalf("resumed %v instead of %v, prompt = %q", id, first, fixture.prompt(1))
+			}
+			if selected := fixture.received("session/set_model"); len(selected) != 2 {
+				t.Fatalf("the model was not selected in the resumed session: %d", len(selected))
+			}
+		})
+	}
+
+	t.Run("tries load after resume and replays when both fail", func(t *testing.T) {
+		fixture := acpFixtureModel(t, "meta,resume,load,forget", []acpFixtureReply{{Chunks: []string{"one"}}, {Chunks: []string{"two"}}}, nil)
+		if result := fixture.run(t.Context(), acpRequest(t, "", acpUser), nil); result.failure != nil {
+			t.Fatal(result.failure)
+		}
+		restart(fixture)
+		if result := fixture.run(t.Context(), acpRequest(t, "", second), nil); result.failure != nil || result.text != "two" {
+			t.Fatalf("reply = %#v", result)
+		}
+		if len(fixture.received("session/resume")) != 1 || len(fixture.received("session/load")) != 1 || len(fixture.received("session/new")) != 2 ||
+			fixture.prompt(1) != "[USER]\nhi\n\n[ASSISTANT]\none\n\nmore" {
+			t.Fatalf("prompt = %q", fixture.prompt(1))
+		}
+	})
+
+	t.Run("resumes the session after a Node restart", func(t *testing.T) {
+		fixture := acpFixtureModel(t, "meta,resume", []acpFixtureReply{{Chunks: []string{"one"}}, {Chunks: []string{"two"}}}, nil)
+		if result := fixture.run(t.Context(), acpRequest(t, "", acpUser), nil); result.failure != nil {
+			t.Fatal(result.failure)
+		}
+		// A new Node has a new pool and a new model; only the record remains.
+		capture := fixture.model.capture
+		capture.Pool = program.NewPool(2, time.Minute)
+		t.Cleanup(capture.Pool.Close)
+		fixture.model.capture.Pool.Close()
+		restarted, err := NewACP(fixture.model.binding, capture)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.model = restarted.(*acpModel)
+		if result := fixture.run(t.Context(), acpRequest(t, "", second), nil); result.failure != nil || result.text != "two" ||
+			len(fixture.received("session/resume")) != 1 || len(fixture.received("session/new")) != 1 || fixture.prompt(1) != "more" {
+			t.Fatalf("reply = %#v, prompt = %q", result, fixture.prompt(1))
+		}
+	})
+
+	for _, advertised := range []bool{true, false} {
+		name := "sends /compact only where the session advertises it"
+		scenario := "meta,resume,close"
+		if advertised {
+			name, scenario = "continues the session after /compact", scenario+",compact"
+		}
+		t.Run(name, func(t *testing.T) {
+			fixture := acpFixtureModel(t, scenario, []acpFixtureReply{{Chunks: []string{"one"}}, {Chunks: []string{"two"}}}, nil)
+			if result := fixture.run(t.Context(), acpRequest(t, "", acpUser), nil); result.failure != nil {
+				t.Fatal(result.failure)
+			}
+			if route := RouteOf(fixture.model, fixture.model.binding.Session); route.Compact != advertised {
+				t.Fatalf("route = %#v", route)
+			}
+			// The compacted history: the handoff, then the retained exchange.
+			const handoff = `{"role":"user","parts":[{"kind":"text","text":"Summary of the earlier work"}]},`
+			compacted := "[" + handoff + `{"role":"user","parts":[{"kind":"text","text":"hi"}]},{"role":"assistant","parts":[{"kind":"text","text":"one"}]}]`
+			call := fantasy.Call{ProviderOptions: fantasy.ProviderOptions{pluginRequestKey: &pluginCallRequest{Body: mustJSON(t, acpRequest(t, "", compacted))}}}
+			if err := CompactSession(t.Context(), fixture.model, call); err != nil {
+				t.Fatal(err)
+			}
+			next := "[" + handoff + strings.TrimPrefix(second, "[")
+			if result := fixture.run(t.Context(), acpRequest(t, "", next), nil); result.failure != nil || result.text != "two" {
+				t.Fatalf("reply = %#v", result)
+			}
+			sent := fixture.received("session/prompt")
+			if !advertised {
+				if len(sent) != 2 || len(fixture.received("session/new")) != 2 || strings.Contains(fixture.prompt(1), "/compact") {
+					t.Fatalf("prompts = %d, sessions = %d", len(sent), len(fixture.received("session/new")))
+				}
+				return
+			}
+			session := sent[0]["params"].(map[string]any)["sessionId"]
+			if len(sent) != 3 || fixture.prompt(1) != "/compact" || fixture.prompt(2) != "more" || len(fixture.received("session/new")) != 1 ||
+				sent[2]["params"].(map[string]any)["sessionId"] != session {
+				t.Fatalf("prompts = %d, second = %q", len(sent), fixture.prompt(len(sent)-1))
+			}
+		})
+	}
+
+	t.Run("closes a replaced session and never sends a compact command", func(t *testing.T) {
+		fixture := acpFixtureModel(t, "meta,close", []acpFixtureReply{{Chunks: []string{"one"}}, {Chunks: []string{"two"}}}, nil)
+		if result := fixture.run(t.Context(), acpRequest(t, "", acpUser), nil); result.failure != nil {
+			t.Fatal(result.failure)
+		}
+		// A compacted history begins with its summary: no prefix is shared.
+		compacted := `[{"role":"user","parts":[{"kind":"text","text":"Summary of the earlier work"}]},{"role":"user","parts":[{"kind":"text","text":"more"}]}]`
+		if result := fixture.run(t.Context(), acpRequest(t, "", compacted), nil); result.failure != nil || result.text != "two" {
+			t.Fatalf("reply = %#v", result)
+		}
+		sessions, closed := fixture.received("session/new"), fixture.received("session/close")
+		if len(sessions) != 2 || len(closed) != 1 || closed[0]["params"].(map[string]any)["sessionId"] != fixture.received("session/prompt")[0]["params"].(map[string]any)["sessionId"] {
+			t.Fatalf("sessions = %d, closed = %#v", len(sessions), closed)
+		}
+		for index := range fixture.received("session/prompt") {
+			if strings.TrimSpace(fixture.prompt(index)) == "/compact" {
+				t.Fatal("a compact command was sent")
+			}
 		}
 	})
 }

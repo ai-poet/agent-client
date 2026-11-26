@@ -1,12 +1,12 @@
 package shell
 
 import (
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/sidebar"
+	"github.com/egoist/mygo/ui"
 )
 
 // pageFeatures are the rail features that open an independent page, and the
@@ -14,6 +14,7 @@ import (
 var pageFeatures = map[string]Page{
 	"page:conversation":     ConversationPage,
 	"page:image_studio":     ImageStudioPage,
+	"page:insights":         InsightsPage,
 	"page:activity":         ActivityPage,
 	"page:files":            FilesPage,
 	"page:git":              GitPage,
@@ -148,6 +149,10 @@ func (a *App) RevealDetails() {
 // alike; Activity and Market as the reference's preview shows them,
 // unavailable.
 func (a *App) featurePage(c *ui.Context) {
+	if a.Page == InsightsPage && !a.sampled() && a.Hooks.Insights != nil {
+		a.Hooks.Insights(c)
+		return
+	}
 	if a.Page == PluginPage && a.Hooks.PluginPage != nil {
 		a.Hooks.PluginPage(c, a.pluginPage)
 		return

@@ -144,6 +144,10 @@ func supplierForPlatform(platform string) string {
 
 func supplierForAPI(api protocol.ConversationModelApi) string {
 	switch api {
+	case protocol.ConversationModelApiBedrock:
+		return "amazon-bedrock"
+	case protocol.ConversationModelApiVertexAi:
+		return "google-vertex"
 	case protocol.ConversationModelApiResponses, protocol.ConversationModelApiChatCompletions:
 		return "openai"
 	case protocol.ConversationModelApiAnthropic:

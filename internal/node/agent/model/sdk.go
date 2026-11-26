@@ -15,6 +15,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/egoist/mygo/netproxy"
 	"github.com/openai/openai-go/v3/packages/ssestream"
 )
@@ -75,11 +76,13 @@ type sdkModel struct {
 	client *http.Client
 }
 type responseFacts struct {
-	status   int
-	headers  http.Header
-	body     []byte
-	family   string
-	observer *usageObserverBody
+	// A short-lived token is not known when Run captures the static secrets.
+	accessToken protocol.Secret
+	status      int
+	headers     http.Header
+	body        []byte
+	family      string
+	observer    *usageObserverBody
 }
 type factsKey struct{}
 
@@ -140,7 +143,10 @@ func (transport responseTransport) RoundTrip(request *http.Request) (*http.Respo
 		if err != nil {
 			return nil, err
 		}
-		capturePrepared(request.Context(), raw, true)
+		if capture := capturePrepared(request.Context(), raw, true); capture != nil && capture.trace != nil {
+			request = capture.trace.GatewayRequest(request)
+			capture.trace.Request(request.Header, raw)
+		}
 	}
 	owner, cancel := context.WithCancel(request.Context())
 	stalled := &atomic.Bool{}
@@ -159,7 +165,12 @@ func (transport responseTransport) RoundTrip(request *http.Request) (*http.Respo
 		return nil, err
 	}
 	response.Body = &stallBody{ReadCloser: response.Body, limit: transport.stall, timer: timer, cancel: cancel, stalled: stalled}
-	captureHeaders(request.Context(), response.StatusCode)
+	if capture := captureHeaders(request.Context(), response.StatusCode); capture != nil {
+		capture.gatewayID = gatewayRequestID(response.Header)
+		if capture.trace != nil {
+			capture.trace.Response(response)
+		}
+	}
 	if facts, ok := request.Context().Value(factsKey{}).(*responseFacts); ok {
 		facts.status, facts.headers = response.StatusCode, response.Header.Clone()
 		if response.StatusCode >= 400 {
@@ -196,6 +207,9 @@ func newSDK(_ context.Context, config transportConfig) (fantasy.LanguageModel, e
 	var transport http.RoundTripper = responseTransport{base: modelTransport(), stall: stallTimeout}
 	if config.Kind == "anthropic" && config.OAuth {
 		transport = claudeTransport{base: transport}
+	}
+	if config.vertex != nil {
+		transport = vertexTransport{base: transport, account: config.vertex}
 	}
 	return &sdkModel{config: config, client: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
@@ -234,6 +248,10 @@ func (model *sdkModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.S
 		case "google":
 			model.streamGoogle(owner, raw, call, emitter)
 		case "responses":
+			if nativeRequest(call) != nil {
+				model.compactResponses(owner, body, call, emitter)
+				return
+			}
 			model.streamResponses(owner, raw, call, emitter)
 		default:
 			model.streamChat(owner, raw, call, emitter)
@@ -376,7 +394,11 @@ func (emitter *sdkEmitter) fail(cause error) {
 	failure := &fantasy.ProviderError{Message: message, Cause: cause, StatusCode: emitter.facts.status, ResponseHeaders: headers, ResponseBody: emitter.facts.body}
 	lower := strings.ToLower(string(emitter.facts.body))
 	failure.ContextTooLargeErr = strings.Contains(lower, "context_length_exceeded") || strings.Contains(lower, "maximum context length")
-	emitter.emit(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: withResponseHints(failure, emitter.facts.status, emitter.facts.headers)})
+	err := withResponseHints(failure, emitter.facts.status, emitter.facts.headers)
+	if emitter.config.vertex != nil {
+		err = Classify(err, emitter.facts.accessToken)
+	}
+	emitter.emit(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: err})
 }
 
 func decodeSDK(raw string) (map[string]any, error) {
@@ -442,8 +464,26 @@ func (emitter *sdkEmitter) updateUsage(value map[string]any, family string) {
 			emitter.usage.Reasoning = count
 		}
 	}
+	counts := value
+	if iterations := wireArray(merged["iterations"]); family == "anthropic" && len(iterations) > 0 {
+		// A request that compacts reports zero at the top level and its billed
+		// passes, the compaction among them, as iterations.
+		counts = map[string]any{}
+		for key := range keys {
+			var sum int64
+			found := false
+			for _, iteration := range iterations {
+				if count := wireInt(wireObject(iteration)[key]); count != nil {
+					sum, found = sum+*count, true
+				}
+			}
+			if found {
+				counts[key] = json.Number(fmt.Sprint(sum))
+			}
+		}
+	}
 	for key, target := range keys {
-		if count := wireInt(value[key]); count != nil {
+		if count := wireInt(counts[key]); count != nil {
 			*target = count
 		}
 	}
