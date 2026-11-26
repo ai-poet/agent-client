@@ -39,6 +39,9 @@ type State struct {
 	MigrationFailureDetail string
 	Account                core.User
 	ModelCount             int
+	AffectedRoles          int
+	MigratingRoles         bool
+	MigrateRoles           func()
 	Recharge               *RechargeDialog
 	OpenRecharge           func()
 	OpenPlans              func()

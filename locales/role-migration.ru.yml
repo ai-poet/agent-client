@@ -1,0 +1,5 @@
+cheaprouter_roles_affected: "Агенты, использующие отключённый канал: %{count}"
+cheaprouter_roles_migrate: "Перенести на доступный одноимённый канал"
+cheaprouter_roles_receipt: "Успешно: %{saved}. Ошибок: %{failed}. Пропущено: %{skipped}."
+cheaprouter_roles_manual: "Подходящего канала нет. Измените настройки этих агентов в разделе «Настройки › Команды»: %{names}."
+cheaprouter_roles_unknown: "Не подтверждено: %{count}. Проверьте каналы агентов."

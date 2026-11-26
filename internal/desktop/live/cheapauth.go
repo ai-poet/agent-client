@@ -98,6 +98,7 @@ func (r *Runtime) initCheapAuth() {
 		}
 	}
 	state.StopSync = r.stopCheapSync
+	state.MigrateRoles = r.migrateCheapRoles
 	state.Logout = r.logoutCheapAuth
 	state.OpenRecharge = r.openRecharge
 	state.OpenPlans = func() { r.openPayment(nil, true) }

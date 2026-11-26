@@ -51,6 +51,13 @@ func content(c *ui.Context, state *State) {
 	if state.SignedIn() && state.AccountFailure != "" && state.AccountFailure != state.Failure {
 		feedback.Alert(c.Key("account-failure"), state.AccountFailure, feedback.AlertProps{Type: feedback.Error, Selectable: true})
 	}
+	if state.AffectedRoles > 0 {
+		kit.Row(c, "affected-roles", i18n.T(c, "cheaprouter_roles_affected", "count", state.AffectedRoles), "", func() {
+			kit.Secondary(c.Key("migrate-roles"), i18n.T(c, "cheaprouter_roles_migrate")).
+				Disabled(state.MigratingRoles || state.LoggingOut || state.SwitchingGroup || state.Stage == SyncingGateway || state.MigrateRoles == nil).
+				OnClick(state.MigrateRoles)
+		})
+	}
 	if state.MigrationFailure != "" {
 		message := i18n.T(c, state.MigrationFailure) + "：" + i18n.T(c, "migration_failed_retry")
 		if state.MigrationFailureDetail != "" {

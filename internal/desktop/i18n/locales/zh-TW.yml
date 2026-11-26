@@ -1851,6 +1851,11 @@ team_conflict: 團隊已變更，請重新開啟
 role_model_unavailable: 所選模型或供應商不可用
 role_capacity: 子代理數量已達上限
 role_unknown: 結果未確認，請重試原請求
+cheaprouter_roles_affected: 有 %{count} 個 Agent 引用了已停用的渠道
+cheaprouter_roles_migrate: 遷移到可用的同名渠道
+cheaprouter_roles_receipt: 成功 %{saved}，失敗 %{failed}，略過 %{skipped}。
+cheaprouter_roles_manual: 沒有可用的同名渠道，請在「設定 › 團隊」中手動修改：%{names}。
+cheaprouter_roles_unknown: 另有 %{count} 筆結果未確認，請檢查角色綁定。
 role_failed: 操作失敗，請重試
 chat_child_unavailable: 子會話尚不可用，請重試
 reference_load_failed: 無法載入引用

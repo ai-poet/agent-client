@@ -1851,6 +1851,11 @@ team_conflict: 팀이 변경되었습니다. 다시 여세요
 role_model_unavailable: 선택한 모델 또는 공급자를 사용할 수 없습니다
 role_capacity: 하위 에이전트 제한에 도달함
 role_unknown: 결과 확인되지 않음; 원래 요청을 다시 시도하십시오
+cheaprouter_roles_affected: '비활성 채널을 사용하는 에이전트: %{count}개'
+cheaprouter_roles_migrate: 사용 가능한 같은 이름의 채널로 이전
+cheaprouter_roles_receipt: 성공 %{saved}개, 실패 %{failed}개, 건너뜀 %{skipped}개.
+cheaprouter_roles_manual: '일치하는 채널이 없습니다. 설정 › 팀에서 직접 수정하세요: %{names}.'
+cheaprouter_roles_unknown: 미확인 %{count}개. 에이전트의 채널 설정을 확인하세요.
 role_failed: 작업 실패; 다시 시도하기
 chat_child_unavailable: 하위 세션을 사용할 수 없습니다. 다시 시도하십시오
 reference_load_failed: 참조를 불러오지 못함

@@ -1,0 +1,5 @@
+cheaprouter_roles_affected: "Agents using a disabled channel: %{count}"
+cheaprouter_roles_migrate: "Migrate to the matching available channel"
+cheaprouter_roles_receipt: "Migrated: %{saved}. Failed: %{failed}. Skipped: %{skipped}."
+cheaprouter_roles_manual: "No matching channel. Edit these agents in Settings › Teams: %{names}."
+cheaprouter_roles_unknown: "Unconfirmed: %{count}. Check the agent bindings."

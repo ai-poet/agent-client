@@ -1851,6 +1851,11 @@ team_conflict: A equipe mudou; abra-a novamente
 role_model_unavailable: O modelo ou provedor selecionado não está disponível
 role_capacity: Limite de sub-agente atingido
 role_unknown: Resultado não confirmado; tente novamente a solicitação original
+cheaprouter_roles_affected: 'Agentes que usam um canal desativado: %{count}'
+cheaprouter_roles_migrate: Migrar para o canal disponível de mesmo nome
+cheaprouter_roles_receipt: 'Sucessos: %{saved}. Falhas: %{failed}. Ignorados: %{skipped}.'
+cheaprouter_roles_manual: 'Não há um canal correspondente. Edite estes agentes em Configurações › Equipes: %{names}.'
+cheaprouter_roles_unknown: 'Sem confirmação: %{count}. Confira os canais dos agentes.'
 role_failed: Operação falhou; tente novamente
 chat_child_unavailable: Subsessão indisponível; tente novamente
 reference_load_failed: Não foi possível carregar as referências

@@ -1851,6 +1851,11 @@ team_conflict: Team changed; reopen it
 role_model_unavailable: Selected model or provider is unavailable
 role_capacity: Subagent limit reached
 role_unknown: Result unconfirmed; retry the original request
+cheaprouter_roles_affected: 'Agents using a disabled channel: %{count}'
+cheaprouter_roles_migrate: Migrate to the matching available channel
+cheaprouter_roles_receipt: 'Migrated: %{saved}. Failed: %{failed}. Skipped: %{skipped}.'
+cheaprouter_roles_manual: 'No matching channel. Edit these agents in Settings › Teams: %{names}.'
+cheaprouter_roles_unknown: 'Unconfirmed: %{count}. Check the agent bindings.'
 role_failed: Operation failed; retry
 chat_child_unavailable: Subsession unavailable; try again
 reference_load_failed: Failed to load references

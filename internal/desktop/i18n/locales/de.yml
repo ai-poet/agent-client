@@ -1851,6 +1851,11 @@ team_conflict: Team wurde geändert; erneut öffnen
 role_model_unavailable: Ausgewähltes Modell oder Anbieter ist nicht verfügbar
 role_capacity: Unteragent-Limit erreicht
 role_unknown: Ergebnis nicht bestätigt; versuchen Sie die ursprüngliche Anfrage erneut
+cheaprouter_roles_affected: 'Agenten mit deaktiviertem Kanal: %{count}'
+cheaprouter_roles_migrate: Zum verfügbaren gleichnamigen Kanal wechseln
+cheaprouter_roles_receipt: 'Erfolgreich: %{saved}. Fehlgeschlagen: %{failed}. Übersprungen: %{skipped}.'
+cheaprouter_roles_manual: 'Kein passender Kanal. Diese Agenten unter Einstellungen › Teams bearbeiten: %{names}.'
+cheaprouter_roles_unknown: 'Unbestätigt: %{count}. Bitte die Kanalzuordnung prüfen.'
 role_failed: Vorgang fehlgeschlagen; versuchen Sie es erneut
 chat_child_unavailable: Untersitzung nicht verfügbar; versuchen Sie es erneut
 reference_load_failed: Referenzen konnten nicht geladen werden

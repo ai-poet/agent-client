@@ -1864,6 +1864,11 @@ team_conflict
 role_model_unavailable
 role_capacity
 role_unknown
+cheaprouter_roles_affected
+cheaprouter_roles_migrate
+cheaprouter_roles_receipt
+cheaprouter_roles_manual
+cheaprouter_roles_unknown
 role_failed
 chat_child_unavailable
 reference_load_failed
