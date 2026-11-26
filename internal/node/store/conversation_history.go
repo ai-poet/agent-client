@@ -165,6 +165,9 @@ func historyEntries(ctx context.Context, db *sql.Conn, session protocol.SessionI
 	out := make([]protocol.ConversationEntry, 0, len(records))
 	requests := toolRequests{}
 	for i := range records {
+		requests.include(records[i].record)
+	}
+	for i := range records {
 		entry, err := projectStoredEntry(ctx, db, records[i].record, records[i].sequence, requests)
 		if err != nil {
 			return nil, false, err
