@@ -51,28 +51,17 @@ func BuildCall(binding Binding, request Request) (fantasy.Call, error) {
 	}
 	records := VisibleRecords(request.Records)
 	origins := map[int]string{}
-	active := -1
-	for i := len(records) - 1; i >= 0 && active < 0; i-- {
-		runtime := records[i].Metadata.Runtime
-		if runtime != nil && runtime.TurnContext {
-			continue
-		}
-		if message, _, _ := records[i].ModelContent(); message != nil && message.Role == canonical.User {
-			for _, block := range message.Content {
-				if block.Kind != "tool_response" {
-					active = i
-					break
-				}
-			}
-		}
-	}
 	appendBackground := func(text string) {
 		if text != "" {
 			call.Prompt = append(call.Prompt, fantasy.Message{Role: fantasy.MessageRoleAssistant, Content: []fantasy.MessagePart{fantasy.TextPart{Text: text}}})
 		}
 	}
-	for i, record := range records {
+	for _, record := range records {
 		record = request.audienceRecord(record)
+		if native, ok := nativeMessage(binding, record); ok {
+			call.Prompt = append(call.Prompt, native)
+			continue
+		}
 		message, background, err := record.ModelContent()
 		if err != nil {
 			return call, err
@@ -148,7 +137,7 @@ func BuildCall(binding Binding, request Request) (fantasy.Call, error) {
 				}
 				part := fantasy.ReasoningPart{Text: value.Text, ProviderOptions: fantasy.ProviderOptions{}}
 				if value.Signature != nil {
-					switch binding.Provider.Api {
+					switch binding.Provider.Api.Family() {
 					case "anthropic":
 						part.ProviderOptions[anthropic.Name] = &anthropic.ReasoningOptionMetadata{Signature: *value.Signature}
 					case "responses":
@@ -158,9 +147,7 @@ func BuildCall(binding Binding, request Request) (fantasy.Call, error) {
 						if err != nil {
 							return call, &Failure{Kind: InvalidRequest, Message: "stored thought signature is invalid"}
 						}
-						if active < 0 || i >= active {
-							part.ProviderOptions[google.Name] = &google.ReasoningMetadata{Signature: string(decoded)}
-						}
+						part.ProviderOptions[google.Name] = &google.ReasoningMetadata{Signature: string(decoded)}
 					}
 				}
 				current.Content = append(current.Content, part)
@@ -177,7 +164,7 @@ func BuildCall(binding Binding, request Request) (fantasy.Call, error) {
 					return call, &Failure{Kind: InvalidRequest, Message: "stored tool call is invalid"}
 				}
 				options := fantasy.ProviderOptions{}
-				if keep && binding.Provider.Api == "gemini" && (active < 0 || i >= active) && value.Provider != nil {
+				if keep && binding.Provider.Api.Family() == "gemini" && value.Provider != nil {
 					if raw := (*value.Provider)["thoughtSignature"]; len(raw) > 0 {
 						var signature string
 						if json.Unmarshal(raw, &signature) == nil {
@@ -240,12 +227,19 @@ func BuildCall(binding Binding, request Request) (fantasy.Call, error) {
 		flush()
 		appendBackground(background)
 	}
-	if binding.Provider.Api == "anthropic" {
+	if binding.Provider.Api.Family() == protocol.ConversationModelApiAnthropic {
 		remaining := 2
 		for i := len(call.Prompt) - 1; i >= 0 && remaining > 0; i-- {
 			if call.Prompt[i].Role == fantasy.MessageRoleUser || call.Prompt[i].Role == fantasy.MessageRoleTool {
 				call.Prompt[i].ProviderOptions = cacheOptions(binding)
 				remaining--
+				// Treat a parallel tool-response batch as one logical turn so
+				// both breakpoints are not spent on the newest tool results.
+				if call.Prompt[i].Role == fantasy.MessageRoleTool {
+					for i > 0 && call.Prompt[i-1].Role == fantasy.MessageRoleTool {
+						i--
+					}
+				}
 			}
 		}
 	}
@@ -479,7 +473,7 @@ func keepReasoning(binding Binding, record canonical.Record) bool {
 	return false
 }
 func cacheOptions(binding Binding) fantasy.ProviderOptions {
-	if binding.Provider.Api == "anthropic" {
+	if binding.Provider.Api.Family() == protocol.ConversationModelApiAnthropic {
 		return fantasy.ProviderOptions{anthropic.Name: &anthropic.ProviderCacheControlOptions{CacheControl: anthropic.CacheControl{Type: "ephemeral"}}}
 	}
 	return nil

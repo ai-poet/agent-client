@@ -26,13 +26,13 @@ import (
 
 // Options exposes the actual model and clock boundaries to deterministic tests.
 type Options struct {
-	Python            *python.Manager
-	ValidateWorktree  func(context.Context, protocol.WorktreeID) error
-	Attachment        func(context.Context, protocol.TurnID, protocol.AttachmentID) (protocol.Attachment, bool, error)
-	AttachmentBytes   func(context.Context, protocol.Attachment) ([]byte, error)
-	Clock             clock.Clock
-	Model             func(context.Context, model.Binding) (fantasy.LanguageModel, error)
-	AuthorizeProvider func(context.Context, *store.AgentInvocation) error
+	Python             *python.Manager
+	ValidateWorktree   func(context.Context, protocol.WorktreeID) error
+	Attachment         func(context.Context, protocol.TurnID, protocol.AttachmentID) (protocol.Attachment, bool, error)
+	AttachmentBytes    func(context.Context, protocol.Attachment) ([]byte, error)
+	Clock              clock.Clock
+	Model              func(context.Context, model.Binding) (fantasy.LanguageModel, error)
+	AuthorizeProvider  func(context.Context, *store.AgentInvocation) error
 	Tools              []Tool
 	ToolsForTurn       func(context.Context, *store.AgentInvocation) ([]Tool, error)
 	HooksForTurn       func(context.Context, *store.AgentInvocation) *hooks.Binding
@@ -114,27 +114,30 @@ type execution struct {
 	stopped           []*delegatedChild // the session's children this turn cancelled; guarded by Runtime.mu
 	renewedModel      fantasy.LanguageModel
 	renewedSecret     protocol.Secret
-	childBudget       uint64
-	finishing         bool
-	commandsStopped   bool // guarded by Runtime.publication
-	operations        uint64
-	operationsDone    chan struct{}
-	attachments       map[protocol.AttachmentID]*attachmentMaterial
-	hooks             *hooks.Binding
-	timeline          *timeline
-	inv               *store.AgentInvocation
-	ctx               context.Context
-	cancel            context.CancelFunc
-	done              chan struct{}
-	wake              chan struct{}
-	guidance          chan struct{}
-	tools             []Tool
-	names             *exposure
-	deferredContext   *string
-	toolCleanup       []func() error
-	inputMu           sync.Mutex
-	inputWake         chan struct{}
-	output            output.Cache
+	// sessionRoute: the model keeps the session's history and receives only
+	// new messages, so rewriting earlier ones would replay all of it.
+	sessionRoute    bool
+	childBudget     uint64
+	finishing       bool
+	commandsStopped bool // guarded by Runtime.publication
+	operations      uint64
+	operationsDone  chan struct{}
+	attachments     map[protocol.AttachmentID]*attachmentMaterial
+	hooks           *hooks.Binding
+	timeline        *timeline
+	inv             *store.AgentInvocation
+	ctx             context.Context
+	cancel          context.CancelFunc
+	done            chan struct{}
+	wake            chan struct{}
+	guidance        chan struct{}
+	tools           []Tool
+	names           *exposure
+	deferredContext *string
+	toolCleanup     []func() error
+	inputMu         sync.Mutex
+	inputWake       chan struct{}
+	output          output.Cache
 }
 
 func New(db *store.Handle, node protocol.NodeID, profile string, frames *feed.Hub, publish func(), options Options) *Runtime {
@@ -185,6 +188,10 @@ func (r *Runtime) Wake() {
 	default:
 	}
 }
+
+// ActivitySignal returns a channel closed at the next wake, which follows
+// every settled execution. Take it before reading the state it guards.
+func (r *Runtime) ActivitySignal() <-chan struct{} { return r.activitySignal() }
 
 // LockPublication orders commits, their frames and pinned controller snapshots.
 // Acquire decision ownership first; acquire storage leases only after this lock.

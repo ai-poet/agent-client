@@ -655,6 +655,11 @@ func (s *State) blocks(c *ui.Context, turn string, blocks []Block, continuing bo
 				s.grounding(c, key, b)
 			case RetryBlock:
 				s.retry(c, key, b.Retry, continuing && last)
+				if trace, ok := actions.(interface{ ViewTrace(string, int) }); ok && b.Retry.Request != "" && b.Retry.TraceAttempt > 0 {
+					kit.Ghost(c.Key("view-trace"), i18n.T(c, "trace_view"), false).OnClick(func() {
+						trace.ViewTrace(b.Retry.Request, b.Retry.TraceAttempt)
+					})
+				}
 			case VisualBlock:
 				visual(c, "visual", b.Visual)
 			case CompactionBlock:

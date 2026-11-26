@@ -4,9 +4,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panes"
+	"github.com/egoist/mygo/ui"
 )
 
 func TestWorkspaceTerminalStandalone(t *testing.T) {
@@ -58,6 +58,22 @@ func TestWorkspaceTerminalSameConversationSelection(t *testing.T) {
 	click(t, tt, "Virtualized transcript stress test")
 	if a.panes.Active != session(selected) || a.FocusedConversation() != selected || !a.HasWorkspaceTerminal("terminal") {
 		t.Fatalf("same-row selection: active %v, terminals %v", a.panes.Active, a.WorkspaceTerminalIDs())
+	}
+}
+
+// The sidebar selects a main terminal's row only while the conversation page
+// shows it; another page with the sidebar leaves the selection to it.
+func TestWorkspaceTerminalSidebarSelection(t *testing.T) {
+	a, tt := newTester(t)
+	a.OpenWorkspaceTerminal("terminal", "Project shell")
+	tt.Frame()
+	if a.Sidebar.Terminal != "terminal" {
+		t.Fatalf("the shown terminal's row is not selected: %q", a.Sidebar.Terminal)
+	}
+	a.OpenProject(a.Data.Projects[0], ProjectActions{})
+	tt.Frame()
+	if a.Page != ProjectPage || a.Sidebar.Terminal != "" {
+		t.Fatalf("the terminal's row stayed selected on page %v: %q", a.Page, a.Sidebar.Terminal)
 	}
 }
 

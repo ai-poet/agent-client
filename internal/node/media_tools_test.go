@@ -542,7 +542,7 @@ func TestMediaTools(t *testing.T) {
 		usage := map[string]protocol.ConversationUsage{}
 		for _, item := range report.Requests.Items {
 			if item.Session == session.ID && item.Provider == provider.ID {
-				usage[item.Model] = item.Tokens
+				usage[item.Model] = *item.Tokens
 			}
 		}
 		if usage["painter"].Input != 7 || usage["painter"].Output != 5 || usage["eyes"].Input != 11 || usage["eyes"].Output != 3 {

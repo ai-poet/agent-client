@@ -18,7 +18,9 @@ import (
 )
 
 func (model *sdkModel) openAIOptions(call fantasy.Call) []option.RequestOption {
-	opts := []option.RequestOption{option.WithHTTPClient(model.client), option.WithBaseURL(strings.TrimSuffix(model.config.Endpoint, "/chat/completions")), option.WithAPIKey(model.config.Key), option.WithMaxRetries(0)}
+	// Supply the trailing slash with the escaped path to preserve mount segments.
+	base := strings.TrimRight(model.config.Endpoint, "/") + "/"
+	opts := []option.RequestOption{option.WithHTTPClient(model.client), option.WithBaseURL(base), option.WithAPIKey(model.config.Key), option.WithMaxRetries(0)}
 	for key, value := range model.config.Headers {
 		opts = append(opts, option.WithHeader(key, value))
 	}
@@ -295,6 +297,58 @@ func (model *sdkModel) streamResponses(ctx context.Context, raw []byte, call fan
 	emitter.emit(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: reason})
 }
 
+// compactResponses sends the history as `/responses/compact`, Sailry's choice
+// of when to compact instead of the server's automatic threshold. The
+// endpoint takes the window and its instructions but no tools; it is
+// stateless, so the request stays ZDR-friendly. The returned window, the
+// retained user messages followed by one encrypted compaction item, is the
+// next context as is; it carries no readable summary.
+func (model *sdkModel) compactResponses(ctx context.Context, body map[string]any, call fantasy.Call, emitter *sdkEmitter) {
+	request := map[string]any{"model": body["model"], "input": body["input"]}
+	for _, key := range []string{"instructions", "prompt_cache_key"} {
+		if value, ok := body[key]; ok {
+			request[key] = value
+		}
+	}
+	raw, err := json.Marshal(request)
+	if err != nil {
+		emitter.fail(err)
+		return
+	}
+	service := responses.NewResponseService(model.openAIOptions(call)...)
+	response, err := service.Compact(ctx, responses.ResponseCompactParams{}, option.WithRequestBody("application/json", raw))
+	if err != nil {
+		emitter.fail(err)
+		return
+	}
+	value, err := decodeSDK(response.RawJSON())
+	if err != nil {
+		emitter.fail(err)
+		return
+	}
+	emitter.updateUsage(wireObject(value["usage"]), "responses")
+	output := wireArray(value["output"])
+	result := &nativeOutput{Ignored: true}
+	part := fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop,
+		ProviderMetadata: fantasy.ProviderMetadata{nativeCompactionKey: result}}
+	for _, item := range output {
+		if object := wireObject(item); object["type"] == "compaction" {
+			result.Ignored = false
+			if wireString(object["encrypted_content"]) == "" {
+				continue
+			}
+			items, err := json.Marshal(output)
+			if err != nil {
+				emitter.fail(err)
+				return
+			}
+			result.Items = items
+			break
+		}
+	}
+	emitter.emit(part)
+}
+
 type chatTool struct {
 	id, name, input string
 	started         bool
@@ -306,6 +360,15 @@ func (model *sdkModel) streamChat(ctx context.Context, raw []byte, call fantasy.
 	stream := service.NewStreaming(ctx, openaisdk.ChatCompletionNewParams{}, option.WithRequestBody("application/json", raw))
 	defer stream.Close()
 	tools := map[int64]*chatTool{}
+	finished := map[int64]bool{}
+	var options struct {
+		N int `json:"n"`
+	}
+	if err := json.Unmarshal(raw, &options); err != nil {
+		emitter.fail(err)
+		return
+	}
+	want := int64(max(options.N, 1))
 	reason := ""
 	// Reasoning a model writes inline in its content is reasoning. A provider
 	// that also reports reasoning in its own field is read from that field.
@@ -385,6 +448,14 @@ func (model *sdkModel) streamChat(ctx context.Context, raw []byte, call fantasy.
 				}
 			}
 			if finish, ok := choice["finish_reason"].(string); ok && finish != "" {
+				switch finish {
+				case "stop", "tool_calls", "function_call", "length", "content_filter":
+					if index := wireInt(choice["index"]); index != nil && *index >= 0 && *index < want {
+						finished[*index] = true
+					} else if choice["index"] == nil && want == 1 {
+						finished[0] = true
+					}
+				}
 				reason = finish
 			}
 		}
@@ -394,8 +465,11 @@ func (model *sdkModel) streamChat(ctx context.Context, raw []byte, call fantasy.
 		return
 	}
 	if err := stream.Err(); err != nil {
-		emitter.fail(err)
-		return
+		// Connection loss after all choices finished loses only the trailer.
+		if ctx.Err() != nil || int64(len(finished)) != want || !http2ConnectionLost(err) {
+			emitter.fail(err)
+			return
+		}
 	}
 	if reason == "" {
 		emitter.fail(io.ErrUnexpectedEOF)

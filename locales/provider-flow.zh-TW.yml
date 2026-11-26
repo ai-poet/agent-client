@@ -22,3 +22,7 @@ provider_login_claude: "Claude"
 provider_add_model: "新增模型"
 provider_model_default: "預設"
 provider_api_chat_completions: Chat Completions
+provider_project: "專案 ID"
+provider_location: "位置"
+provider_service_account: "服務帳戶金鑰"
+provider_service_account_hint: "貼上服務帳戶 JSON 金鑰"

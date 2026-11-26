@@ -155,6 +155,9 @@ func (a *App) SetPrefs(p Prefs) {
 		// Merged as a profile's are: a saved order keeps the fixed features
 		// in place and gains the ones added since.
 		pins := map[string]bool{}
+		for _, f := range p.Features {
+			pins[f] = true
+		}
 		for _, f := range p.Unpinned {
 			pins[f] = false
 		}

@@ -195,8 +195,7 @@ func modelRow(t *testing.T, tt *ui.Tester, name string) ui.AccessInfo {
 	return row
 }
 
-// point moves the pointer onto a row: one move there gives the row the
-// effort column.
+// point moves the pointer onto a row without clicking it.
 func point(tt *ui.Tester, row ui.AccessInfo) {
 	tt.Move(row.Bounds.X+20, row.Bounds.Y+row.Bounds.H/2)
 	tt.Frame()
@@ -263,12 +262,9 @@ func inside(in, out ui.Rect) bool {
 	return in.X >= out.X-0.5 && in.Y >= out.Y-0.5 && in.X+in.W <= out.X+out.W+0.5 && in.Y+in.H <= out.Y+out.H+0.5
 }
 
-// composerModels is the model picker's panel: the families' rail, the
-// models and the efforts of the model the pointer or the keys are on, three
-// columns of one panel with a hairline between them. No menu floats over it.
-// A model's row chooses it at the effort its column checks, an effort's row
-// at that effort, and the panel goes back to its controls, still open.
-// pickerInShell has the picker in the app's window.
+// composerModels exercises the picker panel, including the family rail, model
+// list and effort column. A model with efforts opens its column on click or
+// keyboard focus. Choosing an effort returns to the controls.
 func composerModels(t *testing.T) {
 	heading := zh("composer_effort")
 	none := zh("composer_effort_unavailable")
@@ -282,8 +278,8 @@ func composerModels(t *testing.T) {
 				tt, comp, _ := composerPicker(t, width, scale, nil)
 				window := ui.Rect{W: float32(width), H: 520}
 				pickerContained(t, tt, "as the picker opens", heading, window, anthropic...)
-				point(tt, modelRow(t, tt, "Claude Sonnet 5.5"))
-				pickerContained(t, tt, "with the pointer on a model", heading, window, anthropic...)
+				pressButton(t, tt, "Claude Sonnet 5.5")
+				pickerContained(t, tt, "after clicking a model", heading, window, anthropic...)
 				pressEffort(t, tt, "low")
 				if comp.Model != "claude-sonnet-5-5" || composer.Efforts[int(comp.Effort)] != "low" {
 					t.Fatalf("the effort's row chose %q at effort %v, want claude-sonnet-5-5 at low", comp.Model, comp.Effort)
@@ -361,50 +357,40 @@ func composerModels(t *testing.T) {
 		atRest(t, tt, calm, "with the pointer at rest on a model")
 	})
 
-	// The column follows the pointer as it moves on a model's row, and
-	// checks the effort the row would choose: the one chosen now where the
-	// model has it, else the model's default.
-	t.Run("pointer on another model", func(t *testing.T) {
+	// Clicking another model opens its effort column at the first level.
+	t.Run("click another model", func(t *testing.T) {
 		tt, comp, _ := modelPickerAt(t, 960, nil)
 		pressButton(t, tt, "Google")
 		rest(tt)
-		// The pointer is on the rail: the column is still the chosen model's.
+		// Changing the family keeps the chosen model's efforts until a model is clicked.
 		if names, checked := effortNames(tt); !slices.Equal(names, composer.Efforts) || checked != "medium" {
-			t.Errorf("before the pointer is on a model the column lists %q with %q checked", names, checked)
+			t.Errorf("after choosing a family the column lists %q with %q checked", names, checked)
 		}
-		gemini := modelRow(t, tt, "Gemini 3 Pro")
-		point(tt, gemini)
-		if names, checked := effortNames(tt); !slices.Equal(names, []string{"low", "high"}) || checked != "high" {
-			t.Fatalf("on Gemini 3 Pro the column lists %q with %q checked, want low and high with its default", names, checked)
+		pressButton(t, tt, "Gemini 3 Pro")
+		if names, checked := effortNames(tt); !slices.Equal(names, []string{"low", "high"}) || checked != "low" {
+			t.Fatalf("on Gemini 3 Pro the column lists %q with %q checked, want low and high with low selected", names, checked)
 		}
-		// The row chooses the model at that effort.
-		tt.ClickAt(gemini.Bounds.X+20, gemini.Bounds.Y+gemini.Bounds.H/2)
-		rest(tt)
+		if comp.Model != "claude-opus-5-5" || comp.Effort != 2 {
+			t.Fatalf("opening the effort column selected %q at effort %v", comp.Model, comp.Effort)
+		}
+		pressEffort(t, tt, "high")
 		if comp.Model != "gemini-3-pro" || comp.Effort != 1 {
-			t.Fatalf("the row chose %q at effort %v, want gemini-3-pro at high", comp.Model, comp.Effort)
+			t.Fatalf("the effort row chose %q at effort %v, want gemini-3-pro at high", comp.Model, comp.Effort)
 		}
-		// high is one of Claude Opus 5.5's: its row keeps it.
+		// The next model opens at its first effort even when it also offers high.
 		pressButton(t, tt, "Gemini 3 Pro")
 		rest(tt)
 		pressButton(t, tt, zh("provider_anthropic"))
 		rest(tt)
-		opus := modelRow(t, tt, "Claude Opus 5.5")
-		point(tt, opus)
-		if _, checked := effortNames(tt); checked != "high" {
-			t.Errorf("on Claude Opus 5.5 the column checks %q, want the effort chosen now", checked)
-		}
-		tt.ClickAt(opus.Bounds.X+20, opus.Bounds.Y+opus.Bounds.H/2)
-		rest(tt)
-		if comp.Model != "claude-opus-5-5" || composer.Efforts[int(comp.Effort)] != "high" {
-			t.Errorf("the row chose %q at effort %v, want claude-opus-5-5 at high", comp.Model, comp.Effort)
+		pressButton(t, tt, "Claude Opus 5.5")
+		if _, checked := effortNames(tt); checked != "minimal" {
+			t.Errorf("on Claude Opus 5.5 the column checks %q, want minimal", checked)
 		}
 	})
 
-	// One move onto a model's row gives it the column. A pointer at rest
-	// takes nothing: not from the keys, and not for a row the list brings
-	// under it. On its way to the column, more to the right than up or down,
-	// it crosses the rows between without giving them the column.
-	t.Run("pointer at rest", func(t *testing.T) {
+	// Moving the pointer leaves the effort column with the last model clicked
+	// or reached by keyboard focus.
+	t.Run("hover keeps the current column", func(t *testing.T) {
 		short := []string{"low", "high"}
 		tt, _, _ := modelPickerAt(t, 960, func(_ *composer.State, ctx *composer.Context) {
 			ctx.Models = slices.Clone(ctx.Models)
@@ -426,18 +412,14 @@ func composerModels(t *testing.T) {
 		}
 		// The list opened under the pointer, which has not moved.
 		column("as the picker opens", composer.Efforts)
-		sonnet := modelRow(t, tt, "Claude Sonnet 5.5").Bounds
-		x, y := sonnet.X+20, sonnet.Y+sonnet.H/2
-		tt.Move(x, y)
-		tt.Frame()
-		column("after one move onto Claude Sonnet 5.5", short)
-		// The keys take the column from under the pointer.
 		key(ui.KeyDown) // from Claude Opus 5.5, which has the focus
+		column("with the focus on Claude Sonnet 5.5", short)
+		point(tt, modelRow(t, tt, "Claude Haiku 5.5"))
+		column("while hovering Claude Haiku 5.5", short)
 		key(ui.KeyDown)
 		column("with the focus on Claude Haiku 5.5", nil)
-		tt.Move(x+1, y)
-		tt.Frame()
-		column("after a move on Claude Sonnet 5.5", short)
+		point(tt, modelRow(t, tt, "Claude Sonnet 5.5"))
+		column("while hovering Claude Sonnet 5.5", nil)
 		// Returning by keyboard takes precedence over the stationary pointer.
 		key(ui.KeyUp)
 		key(ui.KeyUp)
@@ -445,22 +427,16 @@ func composerModels(t *testing.T) {
 		tt.Frame()
 		tt.Frame()
 		column("with the pointer still at rest", composer.Efforts)
-		tt.Move(x+2, y)
-		tt.Frame()
-		column("after a move on that row", short)
-		// Towards the column, over the next model's row.
-		tt.Move(x+42, y+20)
-		tt.Frame()
-		column("on the way to the column over Claude Haiku 5.5", short)
-		tt.Move(x+42, y+30)
-		tt.Frame()
-		column("after a move down Claude Haiku 5.5", nil)
+		pressButton(t, tt, "Claude Sonnet 5.5")
+		column("after clicking Claude Sonnet 5.5", short)
+		point(tt, modelRow(t, tt, "Claude Haiku 5.5"))
+		column("after moving off the clicked model", short)
 	})
 
 	// Unsupported efforts hide the column and divider without resizing
 	// the panel itself.
 	t.Run("model without efforts", func(t *testing.T) {
-		tt, _, _ := modelPickerAt(t, 960, nil)
+		tt, comp, _ := modelPickerAt(t, 960, nil)
 		before, _ := popups(tt)
 		if _, ok := tt.AccessByRole(ui.RoleListBox, heading); !ok {
 			t.Fatal("Claude Opus 5.5 has no effort column")
@@ -468,7 +444,9 @@ func composerModels(t *testing.T) {
 		if tt.HasText(none) {
 			t.Fatalf("the line of a model without efforts shows for Claude Opus 5.5: %q", tt.Texts())
 		}
-		point(tt, modelRow(t, tt, "Claude Haiku 5.5"))
+		tt.Key(0, ui.KeyDown)
+		tt.Frame()
+		tt.Key(0, ui.KeyDown)
 		rest(tt)
 		after, _ := popups(tt)
 		if len(before) != 1 || len(after) != 1 || after[0].Bounds != before[0].Bounds {
@@ -483,13 +461,17 @@ func composerModels(t *testing.T) {
 		if tt.HasText(none) {
 			t.Error("a model without efforts still shows an unavailable placeholder")
 		}
+		pressButton(t, tt, "Claude Haiku 5.5")
+		if comp.Model != "claude-haiku-5-5" || comp.Effort != 0 {
+			t.Errorf("clicking a model without efforts chose %q at effort %v", comp.Model, comp.Effort)
+		}
 	})
 
 	// An effort's row chooses the column's model at that effort, as the
 	// efforts' menu did: the panel stays open, back on its controls.
 	t.Run("choosing an effort", func(t *testing.T) {
 		tt, comp, _ := modelPickerAt(t, 960, nil)
-		point(tt, modelRow(t, tt, "Claude Sonnet 5.5"))
+		pressButton(t, tt, "Claude Sonnet 5.5")
 		pressEffort(t, tt, "high")
 		if comp.Model != "claude-sonnet-5-5" || composer.Efforts[int(comp.Effort)] != "high" {
 			t.Fatalf("the effort's row chose %q at effort %v, want claude-sonnet-5-5 at high", comp.Model, comp.Effort)
@@ -576,10 +558,12 @@ func composerModels(t *testing.T) {
 		// No efforts to go to.
 		key(0, ui.KeyRight, ui.RoleButton, "Claude Haiku 5.5")
 		key(0, ui.KeyUp, ui.RoleButton, "Claude Sonnet 5.5")
-		if names, checked := effortNames(tt); !slices.Equal(names, composer.Efforts) || checked != "medium" {
+		if names, checked := effortNames(tt); !slices.Equal(names, composer.Efforts) || checked != "minimal" {
 			t.Errorf("with the focus on Claude Sonnet 5.5 the column lists %q with %q checked", names, checked)
 		}
-		key(0, ui.KeyRight, ui.RoleOption, "medium")
+		key(0, ui.KeyRight, ui.RoleOption, "minimal")
+		key(0, ui.KeyDown, ui.RoleOption, "low")
+		key(0, ui.KeyDown, ui.RoleOption, "medium")
 		key(0, ui.KeyDown, ui.RoleOption, "high")
 		tt.Key(0, ui.KeyEnter)
 		rest(tt)
@@ -851,6 +835,61 @@ func composerModels(t *testing.T) {
 		}
 		still("a model's score", score.X+score.W/2, score.Y+score.H/2)
 	})
+
+	// Multiple providers in the same family group under collapsible disclosure
+	// headers: only the chosen model's provider starts expanded, clicking another
+	// header toggles it without stealing the effort column, and search expands
+	// all matching groups.
+	t.Run("multi-provider groups", func(t *testing.T) {
+		tt, comp, _ := modelPickerAt(t, 960, func(_ *composer.State, ctx *composer.Context) {
+			ctx.Models = append(slices.Clone(ctx.Models),
+				composer.Model{
+					ID: "bedrock/claude-sonnet-5-5", Name: "Bedrock Sonnet 5.5",
+					Provider: "AWS Bedrock", ProviderID: "bedrock", ProviderTag: "Bedrock",
+					Family: "anthropic", Reasoning: true, Efforts: []string{"low", "high"}, DefaultEffort: "low",
+				},
+			)
+		})
+		direct, ok := tt.AccessByRole(ui.RoleDisclosure, "Anthropic")
+		if !ok || !direct.Expanded {
+			t.Fatalf("chosen provider group not expanded: %+v", direct)
+		}
+		bedrock, ok := tt.AccessByRole(ui.RoleDisclosure, "AWS Bedrock")
+		if !ok || bedrock.Expanded {
+			t.Fatalf("other provider group should start collapsed: %+v", bedrock)
+		}
+		if _, ok := tt.AccessByRole(ui.RoleButton, "Bedrock Sonnet 5.5"); ok {
+			t.Fatal("collapsed provider's model should not be listed")
+		}
+		clickRest(tt, bedrock)
+		if _, ok := tt.AccessByRole(ui.RoleButton, "Bedrock Sonnet 5.5"); !ok {
+			t.Fatalf("clicking disclosure header did not expand Bedrock: %q", tt.Texts())
+		}
+		if comp.Model != "claude-opus-5-5" {
+			t.Fatalf("clicking disclosure header changed model to %q", comp.Model)
+		}
+		// Effort column still reflects chosen Claude Opus 5.5 (5 default efforts).
+		if names, _ := effortNames(tt); !slices.Equal(names, composer.Efforts) {
+			t.Fatalf("clicking disclosure header altered effort column: %q", names)
+		}
+		// Re-collapse Bedrock, then search "sonnet" to confirm search force-expands both groups.
+		bedrock, _ = tt.AccessByRole(ui.RoleDisclosure, "AWS Bedrock")
+		clickRest(tt, bedrock)
+		box, ok := tt.Find(zh("search"))
+		if !ok {
+			t.Fatalf("missing search field: %q", tt.Texts())
+		}
+		tt.ClickAt(box.X+box.W/2, box.Y+box.H/2)
+		tt.Frame()
+		tt.Type("sonnet")
+		rest(tt)
+		if h, ok := tt.AccessByRole(ui.RoleDisclosure, "AWS Bedrock"); !ok || !h.Expanded {
+			t.Fatalf("search did not expand Bedrock group: %+v", h)
+		}
+		if _, ok := tt.AccessByRole(ui.RoleButton, "Bedrock Sonnet 5.5"); !ok {
+			t.Fatalf("search did not reveal Bedrock Sonnet 5.5: %q", tt.Texts())
+		}
+	})
 }
 
 // pickerInShell is the model picker in the app's window, at its first size
@@ -884,8 +923,8 @@ func pickerInShell(t *testing.T) {
 				if row := modelRow(t, tt, "Claude Opus 5.5").Bounds; row.W != 236 {
 					t.Errorf("as the picker opens the model's row is %v wide, want 236", row.W)
 				}
-				point(tt, modelRow(t, tt, "Claude Sonnet 5.5"))
-				pickerContained(t, tt, "with the pointer on a model", heading, window, models...)
+				pressButton(t, tt, "Claude Sonnet 5.5")
+				pickerContained(t, tt, "after clicking a model", heading, window, models...)
 				pressEffort(t, tt, "low")
 				if comp.Model != "claude-sonnet-5-5" || composer.Efforts[int(comp.Effort)] != "low" {
 					t.Fatalf("the effort's row chose %q at effort %v, want claude-sonnet-5-5 at low", comp.Model, comp.Effort)
@@ -906,9 +945,7 @@ func pickerInShell(t *testing.T) {
 					t.Errorf("the model's row is %v wide, want 236", row.W)
 				}
 				if size == [2]int{1280, 820} && scale == 2 && os.Getenv("SAILRY_SNAPSHOTS") != "" {
-					// The saved frames have the pointer on another model,
-					// whose efforts the column lists.
-					point(tt, modelRow(t, tt, "Claude Opus 5.5"))
+					pressButton(t, tt, "Claude Opus 5.5")
 					tt.SetLocale("zh-CN")
 					shots := filepath.Join("..", "..", "..", ".runtime", "ui-shots")
 					if err := os.MkdirAll(shots, 0o755); err != nil {

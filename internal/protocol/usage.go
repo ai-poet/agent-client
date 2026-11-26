@@ -7,15 +7,24 @@ import (
 )
 
 type UsageQuery struct {
-	StartMs          int64          `json:"start_ms"`
-	EndMs            int64          `json:"end_ms"`
-	UtcOffsetMinutes int32          `json:"utc_offset_minutes"`
-	Dimension        UsageDimension `json:"dimension"`
-	Projects         []ProjectID    `json:"projects"`
-	Worktrees        []WorktreeID   `json:"worktrees"`
-	Providers        []ProviderID   `json:"providers"`
-	Models           []string       `json:"models"`
-	Before           *UsagePosition `json:"before"`
+	CacheMissOnly     bool                             `json:"cache_miss_only,omitempty"`
+	ObservedOnly      bool                             `json:"observed_only,omitempty"`
+	WithoutCredential bool                             `json:"without_credential,omitempty"`
+	Statuses          []uint16                         `json:"statuses,omitempty"`
+	FailureKinds      []string                         `json:"failure_kinds,omitempty"`
+	Outcomes          []ConversationObservationOutcome `json:"outcomes,omitempty"`
+	EndKinds          []ConversationObservationEndKind `json:"end_kinds,omitempty"`
+	Sessions          []SessionID                      `json:"sessions,omitempty"`
+	Credentials       []CredentialID                   `json:"credentials,omitempty"`
+	StartMs           int64                            `json:"start_ms"`
+	EndMs             int64                            `json:"end_ms"`
+	UtcOffsetMinutes  int32                            `json:"utc_offset_minutes"`
+	Dimension         UsageDimension                   `json:"dimension"`
+	Projects          []ProjectID                      `json:"projects"`
+	Worktrees         []WorktreeID                     `json:"worktrees"`
+	Providers         []ProviderID                     `json:"providers"`
+	Models            []string                         `json:"models"`
+	Before            *UsagePosition                   `json:"before"`
 }
 
 func DefaultUsageQuery() UsageQuery {
@@ -52,6 +61,7 @@ func (value UsageQuery) MarshalJSON() ([]byte, error) {
 }
 
 type UsagePosition struct {
+	Ordinal     uint64 `json:"ordinal,omitempty"`
 	TimestampMs int64  `json:"timestamp_ms"`
 	Node        NodeID `json:"node"`
 	Sequence    uint64 `json:"sequence"`
@@ -80,20 +90,33 @@ func (value UsagePosition) MarshalJSON() ([]byte, error) {
 }
 
 type UsageRequest struct {
-	Position     UsagePosition     `json:"position"`
-	Session      SessionID         `json:"session"`
-	SessionTitle *string           `json:"session_title"`
-	Turn         TurnID            `json:"turn"`
-	Project      *ProjectID        `json:"project"`
-	ScopeName    string            `json:"scope_name"`
-	Worktree     WorktreeID        `json:"worktree"`
-	Provider     ProviderID        `json:"provider"`
-	ProviderName string            `json:"provider_name"`
-	Model        string            `json:"model"`
-	Tokens       ConversationUsage `json:"tokens"`
-	UsdMicros    *uint64           `json:"usd_micros"`
-	ElapsedUs    *uint64           `json:"elapsed_us"`
-	FirstTokenUs *uint64           `json:"first_token_us"`
+	CacheRead        *uint64                         `json:"cache_read,omitempty"`
+	Verdict          *TraceVerdict                   `json:"verdict,omitempty"`
+	FailureKind      *string                         `json:"failure_kind,omitempty"`
+	CacheWrite       *uint64                         `json:"cache_write,omitempty"`
+	EndKind          *ConversationObservationEndKind `json:"end_kind,omitempty"`
+	GatewayRequestID *string                         `json:"gateway_request_id,omitempty"`
+	RetryReason      *string                         `json:"retry_reason,omitempty"`
+	Outcome          *ConversationObservationOutcome `json:"outcome,omitempty"`
+	Credential       *CredentialID                   `json:"credential,omitempty"`
+	RequestID        *string                         `json:"request_id,omitempty"`
+	Attempt          *uint64                         `json:"attempt,omitempty"`
+	Status           *uint16                         `json:"status,omitempty"`
+	Position         UsagePosition                   `json:"position"`
+	Session          SessionID                       `json:"session"`
+	SessionTitle     *string                         `json:"session_title"`
+	Turn             TurnID                          `json:"turn"`
+	Project          *ProjectID                      `json:"project"`
+	ScopeName        string                          `json:"scope_name"`
+	Worktree         WorktreeID                      `json:"worktree"`
+	Provider         ProviderID                      `json:"provider"`
+	ProviderName     string                          `json:"provider_name"`
+	Model            string                          `json:"model"`
+	// Tokens is null in v2 when the attempt did not report both input and output.
+	Tokens       *ConversationUsage `json:"tokens"`
+	UsdMicros    *uint64            `json:"usd_micros"`
+	ElapsedUs    *uint64            `json:"elapsed_us"`
+	FirstTokenUs *uint64            `json:"first_token_us"`
 }
 
 func DefaultUsageRequest() UsageRequest {
@@ -108,7 +131,7 @@ func DefaultUsageRequest() UsageRequest {
 		Provider:     ProviderID{},
 		ProviderName: "",
 		Model:        "",
-		Tokens:       DefaultConversationUsage(),
+		Tokens:       &ConversationUsage{},
 		UsdMicros:    nil,
 		ElapsedUs:    nil,
 		FirstTokenUs: nil,
@@ -118,7 +141,7 @@ func (value *UsageRequest) UnmarshalJSON(data []byte) error {
 	type plain UsageRequest
 	decoded := plain{}
 	decoded.SessionTitle = nil
-	if err := DecodeObject(data, &decoded, []string{"position", "session", "turn", "scope_name", "worktree", "provider", "provider_name", "model", "tokens"}, false); err != nil {
+	if err := DecodeObject(data, &decoded, []string{"position", "session", "turn", "scope_name", "worktree", "provider", "provider_name", "model"}, false); err != nil {
 		return err
 	}
 	*value = UsageRequest(decoded)
@@ -160,10 +183,12 @@ func (value UsagePage) MarshalJSON() ([]byte, error) {
 type UsageDimension string
 
 const (
-	UsageDimensionProvider UsageDimension = "provider"
-	UsageDimensionModel    UsageDimension = "model"
-	UsageDimensionProject  UsageDimension = "project"
-	UsageDimensionWorktree UsageDimension = "worktree"
+	UsageDimensionSession    UsageDimension = "session"
+	UsageDimensionCredential UsageDimension = "credential"
+	UsageDimensionProvider   UsageDimension = "provider"
+	UsageDimensionModel      UsageDimension = "model"
+	UsageDimensionProject    UsageDimension = "project"
+	UsageDimensionWorktree   UsageDimension = "worktree"
 )
 
 func (value UsageDimension) MarshalJSON() ([]byte, error) { return marshalEnum(value) }
@@ -173,7 +198,7 @@ func (value *UsageDimension) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	switch UsageDimension(decoded) {
-	case UsageDimensionProvider, UsageDimensionModel, UsageDimensionProject, UsageDimensionWorktree:
+	case UsageDimensionSession, UsageDimensionCredential, UsageDimensionProvider, UsageDimensionModel, UsageDimensionProject, UsageDimensionWorktree:
 		*value = UsageDimension(decoded)
 		return nil
 	default:
@@ -421,7 +446,7 @@ func (value UsageKeyWorktreePayload) MarshalJSON() ([]byte, error) {
 	return json.Marshal(encoded)
 }
 
-var usageKeyVariants = variantFactories{"provider": func() any { return new(ProviderID) },
+var usageKeyVariants = variantFactories{"credential": func() any { return new(CredentialID) }, "unassigned": func() any { return new(struct{}) }, "provider": func() any { return new(ProviderID) },
 	"model":      func() any { return new(UsageKeyModelPayload) },
 	"project":    func() any { return new(ProjectID) },
 	"session":    func() any { return new(SessionID) },
@@ -442,9 +467,10 @@ func (value *UsageKey) UnmarshalJSON(data []byte) error {
 }
 
 type UsageGroup struct {
-	Key     UsageKey     `json:"key"`
-	Name    *string      `json:"name"`
-	Metrics UsageMetrics `json:"metrics"`
+	Insights *UsageInsights `json:"insights,omitempty"`
+	Key      UsageKey       `json:"key"`
+	Name     *string        `json:"name"`
+	Metrics  UsageMetrics   `json:"metrics"`
 }
 
 func DefaultUsageGroup() UsageGroup {
@@ -471,16 +497,17 @@ func (value UsageGroup) MarshalJSON() ([]byte, error) {
 }
 
 type UsageReport struct {
-	Node               NodeID       `json:"node"`
-	Cursor             uint64       `json:"cursor"`
-	PricingUpdatedAtMs *uint64      `json:"pricing_updated_at_ms"`
-	Query              UsageQuery   `json:"query"`
-	Totals             UsageMetrics `json:"totals"`
-	Days               []UsagePoint `json:"days"`
-	Recent             []UsagePoint `json:"recent"`
-	Groups             []UsageGroup `json:"groups"`
-	Resources          []UsageKey   `json:"resources"`
-	Requests           UsagePage    `json:"requests"`
+	Insights           *UsageInsights `json:"insights,omitempty"`
+	Node               NodeID         `json:"node"`
+	Cursor             uint64         `json:"cursor"`
+	PricingUpdatedAtMs *uint64        `json:"pricing_updated_at_ms"`
+	Query              UsageQuery     `json:"query"`
+	Totals             UsageMetrics   `json:"totals"`
+	Days               []UsagePoint   `json:"days"`
+	Recent             []UsagePoint   `json:"recent"`
+	Groups             []UsageGroup   `json:"groups"`
+	Resources          []UsageKey     `json:"resources"`
+	Requests           UsagePage      `json:"requests"`
 }
 
 func DefaultUsageReport() UsageReport {
@@ -514,4 +541,29 @@ func (value UsageReport) MarshalJSON() ([]byte, error) {
 	encoded.Groups = normalizeCollections(encoded.Groups)
 	encoded.Resources = normalizeCollections(encoded.Resources)
 	return json.Marshal(encoded)
+}
+
+type UsagePercentiles struct {
+	Samples     uint64  `json:"samples"`
+	P50         *uint64 `json:"p50"`
+	P95         *uint64 `json:"p95"`
+	P99         *uint64 `json:"p99"`
+	Approximate bool    `json:"approximate"`
+}
+
+type UsageInsights struct {
+	Attempts          uint64            `json:"attempts"`
+	Succeeded         uint64            `json:"succeeded"`
+	Failed            uint64            `json:"failed"`
+	Cancelled         uint64            `json:"cancelled"`
+	Retries           uint64            `json:"retries"`
+	CacheRead         uint64            `json:"cache_read"`
+	CacheWrite        uint64            `json:"cache_write"`
+	CacheReadSamples  uint64            `json:"cache_read_samples"`
+	CacheWriteSamples uint64            `json:"cache_write_samples"`
+	CacheInputTokens  uint64            `json:"cache_input_tokens"`
+	FirstTokenUs      UsagePercentiles  `json:"first_token_us"`
+	ElapsedUs         UsagePercentiles  `json:"elapsed_us"`
+	EndKinds          map[string]uint64 `json:"end_kinds"`
+	FailureKinds      map[string]uint64 `json:"failure_kinds"`
 }

@@ -196,22 +196,12 @@ func delegateAgent(ctx context.Context, db *sql.Conn, node protocol.NodeID, pare
 			if role.ReadOnly {
 				session.Config.Mode = protocol.WorkModePlan
 			}
-			model := role.Model
-			if override, ok := capture.Roles.Models[role.ID]; ok {
-				model = &override
+			model, capturedProvider, err := capturedRoleModel(capture.Roles, *role)
+			if err != nil {
+				return empty, nil, err
 			}
 			if model != nil {
-				provider = nil
-				for _, candidate := range capture.Roles.Providers {
-					if candidate.ID == model.Provider {
-						copy := candidate
-						provider = &copy
-						break
-					}
-				}
-				if provider == nil {
-					return empty, nil, invalid("frozen role provider is missing")
-				}
+				provider = capturedProvider
 				session.Config, err = roleModelConfig(session.Config, *provider, *model)
 				if err != nil {
 					return empty, nil, err

@@ -136,6 +136,9 @@ tool_result: 结果
 command_result: 执行结果
 tool_copy: 复制
 diff_more_lines: "还有 %{count} 行"
+tool_rows_earlier: "显示更早的 %{count} 项"
+output_show_all: "显示全部 %{count} 行"
+output_show_less: "收起"
 approval_live_count: "待审批 %{count} 项"
 approval_receipt: 审批回执
 approval_create_file: "创建 %{path}"
@@ -912,7 +915,9 @@ chat_model_failed: 模型请求失败
 chat_model_unauthorized: 模型凭据被拒绝
 chat_model_rate_limited: 模型请求已达速率上限
 chat_config_changed: 配置已变化，请重新发送
-chat_config_unavailable: 会话配置不可用，请检查供应商
+chat_selected_model_unavailable: "所选模型不可用，请检查供应商设置"
+chat_agent_model_unavailable: "某个 Agent 的模型不可用，请到「设置 › 团队」检查"
+chat_login_expired: "登录状态已失效，请重新登录"
 chat_action_denied: "操作未被允许"
 chat_retry: 重试
 chat_new: 新建会话
@@ -1202,6 +1207,7 @@ composer_select_model: 选择模型
 composer_model_hint: 选择设置中已启用渠道的模型，仅用于 UI 预览
 composer_model_all: 全部供应商
 composer_model_empty: 没有匹配的可用模型
+composer_model_search_more: 继续输入以缩小范围
 composer_models_recent: 最近使用
 composer_effort: 推理强度
 composer_model_settings: 模型与强度

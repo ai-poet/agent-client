@@ -47,6 +47,10 @@ cheaprouter_account_description: Manage sign-in, plan details and the model gate
 cheaprouter_signed_out: Not signed in
 cheaprouter_signed_out_description: Sign in to connect the CheapRouter model gateway. Other models and local features work without an account.
 cheaprouter_signed_in: Signed in to CheapRouter
+cheaprouter_login_expired: CheapRouter 로그인이 만료되었습니다. 다시 로그인하세요.
+cheaprouter_login_expired_action: 다시 로그인
+cheaprouter_login_expired_dismiss: 로그인 알림 닫기
+cheaprouter_disable_failed: CheapRouter를 비활성화하지 못했습니다. 모델 설정에서 공급자를 끄세요.
 settings_providers: 모델
 settings_providers_description: 세션 공급자, 인증 및 모델 관리
 settings_connectors: 커넥터
@@ -137,6 +141,10 @@ tool_failed: 도구 실행 실패
 approval_pending: 승인을 기다리는 중
 content_copied: 복사됨
 tool_copy: 복사
+tool_rows_earlier: 이전 항목 %{count}개 표시
+output_show_all: 전체 %{count}줄 표시
+output_show_less: 접기
+diff_more_lines: '%{count} 더 많은 줄'
 tool_interrupted: 결과 확인되지 않음
 tool_not_executed: 승인 중단됨; 실행되지 않음Name
 tool_not_found: 대상을 찾을 수 없습니다
@@ -668,6 +676,7 @@ location_create: 새 작업 트리
 git_no_matches: 일치하지 않음
 composer_model_settings: 모델과 노력
 composer_model_empty: 일치하는 사용 가능한 모델이 없습니다
+composer_model_search_more: 계속 입력하여 결과를 좁히세요
 composer_models_recent: 최근 사용한 모델
 composer_effort_reset: 기본값으로 초기화
 composer_feature_description: 추가 요금 발생 가능
@@ -1156,6 +1165,10 @@ provider_deployment_id: 배포 이름
 provider_api_version: API 버전
 form_api_version_hint: 예를 들어 2024-10-21
 provider_cloud_required: 클라우드 공급자 구성 입력
+provider_project: 프로젝트 ID
+provider_location: 위치
+provider_service_account: 서비스 계정 키
+provider_service_account_hint: 서비스 계정 JSON 키 붙여넣기
 form_model_hint: 모델 ID
 provider_context: 컨텍스트 제한(Token)
 form_tokens_hint: Token 수
@@ -1690,7 +1703,9 @@ session_changed: 세션이 변경되었습니다. 다시 시도하십시오
 project_changed: 프로젝트 변경; 편집기 다시 열기
 chat_action_failed: 작업 실패, 다시 시도하십시오
 chat_action_unknown: 결과 확인되지 않음; 원래 요청을 다시 시도하십시오
-chat_config_unavailable: 세션 구성을 사용할 수 없습니다. 공급자 확인
+chat_selected_model_unavailable: 선택한 모델을 사용할 수 없습니다. 공급자 설정을 확인하세요.
+chat_agent_model_unavailable: 에이전트의 모델을 사용할 수 없습니다. 설정 › 팀을 확인하세요.
+chat_login_expired: 로그인이 만료되었습니다. 다시 로그인하세요.
 notification_update_failed: 알림을 업데이트하지 못했습니다. 다시 시도하세요
 session_archive_named: “%{name}”을(를) 보관하고 활성 대화에서 숨기기
 power_request_failed: 절전 모드를 방지할 수 없습니다
@@ -1840,6 +1855,11 @@ team_conflict: 팀이 변경되었습니다. 다시 여세요
 role_model_unavailable: 선택한 모델 또는 공급자를 사용할 수 없습니다
 role_capacity: 하위 에이전트 제한에 도달함
 role_unknown: 결과 확인되지 않음; 원래 요청을 다시 시도하십시오
+cheaprouter_roles_affected: '비활성 채널을 사용하는 에이전트: %{count}개'
+cheaprouter_roles_migrate: 사용 가능한 같은 이름의 채널로 이전
+cheaprouter_roles_receipt: 성공 %{saved}개, 실패 %{failed}개, 건너뜀 %{skipped}개.
+cheaprouter_roles_manual: '일치하는 채널이 없습니다. 설정 › 팀에서 직접 수정하세요: %{names}.'
+cheaprouter_roles_unknown: 미확인 %{count}개. 에이전트의 채널 설정을 확인하세요.
 role_failed: 작업 실패; 다시 시도하기
 chat_child_unavailable: 하위 세션을 사용할 수 없습니다. 다시 시도하십시오
 reference_load_failed: 참조를 불러오지 못함
@@ -2637,3 +2657,131 @@ gateway_node_unauthorized: Key refused
 gateway_node_http: HTTP %{status}
 gateway_node_unreachable: Unreachable
 gateway_node_invalid_url: Invalid URL
+trace_title: 요청 추적
+trace_view: 추적 보기
+trace_locate: 대화에서 찾기
+trace_export: 추적 내보내기
+trace_export_saved: 추적 저장됨
+trace_export_limit: 64 MiB를 초과합니다. 범위를 줄이세요.
+trace_recording: 기록 중
+trace_off: 기록 꺼짐
+trace_retries: 재시도
+trace_miss: 캐시 미스
+trace_request: 요청
+trace_response: 응답
+trace_metrics: 사용량 및 시간
+trace_cache_write: 캐시 쓰기
+trace_equal: 균등 너비
+trace_actual: 실제 시간
+trace_scope: 범위
+trace_turn: 선택한 턴
+trace_mode: 모드
+trace_shareable: 공유용
+trace_raw: 원본
+trace_raw_confirm: 원본 추적에 프롬프트, 코드 및 비공개 대화가 포함될 수 있습니다. 내보낼까요?
+trace_partial: 일부만 기록됨
+trace_load: 본문 불러오기
+trace_events: 이벤트별 보기
+trace_private: 로컬 추적에는 시스템 프롬프트와 비공개 대화 내용이 포함될 수 있습니다.
+trace_dispatch: 디스패치
+trace_sent: 요청 전송
+trace_gap: 최장 간격
+trace_dropped_headers: 생략된 헤더
+trace_turn_number: 턴 %{count}
+trace_export_failed: 추적을 내보낼 수 없습니다
+trace_load_failed: 추적을 불러올 수 없습니다
+trace_response_headers: 응답 헤더
+trace_request_id: 요청 ID
+trace_started: 시작 시각
+trace_empty: 아직 요청이 없습니다
+trace_empty_hint: 이 대화의 모델 요청이 여기에 표시됩니다.
+trace_body_missing: 본문이 기록되지 않았습니다
+trace_body_capture_hint: 설정 › 일반에서 '요청 본문 기록'을 켜면 새 요청의 본문이 저장됩니다.
+trace_body_not_saved: 추적이 저장 한도에 도달했거나 본문을 기록할 수 없었습니다.
+trace_body_failed: 본문을 불러올 수 없습니다
+trace_export_shareable_hint: 시스템 지시는 지문으로 대체됩니다. 대화 내용은 포함됩니다.
+trace_export_raw_hint: 요청과 응답 전체를 포함합니다.
+trace_export_count: 기록된 요청 %{count}개
+trace_export_none: 이 범위에 기록된 요청이 없습니다
+trace_turn_label: 턴
+trace_timing: 타이밍
+approval_cancelled: 취소됨
+diagnosis_action_account: 게이트웨이 관리자에게 업스트림 계정 변경 여부를 확인하세요.
+diagnosis_action_balance: 잔액과 할당량을 확인하세요.
+diagnosis_action_billing: 이 응답으로는 비용을 추정할 수 없습니다.
+diagnosis_action_compact: 기록을 압축하거나 더 큰 컨텍스트를 사용하세요.
+diagnosis_action_credential: 인증 정보와 권한을 확인하세요.
+diagnosis_action_fluctuation: 재시도 중 오류가 변경되었습니다. 업스트림 경로를 확인하세요.
+diagnosis_action_network: DNS, 프록시, 네트워크 연결을 확인하세요.
+diagnosis_action_prefix: 이전 요청의 접두부와 비교하세요.
+diagnosis_action_protocol: API 모드와 응답 형식을 확인하세요.
+diagnosis_action_route: 지속되면 공급자 상태를 확인하세요.
+diagnosis_action_timing: 요청 시간 내역을 확인하세요.
+diagnosis_action_wait: 공급자의 재시도 간격을 따르세요.
+diagnosis_authentication: 접근 거부
+diagnosis_cache_miss: 프롬프트 캐시 미스
+diagnosis_cache_partial: 프롬프트 캐시 일부 적중
+diagnosis_cancelled: 요청 취소됨
+diagnosis_context_overflow: 컨텍스트 한도 초과
+diagnosis_failed: 요청 실패
+diagnosis_invalid_request: 요청 거부됨
+diagnosis_invalid_response: 응답 오류 또는 중단
+diagnosis_lost: 재사용되지 않은 추정 토큰
+diagnosis_network: 네트워크 연결 실패
+diagnosis_no_usage: 사용량 미보고
+diagnosis_normal: 이상 없음
+diagnosis_prefix_broken: 캐시 접두부 변경
+diagnosis_quota: 잔액 또는 할당량 부족
+diagnosis_rate_limited: 요청 속도 제한
+diagnosis_slow_first: 첫 토큰 지연
+diagnosis_slow_output: 생성 지연
+diagnosis_unavailable: 공급자 또는 게이트웨이 사용 불가
+insights_all: 전체
+insights_apply: 필터 적용
+insights_attempts: 시도 횟수
+insights_cost_coverage: 가격이 확인된 시도
+insights_credential: 자격 증명 ID
+insights_end: 종료 사유
+insights_failure: 실패 유형
+insights_failure_rate: 실패율(확인된 결과)
+insights_groups: 그룹별 통계
+insights_host: 노드
+insights_index: 추적
+insights_invalid: 기간, 상태 코드와 필터 ID를 확인하세요.
+insights_outcome: 결과
+insights_provider_id: 공급자 ID
+insights_samples: 표본 %{count}개
+insights_session: 세션 ID
+insights_start: 시작일
+insights_status: HTTP 상태
+insights_title: 요청 분석
+insights_unassigned: 자격 증명 없음
+insights_until: 종료일
+insights_worktree: 작업 트리 ID
+model: 모델
+project: 프로젝트
+session: 데스크톱 UI 리팩터링
+trace_all_cleared: 기록된 추적을 삭제했습니다
+trace_capture_privacy: 본문에는 프롬프트, 코드 및 비공개 대화가 포함될 수 있습니다.
+trace_clear_all: 모든 추적 삭제
+trace_clear_consequence: 이 노드의 모든 세션에서 기록된 추적을 삭제할까요? 대화 기록과 사용량은 유지됩니다.
+trace_enable_capture: 요청 본문 기록
+trace_gateway_allowlist: 기록 중에 허용된 HTTPS 게이트웨이로만 보냅니다.
+trace_gateway_header: 게이트웨이에 추적 ID 보내기
+trace_settings_saved: 추적 설정을 저장했습니다
+usage: 사용량
+usage_column_model: 모델
+usage_column_project: 프로젝트
+usage_column_provider: 공급자
+usage_cost: 예상 비용 (USD)
+usage_duration: 모델 요청 기간
+usage_empty: 아직 사용되지 않음
+usage_filters: 필터
+usage_loading: 로딩 사용량
+usage_query_failed: 사용량, 범위 또는 필터를 좁힐 수 없습니다
+usage_range: 시간 범위
+usage_range_days: 마지막 %{days} 일
+usage_uncached_input: 캐시되지 않은 입력
+insights_gateway_id: 게이트웨이 요청 ID
+usage_column_duration: 기간
+usage_column_first_token: TTFT

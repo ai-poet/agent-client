@@ -123,7 +123,7 @@ func TestSDKPreheaderEOFRetriesTheSameRequest(t *testing.T) {
 			first, last := attempts[0], attempts[1]
 			if first.Failure == nil || first.Failure.Kind != Network || first.Failure.Message != "Model connection ended before response headers" || !first.Failure.Retryable() ||
 				first.Status != nil || first.ResponseUs != nil || first.RetryDelay == nil || *first.RetryDelay != timer.delays[0] ||
-				timer.delays[0] < 800*time.Millisecond || timer.delays[0] > 1200*time.Millisecond ||
+				timer.delays[0] < 240*time.Millisecond || timer.delays[0] > 360*time.Millisecond ||
 				last.Failure != nil || last.Status == nil || *last.Status != http.StatusOK || first.RequestID != last.RequestID || last.Index != 1 {
 				t.Fatalf("preheader EOF lost its transport boundary or retry identity: %+v", attempts)
 			}
@@ -142,8 +142,24 @@ func TestSDKTruncatedStreamsRetryTheSameRequestAndResetOutput(t *testing.T) {
 			"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"discard\"}}\n\n",
 		"google": "data: {\"candidates\":[{\"index\":0,\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"discard\"}]}}]}\n\n",
 	}
+	const interrupted = "Upstream response stream was interrupted"
+	type streamCase struct {
+		name, kind, payload, message string
+		failure                      FailureKind
+	}
+	var cases []streamCase
 	for kind, prefix := range prefixes {
-		t.Run(kind, func(t *testing.T) {
+		cases = append(cases, streamCase{kind, kind, prefix, "Model stream ended before a completion event", InvalidResponse})
+	}
+	for name, event := range map[string]string{
+		"unavailable":  `{"type":"response.failed","response":{"error":{"code":"unavailable","message":"` + interrupted + `"}}}`,
+		"message only": `{"type":"error","message":"` + interrupted + `"}`,
+	} {
+		cases = append(cases, streamCase{name, "responses", prefixes["responses"] + "data: " + event + "\n\n", interrupted, Unavailable})
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			kind := tc.kind
 			var requests atomic.Int32
 			bodies := make(chan string, MainRetries+1)
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -154,7 +170,7 @@ func TestSDKTruncatedStreamsRetryTheSameRequestAndResetOutput(t *testing.T) {
 				bodies <- string(body)
 				writer.Header().Set("Content-Type", "text/event-stream")
 				if requests.Add(1) == 1 {
-					_, _ = io.WriteString(writer, prefix)
+					_, _ = io.WriteString(writer, tc.payload)
 					return
 				}
 				_, _ = writer.Write(fixture(t, kind+"-text.sse"))
@@ -184,8 +200,8 @@ func TestSDKTruncatedStreamsRetryTheSameRequestAndResetOutput(t *testing.T) {
 			if err != nil || requests.Load() != 2 || len(attempts) != 2 || resets != 1 || output != "Read complete" {
 				t.Fatalf("SDK stream recovery: requests=%d attempts=%d resets=%d output=%q error=%v", requests.Load(), len(attempts), resets, output, err)
 			}
-			if first := attempts[0]; first.Failure == nil || first.Failure.Kind != InvalidResponse || first.Failure.Message != "Model stream ended before a completion event" || !first.Failure.Retryable() || first.Status == nil || *first.Status != 200 || first.ResponseUs == nil || first.RetryDelay == nil || attempts[1].Failure != nil {
-				t.Fatalf("SDK EOF lost its status, cause or retry observation: %+v", attempts)
+			if first := attempts[0]; first.Failure == nil || first.Failure.Kind != tc.failure || first.Failure.Message != tc.message || !first.Failure.Retryable() || first.Status == nil || *first.Status != 200 || first.ResponseUs == nil || first.RetryDelay == nil || attempts[1].Failure != nil {
+				t.Fatalf("SDK interruption lost its status, cause or retry observation: %+v", attempts)
 			}
 			if first, second := <-bodies, <-bodies; first != second {
 				t.Fatal("retry changed the captured request body")

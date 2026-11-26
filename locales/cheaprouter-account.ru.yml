@@ -1,0 +1,4 @@
+cheaprouter_login_expired: "Срок действия сеанса CheapRouter истёк. Войдите снова."
+cheaprouter_login_expired_action: "Войти снова"
+cheaprouter_disable_failed: "Не удалось отключить CheapRouter. Отключите поставщика в настройках моделей."
+cheaprouter_login_expired_dismiss: "Скрыть напоминание о входе"

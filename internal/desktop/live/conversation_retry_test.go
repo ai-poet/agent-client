@@ -171,7 +171,7 @@ func TestRetryProjectionUsesModelRequestIdentity(t *testing.T) {
 			snapshot := protocol.DefaultConversationSnapshot()
 			snapshot.Page.Runs = []protocol.ConversationRun{{Turn: turn, Kind: "task", Status: "running"}}
 			for index, id := range row.ids {
-				raw, err := json.Marshal(map[string]any{"type": "model_retry", "id": id, "attempt": index + 2, "limit": 9})
+				raw, err := json.Marshal(map[string]any{"type": "model_retry", "id": id, "attempt": index + 2, "trace_attempt": index + 3, "limit": 9})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -186,6 +186,9 @@ func TestRetryProjectionUsesModelRequestIdentity(t *testing.T) {
 			}
 			if len(snapshot.Page.Entries) != len(row.ids) {
 				t.Fatal("retry presentation changed stored attempts")
+			}
+			if blocks[len(blocks)-1].Retry.TraceAttempt != len(row.ids)+2 {
+				t.Fatal("retry link used the displayed resend count instead of the observed attempt")
 			}
 		})
 	}

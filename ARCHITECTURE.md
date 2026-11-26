@@ -197,6 +197,16 @@ History boundaries follow recorded execution order and retain consumed guidance
 with its recipient turn. Queue admission order remains the public history-head
 concurrency token; it does not determine which messages a history action retains.
 
+Removing sessions covers the selected root sessions and their delegated
+descendants. The Node validates the removal first; a stale or invalid removal
+stops nothing. It then stops each running turn on the `stop_turn` path and
+waits for every turn of the removal to settle before recording it, in the
+project lane so other commands are not delayed. If the scheduler starts another
+turn before the removal commits, the attempt rolls back and the Node stops and
+awaits that turn under the same removal request. The removing transaction
+discards queued input that was never admitted, ending it cancelled outside any
+queue, so no scheduler can claim it later.
+
 ### Personal configuration and credentials
 
 Each controller's local Node owns its personal configuration. Settings pages edit
@@ -255,6 +265,12 @@ default to Responses (`/v1/responses`) and fall back to Chat Completions when
 their directory entry explicitly declares `supports_responses: false`; domestic
 and unknown platforms use Chat Completions. The original
 account ID remains the unbound route and is never reused as a lane ID.
+
+The account page compares the local Client's role catalog with the reconciled
+providers. Reconciliation does not edit agent definitions. On request, Desktop
+moves affected roles from the disabled unbound route to its exact-model
+successor with individual revision-checked `put_role` commands. A lane with
+no successor needs a manual edit. Existing session rosters are not rewritten.
 
 A model sign-in is durable once its credential is saved. The Node publishes that
 credential with the `exchanging` state before model discovery, and a later
@@ -498,6 +514,46 @@ ACP programs act as models: their file, terminal and MCP capabilities and their
 own permission requests are refused. Packages declare executables and protocol
 differences; the process service owns their lifecycle.
 
+The Node's model factory selects the transport from the binding and reports
+its route: a per-prompt byte bound, whether the transport keeps a session
+per Sailry session, and whether that session currently holds the history.
+As in T3 Code, an ACP program keeps one agent session per Sailry session and
+sends only the messages the session has not seen. The Node records which
+agent session holds each Sailry session, with the message digests it has
+seen, under the package's `program-sessions` data; the record holds no
+conversation text and the least recently written of 256 per program leave
+first. A program started again after an idle stop, an eviction or a Node
+restart reopens that session with `session/resume`, then `session/load`,
+where the agent advertises them. Only when neither succeeds, when earlier
+history or the system text differs (an edit, rewind or compaction), or when
+another model replied since the session last answered, is the whole history
+replayed into a new session; `replay_bytes` bounds that replay, and a larger
+one is a context overflow handled by compaction. A replaced session is closed
+when the agent offers `session/close`. A program whose copy of a session is
+older than the record, because another program continued it, closes its
+outdated copy where supported before resuming the recorded session. Transcript
+summary requests, discovery and a request whose agent session is busy
+share any compatible program with room, each in an agent session of its own
+that ends with the request. A package runs at most
+four programs for each user across every session. One program serves as many
+requests at once as its adapter's `concurrency` declares, one by default, each
+Sailry session in its own agent session; updates are routed by agent session.
+A request beyond that, such as one of several parallel delegations, waits
+until a running request releases its share. A request holds a share only for
+one model step, never while tools or delegations run. A cancelled or failed
+prompt leaves its agent session unknown, so the next request of that Sailry
+session opens a new one.
+
+Automatic compaction on these routes uses the ordinary threshold. When the
+session advertised a `compact` command (`available_commands_update`), the saved
+handoff is followed by a bare `/compact` in the same session; the session
+then counts the retained messages as seen and receives only what follows.
+That second pass over the agent's context is billed by the agent's account
+and not recorded as Sailry usage. Without the command nothing is sent and the
+next request replays the handoff into a new session. The handoff and retained
+tail are sized for the replay bound, so that replay fits. Discovered agent
+models take their window from the bundled catalog when it knows them.
+
 Switching models retains the same canonical session and history. Outbound
 projection adapts messages and paired tool results to the selected protocol;
 private reasoning is replayed only to its producing provider and model. Reviewed
@@ -510,6 +566,22 @@ Completions also send it as `prompt_cache_key`. A request without a session send
 An API-key provider's custom headers, set in its advanced settings, replace these
 defaults of any letter case. Credential and framing headers stay the
 transport's. Account sign-ins keep their own client identity.
+
+Bedrock (`bedrock`) carries Anthropic Messages and Vertex AI (`vertex_ai`)
+carries Gemini. Request parameters, history and attachments follow
+`ConversationModelApi.Family()`; the route owns credentials and transport.
+Desktop derives a public service endpoint from the Bedrock region or Vertex
+location unless the channel has a private endpoint. Saving refuses a service path.
+On Bedrock, the Anthropic SDK moves the selected model into the invoke path
+and betas into the body, and decodes EventStream. Only the configured Bedrock
+bearer token is sent, not ambient credentials or Claude Code metadata.
+For Vertex, the Node retains the service-account JSON as a credential, signs
+a JWT with its RSA key for the cloud-platform scope, and refreshes the cached
+token within one minute of expiry. While one request mints a token, others
+can use an unexpired token or cancel their wait. A 401 invalidates only the
+refused token. Attempt diagnostics redact minted tokens. The GenAI Vertex client uses the configured project,
+location, endpoint and authorized HTTP transport. Neither route lists deployed
+models; users enter their model IDs and the catalog supplies known metadata.
 
 Anthropic API-key requests carry an opaque, stable session identity so compatible
 account pools do not infer a new route when cache breakpoints move. Replies with
@@ -570,7 +642,7 @@ instructions are never truncated or summarized: when their offline token estimat
 already fills the captured model's context window, the turn reports that capacity
 problem before inference instead of attempting an ineffective history compaction.
 
-Compaction merges the previous summary and older messages into one bounded text
+Sailry's transcript compaction merges the previous summary and older messages into one bounded text
 handoff, retaining recent complete exchanges and tool-call/result groups in their
 original records. The retained tail targets at most 20,000 estimated tokens or
 20% of the model window, whichever is smaller; the newest indivisible exchange
@@ -585,18 +657,88 @@ contain a populated handoff object, which may be fenced or surrounded by prose.
 Empty or invalid output gets one format-correction request. Truncated output
 and a failed retry leave the original context intact; plain prose never replaces it.
 
+For an unfocused compaction within the replay window, Anthropic Messages
+uses `compaction: {type: "summarize"}` and the `compact-2026-09-04` beta;
+Responses uses `/responses/compact`. Other routes, focused requests, and
+overflow recovery use the transcript handoff. Rejected native endpoints
+and features are remembered for the current provider revision, protocol,
+endpoint and model (at most 256 routes). Editing the channel permits a new
+native attempt. A completed reply with no compaction item also disables
+native compaction for that route. An unusable item falls back without disabling it.
+Transient native provider errors get one resend before the transcript handoff,
+even after waiting for load. They do not mark the route unsupported. Rate
+limits, overload and retryable account refusals use the ordinary retry and
+wait budgets. Exhausting those budgets, a spent balance, invalid credentials
+or cancellation ends the compaction without another summary request.
+Native attempts are recorded as compaction usage; Messages sums the billed
+iterations. Only the producing provider, API and model receive the native
+items. Another model receives the readable summary; for an opaque Responses
+window Sailry writes this summary lazily from the original records, without
+replacing the producing model's encrypted window.
+
 Hidden history is filtered before attachment materialization. A successful
 compaction must reach a main request before another threshold compaction.
 Provider-reported usage alone enters usage and cost totals; local token estimates
 inform context budgeting without inventing billed usage. After a checkpoint,
 context estimates count the summary and retained tail until a new main-model
-measurement is available.
+measurement is available. A reply that took several requests, such as an ACP
+reply with correction prompts, bills them all but measures the window of its
+last request, which an adapter reports as `context_tokens`.
 
 Request observations retain the final serialized body size, attributed text
 character counts and excluded opaque payload sizes, never request bodies.
 Text estimates remain separate from provider-reported tokens. Attempt-relative
 timings distinguish HTTP dispatch after preparation, successful request write,
 response headers and first model content; unavailable transport facts stay absent.
+
+Separately, a profile can opt into private HTTP traces for SDK inference and
+compaction. The transport copies the prepared request and the response bytes
+the SDK actually consumes. Attempt completion appends observation facts and
+relative gzip body references to `traces/<session>/trace.jsonl`. Credentials
+are masked before persistence; system prompts are not removed. Caps (16 MiB
+per body, 64 MiB or 200 attempts per session, 512 MiB per profile) and storage
+errors never change model output. The ordinary log and backup roots exclude
+these bodies. General settings let an administrator opt in to recording and,
+separately, sending the attempt's request ID to the built-in HTTPS gateways.
+Neither option defaults on. A profile-wide clear uses a durable receipt and
+invalidates in-flight recorders, without deleting conversation history or usage.
+At startup and publication the Node drops sessions whose last append is older
+than 180 days, then evicts least recently used session directories for space.
+Inspection affects capacity eviction order, not the age deadline.
+
+Only a controller with access to the session can list trace records, preview
+a body, export, or clear the trace. The Desktop session panel follows the existing
+conversation watch and requests new index rows after its last cursor. It loads a
+selected body on demand (up to 2 MiB) and drops its private state on close or
+owner change. Retry links use the observation index, not the displayed resend
+counter. `export_trace` prepares a bounded ZIP on the execution Node and returns
+a caller-bound, single-use download stream. The default shareable mode replaces
+system instructions with fingerprints but still contains private conversation
+data. Desktop publishes the verified file only after the download succeeds.
+A clear has a durable command receipt. Archiving
+or removing a session deletes its private trace; startup also checks for
+inactive trace directories after interrupted cleanup. `read_usage_v2` lists
+observed attempts even without token counts. Only reported usage contributes
+to billing totals, independently of whether body capture was enabled.
+
+The Node diagnoses each attempt using HTTP, failure, retry, usage and timing
+facts. Private capture can additionally compare provider-ordered request
+segments with a predecessor for estimated cache loss. The private index stores
+bounded fingerprints of redacted segments, not segment previews. Among compatible
+successful captures from the previous hour, the longest shared prefix wins
+(newest on ties). With no shared prefix, at least half of a predecessor's three
+or more segments must recur. Only the selected sidecar is opened; legacy rows
+without fingerprints can supply a single, subsequently verified fallback.
+Gemini's actual request structure is recognized, but reported cache reads do
+not establish cache eligibility, lifetime or a lost-token estimate. Suspected upstream
+account changes are hints, not verified identities. Shareable export groups
+the selected attempts by verdict. The Insights rail page queries the same
+Node's usage index under the caller's owner/shared-project visibility rules;
+neither the aggregate nor the paginated list opens a body. Opening an attempt
+selects its session, turn and request on the owning Node. A separate
+session-authorized read supplies any retained body. TTFT and elapsed
+percentiles use nearest rank up to 20,000 samples per distribution and fixed
+histogram upper bounds beyond that.
 
 Model request recovery permits up to nine retries and ten minutes of cumulative
 waiting. Network failures use exponential waits from one to thirty seconds;
@@ -624,6 +766,10 @@ coordination under the same permission model. Package modes map to a core mode
 without escalating access.
 `spawn_agent`, `guide_agent` and `wait_agent` use the same execution and history
 path. Children inherit captured scope and permission; read-only roles use Plan.
+An unavailable default role model stays in the frozen roster with its provider
+metadata (or its absence). It does not block unrelated work. Explicit references
+and delegations resolve against that same snapshot and report the unavailable
+model instead of running it with the parent's model.
 Team settings control child concurrency, with a default of eight per root session.
 
 `list_subagents` reads a bounded page of direct child sessions from durable
@@ -637,7 +783,10 @@ listed child session starts a new child turn with its own admission receipt;
 waiting only observes a specific execution.
 
 Input received during a running task is durable guidance, consumed at a model
-boundary. Stop cancels work explicitly. Partial text and reasoning use a bounded
+boundary. A delegated child that fails or is stopped holds its own queue, which
+nothing resumes, so guidance it settles without joining ends cancelled with it;
+the parent sees the child's outcome and can guide it again. Node recovery
+cancels such guidance that earlier versions left queued. Stop cancels work explicitly. Partial text and reasoning use a bounded
 in-memory feed; committed output is canonical. Interrupted streams seal visible
 text into history. Background children and commands publish durable completion
 evidence. The running turn takes a bounded batch between model steps; an idle
@@ -654,7 +803,7 @@ input or approval remains visible when background work is active.
 | Service | Implemented boundary |
 | --- | --- |
 | Commands | Workspace sandbox on macOS and Linux by default; private temporary files, read-only toolchains and no network; full permission grants the full environment |
-| Files and Git | Captured paths, ignore rules, bounded reads and revision-checked writes; change sets stop at the first failure |
+| Files and Git | Captured paths, ignore rules, bounded reads and revision-checked writes; change sets stop at the first failure. Under full permission, file tools also take absolute paths outside the session worktree, running the same confined, revision-checked operation from the path's volume root with symbolic links in its ancestors resolved, without worktree locks, checkpoints or durable admission |
 | Terminals | Node owns the PTY and screen mirror; local and remote controllers attach to that mirror |
 | Web | Execution-Node reads and ordered search channels; direct reads pin public DNS on redirects and reject private addresses |
 | Browser | Node-owned Chromium process tree and private browser profile per conversation |
@@ -814,12 +963,22 @@ presentation needs them. Floating surfaces remain Kit's frost; right-click menus
 and confirmation-only dialogs use the operating system. Forms remain Kit surfaces.
 
 CheapRouter sign-in is optional and lives on its account page in Settings; no
-account state hides the workspace, and a failed gateway sync is reported on that
-page alone. `internal/desktop/cheapauth` uses the pinned lobe-mygo actions,
+account state hides the workspace. Ordinary gateway failures stay on that page.
+A definite credential rejection also shows a window banner that starts the
+existing sign-in flow. Dismissing it silences banners for the process, without
+clearing the profile's expired status; successful sign-in clears that status.
+`internal/desktop/cheapauth` uses the pinned lobe-mygo actions,
 fields and feedback with Lobe's semantic tokens, scoped to a `ui.Themed` subtree
 of the page. Connected account settings and other pages retain Kit. Presentation
 state and callbacks still belong to the existing CheapRouter controller; the
 component library owns no credentials or network work.
+
+A business API bearer rejection on the login origin triggers one serialized
+renewal and a retry of the rejected request. A refused refresh ends the login;
+a network failure does not. During gateway sync, a different origin cannot
+invalidate the account: Desktop first restores routing to the login origin
+and resyncs its account, catalog and keys before updating Node providers. A
+confirmed rejection there after renewal ends the session.
 
 The account's Kit payment sheet uses `internal/cheapauth` to renew the session
 at the login endpoint and to call `/pay` at the selected API origin. The live
@@ -841,8 +1000,14 @@ divider resizing follows the current width without an additional layout animatio
 Project-created terminals are independent main-workspace surfaces and may share
 split groups with conversations. The header shows a title for one workspace entry
 and tabs for multiple entries; selecting a split-group tab restores its focused
-pane. Terminal tabs opened in the right panel stay
-with that conversation and do not join splits. A terminal ID has one surface at a
+pane. The right panel's tabs, shown tab and open state belong to the active pane:
+each conversation and each main terminal has its own, and a pane that never
+opened the panel shows it closed. A main terminal's panel shows the project and
+worktree its shell runs in, not the selected conversation's, and moving a
+panel's only terminal to the main workspace closes that panel. The sidebar
+selects a main terminal's row only while the conversation page shows it.
+Terminal tabs opened in the right panel stay
+with that pane and do not join splits. A terminal ID has one surface at a
 time; moving it keeps its Node attachment. Closing a main surface releases its
 observation while the Node process continues, available through terminal activity.
 Explicitly closing a right-panel terminal stops its shell. Project overview lists
@@ -867,6 +1032,14 @@ Leaving a conversation releases its presentation cache and unbinds
 the transcript payload without resetting scroll. Historical command output opens
 on its original tool row; closing the disclosure releases the read, not the process.
 Command admission reads current Client state independently of rendering.
+
+Tool groups and outputs share the transcript's vertical scroll. An open group
+shows its latest eight rows; open rows stay visible as calls arrive, and each
+earlier page reveals up to fifty still-hidden rows. Text and
+diff previews show twelve lines and expand in place to at most 400, with the
+omitted count shown. Commands preview the tail; other text starts at the head.
+Text wraps. Tables preview twelve data rows, expand to every row, and scroll
+only sideways. Copy uses the full output, including table headers and rows as TSV.
 
 Background activity stays on the rows that started it. A background command's
 state, exit code and retained output show on its launching call, and a task

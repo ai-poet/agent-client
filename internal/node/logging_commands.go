@@ -12,6 +12,7 @@ import (
 
 	"github.com/ai-poet/cheaprouter-harness/internal/link"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
@@ -50,12 +51,12 @@ var transientCommands = func() map[string]observation {
 		changing: {"complete_browser", "refresh_model_catalog", "dismiss_installation", "request_computer_permission"},
 		traced:   {"search_skill_catalog", "discover_registry_skill", "read_skill_document"},
 		slow: {
-			"read_conversation", "read_conversation_runs", "read_conversation_run", "read_turn_capture", "read_turn", "read_command_page",
+			"read_trace", "read_conversation", "read_conversation_runs", "read_conversation_run", "read_turn_capture", "read_turn", "read_command_page",
 			"read_tool_output", "read_tool_detail", "read_session", "read_plugin_callback", "read_plugin_value", "read_plugin_conversation_value",
 			"list_plugin_models", "read_model_catalog", "read_model_scores", "read_project_catalog",
 		},
 		workspaceRead: {"list_directory", "inspect_git", "list_worktrees"},
-		transfer: {
+		transfer: {"export_trace",
 			"open_port", "cancel_port", "upload_plugin", "download_backup", "upload_backup",
 			"download_file", "upload_file", "upload_attachment", "download_attachment", "download_image", "cancel_file_transfer",
 		},
@@ -68,10 +69,10 @@ var transientCommands = func() map[string]observation {
 			"inspect_plugin_upload", "read_plugin", "read_plugin_version", "read_plugin_settings", "read_plugin_mcp", "list_plugin_keys",
 			"search_plugin_values", "resolve_plugin_model", "read_plugin_connection", "read_plugin_view", "list_roles", "list_teams",
 			"read_compaction_settings", "read_team_settings", "list_providers", "read_provider_key", "list_channel_presets",
-			"request_provider_http", "discover_models", "list_associated_sessions", "read_usage", "read_activity",
+			"request_provider_http", "discover_models", "list_associated_sessions", "read_usage", "read_usage_v2", "read_activity",
 			"search_conversation", "list_conversation_assets", "list_file_checkpoints", "read_turn_diff", "read_turn_hunks",
 			"read_queued_turn", "list_terminals", "list_terminal_tools", "list_commands", "read_command", "read_terminal_settings",
-			"read_power_settings", "read_telemetry_settings", "send_diagnostics", "read_network_settings", "list_network_presets", "probe_network",
+			"read_trace_settings", "read_power_settings", "read_telemetry_settings", "send_diagnostics", "read_network_settings", "list_network_presets", "probe_network",
 			"read_sandbox_settings", "read_search_settings", "read_backup_settings", "list_backups", "read_python_settings", "read_installations",
 			"decide", "list_shells", "read_plugin_secret",
 			"list_media_models", "read_media_settings", "synthesize_speech", "search_models", "read_model_versions", "resolve_model", "query_knowledge",
@@ -239,6 +240,9 @@ func rejectCommand(span *logging.Span, kind string, fault *protocol.Fault, aband
 		// The native Git service reports a missing executable without a configuration reason.
 		expected = true
 	}
+	if fault.Code == protocol.ErrorCodeNotConfigured && fault.Details == nil && fault.Message == "role model is unavailable" {
+		span.Set(slog.String("reason", "role_model_missing"))
+	}
 	if reason := fault.ConfigurationReason(); reason.Known() {
 		span.Set(slog.String("configuration_reason", string(reason)))
 		if fault.Code == protocol.ErrorCodeNotConfigured {
@@ -267,9 +271,27 @@ func faultDiagnostic(fault *protocol.Fault) (protocol.NotificationSystemSystemDi
 	return protocol.NotificationSystemSystemDiagnostic{}, false
 }
 
+// A durable completion carries a wire fault, not the store error. Keep the
+// identifiers with this dispatch until completion, not with the receipt.
+type roleCaptureLogKey struct{}
+
+type commandLogContext struct{ capture *store.RoleCaptureError }
+
+func rememberRoleCapture(ctx context.Context, err error) {
+	if ctx != nil && err != nil {
+		if record, ok := ctx.Value(roleCaptureLogKey{}).(*commandLogContext); ok {
+			errors.As(err, &record.capture)
+		}
+	}
+}
+
 // Dispatch admits a command and observes every one that changes data.
 func (node *Node) Dispatch(ctx context.Context, caller protocol.NodeID, request protocol.Request) (link.Admission, error) {
 	span := node.commandSpan(caller, request)
+	var record commandLogContext
+	if span != nil {
+		ctx = context.WithValue(ctx, roleCaptureLogKey{}, &record)
+	}
 	accepted, err := node.admitCommand(ctx, caller, request)
 	if span == nil {
 		return accepted, err
@@ -295,6 +317,10 @@ func (node *Node) Dispatch(ctx context.Context, caller protocol.NodeID, request 
 			span.Finish(logging.Interrupted, string(protocol.ErrorCodeOutcomeUnknown), false)
 			return
 		case result.Fault != nil:
+			if capture := record.capture; capture != nil {
+				span.Set(slog.String("role", capture.Role.String()))
+				span.Set(slog.String("provider", capture.Provider.String()))
+			}
 			span.Set(slog.String("command_stage", "completion"))
 			rejectCommand(span, request.Command.Kind, result.Fault, !accepted.Receipt.Durable && ctx.Err() != nil)
 		default:

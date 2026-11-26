@@ -78,7 +78,16 @@ func Open(ctx context.Context, profile string, node protocol.NodeID) (_ *Store, 
 		}
 	}
 	if err := handle.Write(ctx, func(connection *sql.Conn) error {
-		return definition.initialize(ctx, connection, node)
+		if err := definition.initialize(ctx, connection, node); err != nil {
+			return err
+		}
+		value, err := ReadTraceSettings(ctx, connection)
+		if err != nil {
+			return err
+		}
+		handle.traceEnabled.Store(value.Enabled)
+		handle.traceGatewayEnabled.Store(value.GatewayEnabled)
+		return nil
 	}); err != nil {
 		return nil, err
 	}

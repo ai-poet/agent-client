@@ -224,7 +224,7 @@ func samePresetSource(a, b protocol.ConversationPresetsSource) bool {
 func presetKeyAuth(entry protocol.ConversationPresetsEntry) viewmodel.Auth {
 	if entry.Source.Kind == "builtin" && entry.Preset.Auth.Kind == "api_key" && len(entry.Preset.Routes) > 0 {
 		for _, route := range entry.Preset.Routes {
-			if route.Endpoint != "" || !supportsOptionalKey(apiForProtocol(route.Protocol)) {
+			if route.Endpoint != "" || !supportsOptionalKey(nodeproviders.RouteAPI(route.Protocol)) {
 				return viewmodel.AuthKey
 			}
 		}
@@ -325,7 +325,7 @@ func (r *Runtime) applyPresets(listing protocol.ConversationPresetsListing) {
 			}
 		}
 		for i, route := range p.Routes {
-			v := viewmodel.Route{ID: fmt.Sprintf("%s/%d", method.ID, i), API: string(apiForProtocol(route.Protocol)), Endpoint: route.Endpoint, Custom: route.Endpoint == "", Models: static}
+			v := viewmodel.Route{ID: fmt.Sprintf("%s/%d", method.ID, i), API: string(nodeproviders.RouteAPI(route.Protocol)), Endpoint: route.Endpoint, Custom: route.Endpoint == "", Models: static}
 			if route.Region != nil {
 				v.Region = string(*route.Region)
 			}
@@ -382,26 +382,7 @@ const defaultUserAgent = "Sailry/0.1"
 // wire protocol.
 var apiBrands = map[protocol.ConversationModelApi]string{
 	"responses": "openai", "chat_completions": "openai", "anthropic": "anthropic", "gemini": "gemini",
-	"deepseek": "deepseek", "open_code_go": "opencode", "open_code_zen": "opencode", "azure_open_ai": "azure-openai", "azure_ai": "azure-ai",
-}
-
-func apiForProtocol(p protocol.ConversationPresetsProtocol) protocol.ConversationModelApi {
-	switch p {
-	case "openai-responses":
-		return "responses"
-	case "openai-chat-completions":
-		return "chat_completions"
-	case "azure-openai":
-		return "azure_open_ai"
-	case "azure-ai":
-		return "azure_ai"
-	case "opencode-go":
-		return "open_code_go"
-	case "opencode-zen":
-		return "open_code_zen"
-	default:
-		return protocol.ConversationModelApi(p)
-	}
+	"deepseek": "deepseek", "open_code_go": "opencode", "open_code_zen": "opencode", "azure_open_ai": "azure-openai", "azure_ai": "azure-ai", "bedrock": "bedrock", "vertex_ai": "vertexai",
 }
 
 // projectProviderSnapshot shows the Node's channels, catalog and media
@@ -460,6 +441,12 @@ func (r *Runtime) projectProviderSnapshot() {
 			}
 		}
 		ch.APIVersion = azureVersion(p)
+		if options, ok := p.Options.Bedrock(); ok {
+			ch.Region = options.Region
+		}
+		if options, ok := p.Options.VertexAi(); ok {
+			ch.Project, ch.Location = options.Project, options.Location
+		}
 		ch.Headers = maps.Clone(p.Headers)
 		for _, quota := range snapshot.ProviderQuotas {
 			if quota.Provider == p.ID && p.Credential != nil && quota.Credential == *p.Credential {
@@ -487,7 +474,7 @@ func (r *Runtime) projectProviderSnapshot() {
 			for id, entry := range r.providerPresets {
 				_, index, _ := strings.Cut(id, "/")
 				i, _ := strconv.Atoi(index)
-				if (route < 0 || i < route) && entry.Preset.ID == reference.ID && samePresetSource(entry.Source, reference.Source) && i < len(entry.Preset.Routes) && apiForProtocol(entry.Preset.Routes[i].Protocol) == p.Api && (reference.Route == nil || reflect.DeepEqual(*reference.Route, presetRouteKey(entry.Preset.Routes[i]))) {
+				if (route < 0 || i < route) && entry.Preset.ID == reference.ID && samePresetSource(entry.Source, reference.Source) && i < len(entry.Preset.Routes) && nodeproviders.RouteAPI(entry.Preset.Routes[i].Protocol) == p.Api && (reference.Route == nil || reflect.DeepEqual(*reference.Route, presetRouteKey(entry.Preset.Routes[i]))) {
 					route, ch.Method = i, id
 					// MyGo presents plugin sign-in as OAuth, like built-in accounts.
 					switch entry.Preset.Auth.Kind {
@@ -590,10 +577,34 @@ func (r *Runtime) providerDraft(d settings.ProviderDraft) protocol.ConversationP
 	p.Name = d.Channel.Name
 	p.Endpoint = d.Channel.Endpoint
 	p.Api = protocol.ConversationModelApi(d.Channel.API)
+	// Options belong to their API: a draft on another route keeps none of the
+	// previous route's. Those of a cloud route are the draft's own, below.
+	if p.Options != nil {
+		hosted := p.Api == protocol.ConversationModelApiChatCompletions || p.Api == protocol.ConversationModelApiAnthropic || p.Api == protocol.ConversationModelApiDeepSeek
+		if !(p.Options.Kind == "azure_open_ai" && p.Api == protocol.ConversationModelApiAzureOpenAi || p.Options.Kind == "hosted" && hosted) {
+			p.Options = nil
+		}
+	}
 	// The API version travels with an Azure OpenAI provider; a draft that
 	// names none keeps the one the provider has.
 	if p.Api == protocol.ConversationModelApiAzureOpenAi && d.Channel.APIVersion != "" {
 		p.Options = &protocol.ConversationConnectionOptions{Kind: "azure_open_ai", Data: protocol.ConversationConnectionOptionsAzureOpenAiPayload{ApiVersion: d.Channel.APIVersion}}
+	}
+	// A cloud channel's region, or project and location, travel as its
+	// options; the endpoint is the service host they name.
+	switch p.Api {
+	case protocol.ConversationModelApiBedrock:
+		options := protocol.ConversationConnectionOptionsBedrockPayload{Region: d.Channel.Region}
+		p.Options = &protocol.ConversationConnectionOptions{Kind: "bedrock", Data: options}
+		if p.Endpoint == "" {
+			p.Endpoint = options.Endpoint()
+		}
+	case protocol.ConversationModelApiVertexAi:
+		options := protocol.ConversationConnectionOptionsVertexAiPayload{Project: d.Channel.Project, Location: d.Channel.Location}
+		p.Options = &protocol.ConversationConnectionOptions{Kind: "vertex_ai", Data: options}
+		if p.Endpoint == "" {
+			p.Endpoint = options.Endpoint()
+		}
 	}
 	if entry, ok := r.providerPresets[d.Channel.Method]; ok {
 		ref := protocol.ConversationPresetsPresetRef{ID: entry.Preset.ID, Source: entry.Source}

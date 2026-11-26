@@ -4,12 +4,30 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/ai-poet/cheaprouter-harness/internal/link"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"golang.org/x/net/http/httpguts"
 )
 
 // maxCustomHeaders bounds the request headers one provider adds.
 const maxCustomHeaders = 32
+
+// Claude Code's print mode sends this User-Agent to Messages gateways.
+const anthropicAPIKeyUserAgent = "claude-cli/2.1.330 (external, sdk-cli)"
+
+// APIKeyHeaderDefaults keeps native model discovery and conversation requests
+// on the same client and protocol defaults before applying provider overrides.
+func APIKeyHeaderDefaults(api protocol.ConversationModelApi) map[string]string {
+	if api == protocol.ConversationModelApiAnthropic {
+		return map[string]string{
+			"User-Agent":        anthropicAPIKeyUserAgent,
+			"Accept":            "application/json",
+			"anthropic-version": "2023-06-01",
+			"x-app":             "cli",
+		}
+	}
+	return map[string]string{"User-Agent": "Sailry/" + link.ProductVersion}
+}
 
 // reservedHeaders carry credentials or message framing that the transport
 // sets itself; a custom value would misplace a key or corrupt the body.
@@ -23,7 +41,8 @@ func ReservedHeader(name string) bool {
 	return slices.ContainsFunc(reservedHeaders, func(reserved string) bool { return strings.EqualFold(reserved, name) })
 }
 
-func validateHeaders(provider protocol.ConversationProvider) error {
+// ValidateHeaders checks the custom request headers before saving or discovery.
+func ValidateHeaders(provider protocol.ConversationProvider) error {
 	if len(provider.Headers) == 0 {
 		return nil
 	}

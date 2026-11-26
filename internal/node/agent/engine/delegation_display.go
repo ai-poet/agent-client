@@ -40,10 +40,23 @@ func (r *Runtime) captureCorePresentation(record *canonical.Record) {
 		case *canonical.ToolResponse:
 			name = value.Name
 		}
+		if tool := findTool(owner.tools, name); tool != nil && tool.Display != nil {
+			// A tool that carries its own display, such as a listed MCP tool,
+			// is shown as the turn built it.
+			if record.Metadata.Presentation == nil {
+				record.Metadata.Presentation = &canonical.Presentation{}
+			}
+			if record.Metadata.Presentation.Displays == nil {
+				record.Metadata.Presentation.Displays = map[string]protocol.ToolDisplay{}
+			}
+			record.Metadata.Presentation.Displays[name] = *tool.Display
+			continue
+		}
 		manager, catalog := managementLabels[name], slices.Contains(catalogToolNames, name)
 		media, shown := mediaDisplays()[name]
 		_, delegation := delegationDescriptions[name]
-		if !delegation && !slices.Contains([]string{"load_skill", "read_skill_resource"}, name) && manager == "" && !catalog && !shown || findTool(owner.tools, name) == nil {
+		builtin, labelled := builtinIcons[name]
+		if !delegation && !slices.Contains([]string{"load_skill", "read_skill_resource"}, name) && manager == "" && !catalog && !shown && !labelled || findTool(owner.tools, name) == nil {
 			continue
 		}
 		if record.Metadata.Presentation == nil {
@@ -59,7 +72,6 @@ func (r *Runtime) captureCorePresentation(record *canonical.Record) {
 		if p.Groupings == nil {
 			p.Groupings = map[string]protocol.ToolGrouping{}
 		}
-		p.Tools[name] = protocol.ToolPresentationDetails
 		label := coreLabels()["tool_"+name]
 		if manager != "" {
 			label = coreLabels()[manager]
@@ -70,6 +82,16 @@ func (r *Runtime) captureCorePresentation(record *canonical.Record) {
 				display.Locales[locale] = value
 			}
 		}
+		if labelled {
+			// These tools keep their default rows and details; only their
+			// name and icon are declared here.
+			if builtin != "" {
+				display.Icon = &protocol.PluginDesktopIcon{Kind: "Name", Data: builtin}
+			}
+			p.Displays[name] = display
+			continue
+		}
+		p.Tools[name] = protocol.ToolPresentationDetails
 		field := func(path string) *protocol.ToolDisplayField { return &protocol.ToolDisplayField{Path: path} }
 		if shown {
 			media.Label, media.Locales = display.Label, display.Locales
@@ -126,6 +148,17 @@ func (r *Runtime) captureCorePresentation(record *canonical.Record) {
 
 // managementLabels names the settings label each package manager is shown under.
 var managementLabels = map[string]string{"manage_plugins": "settings_plugins", "manage_skills": "settings_skills", "manage_mcp": "settings_mcp"}
+
+// builtinIcons are the native tools whose calls carry only a declared name
+// and icon; "" keeps the client's default icon.
+var builtinIcons = map[string]string{
+	"set_session_title": "reicon:messages/pen",
+	"list_sessions":     "reicon:messages/chat-round-line",
+	"read_session":      "reicon:files/file-text",
+	"search_session":    "reicon:search/search",
+	"tool_search":       "reicon:search/search",
+	"read_tool_output":  "reicon:files/file-text",
+}
 
 // catalogToolNames are the role and team catalog tools.
 var catalogToolNames = []string{"list_agents", "add_agent", "edit_agent", "delete_agent", "apply_agents", "list_teams", "add_team", "edit_team", "delete_team", "apply_team"}

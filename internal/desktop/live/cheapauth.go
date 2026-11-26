@@ -14,6 +14,7 @@ import (
 	cheapauthui "github.com/ai-poet/cheaprouter-harness/internal/desktop/cheapauth"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/providers"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/egoist/mygo/ui"
@@ -23,6 +24,7 @@ import (
 // taking it, a worker must check its generation's context before admission.
 // Already admitted writes settle before another mutation can overtake them.
 type cheapAuthRuntime struct {
+	stopExpiryWatch  func()
 	service          *core.Service
 	state            *cheapauthui.State
 	generation       *cheapAuthGeneration
@@ -97,6 +99,7 @@ func (r *Runtime) initCheapAuth() {
 		}
 	}
 	state.StopSync = r.stopCheapSync
+	state.MigrateRoles = r.migrateCheapRoles
 	state.Logout = r.logoutCheapAuth
 	state.OpenRecharge = r.openRecharge
 	state.OpenPlans = func() { r.openPayment(nil, true) }
@@ -112,6 +115,14 @@ func (r *Runtime) initCheapAuth() {
 		state.Failure = cheapAuthError(err)
 		return
 	}
+	account.stopExpiryWatch = desktopExpiry.watch(profile, func() {
+		r.enqueue(func(*ui.Context) {
+			state.LoginExpired, state.ExpiryBannerDismissed = desktopExpiry.snapshot(profile)
+		})
+	})
+	state.LoginExpired, state.ExpiryBannerDismissed = desktopExpiry.snapshot(profile)
+	state.DismissExpiryBanner = desktopExpiry.dismiss
+	service.SetExpiryListener(func(expired bool) { desktopExpiry.set(profile, expired) })
 	state.OriginConfig = service.GatewayOriginConfig()
 	if err := service.Restore(); err != nil {
 		state.Failure = "无法读取已保存的登录状态，请重新登录"
@@ -127,7 +138,7 @@ func (r *Runtime) initCheapAuth() {
 
 func (r *Runtime) startCheapLogin(manual bool) {
 	account := r.cheapAuth
-	if account == nil || account.service == nil || account.state.LoggingOut || account.state.Stage != cheapauthui.SignedOut {
+	if account == nil || account.service == nil || account.state.LoggingOut || account.state.LoginStage() != cheapauthui.SignedOut {
 		return
 	}
 	generation := account.advance(r.ctx)
@@ -281,103 +292,37 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 			_, gatewayErr = r.resolveCheapProvider(ctx, account)
 		}
 		account.effects.Unlock()
-		user, accountErr := account.service.Account(ctx)
-		var gateway core.Gateway
-		var groups []core.Group
-		var groupsErr error
-		var autoBindAttempted bool
-		var autoBindFailures map[string]string
-		var statuses []core.GroupStatus
-		var statusErr error
-		statusAttempted := false
-		if !cheapAuthRejected(accountErr) && ctx.Err() == nil {
-			groups, groupsErr = account.service.AvailableGroups(ctx)
-			// Do not downgrade established routes after a failed directory read.
-			if groupsErr != nil && len(account.service.LaneBindings()) > 0 && gatewayErr == nil {
-				gatewayErr = groupsErr
-			}
-			if !cheapAuthRejected(groupsErr) && ctx.Err() == nil && gatewayErr == nil {
-				gateway, gatewayErr = account.service.GatewayWithGroups(ctx, groups)
-				if gatewayErr == nil && len(groups) > 0 {
-					_ = account.service.MigrateLegacyGroup(ctx, groups, gateway.Catalog)
-				}
-				if gatewayErr == nil && groupsErr == nil && shouldAutoBind && ctx.Err() == nil {
-					autoBindAttempted = true
-					updated, autoResult, autoErr := account.service.AutoBindUnboundLanes(
-						ctx,
-						groups,
-						&core.ModelCatalog{BaseURL: gateway.BaseURL, Items: gateway.Catalog},
-						nil,
-					)
-					if len(autoResult.Failures) > 0 {
-						autoBindFailures = make(map[string]string, len(autoResult.Failures))
-						for _, failure := range autoResult.Failures {
-							autoBindFailures[failure.Lane] = cheapAuthError(failure.Err)
-						}
-					}
-					if autoErr != nil {
-						slog.Warn("cheaprouter auto-bind gateway refresh failed", "error", autoErr.Error())
-						for lane := range autoResult.Bound {
-							_ = account.service.RestoreLaneBinding(ctx, lane, nil, false)
-						}
-					} else if len(autoResult.Bound) > 0 {
-						if _, providerErr := providers.CheapRouterProviders(updated); providerErr != nil {
-							slog.Warn("cheaprouter auto-bind provider invalid, keeping base gateway", "error", providerErr.Error())
-							for lane := range autoResult.Bound {
-								_ = account.service.RestoreLaneBinding(ctx, lane, nil, false)
-							}
-						} else {
-							gateway = updated
-						}
-					}
-				}
-			}
-			// Group status is optional decoration: a failure must not reject the
-			// session or block group switching.
-			if !cheapAuthRejected(groupsErr) && !cheapAuthRejected(gatewayErr) && ctx.Err() == nil {
-				statusAttempted = true
-				statuses, statusErr = account.service.GroupStatuses(ctx)
-			}
-		}
-		authErr := accountErr
-		if !cheapAuthRejected(authErr) {
-			authErr = gatewayErr
-		}
-		if !cheapAuthRejected(authErr) {
-			authErr = groupsErr
+		result := readCheapGateway(ctx, account.service, gatewayErr, shouldAutoBind)
+		if !result.autoBindAttempted && result.authErr == nil && result.gatewayErr == nil && len(result.groups) > 0 {
+			_ = account.service.MigrateLegacyGroup(ctx, result.groups, result.gateway.Catalog)
 		}
 
 		var modelCount int
 		var disableErr error
 		if ctx.Err() == nil {
-			if cheapAuthRejected(authErr) {
+			if cheapAuthRejected(result.authErr) {
 				account.effects.Lock()
 				if ctx.Err() == nil {
-					// Refresh rejection is already cleared by Service. A
-					// bearer rejection from /me or the gateway clears here.
-					authErr = errors.Join(authErr, account.service.Invalidate())
-					// The session is over as after a sign-out: its gateway
-					// stops routing, and nothing else of the Node changes.
-					disableErr = r.disableCheapGateway(account, generation)
+					result.authErr, disableErr = r.invalidateCheapSession(account, generation, result.authErr, "sync", result.sameOrigin)
 				}
 				account.effects.Unlock()
-			} else if gatewayErr == nil {
-				modelCount, gatewayErr = r.saveCheapGateway(ctx, account, generation, gateway)
+			} else if result.gatewayErr == nil {
+				modelCount, result.gatewayErr = r.saveCheapGateway(ctx, account, generation, result.gateway)
 			}
 		}
 		selectedGroup := account.service.SelectedGroup()
 		laneBindings := account.service.LaneBindings()
-		r.enqueue(func(*ui.Context) {
+		r.enqueue(func(c *ui.Context) {
 			if account.generation != generation || ctx.Err() != nil {
 				return
 			}
 			cancel()
 			account.stopSync = nil
-			if cheapAuthRejected(authErr) {
+			if cheapAuthRejected(result.authErr) {
 				account.autoBindDone = false
-				account.state.Stage, account.state.Failure = cheapauthui.SignedOut, cheapAuthError(authErr)
+				account.state.Stage, account.state.Failure = cheapauthui.SignedOut, cheapAuthError(result.authErr)
 				if disableErr != nil {
-					account.state.Failure += "；CheapRouter provider 未能停用，请在模型设置中关闭"
+					account.state.Failure = i18n.T(c, "cheaprouter_disable_failed")
 				}
 				account.state.Account, account.state.ModelCount = core.User{}, 0
 				account.state.Groups, account.state.Catalog = nil, nil
@@ -391,43 +336,43 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 				r.projectModels()
 				return
 			}
-			account.state.Account = user
-			if accountErr != nil {
-				account.state.AccountFailure = cheapAuthError(accountErr)
+			account.state.Account = result.user
+			if result.accountErr != nil {
+				account.state.AccountFailure = cheapAuthError(result.accountErr)
 			}
-			if groupsErr == nil {
-				account.state.Groups = groups
+			if result.groupsErr == nil {
+				account.state.Groups = result.groups
 				account.state.GroupsError = ""
 			} else if len(account.state.Groups) == 0 {
-				account.state.GroupsError = cheapAuthError(groupsErr)
+				account.state.GroupsError = cheapAuthError(result.groupsErr)
 			}
-			if statusAttempted {
+			if result.statusAttempted {
 				account.state.GroupStatusLoading = false
-				if statusErr == nil {
-					account.state.GroupStatuses = core.IndexGroupStatuses(statuses)
+				if result.statusErr == nil {
+					account.state.GroupStatuses = core.IndexGroupStatuses(result.statuses)
 					account.state.GroupStatusLoaded = true
 					account.state.GroupStatusError = ""
 				} else {
 					account.state.GroupStatuses = nil
 					account.state.GroupStatusLoaded = false
-					account.state.GroupStatusError = cheapAuthError(statusErr)
+					account.state.GroupStatusError = cheapAuthError(result.statusErr)
 				}
 			}
-			if len(gateway.Catalog) > 0 {
-				account.state.Catalog = gateway.Catalog
+			if len(result.gateway.Catalog) > 0 {
+				account.state.Catalog = result.gateway.Catalog
 			}
 			account.state.SelectedGroupID = selectedGroup
 			account.state.LaneBindings = laneBindings
-			account.state.AutoBindFailures = autoBindFailures
-			if gatewayErr != nil {
-				account.state.Stage, account.state.Failure = cheapauthui.GatewayFailed, cheapAuthError(gatewayErr)
+			account.state.AutoBindFailures = result.autoBindFailures
+			if result.gatewayErr != nil {
+				account.state.Stage, account.state.Failure = cheapauthui.GatewayFailed, cheapAuthError(result.gatewayErr)
 				account.state.OriginConfig = account.service.GatewayOriginConfig()
 				r.syncImageStudioCatalog()
 				r.projectModels()
 				r.refreshCheapGatewayNodes(account, generation)
 				return
 			}
-			if autoBindAttempted {
+			if result.autoBindAttempted {
 				account.autoBindDone = true
 			}
 			account.state.ModelCount = modelCount
@@ -444,6 +389,27 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 
 func cheapAuthRejected(err error) bool {
 	return errors.Is(err, core.ErrRefresh) || errors.Is(err, core.ErrUnauthorized)
+}
+
+// Called under account.effects after the generation check, just like sign-out.
+func (r *Runtime) invalidateCheapSession(account *cheapAuthRuntime, generation *cheapAuthGeneration, cause error, flow string, sameOrigin bool) (error, error) {
+	clearErr := account.service.Invalidate()
+	disableErr := r.disableCheapGateway(account, generation)
+	operation, status := "unknown", 0
+	var auth *core.AuthError
+	if errors.As(cause, &auth) {
+		status = auth.Status
+		// Only known interface names may leave the process; never emit URLs,
+		// query parameters, server text, or the errors from cleanup.
+		path, _, _ := strings.Cut(auth.Op, "?")
+		switch path {
+		case "/auth/me", "/auth/refresh", "/groups/available", "/group-status", "/models/catalog", "/keys":
+			operation = path
+		}
+	}
+	slog.Warn(logging.Target, "area", "cheaprouter", "phase", "session_invalidation",
+		"auth_flow", flow, "auth_interface", operation, "upstream_status", status, "gateway_matches_login", sameOrigin, "disable_succeeded", disableErr == nil)
+	return errors.Join(cause, clearErr), disableErr
 }
 
 func (r *Runtime) saveCheapGateway(ctx context.Context, account *cheapAuthRuntime, generation *cheapAuthGeneration, gateway core.Gateway) (int, error) {

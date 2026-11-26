@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"slices"
 	"strings"
 
 	"charm.land/fantasy"
 	anthropic "github.com/ai-poet/cheaprouter-harness/internal/node/agent/model/anthropic"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/providers"
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
@@ -17,18 +19,46 @@ import (
 type anthropicBlock struct {
 	kind, id, name, input, text, signature, redacted string
 	inputDelta                                       bool
+	// raw is a compaction block as the API sent it, kept for replay.
+	raw map[string]any
 }
 
 func (model *sdkModel) streamAnthropic(ctx context.Context, raw []byte, call fantasy.Call, emitter *sdkEmitter) {
-	endpoint := strings.TrimSuffix(strings.TrimSuffix(model.config.Endpoint, "/messages"), "/v1")
+	parsed, err := url.Parse(model.config.Endpoint)
+	if err != nil {
+		emitter.fail(err)
+		return
+	}
+	base := providers.AnthropicBaseURL(*parsed)
+	endpoint := base.String() + "/"
 	// WithoutEnvironmentDefaults keeps the SDK from adding ANTHROPIC_* variables
 	// or a local profile of the machine to a request for the configured provider.
-	opts := []option.RequestOption{option.WithoutEnvironmentDefaults(), option.WithHTTPClient(model.client), option.WithBaseURL(endpoint), option.WithAPIKey(model.config.Key), option.WithMaxRetries(0)}
+	opts := []option.RequestOption{option.WithoutEnvironmentDefaults(), option.WithHTTPClient(model.client), option.WithBaseURL(endpoint), option.WithMaxRetries(0)}
+	bedrock := model.config.Bedrock()
+	if !bedrock {
+		opts = append(opts, option.WithAPIKey(model.config.Key))
+	}
 	for key, value := range model.config.Headers {
+		if strings.EqualFold(key, "anthropic-beta") {
+			continue
+		}
 		opts = append(opts, option.WithHeader(key, value))
 	}
 	for key, value := range call.Headers {
+		if strings.EqualFold(key, "anthropic-beta") {
+			continue
+		}
 		opts = append(opts, option.WithHeader(key, value))
+	}
+	beta := anthropicBetaHeader(endpoint, model.config.OAuth, model.config.AnthropicAPIKey, raw, model.config.Headers, call.Headers)
+	if bedrock {
+		beta = bedrockBeta(beta, raw)
+	}
+	if beta != "" {
+		opts = append(opts, option.WithHeader("anthropic-beta", beta))
+		if !model.config.OAuth && !bedrock {
+			opts = append(opts, option.WithQuery("beta", "true"))
+		}
 	}
 	if call.UserAgent != "" {
 		opts = append(opts, option.WithHeader("User-Agent", call.UserAgent))
@@ -39,6 +69,9 @@ func (model *sdkModel) streamAnthropic(ctx context.Context, raw []byte, call fan
 	for _, key := range model.config.RemoveHeaders {
 		opts = append(opts, option.WithHeaderDel(key))
 	}
+	if bedrock {
+		opts = append(opts, bedrockOptions(model.config, base.String())...)
+	}
 	client := anthropicsdk.NewClient(opts...)
 	stream := client.Messages.NewStreaming(ctx, anthropicsdk.MessageNewParams{}, option.WithRequestBody("application/json", raw))
 	defer stream.Close()
@@ -47,6 +80,7 @@ func (model *sdkModel) streamAnthropic(ctx context.Context, raw []byte, call fan
 	// ended, until the stop reason says why.
 	cut := map[int64]*anthropicBlock{}
 	terminal, reason := false, ""
+	var compacted map[string]any
 	// message_stop follows final usage; waiting for HTTP EOF afterward can
 	// turn an already completed message into a retryable connection failure.
 	for !terminal && stream.Next() {
@@ -86,6 +120,9 @@ func (model *sdkModel) streamAnthropic(ctx context.Context, raw []byte, call fan
 				encoded, _ := json.Marshal(input)
 				block.input = string(encoded)
 			}
+			if block.kind == "compaction" {
+				block.raw = content
+			}
 			blocks[index] = block
 			if block.kind == "tool_use" {
 				if !emitter.emitIndexed(fantasy.StreamPart{Type: fantasy.StreamPartTypeToolInputStart, ID: block.id, ToolCallName: block.name}, index) {
@@ -110,6 +147,16 @@ func (model *sdkModel) streamAnthropic(ctx context.Context, raw []byte, call fan
 			}
 			delta := wireObject(value["delta"])
 			switch wireString(delta["type"]) {
+			case "compaction_delta":
+				// Threshold compaction sends its summary and encrypted state in
+				// one delta; an on-demand block arrives whole in its start event.
+				if block.raw != nil {
+					for _, key := range []string{"content", "encrypted_content"} {
+						if value, ok := delta[key]; ok {
+							block.raw[key] = value
+						}
+					}
+				}
 			case "citations_delta":
 				citation := wireObject(delta["citation"])
 				if wireString(citation["type"]) == "web_search_result_location" {
@@ -148,6 +195,8 @@ func (model *sdkModel) streamAnthropic(ctx context.Context, raw []byte, call fan
 				return
 			}
 			switch block.kind {
+			case "compaction":
+				compacted = block.raw
 			case "thinking", "redacted_thinking":
 				metadata := &anthropic.ReasoningOptionMetadata{Signature: block.signature, RedactedData: block.redacted}
 				if !emitter.emitIndexed(fantasy.StreamPart{Type: fantasy.StreamPartTypeReasoningEnd, ID: block.id, ProviderMetadata: fantasy.ProviderMetadata{anthropic.Name: metadata}}, index) {
@@ -206,9 +255,122 @@ func (model *sdkModel) streamAnthropic(ctx context.Context, raw []byte, call fan
 		finish = fantasy.FinishReasonLength
 	case "refusal":
 		finish = fantasy.FinishReasonContentFilter
-	case "end_turn", "stop_sequence":
+	case "end_turn", "stop_sequence", "compaction":
 	default:
 		finish = fantasy.FinishReasonUnknown
 	}
-	emitter.emit(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: finish})
+	part := fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: finish}
+	// A blocked or missing summary leaves no block or one with null content,
+	// whatever the stop reason says; only a block with text is a summary.
+	if summary, ok := compacted["content"].(string); ok && strings.TrimSpace(summary) != "" {
+		items, err := json.Marshal([]any{compacted})
+		if err != nil {
+			emitter.fail(err)
+			return
+		}
+		part.ProviderMetadata = fantasy.ProviderMetadata{nativeCompactionKey: &nativeOutput{Summary: summary, Items: items}}
+	} else if compacted == nil && nativeRequest(call) != nil {
+		part.ProviderMetadata = fantasy.ProviderMetadata{nativeCompactionKey: &nativeOutput{Ignored: true}}
+	}
+	emitter.emit(part)
+}
+
+func anthropicBetaHeader(endpoint string, oauth, apiKey bool, raw []byte, configHeaders, callHeaders map[string]string) string {
+	var betas []string
+	seen := map[string]bool{}
+	addList := func(value string) {
+		for _, part := range strings.Split(value, ",") {
+			token := strings.TrimSpace(part)
+			if token == "" || seen[token] {
+				continue
+			}
+			seen[token] = true
+			betas = append(betas, token)
+		}
+	}
+	if apiKey {
+		addList("claude-code-20250219")
+		var payload struct {
+			Thinking struct {
+				Type string `json:"type"`
+			} `json:"thinking"`
+			OutputConfig struct {
+				Effort string `json:"effort"`
+			} `json:"output_config"`
+		}
+		if json.Unmarshal(raw, &payload) == nil {
+			if payload.Thinking.Type == "adaptive" || payload.Thinking.Type == "enabled" {
+				addList("interleaved-thinking-2025-05-14")
+			}
+			if payload.OutputConfig.Effort != "" {
+				addList("effort-2025-11-24")
+			}
+		}
+	}
+	for _, headers := range []map[string]string{configHeaders, callHeaders} {
+		for key, value := range headers {
+			if strings.EqualFold(key, "anthropic-beta") {
+				addList(value)
+			}
+		}
+	}
+	if anthropicCompacts(raw) {
+		addList(anthropicCompactBeta)
+	}
+	if !oauth && isOfficialAnthropicEndpoint(endpoint) {
+		var payload struct {
+			Thinking struct {
+				Type string `json:"type"`
+			} `json:"thinking"`
+			Tools []json.RawMessage `json:"tools"`
+			Speed string            `json:"speed"`
+		}
+		if json.Unmarshal(raw, &payload) == nil {
+			if payload.Thinking.Type == "enabled" && len(payload.Tools) > 0 {
+				addList("interleaved-thinking-2025-05-14")
+			}
+			if payload.Speed == "fast" {
+				addList("fast-mode-2026-02-01")
+			}
+		}
+	}
+	return strings.Join(betas, ",")
+}
+
+// anthropicCompacts reports a request that asks for an on-demand summary or
+// carries the signed block one returned; both need the compaction beta.
+func anthropicCompacts(raw []byte) bool {
+	var payload struct {
+		Compaction json.RawMessage `json:"compaction"`
+		Messages   []struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if json.Unmarshal(raw, &payload) != nil {
+		return false
+	}
+	if len(payload.Compaction) > 0 && string(payload.Compaction) != "null" {
+		return true
+	}
+	for _, message := range payload.Messages {
+		var blocks []struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(message.Content, &blocks) == nil && slices.ContainsFunc(blocks, func(block struct {
+			Type string `json:"type"`
+		}) bool {
+			return block.Type == "compaction"
+		}) {
+			return true
+		}
+	}
+	return false
+}
+
+func isOfficialAnthropicEndpoint(endpoint string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(parsed.Hostname(), "api.anthropic.com")
 }

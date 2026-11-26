@@ -1,6 +1,7 @@
 package live
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
 	"path"
@@ -8,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 const workspaceReadBackoff = 5 * time.Second
@@ -139,11 +140,27 @@ func (r *Runtime) workspaceFrame(c *ui.Context) {
 		project.pruneDocumentImages()
 	}
 	r.projectWorkspaceLocations()
-	session, ok := r.session(r.App.Sidebar.Selected)
-	// An unsent draft has a worktree to show and no session.
-	r.App.Panel.Session = ok
-	if !ok {
-		session, ok = r.draftWorkspaceSession(r.App.Sidebar.Selected)
+	var session protocol.Session
+	ok := false
+	terminal := r.App.ActiveTerminal()
+	var info protocol.TerminalInfo
+	if terminal != "" {
+		// A main terminal pane's panel shows the worktree its shell runs in,
+		// with no session's checkpoints or documents.
+		r.App.Panel.Session, r.App.Panel.HasProject, r.App.Panel.Cwd = false, false, ""
+		var owner *Runtime
+		if owner, info, ok = r.liveTerminalInfo(terminal); ok && owner == r && info.Worktree != nil {
+			session.Worktree = *info.Worktree
+		} else {
+			ok = false
+		}
+	} else {
+		session, ok = r.session(r.App.Sidebar.Selected)
+		// An unsent draft has a worktree to show and no session.
+		r.App.Panel.Session = ok
+		if !ok {
+			session, ok = r.draftWorkspaceSession(r.App.Sidebar.Selected)
+		}
 	}
 	if !ok {
 		r.releaseSelectedWorkspace()
@@ -172,6 +189,10 @@ func (r *Runtime) workspaceFrame(c *ui.Context) {
 		r.App.Panel.Actions = nil
 		r.App.Panel.Data = &viewmodel.Workspace{}
 		return
+	}
+	if terminal != "" {
+		session.Project = worktree.Project
+		r.App.Panel.Cwd = cmp.Or(workspaceString(info.Directory), worktree.Path)
 	}
 	if r.workspace.selected != session.Worktree {
 		r.releaseSelectedWorkspace()

@@ -2,6 +2,8 @@ package store
 
 import (
 	"bytes"
+	"cmp"
+	"container/heap"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -9,7 +11,6 @@ import (
 	"math"
 	"math/big"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,15 +20,88 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
-func readAgentUsage(ctx context.Context, db *sql.Conn, node protocol.NodeID, query protocol.UsageQuery) (protocol.UsageReport, error) {
+// Only decode scalar diagnostic facts, not the context composition or stream
+// annotations. Unlike transport declarations, this also accepts old snapshots
+// with missing fields. Usage is only needed if the canonical bill is missing.
+type usageAttemptFacts struct {
+	Verdict          *protocol.TraceVerdict `json:"verdict"`
+	Index            *uint64                `json:"index"`
+	Status           *uint16                `json:"status"`
+	Outcome          *string                `json:"outcome"`
+	EndKind          *string                `json:"end_kind"`
+	GatewayRequestID *string                `json:"gateway_request_id"`
+	RetryReason      *string                `json:"retry_reason"`
+	FailureKind      *string                `json:"failure_kind"`
+	usageAttemptTiming
+	CacheWrite        *uint64         `json:"cache_write"`
+	CacheReported     bool            `json:"cache_reported"`
+	ReasoningReported bool            `json:"reasoning_reported"`
+	Usage             json.RawMessage `json:"usage"`
+}
+
+// Old records can contain negative duration sentinels. As in the original
+// scalar SQL projection, those are unknown, not zero-duration samples.
+type usageAttemptTiming struct {
+	ElapsedUs    *int64 `json:"elapsed_us"`
+	FirstTokenUs *int64 `json:"first_token_us"`
+}
+
+func usageDuration(v *int64) *uint64 {
+	if v == nil || *v < 0 {
+		return nil
+	}
+	us := uint64(*v)
+	return &us
+}
+
+type usagePriceKey struct {
+	scope                                           *usageRowScope
+	input, output, cacheRead, cacheWrite, reasoning uint64
+}
+
+// Keep the oldest retained row at the root. Aggregates still see every row.
+type usageRequestHeap []protocol.UsageRequest
+
+func (h usageRequestHeap) Len() int { return len(h) }
+func (h usageRequestHeap) Less(i, j int) bool {
+	return compareUsageOrder(h[i].Position, h[j].Position) < 0
+}
+func (h usageRequestHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *usageRequestHeap) Push(v any)   { *h = append(*h, v.(protocol.UsageRequest)) }
+func (h *usageRequestHeap) Pop() any {
+	last := len(*h) - 1
+	v := (*h)[last]
+	*h = (*h)[:last]
+	return v
+}
+
+func compareUsageOrder(a, b protocol.UsagePosition) int {
+	if a.TimestampMs != b.TimestampMs {
+		return cmp.Compare(a.TimestampMs, b.TimestampMs)
+	}
+	if a.Node != b.Node {
+		return bytes.Compare(a.Node[:], b.Node[:])
+	}
+	return cmp.Or(cmp.Compare(a.Sequence, b.Sequence), cmp.Compare(a.Ordinal, b.Ordinal))
+}
+
+func readAgentUsage(ctx context.Context, db *sql.Conn, node protocol.NodeID, query protocol.UsageQuery, observations bool) (protocol.UsageReport, error) {
 	report := protocol.DefaultUsageReport()
 	report.Node = node
 	report.Query = query
-	if query.StartMs < 0 || query.EndMs <= query.StartMs || query.EndMs-query.StartMs > 366*86400000 || query.UtcOffsetMinutes > 840 || query.UtcOffsetMinutes < -840 || query.Before != nil && (query.Before.TimestampMs < query.StartMs || query.Before.TimestampMs >= query.EndMs) || len(query.Projects) > 128 || len(query.Worktrees) > 128 || len(query.Providers) > 128 || len(query.Models) > 128 {
+	if !observations && (query.CacheMissOnly || query.ObservedOnly || query.WithoutCredential || query.Dimension == protocol.UsageDimensionSession || query.Dimension == protocol.UsageDimensionCredential || len(query.Statuses) != 0 || len(query.FailureKinds) != 0 || len(query.Outcomes) != 0 || len(query.EndKinds) != 0 || len(query.Sessions) != 0 || len(query.Credentials) != 0) {
+		return report, invalid("observation filters require read_usage_v2")
+	}
+	if len(query.Statuses) > 128 || len(query.FailureKinds) > 128 || (query.WithoutCredential && len(query.Credentials) > 0) || query.StartMs < 0 || query.EndMs <= query.StartMs || query.EndMs-query.StartMs > 366*86400000 || query.UtcOffsetMinutes > 840 || query.UtcOffsetMinutes < -840 || query.Before != nil && (query.Before.TimestampMs < query.StartMs || query.Before.TimestampMs >= query.EndMs) || len(query.Projects) > 128 || len(query.Worktrees) > 128 || len(query.Providers) > 128 || len(query.Models) > 128 || len(query.Outcomes) > 128 || len(query.EndKinds) > 128 || len(query.Sessions) > 128 || len(query.Credentials) > 128 {
 		return report, invalid("usage time range or filters exceed the query limits")
 	}
-	for _, model := range query.Models {
-		if strings.TrimSpace(model) == "" || len(model) > 256 {
+	for _, status := range query.Statuses {
+		if status < 100 || status > 599 {
+			return report, invalid("invalid HTTP status")
+		}
+	}
+	for _, value := range slices.Concat(query.Models, query.FailureKinds) {
+		if strings.TrimSpace(value) == "" || len(value) > 256 {
 			return report, invalid("usage time range or filters exceed the query limits")
 		}
 	}
@@ -38,228 +112,187 @@ func readAgentUsage(ctx context.Context, db *sql.Conn, node protocol.NodeID, que
 	report.Days = usageBuckets(query.StartMs, query.EndMs, 86400000, offset)
 	recentStart := max(query.StartMs, query.EndMs-2*86400000)
 	report.Recent = usageBuckets(recentStart, query.EndMs, 1800000, offset)
-	projects, _ := encode(query.Projects)
-	worktrees, _ := encode(query.Worktrees)
-	providers, _ := encode(query.Providers)
-	models, _ := encode(query.Models)
-	if query.Projects == nil {
-		projects = []byte("[]")
-	}
-	if query.Worktrees == nil {
-		worktrees = []byte("[]")
-	}
-	if query.Providers == nil {
-		providers = []byte("[]")
-	}
-	if query.Models == nil {
-		models = []byte("[]")
+	args := []any{time.UnixMilli(query.StartMs).UTC().Format("2006-01-02T15:04:05"), time.UnixMilli(query.EndMs).UTC().Format("2006-01-02T15:04:05")}
+	for _, filter := range []any{query.Projects, query.Worktrees, query.Providers, query.Models, query.Outcomes, query.EndKinds, query.Sessions, query.Credentials, query.Statuses, query.FailureKinds} {
+		data, err := encode(filter)
+		if err != nil {
+			return report, err
+		}
+		if string(data) == "null" {
+			data = []byte("[]")
+		}
+		args = append(args, string(data))
 	}
 	user, err := CurrentUser(ctx, db)
 	if err != nil {
 		return report, err
 	}
-	rows, err := db.QueryContext(ctx, agentUsageRows, time.UnixMilli(query.StartMs).UTC().Format("2006-01-02T15:04:05"), time.UnixMilli(query.EndMs).UTC().Format("2006-01-02T15:04:05"), string(projects), string(worktrees), string(providers), string(models), 100001, user.ID.String())
+	rows, err := db.QueryContext(ctx, agentUsageRows(observations, query.ObservedOnly, len(query.Providers)+len(query.Models)+len(query.Credentials) > 0 || query.WithoutCredential), append(args, 100001, user.ID.String(), query.WithoutCredential, query.ObservedOnly, query.CacheMissOnly)...)
 	if err != nil {
 		return report, err
 	}
-	type usageRow struct {
-		time                          string
-		tokens                        protocol.ConversationUsage
-		provider, model               string
-		project                       sql.NullString
-		worktree                      string
-		api, authentication, endpoint sql.NullString
-		usage                         string
-		elapsed                       sql.NullInt64
-		media                         sql.NullString
-		sequence                      uint64
-		session, turn                 string
-		first                         sql.NullInt64
-		providerName                  sql.NullString
-		scope                         string
-		resource, assistant           sql.NullString
-		preset                        sql.NullString
-	}
-	captured := []usageRow{}
-	for rows.Next() {
-		if len(captured) == 100000 {
-			rows.Close()
-			return report, invalid("usage report exceeds the row limit; narrow the time range or filters")
-		}
-		var row usageRow
-		if err = rows.Scan(&row.time, &row.tokens.Input, &row.tokens.Output, &row.tokens.CachedInput, &row.tokens.Reasoning, &row.provider, &row.model, &row.project, &row.worktree, &row.api, &row.authentication, &row.endpoint, &row.usage, &row.elapsed, &row.media, &row.sequence, &row.session, &row.turn, &row.first, &row.providerName, &row.scope, &row.resource, &row.assistant, &row.preset); err != nil {
-			rows.Close()
-			return report, err
-		}
-		captured = append(captured, row)
-	}
-	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
-		return report, err
-	}
+	defer rows.Close()
 	groups := map[string]*protocol.UsageGroup{}
 	resources := map[string]protocol.UsageKey{}
-	requests := []protocol.UsageRequest{}
+	requests := usageRequestHeap{}
 	prices := modelPrices{}
-	for _, row := range captured {
-		created, e := time.Parse(time.RFC3339Nano, row.time)
+	totalInsights := usageInsightAccumulator{}
+	groupInsights := map[string]*usageInsightAccumulator{}
+	var lastUsage sql.NullString
+	var lastTokens canonical.Usage
+	var lastPriceKey usagePriceKey
+	var lastPrice *protocol.UsageCost
+	for row, e := range streamUsageRows(ctx, db, rows, query, observations, groups, resources) {
 		if e != nil {
 			return report, e
 		}
-		ms := created.UnixMilli()
-		if ms < query.StartMs || ms >= query.EndMs {
-			continue
+		ms, scope := row.ms, row.scope
+		if scope.groupName != nil {
+			scope.group.Name = scope.groupName
 		}
-		provider, e := protocol.ParseProviderID(row.provider)
-		if e != nil {
-			return report, e
-		}
-		worktree, e := protocol.ParseWorktreeID(row.worktree)
-		if e != nil {
-			return report, e
-		}
-		session, e := protocol.ParseSessionID(row.session)
-		if e != nil {
-			return report, e
-		}
-		turn, e := protocol.ParseTurnID(row.turn)
-		if e != nil {
-			return report, e
-		}
-		var project *protocol.ProjectID
-		if row.project.Valid {
-			id, e := protocol.ParseProjectID(row.project.String)
-			if e != nil {
+		request := scope.base
+		var a usageAttemptFacts
+		if row.attempt.Valid {
+			if e = json.Unmarshal([]byte(row.attempt.String), &a); e != nil {
 				return report, e
 			}
-			project = &id
 		}
-		owner := protocol.UsageKey{Kind: "session", Data: session}
-		location := owner
-		if project != nil {
-			owner = protocol.UsageKey{Kind: "project", Data: *project}
-			location = protocol.UsageKey{Kind: "worktree", Data: protocol.UsageKeyWorktreePayload{Project: *project, Worktree: worktree}}
-		} else if row.resource.Valid {
-			var resource protocol.ConnectionResource
-			if e = json.Unmarshal([]byte(row.resource.String), &resource); e != nil {
+		if row.timing.Valid && (a.ElapsedUs == nil || a.FirstTokenUs == nil) {
+			var timing usageAttemptTiming
+			if e = json.Unmarshal([]byte(row.timing.String), &timing); e != nil {
 				return report, e
 			}
-			owner = protocol.UsageKey{Kind: "connection", Data: resource}
-			location = owner
-		} else if row.assistant.Valid {
-			var assistant protocol.PluginConversationBinding
-			if e = json.Unmarshal([]byte(row.assistant.String), &assistant); e != nil {
-				return report, e
+			if a.ElapsedUs == nil {
+				a.ElapsedUs = timing.ElapsedUs
 			}
-			owner = protocol.UsageKey{Kind: "assistant", Data: protocol.UsageKeyAssistantPayload{Package: assistant.Package.Name, ID: assistant.ID}}
-			location = owner
+			if a.FirstTokenUs == nil {
+				a.FirstTokenUs = timing.FirstTokenUs
+			}
 		}
-		keys := []protocol.UsageKey{{Kind: "provider", Data: provider}, {Kind: "model", Data: protocol.UsageKeyModelPayload{Provider: provider, Model: row.model}}, owner, location}
-		index := 0
-		switch query.Dimension {
-		case protocol.UsageDimensionModel:
-			index = 1
-		case protocol.UsageDimensionProject:
-			index = 2
-		case protocol.UsageDimensionWorktree:
-			index = 3
+		elapsed := usageDuration(a.ElapsedUs)
+		if row.usage != lastUsage {
+			lastTokens = canonical.Usage{}
+			if row.usage.Valid {
+				if e = json.Unmarshal([]byte(row.usage.String), &lastTokens); e != nil {
+					return report, e
+				}
+			}
+			lastUsage = row.usage
 		}
-		key := keys[index]
-		keyText := usageKeyText(key)
-		group := groups[keyText]
-		if group == nil {
-			g := protocol.DefaultUsageGroup()
-			g.Key = key
-			group = &g
-			groups[keyText] = group
+		usage := lastTokens
+		if len(a.Usage) > 0 && string(a.Usage) != "null" && (usage.Input == nil || usage.Output == nil) {
+			var u protocol.ConversationUsage
+			if err := json.Unmarshal(a.Usage, &u); err != nil {
+				return report, err
+			}
+			usage.Input, usage.Output = &u.Input, &u.Output
+			if a.CacheReported {
+				usage.CacheRead = &u.CachedInput
+			}
+			if a.ReasoningReported {
+				usage.Reasoning = &u.Reasoning
+			}
 		}
-		providerName := row.provider
-		if row.providerName.Valid {
-			providerName = row.providerName.String
+		if a.CacheWrite != nil {
+			usage.CacheWrite = a.CacheWrite
 		}
-		name := providerName
-		if index == 2 {
-			name = row.scope
-		}
-		if index < 3 && name != "" {
-			v := name
-			group.Name = &v
-		}
-		for _, key := range keys {
-			resources[usageKeyText(key)] = key
-		}
-		if len(groups) > 4096 || len(resources) > 4096*4 {
-			return report, invalid("usage report exceeds the group or resource limit; narrow the filters")
-		}
-		var usage canonical.Usage
-		if e = json.Unmarshal([]byte(row.usage), &usage); e != nil {
-			return report, e
-		}
+		var tokens *protocol.ConversationUsage
 		var cost *protocol.UsageCost
-		if !row.media.Valid || row.media.String != "image" && row.media.String != "video" {
-			cost, e = estimateAgentCost(ctx, db, prices, row.preset.String, row.api.String, row.model, usage)
-			if e != nil {
-				return report, e
+		if usage.Input != nil && usage.Output != nil {
+			tokens = &protocol.ConversationUsage{Input: *usage.Input, Output: *usage.Output, CachedInput: optionalUint(usage.CacheRead), Reasoning: optionalUint(usage.Reasoning)}
+			if row.key.media.String != "image" && row.key.media.String != "video" {
+				key := usagePriceKey{scope: scope, input: *usage.Input, output: *usage.Output, cacheRead: optionalUint(usage.CacheRead), cacheWrite: optionalUint(usage.CacheWrite), reasoning: optionalUint(usage.Reasoning)}
+				if len(usage.Provider) == 0 && key == lastPriceKey {
+					cost = lastPrice
+				} else {
+					cost, e = estimateAgentCost(ctx, db, prices, scope.preset, scope.api, request.Model, usage)
+					if e != nil {
+						return report, e
+					}
+					if len(usage.Provider) == 0 {
+						lastPriceKey, lastPrice = key, cost
+					}
+				}
 			}
 		}
-		var elapsed *uint64
-		if row.elapsed.Valid && row.elapsed.Int64 >= 0 {
-			v := uint64(row.elapsed.Int64)
-			elapsed = &v
-		}
-		if e = addUsageMetrics(&report.Totals, row.tokens, cost, elapsed); e != nil {
-			return report, e
-		}
-		if e = addUsageMetrics(&group.Metrics, row.tokens, cost, elapsed); e != nil {
-			return report, e
-		}
-		day := int((usageFloor(ms, 86400000, offset) - report.Days[0].StartMs) / 86400000)
-		if e = addUsageMetrics(&report.Days[day].Metrics, row.tokens, cost, elapsed); e != nil {
-			return report, e
-		}
-		addUsageModel(&report.Days[day], row.model, row.tokens)
-		if ms >= recentStart {
-			bucket := int((usageFloor(ms, 1800000, offset) - report.Recent[0].StartMs) / 1800000)
-			if e = addUsageMetrics(&report.Recent[bucket].Metrics, row.tokens, cost, elapsed); e != nil {
-				return report, e
-			}
-			addUsageModel(&report.Recent[bucket], row.model, row.tokens)
-		}
-		position := protocol.UsagePosition{TimestampMs: ms, Node: node, Sequence: row.sequence}
-		if before := query.Before; before != nil && (ms > before.TimestampMs || ms == before.TimestampMs &&
-			(bytes.Compare(node[:], before.Node[:]) > 0 || node == before.Node && row.sequence >= before.Sequence)) {
+		if tokens == nil && !observations {
 			continue
 		}
-		request := protocol.DefaultUsageRequest()
-		request.Position = position
-		request.Session = session
-		request.Turn = turn
-		request.Project = project
-		request.ScopeName = row.scope
-		request.Worktree = worktree
-		request.Provider = provider
-		request.ProviderName = providerName
-		request.Model = row.model
-		request.Tokens = row.tokens
-		request.ElapsedUs = elapsed
-		if row.first.Valid && row.first.Int64 >= 0 && elapsed != nil && uint64(row.first.Int64) <= *elapsed {
-			v := uint64(row.first.Int64)
-			request.FirstTokenUs = &v
+		if tokens != nil {
+			if e = addUsageMetrics(&report.Totals, *tokens, cost, elapsed); e != nil {
+				return report, e
+			}
+			if e = addUsageMetrics(&scope.group.Metrics, *tokens, cost, elapsed); e != nil {
+				return report, e
+			}
+			day := int((usageFloor(ms, 86400000, offset) - report.Days[0].StartMs) / 86400000)
+			if e = addUsageMetrics(&report.Days[day].Metrics, *tokens, cost, elapsed); e != nil {
+				return report, e
+			}
+			addUsageModel(&report.Days[day], request.Model, *tokens)
+			if ms >= recentStart {
+				bucket := int((usageFloor(ms, 1800000, offset) - report.Recent[0].StartMs) / 1800000)
+				if e = addUsageMetrics(&report.Recent[bucket].Metrics, *tokens, cost, elapsed); e != nil {
+					return report, e
+				}
+				addUsageModel(&report.Recent[bucket], request.Model, *tokens)
+			}
+		}
+		request.Tokens, request.ElapsedUs = tokens, elapsed
+		if observations {
+			request.RequestID, request.Attempt, request.Status = row.requestID, a.Index, a.Status
+			request.Verdict, request.CacheRead = a.Verdict, usage.CacheRead
+			request.Outcome, request.EndKind = (*protocol.ConversationObservationOutcome)(a.Outcome), (*protocol.ConversationObservationEndKind)(a.EndKind)
+			request.CacheWrite, request.GatewayRequestID, request.RetryReason = usage.CacheWrite, a.GatewayRequestID, a.RetryReason
+			request.FailureKind = a.FailureKind
+			if request.FailureKind == nil {
+				request.FailureKind = a.RetryReason
+			}
+			if request.FailureKind == nil && request.Outcome != nil && *request.Outcome == protocol.ConversationObservationOutcomeFailed {
+				unknown := "unknown"
+				request.FailureKind = &unknown
+			}
+		}
+		if first := usageDuration(a.FirstTokenUs); first != nil && (elapsed != nil && *first <= *elapsed || elapsed == nil && observations) {
+			request.FirstTokenUs = first
 		}
 		if cost != nil {
 			request.UsdMicros = &cost.UsdMicros
 		}
-		requests = append(requests, request)
-	}
-	sort.Slice(requests, func(i, j int) bool {
-		if requests[i].Position.TimestampMs != requests[j].Position.TimestampMs {
-			return requests[i].Position.TimestampMs > requests[j].Position.TimestampMs
+		if observations {
+			groupStats := groupInsights[scope.groupKey]
+			if groupStats == nil {
+				groupStats = &usageInsightAccumulator{}
+				groupInsights[scope.groupKey] = groupStats
+			}
+			for _, stats := range []*usageInsightAccumulator{&totalInsights, groupStats} {
+				if err := stats.add(request, usage); err != nil {
+					return report, err
+				}
+			}
 		}
-		return requests[i].Position.Sequence > requests[j].Position.Sequence
-	})
-	if len(requests) > 20 {
-		report.Requests.HasMore = true
-		requests = requests[:20]
+		position := protocol.UsagePosition{TimestampMs: ms, Node: node, Sequence: row.sequence, Ordinal: row.ordinal}
+		if before := query.Before; before != nil && compareUsageOrder(position, *before) >= 0 {
+			continue
+		}
+		request.Position = position
+		if len(requests) < 20 {
+			requests = append(requests, request)
+			if len(requests) == 20 {
+				heap.Init(&requests)
+			}
+		} else {
+			report.Requests.HasMore = true
+			if compareUsageOrder(request.Position, requests[0].Position) > 0 {
+				requests[0] = request
+				heap.Fix(&requests, 0)
+			}
+		}
 	}
+	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
+		return report, err
+	}
+	slices.SortFunc(requests, func(a, b protocol.UsageRequest) int { return compareUsageOrder(b.Position, a.Position) })
 	titles := map[protocol.SessionID]string{}
 	for i := range requests {
 		title, known := titles[requests[i].Session]
@@ -275,6 +308,9 @@ func readAgentUsage(ctx context.Context, db *sql.Conn, node protocol.NodeID, que
 			requests[i].SessionTitle = &title
 		}
 	}
+	if observations {
+		report.Insights = totalInsights.finish()
+	}
 	report.Requests.Items = requests
 	groupKeys := []string{}
 	for k := range groups {
@@ -282,6 +318,9 @@ func readAgentUsage(ctx context.Context, db *sql.Conn, node protocol.NodeID, que
 	}
 	slices.Sort(groupKeys)
 	for _, k := range groupKeys {
+		if observations {
+			groups[k].Insights = groupInsights[k].finish()
+		}
 		report.Groups = append(report.Groups, *groups[k])
 	}
 	resourceKeys := []string{}
@@ -311,7 +350,7 @@ func readAgentUsage(ctx context.Context, db *sql.Conn, node protocol.NodeID, que
 	return report, nil
 }
 func usageKeyText(key protocol.UsageKey) string {
-	order := slices.Index([]string{"provider", "model", "project", "session", "connection", "assistant", "worktree"}, key.Kind)
+	order := slices.Index([]string{"provider", "model", "project", "session", "connection", "assistant", "worktree", "credential", "unassigned"}, key.Kind)
 	body, _ := encode(key.Data)
 	return string(rune('0'+order)) + string(body)
 }
@@ -398,7 +437,7 @@ type modelPrices map[[2]string][]byte
 
 // catalogSuppliers names the models.dev supplier of a preset or brand that
 // models.dev lists under another identifier.
-var catalogSuppliers = map[string]string{"gemini": "google", "qwen": "alibaba", "moonshot": "moonshotai", "fireworks": "fireworks-ai", "together": "togetherai", "zhipu": "zhipuai", "doubao": "volcengine"}
+var catalogSuppliers = map[string]string{"gemini": "google", "bedrock": "amazon-bedrock", "vertexai": "google-vertex", "vertex-ai": "google-vertex", "qwen": "alibaba", "moonshot": "moonshotai", "fireworks": "fireworks-ai", "together": "togetherai", "zhipu": "zhipuai", "doubao": "volcengine"}
 
 var presetBrands = sync.OnceValue(func() map[string]string {
 	brands := map[string]string{}
@@ -415,7 +454,7 @@ var presetBrands = sync.OnceValue(func() map[string]string {
 // then the vendor its wire protocol belongs to.
 func priceSuppliers(preset, api string) []string {
 	var suppliers []string
-	for _, name := range []string{preset, presetBrands()[preset], map[string]string{"responses": "openai", "chat_completions": "openai", "anthropic": "anthropic", "gemini": "google"}[api]} {
+	for _, name := range []string{preset, presetBrands()[preset], map[string]string{"responses": "openai", "chat_completions": "openai", "anthropic": "anthropic", "gemini": "google", "bedrock": "amazon-bedrock", "vertex_ai": "google-vertex"}[api]} {
 		if alias, ok := catalogSuppliers[name]; ok {
 			name = alias
 		}
@@ -541,7 +580,7 @@ func estimateAgentCost(ctx context.Context, db *sql.Conn, prices modelPrices, pr
 		return nil, nil
 	}
 	hourlyWrite := uint64(0)
-	if api == "anthropic" && write > 0 && len(usage.Provider) > 0 {
+	if (api == "anthropic" || api == "bedrock") && write > 0 && len(usage.Provider) > 0 {
 		var reported struct {
 			Creation *struct {
 				FiveMinutes *uint64 `json:"ephemeral_5m_input_tokens"`
@@ -556,8 +595,9 @@ func estimateAgentCost(ctx context.Context, db *sql.Conn, prices modelPrices, pr
 				return nil, nil
 			}
 			hourlyWrite = *creation.OneHour
-			if hourlyWrite > 0 && supplier != "anthropic" {
-				// A compatible API does not imply Anthropic's cache pricing.
+			if hourlyWrite > 0 && supplier != "anthropic" && supplier != "amazon-bedrock" {
+				// A compatible API does not imply Anthropic's cache pricing;
+				// Bedrock bills Claude's one-hour writes the same way.
 				return nil, nil
 			}
 		}

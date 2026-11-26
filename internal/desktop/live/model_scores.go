@@ -3,13 +3,13 @@ package live
 import (
 	"encoding/json"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 func modelFamily(api protocol.ConversationModelApi) string {
-	switch api {
+	switch api.Family() {
 	case "anthropic":
 		return "anthropic"
 	case "responses", "chat_completions", "azure_open_ai":

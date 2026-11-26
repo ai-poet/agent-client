@@ -47,6 +47,10 @@ cheaprouter_account_description: Manage sign-in, plan details and the model gate
 cheaprouter_signed_out: Not signed in
 cheaprouter_signed_out_description: Sign in to connect the CheapRouter model gateway. Other models and local features work without an account.
 cheaprouter_signed_in: Signed in to CheapRouter
+cheaprouter_login_expired: Your CheapRouter sign-in has expired. Please sign in again.
+cheaprouter_login_expired_action: Sign in again
+cheaprouter_login_expired_dismiss: Dismiss sign-in reminder
+cheaprouter_disable_failed: Could not disable the CheapRouter provider. Turn it off in model settings.
 settings_providers: Models
 settings_providers_description: Manage session providers, authentication and models
 settings_connectors: Connectors
@@ -137,6 +141,10 @@ tool_failed: Tool execution failed
 approval_pending: Waiting for approval
 content_copied: Copied
 tool_copy: Copy
+tool_rows_earlier: Show %{count} earlier
+output_show_all: Show all %{count} lines
+output_show_less: Show less
+diff_more_lines: '%{count} more lines'
 tool_interrupted: Result unconfirmed
 tool_not_executed: Approval interrupted; not executed
 tool_not_found: Target not found
@@ -668,6 +676,7 @@ location_create: New worktree
 git_no_matches: No matches
 composer_model_settings: Model and effort
 composer_model_empty: No matching available models
+composer_model_search_more: Keep typing to narrow results
 composer_models_recent: Recent models
 composer_effort_reset: Reset to default
 composer_feature_description: May cost more
@@ -1156,6 +1165,10 @@ provider_deployment_id: Deployment name
 provider_api_version: API version
 form_api_version_hint: e.g. 2024-10-21
 provider_cloud_required: Enter cloud provider configuration
+provider_project: Project ID
+provider_location: Location
+provider_service_account: Service account key
+provider_service_account_hint: Paste the service account JSON key
 form_model_hint: Model ID
 provider_context: Context limit (tokens)
 form_tokens_hint: Token count
@@ -1690,7 +1703,9 @@ session_changed: Session changed; try again
 project_changed: Project changed; reopen the editor
 chat_action_failed: Operation failed; try again
 chat_action_unknown: Result unconfirmed; retry the original request
-chat_config_unavailable: Session configuration unavailable; check the provider
+chat_selected_model_unavailable: The selected model is unavailable. Check provider settings.
+chat_agent_model_unavailable: An agent’s model is unavailable. Check Settings › Teams.
+chat_login_expired: Your sign-in has expired. Sign in again.
 notification_update_failed: Notifications could not be updated; retry
 session_archive_named: Archive “%{name}” and hide it from active conversations
 power_request_failed: Could not prevent sleep
@@ -1840,6 +1855,11 @@ team_conflict: Team changed; reopen it
 role_model_unavailable: Selected model or provider is unavailable
 role_capacity: Subagent limit reached
 role_unknown: Result unconfirmed; retry the original request
+cheaprouter_roles_affected: 'Agents using a disabled channel: %{count}'
+cheaprouter_roles_migrate: Migrate to the matching available channel
+cheaprouter_roles_receipt: 'Migrated: %{saved}. Failed: %{failed}. Skipped: %{skipped}.'
+cheaprouter_roles_manual: 'No matching channel. Edit these agents in Settings › Teams: %{names}.'
+cheaprouter_roles_unknown: 'Unconfirmed: %{count}. Check the agent bindings.'
 role_failed: Operation failed; retry
 chat_child_unavailable: Subsession unavailable; try again
 reference_load_failed: Failed to load references
@@ -2637,3 +2657,131 @@ gateway_node_unauthorized: Key refused
 gateway_node_http: HTTP %{status}
 gateway_node_unreachable: Unreachable
 gateway_node_invalid_url: Invalid URL
+trace_title: Request trace
+trace_view: View trace
+trace_locate: Locate in conversation
+trace_export: Export trace
+trace_export_saved: Trace saved
+trace_export_limit: Trace exceeds 64 MiB. Select a smaller scope.
+trace_recording: Recording
+trace_off: Recording off
+trace_retries: Retries
+trace_miss: Cache misses
+trace_request: Request
+trace_response: Response
+trace_metrics: Usage & timing
+trace_cache_write: Cache write
+trace_equal: Equal width
+trace_actual: Actual time
+trace_scope: Scope
+trace_turn: Selected turn
+trace_mode: Mode
+trace_shareable: Shareable
+trace_raw: Raw
+trace_raw_confirm: Raw traces may include prompts, code and private conversation content. Export anyway?
+trace_partial: Partial capture
+trace_load: Load body
+trace_events: Split by event
+trace_private: Local traces can contain system prompts and private conversation content.
+trace_dispatch: Dispatch
+trace_sent: Request sent
+trace_gap: Longest gap
+trace_dropped_headers: Omitted headers
+trace_turn_number: Turn %{count}
+trace_export_failed: Couldn't export trace
+trace_load_failed: Couldn't load trace
+trace_response_headers: Response headers
+trace_request_id: Request ID
+trace_started: Started
+trace_empty: No requests yet
+trace_empty_hint: Model requests in this session appear here.
+trace_body_missing: Body not recorded
+trace_body_capture_hint: Turn on Record request bodies in Settings › General to keep the bodies of new requests.
+trace_body_not_saved: The trace reached its storage limit, or the body couldn't be written.
+trace_body_failed: Couldn't load body
+trace_export_shareable_hint: System instructions are replaced with fingerprints. Conversation content is still included.
+trace_export_raw_hint: Includes complete requests and responses.
+trace_export_count: '%{count} recorded requests'
+trace_export_none: No recorded requests in this scope
+trace_turn_label: Turn
+trace_timing: Timing
+approval_cancelled: Cancelled
+diagnosis_action_account: Ask the gateway operator whether the upstream account changed.
+diagnosis_action_balance: Check balance and quota.
+diagnosis_action_billing: Billing cannot be inferred from this response.
+diagnosis_action_compact: Compact history or use a larger context window.
+diagnosis_action_credential: Check credentials and permissions.
+diagnosis_action_fluctuation: Failures changed across retries. Check upstream routing.
+diagnosis_action_network: Check DNS, proxy, and network connectivity.
+diagnosis_action_prefix: Compare the request prefix with the previous attempt.
+diagnosis_action_protocol: Check the API mode and response format.
+diagnosis_action_route: Check provider status if this persists.
+diagnosis_action_timing: Inspect the request timing.
+diagnosis_action_wait: Observe the provider's retry interval.
+diagnosis_authentication: Access refused
+diagnosis_cache_miss: Prompt cache miss
+diagnosis_cache_partial: Partial prompt cache hit
+diagnosis_cancelled: Request cancelled
+diagnosis_context_overflow: Context window exceeded
+diagnosis_failed: Request failed
+diagnosis_invalid_request: Request rejected
+diagnosis_invalid_response: Invalid or interrupted response
+diagnosis_lost: Estimated lost cache tokens
+diagnosis_network: Network connection failed
+diagnosis_no_usage: Usage not reported
+diagnosis_normal: No issue detected
+diagnosis_prefix_broken: Cached prefix changed
+diagnosis_quota: Quota or balance exhausted
+diagnosis_rate_limited: Rate limited
+diagnosis_slow_first: Slow first token
+diagnosis_slow_output: Slow generation
+diagnosis_unavailable: Provider or gateway unavailable
+insights_all: All
+insights_apply: Apply filters
+insights_attempts: Attempts
+insights_cost_coverage: Priced attempts
+insights_credential: Credential ID
+insights_end: End reason
+insights_failure: Failure type
+insights_failure_rate: Failure rate (known outcomes)
+insights_groups: Breakdown
+insights_host: Node
+insights_index: Traces
+insights_invalid: Check the date range, status code and filter IDs.
+insights_outcome: Outcome
+insights_provider_id: Provider ID
+insights_samples: '%{count} samples'
+insights_session: Session ID
+insights_start: Start date
+insights_status: HTTP status
+insights_title: Request insights
+insights_unassigned: No credential
+insights_until: End date
+insights_worktree: Worktree ID
+model: Model
+project: Project
+session: Desktop UI refactor
+trace_all_cleared: Recorded traces cleared
+trace_capture_privacy: Bodies may contain prompts, code and private conversation content.
+trace_clear_all: Clear all traces
+trace_clear_consequence: Delete recorded traces for every session on this node? Conversation history and usage will remain.
+trace_enable_capture: Record request bodies
+trace_gateway_allowlist: Only for allowlisted HTTPS gateways while recording.
+trace_gateway_header: Send gateway trace ID
+trace_settings_saved: Trace settings saved
+usage: Usage
+usage_column_model: Model
+usage_column_project: Project
+usage_column_provider: Provider
+usage_cost: Estimated cost (USD)
+usage_duration: Model request duration
+usage_empty: No usage yet
+usage_filters: Filters
+usage_loading: Loading usage
+usage_query_failed: Could not load usage, narrow the range or filters
+usage_range: Time range
+usage_range_days: Last %{days} days
+usage_uncached_input: Uncached input
+insights_gateway_id: Gateway request ID
+usage_column_duration: Duration
+usage_column_first_token: TTFT

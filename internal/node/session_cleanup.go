@@ -6,6 +6,7 @@ import (
 	"log"
 	"sync"
 
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/trace"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/files"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
@@ -44,12 +45,23 @@ func (node *Node) collectAttachments(ctx context.Context) {
 }
 
 // removedSessionFiles deletes the files that a committed session removal left
-// without rows: the artifact directories of removed sessions that keep no
-// artifact, and the attachments that were bound only to their turns.
+// without rows: its traces, artifact directories that keep no artifact, and
+// attachments bound only to the removed turns.
 func (node *Node) removedSessionFiles(changes []protocol.Event) {
 	removed := false
 	for _, change := range changes {
-		removed = removed || change.Kind == "sessions_removed"
+		switch change.Kind {
+		case "sessions_removed":
+			removed = true
+			ids, _ := dispatchPayload[[]protocol.SessionID](change.Data)
+			for _, id := range ids {
+				node.clearSessionTrace(id)
+			}
+		case "session_changed":
+			if s, ok := dispatchPayload[protocol.Session](change.Data); ok && s.Archived {
+				node.clearSessionTrace(s.ID)
+			}
+		}
 	}
 	if !removed {
 		return
@@ -80,6 +92,12 @@ func (node *Node) removedSessionFiles(changes []protocol.Event) {
 		}
 		node.collectAttachmentsLocked(ctx)
 	}()
+}
+
+func (node *Node) clearSessionTrace(id protocol.SessionID) {
+	if err := trace.Clear(node.profile.Ownership.Path, id.String()); err != nil {
+		log.Printf("inactive session trace cleanup failed: %v", err)
+	}
 }
 
 // collectAttachmentsLocked is collectAttachments for a caller that excludes

@@ -1,7 +1,7 @@
 [
   {
     "operation": "files.list",
-    "description": "List a directory in the captured worktree",
+    "description": "List a directory; an empty path selects the worktree root, and with Full permission an absolute path may name one elsewhere",
     "parameters": {
       "type": "object",
       "properties": {
@@ -105,7 +105,7 @@
   },
   {
     "operation": "files.write",
-    "description": "Write UTF-8 text using the expected file revision",
+    "description": "Write UTF-8 text, replacing the observed or given revision or creating the file",
     "parameters": {
       "type": "object",
       "properties": {
@@ -119,13 +119,13 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Revision to replace; omit or null to create"
         }
       },
       "required": [
         "path",
-        "text",
-        "expected_revision"
+        "text"
       ],
       "additionalProperties": false
     },
@@ -179,12 +179,12 @@
         },
         "expected_revision": {
           "type": "string",
-          "pattern": "^[a-fA-F0-9]{64}$"
+          "pattern": "^[a-fA-F0-9]{64}$",
+          "description": "Optional; defaults to the revision last seen in this conversation"
         }
       },
       "required": [
-        "path",
-        "expected_revision"
+        "path"
       ],
       "additionalProperties": false,
       "oneOf": [
@@ -239,12 +239,12 @@
         },
         "expected_revision": {
           "type": "string",
-          "pattern": "^[a-fA-F0-9]{64}$"
+          "pattern": "^[a-fA-F0-9]{64}$",
+          "description": "Optional; defaults to the revision last seen in this conversation"
         }
       },
       "required": [
-        "path",
-        "expected_revision"
+        "path"
       ],
       "additionalProperties": false
     },
@@ -253,7 +253,7 @@
   },
   {
     "operation": "files.move",
-    "description": "Move a regular file within the worktree using its current revision; never replace an existing destination",
+    "description": "Move a regular file using its current revision (with Full permission, absolute paths may reach outside the worktree on the same volume); never replace an existing destination",
     "parameters": {
       "type": "object",
       "properties": {
@@ -265,13 +265,13 @@
         },
         "expected_revision": {
           "type": "string",
-          "pattern": "^[a-fA-F0-9]{64}$"
+          "pattern": "^[a-fA-F0-9]{64}$",
+          "description": "Optional; defaults to the revision last seen in this conversation"
         }
       },
       "required": [
         "path",
-        "destination",
-        "expected_revision"
+        "destination"
       ],
       "additionalProperties": false
     },
@@ -280,7 +280,7 @@
   },
   {
     "operation": "files.apply",
-    "description": "Apply a patch in the *** Begin Patch format that adds, updates, moves or deletes up to 16 related files with one approval. Context lines match the current file exactly, and updated, moved or deleted files must have been read in this session. Every file is validated first; any failure rejects the whole patch without writing. Files are then written in order; a later failure stops without rollback and each file reports its status",
+    "description": "Apply a patch in the *** Begin Patch format that adds, updates, moves or deletes up to 16 related files with one approval (with Full permission, absolute paths may reach outside the worktree on the same volume). Context lines match the current file exactly, and updated, moved or deleted files must have been read in this session. If a file changed since you read it, read it again. Every file is validated first; any failure rejects the whole patch without writing. Files are then written in order; a later failure stops without rollback and each file reports its status",
     "parameters": {
       "type": "object",
       "properties": {
@@ -299,7 +299,7 @@
   },
   {
     "operation": "files.mkdir",
-    "description": "Create a directory in an existing parent; an existing directory is unchanged",
+    "description": "Create a directory in an existing parent (with Full permission, an absolute path may name one elsewhere); an existing directory is unchanged",
     "parameters": {
       "type": "object",
       "properties": {
@@ -468,7 +468,8 @@
           "type": "string"
         },
         "expected_revision": {
-          "type": "string"
+          "type": "string",
+          "description": "Optional; defaults to the revision last seen in this conversation"
         },
         "edits": {
           "description": "Indices refer to the notebook before this batch is applied.",
@@ -481,7 +482,6 @@
       "additionalProperties": false,
       "required": [
         "path",
-        "expected_revision",
         "edits"
       ],
       "$defs": {
@@ -1360,7 +1360,7 @@
         "timeout_ms": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 9007199254740991
+          "maximum": 600000
         },
         "background": {
           "type": "boolean",
@@ -1540,7 +1540,7 @@
           "type": "integer",
           "default": 5,
           "minimum": 1,
-          "maximum": 9007199254740991
+          "maximum": 100
         },
         "freshness": {
           "type": "string",

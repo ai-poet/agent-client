@@ -92,9 +92,10 @@ type State struct {
 	picker     bool                    // the model controls are open
 	layer      layer
 	member     string // the team member whose model the controls set
-	family     string // the vendor or recent list open in the picker
-	modelQuery string
-	efforts    effortState // the model picker's effort column
+	family            string // the vendor or recent list open in the picker
+	modelQuery        string
+	expandedProviders map[string]bool
+	efforts           effortState // the model picker's effort column
 	settings   bool        // the compact settings popover
 	stats      bool        // the compact usage popover
 	page       settingsPage

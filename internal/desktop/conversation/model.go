@@ -260,6 +260,7 @@ type Citation struct {
 // ended for Reason before the attempts ran out.
 type Retry struct {
 	Request        string // shared by the attempts of one model request
+	TraceAttempt   int    // one-based observation index, independent of the retry wait counter
 	Attempt, Limit int
 	Reason         string
 	Detail         string // the provider's message, shown when opened
@@ -405,7 +406,7 @@ type BackgroundDetail struct {
 
 // Output is a call's result, one or more of its parts.
 type Output struct {
-	// Text is plain output; Command keeps only its last 100 lines.
+	// Text is the full plain output; Command previews it from the tail.
 	Text    string
 	Command bool
 	// Paths lists the files a search or read touched.

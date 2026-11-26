@@ -9,11 +9,13 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"charm.land/fantasy"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/egoist/mygo/netproxy"
 	"github.com/openai/openai-go/v3/packages/ssestream"
 )
@@ -40,6 +42,9 @@ type UsageMetadata struct {
 	CandidateOutput *int64          `json:"candidate_output,omitempty"`
 	ToolInput       *int64          `json:"tool_input,omitempty"`
 	Raw             json.RawMessage `json:"raw,omitempty"`
+	// Context is what the last request occupied when the counts above sum
+	// several requests of one reply.
+	Context *int64 `json:"context,omitempty"`
 }
 
 func (*UsageMetadata) Options() {}
@@ -74,11 +79,13 @@ type sdkModel struct {
 	client *http.Client
 }
 type responseFacts struct {
-	status   int
-	headers  http.Header
-	body     []byte
-	family   string
-	observer *usageObserverBody
+	// A short-lived token is not known when Run captures the static secrets.
+	accessToken protocol.Secret
+	status      int
+	headers     http.Header
+	body        []byte
+	family      string
+	observer    *usageObserverBody
 }
 type factsKey struct{}
 
@@ -86,8 +93,8 @@ type factsKey struct{}
 const maxFailureBody = 1024 * 1024
 
 // stallTimeout is how long a model response may send nothing, counted from
-// the request and again from each read. It is the reference's read timeout.
-const stallTimeout = 600 * time.Second
+// the request and again from each read.
+const stallTimeout = 300 * time.Second
 
 type responseTransport struct {
 	base  http.RoundTripper
@@ -139,7 +146,10 @@ func (transport responseTransport) RoundTrip(request *http.Request) (*http.Respo
 		if err != nil {
 			return nil, err
 		}
-		capturePrepared(request.Context(), raw, true)
+		if capture := capturePrepared(request.Context(), raw, true); capture != nil && capture.trace != nil {
+			request = capture.trace.GatewayRequest(request)
+			capture.trace.Request(request.Header, raw)
+		}
 	}
 	owner, cancel := context.WithCancel(request.Context())
 	stalled := &atomic.Bool{}
@@ -158,7 +168,12 @@ func (transport responseTransport) RoundTrip(request *http.Request) (*http.Respo
 		return nil, err
 	}
 	response.Body = &stallBody{ReadCloser: response.Body, limit: transport.stall, timer: timer, cancel: cancel, stalled: stalled}
-	captureHeaders(request.Context(), response.StatusCode)
+	if capture := captureHeaders(request.Context(), response.StatusCode); capture != nil {
+		capture.gatewayID = gatewayRequestID(response.Header)
+		if capture.trace != nil {
+			capture.trace.Response(response)
+		}
+	}
 	if facts, ok := request.Context().Value(factsKey{}).(*responseFacts); ok {
 		facts.status, facts.headers = response.StatusCode, response.Header.Clone()
 		if response.StatusCode >= 400 {
@@ -174,15 +189,30 @@ func (transport responseTransport) RoundTrip(request *http.Request) (*http.Respo
 	return response, nil
 }
 
+// modelTransport is the connection pool shared by model requests. A model
+// stream can stay silent while the model thinks, and a NAT or gateway may drop
+// an idle connection without notice; HTTP/2 health pings detect a dead
+// connection instead of waiting for the stall timeout, and idle connections
+// are retired before typical gateway idle windows close them.
+var modelTransport = sync.OnceValue(func() *http.Transport {
+	transport := netproxy.Transport().Clone()
+	transport.IdleConnTimeout = 30 * time.Second
+	transport.HTTP2 = &http.HTTP2Config{SendPingTimeout: 15 * time.Second, PingTimeout: 10 * time.Second}
+	return transport
+})
+
 func newSDK(_ context.Context, config transportConfig) (fantasy.LanguageModel, error) {
 	// GenAI fills an empty key from the process environment even with a custom
 	// endpoint. Only the captured provider's explicit credential may leave Node.
 	if config.Kind == "google" && config.Key == "" {
 		return nil, &Failure{Kind: NotConfigured, Message: "Gemini requires an explicitly configured API key"}
 	}
-	var transport http.RoundTripper = responseTransport{base: netproxy.Transport(), stall: stallTimeout}
+	var transport http.RoundTripper = responseTransport{base: modelTransport(), stall: stallTimeout}
 	if config.Kind == "anthropic" && config.OAuth {
 		transport = claudeTransport{base: transport}
+	}
+	if config.vertex != nil {
+		transport = vertexTransport{base: transport, account: config.vertex}
 	}
 	return &sdkModel{config: config, client: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
@@ -200,9 +230,14 @@ func (model *sdkModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.S
 	if err != nil {
 		return nil, err
 	}
-	raw, err := sourceRequestBytes(model.config, call, body)
-	if err != nil {
-		return nil, err
+	// `/responses/compact` takes a few members of the body as they are; the
+	// ordered main-request encoding would be discarded.
+	compactWindow := model.config.Kind == "responses" && nativeRequest(call) != nil
+	var raw []byte
+	if !compactWindow {
+		if raw, err = sourceRequestBytes(model.config, call, body); err != nil {
+			return nil, err
+		}
 	}
 	return func(yield func(fantasy.StreamPart) bool) {
 		owner, cancel := context.WithCancel(ctx)
@@ -221,6 +256,10 @@ func (model *sdkModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.S
 		case "google":
 			model.streamGoogle(owner, raw, call, emitter)
 		case "responses":
+			if compactWindow {
+				model.compactResponses(owner, body, call, emitter)
+				return
+			}
 			model.streamResponses(owner, raw, call, emitter)
 		default:
 			model.streamChat(owner, raw, call, emitter)
@@ -363,7 +402,11 @@ func (emitter *sdkEmitter) fail(cause error) {
 	failure := &fantasy.ProviderError{Message: message, Cause: cause, StatusCode: emitter.facts.status, ResponseHeaders: headers, ResponseBody: emitter.facts.body}
 	lower := strings.ToLower(string(emitter.facts.body))
 	failure.ContextTooLargeErr = strings.Contains(lower, "context_length_exceeded") || strings.Contains(lower, "maximum context length")
-	emitter.emit(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: withResponseHints(failure, emitter.facts.status, emitter.facts.headers)})
+	err := withResponseHints(failure, emitter.facts.status, emitter.facts.headers)
+	if emitter.config.vertex != nil {
+		err = Classify(err, emitter.facts.accessToken)
+	}
+	emitter.emit(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: err})
 }
 
 func decodeSDK(raw string) (map[string]any, error) {
@@ -402,6 +445,26 @@ func (emitter *sdkEmitter) updateUsage(value map[string]any, family string) {
 		decoder.Decode(&merged)
 	}
 	mergeUsageFields(merged, value)
+	if iterations := wireArray(merged["iterations"]); family == "anthropic" && len(iterations) > 0 {
+		// The cache write breakdown follows the iteration totals below, so
+		// that pricing can tell five-minute from one-hour writes.
+		creation := map[string]any{}
+		for _, key := range []string{"ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"} {
+			var sum int64
+			found := false
+			for _, iteration := range iterations {
+				if count := wireInt(wireObject(wireObject(iteration)["cache_creation"])[key]); count != nil {
+					sum, found = sum+*count, true
+				}
+			}
+			if found {
+				creation[key] = json.Number(fmt.Sprint(sum))
+			}
+		}
+		if len(creation) > 0 {
+			merged["cache_creation"] = creation
+		}
+	}
 	raw, _ := json.Marshal(merged)
 	emitter.usage.Raw = raw
 	keys := map[string]**int64{}
@@ -429,8 +492,26 @@ func (emitter *sdkEmitter) updateUsage(value map[string]any, family string) {
 			emitter.usage.Reasoning = count
 		}
 	}
+	counts := value
+	if iterations := wireArray(merged["iterations"]); family == "anthropic" && len(iterations) > 0 {
+		// A request that compacts reports zero at the top level and its billed
+		// passes, the compaction among them, as iterations.
+		counts = map[string]any{}
+		for key := range keys {
+			var sum int64
+			found := false
+			for _, iteration := range iterations {
+				if count := wireInt(wireObject(iteration)[key]); count != nil {
+					sum, found = sum+*count, true
+				}
+			}
+			if found {
+				counts[key] = json.Number(fmt.Sprint(sum))
+			}
+		}
+	}
 	for key, target := range keys {
-		if count := wireInt(value[key]); count != nil {
+		if count := wireInt(counts[key]); count != nil {
 			*target = count
 		}
 	}

@@ -5,20 +5,23 @@
 package panel
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/conversation"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/fileview"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"github.com/egoist/mygo/ui"
 )
 
 // Kind is a resource the panel shows in a tab.
 type Kind string
 
 const (
+	Trace     Kind = "trace"
 	Files     Kind = "files"
 	Changes   Kind = "git"
 	History   Kind = "checkpoints"
@@ -99,6 +102,18 @@ func Closed(tabs []Tab, t, active Tab) ([]Tab, Tab) {
 // row of tabs, each an open item, and the resources no project keeps.
 // Files and Git keep theirs in the shown Project, shared with their pages.
 type State struct {
+	TracePage        []json.RawMessage
+	TraceRecent      []protocol.ConversationObservationRequest
+	TraceTurnNumbers map[string]int
+	TraceMarkers     []TraceMarker
+	TraceContent     protocol.TracePage
+	TraceError       string
+	TraceBodyFailed  bool
+	TraceReadBody    func(string)
+	TraceJump        func(record, turn string)
+	TraceExport      func(scope, mode, turn string)
+	trace            tracePresentation
+
 	createResource  func(Kind) bool
 	Actions         *Actions
 	TerminalActions *TerminalActions
@@ -289,7 +304,7 @@ func (s *State) Mount(tabs []Tab, active Tab, restored bool) {
 // older build may name one it no longer opens.
 func (t Tab) valid() bool {
 	switch t.Kind {
-	case Artifact, Subagent:
+	case Trace, Artifact, Subagent:
 		return true
 	}
 	for _, r := range Resources {
@@ -330,7 +345,7 @@ func (s *State) Close(t Tab) bool {
 // reaches them; neither is a launcher entry.
 func (s *State) lists(k Kind) bool {
 	switch k {
-	case History, Documents:
+	case Trace, History, Documents:
 		return false
 	case Terminal:
 		return !s.Live || s.Worktree

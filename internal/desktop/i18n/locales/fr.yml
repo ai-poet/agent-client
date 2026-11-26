@@ -47,6 +47,10 @@ cheaprouter_account_description: Manage sign-in, plan details and the model gate
 cheaprouter_signed_out: Not signed in
 cheaprouter_signed_out_description: Sign in to connect the CheapRouter model gateway. Other models and local features work without an account.
 cheaprouter_signed_in: Signed in to CheapRouter
+cheaprouter_login_expired: Votre session CheapRouter a expiré. Veuillez vous reconnecter.
+cheaprouter_login_expired_action: Se reconnecter
+cheaprouter_login_expired_dismiss: Masquer le rappel de connexion
+cheaprouter_disable_failed: Impossible de désactiver CheapRouter. Désactivez ce fournisseur dans les paramètres des modèles.
 settings_providers: Modèles
 settings_providers_description: Gérer les fournisseurs de session, l'authentification et les modèles
 settings_connectors: Connecteurs
@@ -137,6 +141,10 @@ tool_failed: L'exécution de l'outil a échoué
 approval_pending: En attente d'approbation
 content_copied: Copié
 tool_copy: Copier
+tool_rows_earlier: Afficher les %{count} éléments précédents
+output_show_all: Afficher les %{count} lignes
+output_show_less: Afficher moins
+diff_more_lines: '%{count} plus de lignes'
 tool_interrupted: Résultat non confirmé
 tool_not_executed: Approbation interrompue; non exécutée
 tool_not_found: Cible non trouvée
@@ -668,6 +676,7 @@ location_create: Nouvel arbre de travail
 git_no_matches: Pas de matchs
 composer_model_settings: Modèle et effort
 composer_model_empty: Aucun modèle correspondant disponible
+composer_model_search_more: Continuez à saisir pour affiner les résultats
 composer_models_recent: Modèles récents
 composer_effort_reset: Réinitialiser
 composer_feature_description: Peut coûter plus
@@ -1156,6 +1165,10 @@ provider_deployment_id: Nom du déploiement
 provider_api_version: Version API
 form_api_version_hint: par exemple 2024-10-21
 provider_cloud_required: Entrez la configuration du fournisseur de cloud
+provider_project: ID du projet
+provider_location: Emplacement
+provider_service_account: Clé du compte de service
+provider_service_account_hint: Collez la clé JSON du compte de service
 form_model_hint: Numéro de modèle
 provider_context: Limite de contexte (tokens)
 form_tokens_hint: Nombre de tokens
@@ -1690,7 +1703,9 @@ session_changed: La session a changé; réessayez
 project_changed: Projet modifié; rouvrir l'éditeur
 chat_action_failed: Opération a échoué; réessayez
 chat_action_unknown: Résultat non confirmé; réessayer la demande originale
-chat_config_unavailable: Configuration de session indisponible; vérifiez le fournisseur
+chat_selected_model_unavailable: Le modèle sélectionné est indisponible. Vérifiez les paramètres du fournisseur.
+chat_agent_model_unavailable: Le modèle d’un agent est indisponible. Vérifiez Paramètres › Équipes.
+chat_login_expired: Votre session a expiré. Reconnectez-vous.
 notification_update_failed: Impossible de mettre à jour les notifications ; réessayez
 session_archive_named: Archiver « %{name} » et le masquer des conversations actives
 power_request_failed: Impossible d’empêcher la veille
@@ -1840,6 +1855,11 @@ team_conflict: L’équipe a changé ; rouvrez-la
 role_model_unavailable: Le modèle ou le fournisseur sélectionné n'est pas disponible
 role_capacity: Limite de sous-agent atteinte
 role_unknown: Résultat non confirmé; réessayer la demande originale
+cheaprouter_roles_affected: 'Agents utilisant un canal désactivé : %{count}'
+cheaprouter_roles_migrate: Migrer vers le canal disponible du même nom
+cheaprouter_roles_receipt: 'Réussites : %{saved}. Échecs : %{failed}. Ignorés : %{skipped}.'
+cheaprouter_roles_manual: 'Aucun canal correspondant. Modifiez ces agents dans Paramètres › Équipes : %{names}.'
+cheaprouter_roles_unknown: 'Résultats non confirmés : %{count}. Vérifiez les canaux des agents.'
 role_failed: Opération a échoué; réessayez
 chat_child_unavailable: Sous-session indisponible; réessayez
 reference_load_failed: Impossible de charger les références
@@ -2637,3 +2657,131 @@ gateway_node_unauthorized: Key refused
 gateway_node_http: HTTP %{status}
 gateway_node_unreachable: Unreachable
 gateway_node_invalid_url: Invalid URL
+trace_title: Trace des requêtes
+trace_view: Afficher la trace
+trace_locate: Repérer dans la conversation
+trace_export: Exporter la trace
+trace_export_saved: Trace enregistrée
+trace_export_limit: La trace dépasse 64 Mio. Réduisez la portée de l’export.
+trace_recording: Enregistrement en cours
+trace_off: Enregistrement désactivé
+trace_retries: Nouvelles tentatives
+trace_miss: Absences du cache
+trace_request: Requête
+trace_response: Réponse
+trace_metrics: Utilisation et délais
+trace_cache_write: Écriture en cache
+trace_equal: Largeur fixe
+trace_actual: Temps réel
+trace_scope: Portée
+trace_turn: Tour sélectionné
+trace_mode: Mode
+trace_shareable: Partageable
+trace_raw: Brut
+trace_raw_confirm: La trace brute peut contenir des consignes, du code et des échanges privés. Exporter quand même ?
+trace_partial: Capture partielle
+trace_load: Charger le corps
+trace_events: Séparer par événement
+trace_private: Les traces locales peuvent contenir des consignes système et des échanges privés.
+trace_dispatch: Répartition
+trace_sent: Requête envoyée
+trace_gap: Intervalle maximal
+trace_dropped_headers: En-têtes omis
+trace_turn_number: Tour %{count}
+trace_export_failed: Impossible d’exporter la trace
+trace_load_failed: Impossible de charger la trace
+trace_response_headers: En-têtes de réponse
+trace_request_id: ID de requête
+trace_started: Début
+trace_empty: Aucune requête pour l’instant
+trace_empty_hint: Les requêtes au modèle de cette conversation apparaissent ici.
+trace_body_missing: Corps non enregistré
+trace_body_capture_hint: Activez « Enregistrer le corps des requêtes » dans Réglages › Général pour conserver le corps des nouvelles requêtes.
+trace_body_not_saved: La trace a atteint sa limite de stockage, ou le corps n’a pas pu être écrit.
+trace_body_failed: Impossible de charger le corps
+trace_export_shareable_hint: Les consignes système sont remplacées par des empreintes. Le contenu de la conversation reste inclus.
+trace_export_raw_hint: Inclut les requêtes et réponses complètes.
+trace_export_count: '%{count} requêtes enregistrées'
+trace_export_none: Aucune requête enregistrée dans cette portée
+trace_turn_label: Tour
+trace_timing: Durées
+approval_cancelled: Annulé
+diagnosis_action_account: Demandez à l’opérateur si le compte en amont a changé.
+diagnosis_action_balance: Vérifiez le solde et le quota.
+diagnosis_action_billing: Cette réponse ne permet pas d’estimer les frais.
+diagnosis_action_compact: Compactez l’historique ou augmentez le contexte.
+diagnosis_action_credential: Vérifiez les identifiants et les autorisations.
+diagnosis_action_fluctuation: Les erreurs varient selon la tentative. Vérifiez le routage.
+diagnosis_action_network: Vérifiez le DNS, le proxy et la connexion.
+diagnosis_action_prefix: Comparez le préfixe avec la requête précédente.
+diagnosis_action_protocol: Vérifiez le mode API et le format de réponse.
+diagnosis_action_route: Si cela persiste, vérifiez l’état du fournisseur.
+diagnosis_action_timing: Examinez les durées de la requête.
+diagnosis_action_wait: Respectez le délai de nouvelle tentative.
+diagnosis_authentication: Accès refusé
+diagnosis_cache_miss: Préfixe non trouvé en cache
+diagnosis_cache_partial: Préfixe partiellement en cache
+diagnosis_cancelled: Requête annulée
+diagnosis_context_overflow: Fenêtre de contexte dépassée
+diagnosis_failed: Échec de la requête
+diagnosis_invalid_request: Requête rejetée
+diagnosis_invalid_response: Réponse invalide ou interrompue
+diagnosis_lost: Jetons de cache perdus estimés
+diagnosis_network: Échec de connexion réseau
+diagnosis_no_usage: Utilisation non indiquée
+diagnosis_normal: Aucun problème détecté
+diagnosis_prefix_broken: Préfixe de cache modifié
+diagnosis_quota: Solde ou quota épuisé
+diagnosis_rate_limited: Limite de débit atteinte
+diagnosis_slow_first: Premier jeton tardif
+diagnosis_slow_output: Génération lente
+diagnosis_unavailable: Fournisseur ou passerelle indisponible
+insights_all: Tous
+insights_apply: Appliquer les filtres
+insights_attempts: Tentatives
+insights_cost_coverage: Tentatives tarifées
+insights_credential: ID d’identifiant
+insights_end: Motif de fin
+insights_failure: Type d’échec
+insights_failure_rate: Taux d’échec (résultats connus)
+insights_groups: Répartition
+insights_host: Nœud
+insights_index: Traces
+insights_invalid: Vérifiez les dates, le code de statut et les identifiants des filtres.
+insights_outcome: Résultat
+insights_provider_id: ID de fournisseur
+insights_samples: '%{count} échantillons'
+insights_session: ID de session
+insights_start: Date de début
+insights_status: Statut HTTP
+insights_title: Analyse des requêtes
+insights_unassigned: Sans identifiant
+insights_until: Date de fin
+insights_worktree: ID d’arbre de travail
+model: Modèle
+project: Projet
+session: Refonte de l’interface de bureau
+trace_all_cleared: Traces enregistrées effacées
+trace_capture_privacy: Le contenu peut inclure des consignes, du code et des conversations privées.
+trace_clear_all: Effacer toutes les traces
+trace_clear_consequence: Supprimer les traces de toutes les sessions de ce nœud ? L’historique et les données d’utilisation seront conservés.
+trace_enable_capture: Enregistrer le corps des requêtes
+trace_gateway_allowlist: Uniquement pendant l’enregistrement, aux passerelles HTTPS autorisées.
+trace_gateway_header: Envoyer l’identifiant de trace à la passerelle
+trace_settings_saved: Paramètres des traces enregistrés
+usage: Utilisation
+usage_column_model: Modèle
+usage_column_project: Projet
+usage_column_provider: Fournisseur
+usage_cost: Coût estimé (USD)
+usage_duration: Durée de la demande de modèle
+usage_empty: Aucune utilisation pour le moment
+usage_filters: Filtres
+usage_loading: Utilisation de chargement
+usage_query_failed: Impossible de charger l'utilisation, de réduire la plage ou les filtres
+usage_range: Intervalle de temps
+usage_range_days: Derniers %{days} jours
+usage_uncached_input: Entrée non mise en cache
+insights_gateway_id: ID de requête de la passerelle
+usage_column_duration: Durée
+usage_column_first_token: TTFT

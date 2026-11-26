@@ -1,0 +1,4 @@
+cheaprouter_login_expired: "CheapRouter 로그인이 만료되었습니다. 다시 로그인하세요."
+cheaprouter_login_expired_action: "다시 로그인"
+cheaprouter_disable_failed: "CheapRouter를 비활성화하지 못했습니다. 모델 설정에서 공급자를 끄세요."
+cheaprouter_login_expired_dismiss: "로그인 알림 닫기"

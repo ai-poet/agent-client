@@ -3,12 +3,14 @@ package model
 import (
 	"context"
 	"net/http/httptrace"
+	"slices"
 	"sync"
 	"time"
 
 	"charm.land/fantasy"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/clock"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/observation"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/trace"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
@@ -25,6 +27,24 @@ type attemptCapture struct {
 	sent         *uint64
 	response     *uint64
 	status       *uint16
+	trace        *trace.Attempt
+	gatewayID    string
+	secrets      []protocol.Secret
+}
+
+// captureSecret adds a transport credential to this attempt's redactions.
+func captureSecret(ctx context.Context, secret protocol.Secret) {
+	if capture, ok := ctx.Value(attemptCaptureKey{}).(*attemptCapture); ok {
+		capture.mu.Lock()
+		capture.secrets = append(capture.secrets, secret)
+		capture.mu.Unlock()
+	}
+}
+
+func (capture *attemptCapture) redact(route []protocol.Secret) []protocol.Secret {
+	capture.mu.Lock()
+	defer capture.mu.Unlock()
+	return append(slices.Clip(route), capture.secrets...)
 }
 
 func captureAttempt(ctx context.Context, call fantasy.Call, timer clock.Clock, started time.Time) (context.Context, *attemptCapture) {
@@ -43,7 +63,7 @@ func captureAttempt(ctx context.Context, call fantasy.Call, timer clock.Clock, s
 }
 
 // Transport hooks retain only request attribution and measured receipt facts.
-func capturePrepared(ctx context.Context, raw []byte, serializedBody bool) {
+func capturePrepared(ctx context.Context, raw []byte, serializedBody bool) *attemptCapture {
 	if capture, ok := ctx.Value(attemptCaptureKey{}).(*attemptCapture); ok {
 		prepared := observation.Prepared(raw, capture.inventory)
 		size := uint64(len(raw))
@@ -55,7 +75,9 @@ func capturePrepared(ctx context.Context, raw []byte, serializedBody bool) {
 		}
 		capture.dispatch, capture.sent, capture.response, capture.status = nil, nil, nil, nil
 		capture.mu.Unlock()
+		return capture
 	}
+	return nil
 }
 
 // Dispatch marks the boundary after serialization and request observation, just
@@ -69,14 +91,16 @@ func captureDispatch(ctx context.Context) {
 	}
 }
 
-func captureHeaders(ctx context.Context, status int) {
+func captureHeaders(ctx context.Context, status int) *attemptCapture {
 	if capture, ok := ctx.Value(attemptCaptureKey{}).(*attemptCapture); ok {
 		elapsed := uint64(max(0, capture.clock.Now().Sub(capture.started).Microseconds()))
 		code := uint16(status)
 		capture.mu.Lock()
 		capture.response, capture.status = &elapsed, &code
 		capture.mu.Unlock()
+		return capture
 	}
+	return nil
 }
 
 func (capture *attemptCapture) apply(attempt *Attempt) {

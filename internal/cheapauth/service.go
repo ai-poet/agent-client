@@ -16,13 +16,14 @@ import (
 // Service serializes credential refresh and persistence for background UI
 // workers. Its public snapshots never contain OAuth tokens.
 type Service struct {
-	mu          sync.Mutex
-	store       *Store
-	originStore *GatewayOriginStore
-	client      *Client // always bound to credentials.Endpoint (the login origin)
-	credentials *Credentials
-	probeKey    string // last resolved gateway key in memory for speed tests
-	now         func() time.Time
+	mu              sync.Mutex
+	store           *Store
+	originStore     *GatewayOriginStore
+	client          *Client // always bound to credentials.Endpoint (the login origin)
+	credentials     *Credentials
+	onExpiryChanged func(bool)
+	probeKey        string // last resolved gateway key in memory for speed tests
+	now             func() time.Time
 }
 
 // credentialLock serializes every renewal and every write of the credential
@@ -45,6 +46,15 @@ func NewService(profileDir string) (*Service, error) {
 		return nil, err
 	}
 	return &Service{store: store, originStore: originStore, now: time.Now}, nil
+}
+
+// SetExpiryListener installs a notification for definite rejection or successful
+// establishment. Mutations notify under the credential lock, in file-write order;
+// the listener must not call back into Service.
+func (s *Service) SetExpiryListener(notify func(bool)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onExpiryChanged = notify
 }
 
 // Restore loads the saved account without making network requests.
@@ -126,6 +136,9 @@ func (s *Service) Establish(ctx context.Context, credentials Credentials) error 
 	}
 	client.now = s.now
 	s.credentials, s.client = &credentials, client
+	if s.onExpiryChanged != nil {
+		s.onExpiryChanged(false)
+	}
 	return nil
 }
 
@@ -187,7 +200,25 @@ func (s *Service) apiSession(ctx context.Context) (Credentials, *Client, bool, e
 	}
 	origin, overridden := s.gatewayOrigin(credentials.Endpoint)
 	if origin == "" || origin == loginClient.Endpoint() {
-		return credentials, loginClient, overridden, nil
+		client := *loginClient
+		client.renew = func(ctx context.Context, rejected string) (string, error) {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			credentialLock.Lock()
+			defer credentialLock.Unlock()
+			if err := s.adoptLocked(); err != nil {
+				return "", err
+			}
+			// Do not replay an old operation with another sign-in's bearer.
+			if s.credentials.Endpoint != credentials.Endpoint || s.credentials.AccessToken != rejected {
+				return "", &AuthError{Kind: ErrorResponse, Op: "/auth/refresh"}
+			}
+			if err := s.refreshLocked(ctx); err != nil {
+				return "", err
+			}
+			return s.credentials.AccessToken, nil
+		}
+		return credentials, &client, overridden, nil
 	}
 	apiClient, err := NewClient(origin, loginClient.http)
 	if err != nil {
@@ -222,6 +253,19 @@ func (s *Service) SaveGatewayOriginConfig(cfg GatewayOriginConfig) error {
 	gatewayOriginLock.Lock()
 	defer gatewayOriginLock.Unlock()
 	return store.Save(cfg)
+}
+
+// RollBackRejectedOrigin returns routing to the login endpoint without losing
+// candidate edits or replacing a newer choice from another window.
+func (s *Service) RollBackRejectedOrigin(rejected string) error {
+	gatewayOriginLock.Lock()
+	defer gatewayOriginLock.Unlock()
+	cfg := s.GatewayOriginConfig()
+	if cfg.SelectedOrigin() != rejected {
+		return &AuthError{Kind: ErrorResponse, Op: "gateway_origin"}
+	}
+	cfg.Chosen, cfg.FallbackFrom = nil, nil
+	return s.saveOriginUnlocked(cfg)
 }
 
 // GatewayOrigin returns the business origin currently in effect (selected
@@ -524,7 +568,7 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 	}
 	if err != nil {
 		if errors.Is(err, ErrRefresh) || errors.Is(err, ErrUnauthorized) {
-			return errors.Join(err, s.clearLocked())
+			return errors.Join(err, s.invalidateLocked())
 		}
 		return err
 	}
@@ -560,7 +604,7 @@ func (s *Service) ReadSetup(ctx context.Context) (User, error, Gateway, error) {
 		return User{}, nil, Gateway{}, err
 	}
 	user, accountErr := client.Me(ctx, credentials.AccessToken)
-	if errors.Is(accountErr, ErrUnauthorized) || ctx.Err() != nil {
+	if errors.Is(accountErr, ErrUnauthorized) || errors.Is(accountErr, ErrRefresh) || ctx.Err() != nil {
 		return user, accountErr, Gateway{}, ctx.Err()
 	}
 	gateway, gatewayErr := readGateway(ctx, client, credentials, overridden)
@@ -573,6 +617,10 @@ func (s *Service) ReadSetup(ctx context.Context) (User, error, Gateway, error) {
 // CheapRouterKeyName is the gateway key this client mints for an account
 // that owns none, matching the name the Rust client uses.
 const CheapRouterKeyName = "CheapRouter desktop"
+
+// CheapRouterClientSource marks keys this desktop mints so the portal can hide
+// them from the user's manual key list (sub2api api_keys.client_source).
+const CheapRouterClientSource = "cheaprouter-desktop"
 
 // Gateway fetches catalog and keys after login, honoring all bound lanes (or
 // legacy single GroupID / account default when no lane is bound).
@@ -1458,6 +1506,14 @@ func (s *Service) Invalidate() error {
 	defer s.mu.Unlock()
 	credentialLock.Lock()
 	defer credentialLock.Unlock()
+	return s.invalidateLocked()
+}
+
+func (s *Service) invalidateLocked() error {
+	// An absent session (including logout in another window) is not a rejection.
+	if s.credentials != nil && s.onExpiryChanged != nil {
+		s.onExpiryChanged(true)
+	}
 	return s.clearLocked()
 }
 

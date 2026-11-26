@@ -1,0 +1,8 @@
+trace_enable_capture: "记录请求正文"
+trace_capture_privacy: "正文可能含有提示词、代码和私密对话。"
+trace_gateway_header: "发送网关轨迹 ID"
+trace_gateway_allowlist: "仅在录制时发送至白名单中的 HTTPS 网关。"
+trace_clear_all: "清除全部轨迹"
+trace_clear_consequence: "删除此节点所有会话已记录的轨迹？会话历史和用量将保留。"
+trace_settings_saved: "轨迹设置已保存"
+trace_all_cleared: "已清除记录的轨迹"

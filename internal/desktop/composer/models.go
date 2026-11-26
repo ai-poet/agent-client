@@ -3,7 +3,6 @@ package composer
 import (
 	"fmt"
 	"maps"
-	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -35,9 +34,9 @@ const (
 	teamRow          = 40
 )
 
-// The model picker's columns: the rail, the list and the efforts, a hairline
-// in a gap of 8 on each side between them. The list is what the page has
-// beside the others: listWidth where the window has room for it. Below
+// The model picker has a gap after the rail and a hairline with two gaps
+// between the models and the efforts. The list is what the page has beside
+// the others: listWidth where the window has room for it. Below
 // compactPickerMin the vendor rail shrinks to icons alone so the model list
 // keeps room to read and select models even at narrow widths.
 const (
@@ -50,37 +49,29 @@ const (
 	listWidth        = 236
 	effortWidth      = 132
 	columnGap        = 8
-	pickerWidth      = railWidth + listWidth + effortWidth + 2*(2*columnGap+1)
+	pickerWidth      = railWidth + listWidth + effortWidth + 3*columnGap + 1
 	// The model controls use the same inset and gap on every page.
 	modelPopoverPadding = 12
 	modelPopoverGap     = 8
 	// windowInset is how far a popover stays from the window's sides.
 	windowInset = 8
+	// maxSearchResults caps rendered search hits in the model picker scroll list.
+	maxSearchResults = 50
 )
 
 // effortState is the model picker's effort column: the model whose efforts
-// it lists and how the pointer and the keys reach it.
+// it lists and how a click and the keys reach it.
 type effortState struct {
-	// model is the model whose efforts show: the one whose row the pointer
-	// or the keys were on last, the chosen one until then.
+	// model is the model whose efforts show: the one whose row was clicked
+	// or that the keys were on last, the chosen one until then.
 	model string
 	// focused is the model row that had the keyboard focus last frame, so
 	// the focus takes the column once, as it comes to a row.
 	focused string
-	// pointer is where the pointer was in the window in the last frame, and
-	// seen tells that it is known: a row takes the column from a pointer
-	// that moved since, so one at rest takes nothing from the keys, nor
-	// does a row the list brings under it.
-	pointer [2]int
-	seen    bool
-	// from is where the pointer last was on the column's model's row, or
-	// since then when its way was read, and direct tells that it has stayed
-	// on model rows since: on its way to the column it keeps that model.
-	from   [2]int
-	direct bool
-	// enter gives the chosen model's row the focus as the picker opens, and
-	// back gives the shown model's row the focus the column had.
-	enter, back bool
+	// enter gives the chosen model's row the focus as the picker opens,
+	// back gives the shown model's row the focus the column had, and open
+	// gives the column the focus once a model's row opened it.
+	enter, back, open bool
 }
 
 // layer is the page the model popover shows.
@@ -739,6 +730,55 @@ func (s *State) teamList(c *ui.Context, ctx *Context, actions Actions) {
 	})
 }
 
+func providerExpandKey(family, providerKey string) string {
+	return family + "\x00" + providerKey
+}
+
+func (s *State) setProviderExpanded(family, providerKey string, open bool) {
+	if s.expandedProviders == nil {
+		s.expandedProviders = map[string]bool{}
+	}
+	s.expandedProviders[providerExpandKey(family, providerKey)] = open
+}
+
+func (s *State) providerGroupOpen(family string, g providerGroup, index int, hasChosenGroup, queryActive, enter bool) bool {
+	if queryActive {
+		return true
+	}
+	key := providerExpandKey(family, g.Key)
+	if enter && g.ContainsChosen {
+		s.setProviderExpanded(family, g.Key, true)
+		return true
+	}
+	if open, ok := s.expandedProviders[key]; ok {
+		return open
+	}
+	if hasChosenGroup {
+		return g.ContainsChosen
+	}
+	return index == 0
+}
+
+func providerMark(c *ui.Context, icon *ui.SVG, name string, size float32, color ui.Color) {
+	if icon != nil {
+		ui.Icon(c, icon).FontSize(size).Shrink(0).TextColor(color)
+		return
+	}
+	initial := []rune(strings.TrimSpace(name))
+	if len(initial) == 0 {
+		return
+	}
+	ui.Row(c).Size(size, size).Shrink(0).Radius(4).Center().Background(theme.Of(c).Secondary).Children(func() {
+		ui.Text(c, string(unicode.ToUpper(initial[0]))).FontSize(size * 0.62).FontWeight(600).SingleLine().TextColor(color)
+	})
+}
+
+type providerHeader struct {
+	el   ui.Element
+	key  string
+	open bool
+}
+
 // modelPicker shows vendors and models, with the existing contextual effort
 // controls next to the model list. Search ignores the current vendor.
 func (s *State) modelPicker(c *ui.Context, ctx *Context) {
@@ -752,9 +792,11 @@ func (s *State) modelPicker(c *ui.Context, ctx *Context) {
 		byID[m.ID] = m
 	}
 	var recent []Model
+	recentSet := make(map[string]bool, len(ctx.RecentModels))
 	for _, id := range ctx.RecentModels {
 		if m, ok := byID[id]; ok {
 			recent = append(recent, m)
+			recentSet[id] = true
 		}
 	}
 	if s.family == recentVendor && len(recent) == 0 || s.family != recentVendor && names[s.family] == "" {
@@ -765,11 +807,32 @@ func (s *State) modelPicker(c *ui.Context, ctx *Context) {
 		FillWidth().Height(32).Shrink(0)
 	query := strings.TrimSpace(s.modelQuery)
 	shown, visible := matchingModels(models, names, query, s.family)
-	if query == "" && s.family == recentVendor {
+	isRecent := query == "" && s.family == recentVendor
+	if isRecent {
 		shown = recent
 	}
-	if field.Submitted() && len(shown) > 0 {
-		s.pick(shown[0], s.carried(shown[0], chosen))
+	var groups []providerGroup
+	truncated := false
+	if !isRecent {
+		groups = groupModelsByProvider(shown, chosen.ID, recentSet)
+		if query != "" {
+			groups, truncated = truncateProviderGroups(groups, maxSearchResults)
+		}
+	}
+	grouped := !isRecent && len(groups) >= 2
+	var firstModel Model
+	switch {
+	case isRecent && len(shown) > 0:
+		firstModel = shown[0]
+	case !isRecent && len(groups) > 0 && len(groups[0].Models) > 0:
+		firstModel = groups[0].Models[0]
+	}
+	if field.Submitted() && firstModel.ID != "" {
+		effort := defaultEffort(firstModel)
+		if firstModel.ID == chosen.ID {
+			effort = s.carried(firstModel, chosen)
+		}
+		s.pick(firstModel, effort)
 		c.Invalidate()
 	}
 	line := func(key string) {
@@ -781,6 +844,7 @@ func (s *State) modelPicker(c *ui.Context, ctx *Context) {
 	if compactRail {
 		vendorsW = compactRailWidth
 	}
+	multiProviderCatalog := hasMultipleProviders(models)
 	picker := ui.Row(c.Key("model-picker")).FillWidth().Grow(1).MinHeight(0).Gap(columnGap).AlignItems(ui.Stretch)
 	picker.Children(func() {
 		ui.Scroll(c.Key("vendors")).Width(vendorsW).Shrink(0).Padding(railPad).Gap(4).Radius(p.Radius2xl()).Background(p.Secondary).
@@ -824,90 +888,162 @@ func (s *State) modelPicker(c *ui.Context, ctx *Context) {
 					}
 				}
 			})
-		line("rail-line")
 		rows := map[string]ui.Element{}
+		var headers []providerHeader
 		listKey := s.family
 		if query != "" {
 			listKey = "#search"
 		}
-		var first ui.Element
+		var first, firstHeader ui.Element
 		list := ui.Scroll(c.Key("models-" + listKey)).Grow(1).MinWidth(0).MaxHeight(panelHeight).FocusGroup(ui.Vertical)
 		list.Children(func() {
 			if len(shown) == 0 {
 				ui.Text(c, i18n.T(c, "composer_model_empty")).FontSize(14).Padding(8).TextColor(p.MutedForeground)
 				return
 			}
-			providers := make(map[string]bool)
-			for _, m := range shown {
-				providers[m.Provider] = true
+			if grouped {
+				hasChosenGroup := slices.ContainsFunc(groups, func(g providerGroup) bool { return g.ContainsChosen })
+				for gi, g := range groups {
+					open := s.providerGroupOpen(s.family, g, gi, hasChosenGroup, query != "", e.enter)
+					if gi > 0 {
+						ui.Box(c.Key("gap-" + g.Key)).Height(4).Shrink(0)
+					}
+					label := g.Name
+					if label == "" {
+						label = g.Key
+					}
+					group := ui.ButtonBase(c.Key("provider-" + g.Key)).Role(ui.RoleDisclosure).Label(label).Expanded(open).
+						FillWidth().MinWidth(0).Height(32).Shrink(0).PaddingX(rowPad).Gap(6).Radius(p.RadiusLg).
+						AlignItems(ui.Center).Cursor(ui.CursorPointer).TextColor(p.MutedForeground)
+					switch {
+					case group.Pressed():
+						group.Background(p.Selected())
+					case group.Hovered():
+						group.Background(p.Hover)
+					}
+					group.Children(func() {
+						providerMark(c, g.Icon, label, 14, p.MutedForeground)
+						ui.Text(c, label).FontSize(13).LineHeight(18.0 / 13).SingleLine().Grow(1).Shrink(1).MinWidth(0)
+						if g.Tag != "" {
+							kit.StatusPill(c, g.Tag, nil, kit.Neutral, true)
+						}
+						ui.Text(c, strconv.Itoa(len(g.Models))).FontSize(11).SingleLine().Shrink(0).TextColor(p.MutedForeground)
+						chevron := icons.ChevronRight
+						if open {
+							chevron = icons.ChevronDown
+						}
+						ui.Icon(c, chevron).FontSize(12).Shrink(0)
+					})
+					if query == "" {
+						family, key, wasOpen := s.family, g.Key, open
+						group.OnClick(func() {
+							s.setProviderExpanded(family, key, !wasOpen)
+						})
+					}
+					headers = append(headers, providerHeader{el: group, key: g.Key, open: open})
+					if firstHeader == (ui.Element{}) {
+						firstHeader = group
+					}
+					if !open {
+						continue
+					}
+					for _, m := range g.Models {
+						vendor := ""
+						if query != "" {
+							vendor = names[vendorID(m)]
+						}
+						row := s.modelRow(c, m, chosen, vendor, "")
+						rows[m.ID] = row
+						if first == (ui.Element{}) {
+							first = row
+						}
+					}
+				}
+			} else {
+				flat := shown
+				if !isRecent && len(groups) == 1 {
+					flat = groups[0].Models
+				}
+				for i, m := range flat {
+					vendor, source := "", ""
+					if query != "" || isRecent {
+						vendor = names[vendorID(m)]
+					}
+					if isRecent && multiProviderCatalog {
+						source = m.Provider
+					}
+					row := s.modelRow(c, m, chosen, vendor, source)
+					rows[m.ID] = row
+					if i == 0 {
+						first = row
+					}
+				}
 			}
-			for i, m := range shown {
-				vendor, source := "", ""
-				if query != "" || s.family == recentVendor {
-					vendor = names[vendorID(m)]
-				}
-				if len(providers) > 1 {
-					source = m.Provider
-				}
-				row := s.modelRow(c, m, chosen, vendor, source)
-				rows[m.ID] = row
-				if i == 0 {
-					first = row
-				}
+			if truncated {
+				ui.Text(c.Key("search-more"), i18n.T(c, "composer_model_search_more")).FontSize(11).Padding(6, 8).TextColor(p.MutedForeground)
 			}
 		})
 		// The picker opens with the focus on the chosen model's row, so the
 		// keys move from it.
 		if row, ok := rows[chosen.ID]; ok && e.enter {
+			row.ScrollIntoView()
 			row.Focus()
 		}
 		e.enter = false
-		if field.Shortcut(0, ui.KeyDown) && first != (ui.Element{}) {
-			first.Focus()
-		}
-		if _, listed := rows[e.model]; !listed {
-			e.model, e.direct = chosen.ID, false
-			if query != "" && len(shown) > 0 {
-				e.model = shown[0].ID
+		if field.Shortcut(0, ui.KeyDown) {
+			if first != (ui.Element{}) {
+				first.Focus()
+			} else if firstHeader != (ui.Element{}) {
+				firstHeader.Focus()
 			}
 		}
-		// The focus takes the column as it comes to a row, the pointer as it
-		// moves onto one or on it. The picker reads the pointer wherever it
-		// is, so the first move onto a row is known for one.
-		x, y, _ := picker.PointerPosition()
-		box := picker.Bounds()
-		at := [2]int{int(math.Round(float64(box.X + x))), int(math.Round(float64(box.Y + y)))}
-		moved := e.seen && at != e.pointer
-		e.pointer, e.seen = at, true
-		focused, hovered := "", false
+		if _, listed := rows[e.model]; !listed {
+			e.model = chosen.ID
+			if query != "" && firstModel.ID != "" {
+				e.model = firstModel.ID
+			}
+		}
+		headerFocused := false
+		for _, h := range headers {
+			if h.el.Focused() {
+				headerFocused = true
+				if query == "" {
+					if !h.open && h.el.Shortcut(0, ui.KeyRight) {
+						s.setProviderExpanded(s.family, h.key, true)
+						c.Invalidate()
+					} else if h.open && h.el.Shortcut(0, ui.KeyLeft) {
+						s.setProviderExpanded(s.family, h.key, false)
+						c.Invalidate()
+					}
+				}
+				break
+			}
+		}
+		// The focus takes the column as it comes to a row; the pointer only
+		// by a click on one.
+		focused := ""
 		for id, row := range rows {
 			if row.Focused() {
 				if focused = id; e.focused != id {
-					e.model, e.direct = id, false
-				}
-			}
-		}
-		e.focused = focused
-		for id, row := range rows {
-			if row.Hovered() {
-				hovered = true
-				if e.aim(id, at, moved) {
 					e.model = id
 				}
 			}
 		}
-		if !hovered {
-			e.direct = false
-		}
+		e.focused = focused
 		column := byID[e.model]
 		if query != "" && len(shown) == 0 {
 			column = Model{}
+		}
+		if _, colListed := rows[column.ID]; !colListed && column.ID != "" {
+			if len(rows) == 0 || slices.ContainsFunc(shown, func(m Model) bool { return m.ID == column.ID }) {
+				column = Model{}
+			}
 		}
 		levels := efforts(column)
 		// Right and Tab go to the efforts, where there are any; Left comes
 		// back to the model they are of.
 		right, tab := false, false
-		if len(levels) > 0 {
+		if len(levels) > 0 && focused != "" && !headerFocused {
 			right, tab = list.Shortcut(0, ui.KeyRight), list.Shortcut(0, ui.KeyTab)
 		}
 		row, listed := rows[column.ID]
@@ -922,45 +1058,18 @@ func (s *State) modelPicker(c *ui.Context, ctx *Context) {
 			row.Focus()
 		case first != (ui.Element{}):
 			first.Focus()
+		case firstHeader != (ui.Element{}):
+			firstHeader.Focus()
 		default:
 			field.Focus()
 		}
 		e.back = false
 		if len(levels) > 0 {
 			line("effort-line")
-			s.effortColumn(c, column, chosen, right || tab)
+			s.effortColumn(c, column, chosen, right || tab || e.open)
 		}
+		e.open = false
 	})
-}
-
-// aimStep is how far the pointer goes before its way tells where it is
-// headed.
-const aimStep = 6
-
-// aim follows the pointer to at, in the window, on the row of the model id,
-// and reports whether the row takes the effort column: it does once the
-// pointer moved. From the column's own row, a pointer headed for the
-// column, more to the right than up or down, crosses the rows between
-// without giving them the column.
-func (e *effortState) aim(id string, at [2]int, moved bool) bool {
-	switch {
-	case id == e.model:
-		e.from, e.direct = at, true
-		return false
-	case !moved:
-		return false
-	}
-	if dx, dy := at[0]-e.from[0], at[1]-e.from[1]; e.direct {
-		if dx*dx+dy*dy < aimStep*aimStep {
-			return false
-		}
-		if dx > max(dy, -dy) {
-			e.from = at
-			return false
-		}
-	}
-	e.from, e.direct = at, true
-	return true
 }
 
 // rowPad is a picker row's padding at each end: its score ends there.
@@ -1021,8 +1130,11 @@ func modelGroupHintRow(c *ui.Context, p *theme.Palette, key string, hint *ModelG
 func (s *State) modelRow(c *ui.Context, m, chosen Model, vendor, source string) ui.Element {
 	p := theme.Of(c)
 	b := rowLook(c, ui.ButtonBase(c.Key(m.ID)).Label(m.Name), m.ID == chosen.ID)
-	if m.Group != nil {
+	if m.Group != nil || m.Unavailable {
 		b.Height(40)
+	}
+	if m.Unavailable {
+		b.Border(1, p.Warning.Alpha(0.55))
 	}
 	var detail []string
 	for _, label := range []string{vendor, source} {
@@ -1044,6 +1156,9 @@ func (s *State) modelRow(c *ui.Context, m, chosen Model, vendor, source string) 
 		detail = append(detail, i18n.T(c, "meter_limit_unknown"))
 	}
 	subtitle := strings.Join(detail, " · ")
+	if m.Unavailable {
+		detail = append(detail, i18n.T(c, "unavailable"))
+	}
 	if m.Group != nil && m.Group.Summary != "" {
 		detail = append(detail, m.Group.Summary)
 	}
@@ -1060,6 +1175,9 @@ func (s *State) modelRow(c *ui.Context, m, chosen Model, vendor, source string) 
 						ui.Text(c, subtitle).FontSize(10).SingleLine().Shrink(1).MinWidth(0).TextColor(p.MutedForeground)
 						ui.Text(c, "·").FontSize(10).Shrink(0).TextColor(p.MutedForeground)
 					}
+					if m.Unavailable {
+						kit.StatusPill(c, i18n.T(c, "unavailable"), icons.TriangleAlert, kit.Caution, true)
+					}
 					if m.Group.GroupName != "" {
 						ui.Text(c, m.Group.GroupName).FontSize(10).SingleLine().Shrink(1).MinWidth(0).TextColor(p.MutedForeground)
 					}
@@ -1069,6 +1187,13 @@ func (s *State) modelRow(c *ui.Context, m, chosen Model, vendor, source string) 
 					if m.Group.StatusText != "" {
 						kit.StatusIndicator(c, m.Group.StatusText, m.Group.StatusIcon, m.Group.StatusTone, true)
 					}
+				})
+			} else if m.Unavailable {
+				ui.Row(c).FillWidth().MinWidth(0).Gap(4).AlignItems(ui.Center).Children(func() {
+					if subtitle != "" {
+						ui.Text(c, subtitle).FontSize(10).SingleLine().Shrink(1).MinWidth(0).TextColor(p.MutedForeground)
+					}
+					kit.StatusPill(c, i18n.T(c, "unavailable"), icons.TriangleAlert, kit.Caution, true)
 				})
 			} else if subtitle != "" {
 				ui.Text(c, subtitle).FontSize(10).SingleLine().TextColor(p.MutedForeground)
@@ -1080,24 +1205,24 @@ func (s *State) modelRow(c *ui.Context, m, chosen Model, vendor, source string) 
 		if m.Score != nil {
 			score(c, m.Score)
 		}
-	}).OnClick(func() { s.pick(m, s.carried(m, chosen)) })
+	}).OnClick(func() {
+		if len(efforts(m)) == 0 {
+			s.pick(m, 0)
+			return
+		}
+		s.efforts.model, s.efforts.open = m.ID, true
+	})
 	return b
 }
 
-// carried is the effort a model is chosen at from its row, the one its
-// column checks: the effort chosen now where the model has one of its name,
-// which the chosen model does, else the model's default.
+// carried is the effort its column checks for a model: the chosen model's
+// current effort, else another model's first.
 func (s *State) carried(m, chosen Model) int {
-	list, now := efforts(m), efforts(chosen)
-	if len(list) == 0 {
+	list := efforts(m)
+	if len(list) == 0 || m.ID != chosen.ID {
 		return 0
 	}
-	if len(now) > 0 {
-		if i := slices.Index(list, now[min(max(int(*s.controlEffort()), 0), len(now)-1)]); i >= 0 {
-			return i
-		}
-	}
-	return defaultEffort(m)
+	return min(max(int(*s.controlEffort()), 0), len(list)-1)
 }
 
 // effortColumn is the efforts of a model under their heading, as high and as

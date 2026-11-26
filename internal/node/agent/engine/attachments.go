@@ -181,7 +181,7 @@ func nodeAttachmentCode(err error) protocol.ErrorCode {
 }
 
 func attachmentPDFSupported(api protocol.ConversationModelApi) bool {
-	switch api {
+	switch api.Family() {
 	case protocol.ConversationModelApiResponses, protocol.ConversationModelApiChatCompletions, protocol.ConversationModelApiAnthropic, protocol.ConversationModelApiGemini, protocol.ConversationModelApiAzureOpenAi:
 		return true
 	}

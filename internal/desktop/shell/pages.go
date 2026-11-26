@@ -1,12 +1,12 @@
 package shell
 
 import (
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/sidebar"
+	"github.com/egoist/mygo/ui"
 )
 
 // pageFeatures are the rail features that open an independent page, and the
@@ -14,14 +14,14 @@ import (
 var pageFeatures = map[string]Page{
 	"page:conversation":     ConversationPage,
 	"page:image_studio":     ImageStudioPage,
+	"page:insights":         InsightsPage,
 	"page:activity":         ActivityPage,
 	"page:files":            FilesPage,
 	"page:git":              GitPage,
 	"page:settings_plugins": MarketPage,
 }
 
-// project returns the state of the selected conversation's project, nil
-// when it has none.
+// project returns the active pane's project, nil when it has none.
 func (a *App) project() *panel.Project {
 	if !a.sampled() {
 		if a.Hooks.WorkspaceProject != nil {
@@ -29,7 +29,7 @@ func (a *App) project() *panel.Project {
 		}
 		return nil
 	}
-	pr := a.Data.ProjectOf(a.Sidebar.Selected)
+	pr := a.panelProject()
 	if pr == nil {
 		return nil
 	}
@@ -148,6 +148,10 @@ func (a *App) RevealDetails() {
 // alike; Activity and Market as the reference's preview shows them,
 // unavailable.
 func (a *App) featurePage(c *ui.Context) {
+	if a.Page == InsightsPage && !a.sampled() && a.Hooks.Insights != nil {
+		a.Hooks.Insights(c)
+		return
+	}
 	if a.Page == PluginPage && a.Hooks.PluginPage != nil {
 		a.Hooks.PluginPage(c, a.pluginPage)
 		return

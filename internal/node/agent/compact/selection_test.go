@@ -141,13 +141,30 @@ func TestSelectRetainsRollingSummary(t *testing.T) {
 	if !ok || selected.Boundary.ID != boundary.ID || selected.Prefix[0].Kind != "compaction" || selected.Prefix[0].ID != summary.ID || len(selected.Tail) != 1 || selected.Tail[0].ID != latest.ID {
 		t.Fatalf("rolling selection = %+v", selected)
 	}
-	prepared, err := Prepare(selected.Prefix, 4096, Output(4096))
+	prepared, err := Prepare(selected.Prefix, 4096, Output(4096), "", 0)
 	if err != nil || !strings.Contains(prepared, "Keep the original constraint") {
 		t.Fatalf("rolling handoff lost its prior summary: %v", err)
 	}
 	updated := canonical.NewRecord(old.Turn, "compaction", &canonical.Compaction{Boundary: boundary.ID, Summary: canonical.NewMessage(canonical.User, canonical.Text(0, "Updated summary"))}, time.Time{})
 	if _, ok := Select(append(records, updated), 1000, true); ok {
 		t.Fatal("unchanged tail triggered another summary")
+	}
+}
+
+func TestSelectRetainsOpaqueNativeCheckpoint(t *testing.T) {
+	old := selectionMessage(canonical.User, canonical.Text(0, "Already compacted"))
+	// An OpenAI Responses window stores no readable text.
+	window := &canonical.Compaction{Boundary: old.ID, Summary: canonical.NewMessage(canonical.User), Native: &canonical.NativeCompaction{Source: canonical.ModelSource{ID: protocol.NewProviderID(), API: protocol.ConversationModelApiResponses, Authentication: protocol.AuthenticationApiKey, Model: "gpt-5"}, Items: json.RawMessage(`[{"type":"compaction","encrypted_content":"opaque"}]`)}}
+	summary := canonical.NewRecord(old.Turn, "compaction", window, time.Time{})
+	prefix := selectionMessage(canonical.User, canonical.Text(0, strings.Repeat("Progress to summarize ", 400)))
+	boundary := selectionMessage(canonical.Assistant, canonical.Text(0, "Completed earlier progress"))
+	latest := selectionMessage(canonical.User, canonical.Text(0, "Latest request"))
+	selected, ok := Select([]canonical.Record{old, summary, prefix, boundary, latest}, 1000, true)
+	if !ok || len(selected.Prefix) != 3 || selected.Prefix[0].ID != summary.ID || selected.Prefix[0].Kind != "compaction" || selected.Boundary.ID != boundary.ID {
+		t.Fatalf("opaque checkpoint left the summarized prefix: %+v", selected)
+	}
+	if kept, ok := selected.Prefix[0].Data.(*canonical.Compaction); !ok || kept.Native == nil || kept.Readable() {
+		t.Fatalf("opaque checkpoint lost its window: %+v", selected.Prefix[0].Data)
 	}
 }
 

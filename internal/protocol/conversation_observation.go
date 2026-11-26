@@ -138,9 +138,15 @@ func (value ConversationObservationRequest) MarshalJSON() ([]byte, error) {
 }
 
 type ConversationObservationAttempt struct {
-	Index     uint64 `json:"index"`
-	Transport string `json:"transport"`
-	Reused    *bool  `json:"reused"`
+	Verdict          *TraceVerdict                   `json:"verdict,omitempty"`
+	FailureKind      *string                         `json:"failure_kind,omitempty"`
+	CacheWrite       *uint64                         `json:"cache_write,omitempty"`
+	EndKind          *ConversationObservationEndKind `json:"end_kind,omitempty"`
+	GatewayRequestID *string                         `json:"gateway_request_id,omitempty"`
+	RetryReason      *string                         `json:"retry_reason,omitempty"`
+	Index            uint64                          `json:"index"`
+	Transport        string                          `json:"transport"`
+	Reused           *bool                           `json:"reused"`
 	// RequestBytes counts the final serialized body. Timing offsets are from
 	// attempt start: DispatchUs precedes HTTP I/O; RequestSentUs follows a
 	// successful request write. Missing transport facts remain nil.
@@ -196,6 +202,34 @@ func (value ConversationObservationAttempt) MarshalJSON() ([]byte, error) {
 	encoded := plain(value)
 	encoded.Categories = normalizeCollections(encoded.Categories)
 	return json.Marshal(encoded)
+}
+
+type ConversationObservationEndKind string
+
+const (
+	ConversationObservationEndKindCompleted           ConversationObservationEndKind = "completed"
+	ConversationObservationEndKindHTTPError           ConversationObservationEndKind = "http-error"
+	ConversationObservationEndKindStreamError         ConversationObservationEndKind = "stream-error"
+	ConversationObservationEndKindClientAbort         ConversationObservationEndKind = "client-abort"
+	ConversationObservationEndKindUpstreamReset       ConversationObservationEndKind = "upstream-reset"
+	ConversationObservationEndKindStreamTruncated     ConversationObservationEndKind = "stream-truncated"
+	ConversationObservationEndKindUpstreamTimeout     ConversationObservationEndKind = "upstream-timeout"
+	ConversationObservationEndKindUpstreamUnreachable ConversationObservationEndKind = "upstream-unreachable"
+)
+
+func (value ConversationObservationEndKind) MarshalJSON() ([]byte, error) { return marshalEnum(value) }
+func (value *ConversationObservationEndKind) UnmarshalJSON(data []byte) error {
+	var decoded string
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	switch ConversationObservationEndKind(decoded) {
+	case ConversationObservationEndKindCompleted, ConversationObservationEndKindHTTPError, ConversationObservationEndKindStreamError, ConversationObservationEndKindClientAbort, ConversationObservationEndKindUpstreamReset, ConversationObservationEndKindStreamTruncated, ConversationObservationEndKindUpstreamTimeout, ConversationObservationEndKindUpstreamUnreachable:
+		*value = ConversationObservationEndKind(decoded)
+		return nil
+	default:
+		return unknownEnum(data, value, decoded)
+	}
 }
 
 type ConversationObservationOutcome string

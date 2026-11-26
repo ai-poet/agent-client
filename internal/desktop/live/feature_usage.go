@@ -3,6 +3,7 @@ package live
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/client"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
@@ -128,7 +129,11 @@ func (r *Runtime) count(features ...protocol.FeatureUse) {
 func countSaved(local *client.Client) func(kind string) {
 	return func(kind string) {
 		if feature, saved := savedFeatures[kind]; saved {
-			go func() { _ = local.CountFeature(context.Background(), feature) }()
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = local.CountFeature(ctx, feature)
+			}()
 		}
 	}
 }

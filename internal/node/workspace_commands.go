@@ -25,6 +25,9 @@ type workspaceCompletion struct {
 	release        func()
 	after          func()
 	commandControl *process.ControlTarget
+	fileScope      externalFileScope
+	// timedOut marks a foreground command that reached its timeout.
+	timedOut bool
 }
 
 func (effect *workspaceCompletion) close() {
@@ -153,12 +156,14 @@ func (node *Node) workspaceRoots(ctx context.Context, command protocol.Command, 
 // dispatchWorkspace records durable admission before starting any resource IO.
 // Its worker owns Node lifetime; losing the controller never repeats an effect.
 func (node *Node) dispatchWorkspace(ctx context.Context, caller protocol.NodeID, request protocol.Request, body []byte) (link.Admission, error) {
-	node.mu.Lock()
-	defer node.mu.Unlock()
-	if node.stopped {
-		return link.Admission{}, unavailable()
+	// The admission is Node work, so Stop waits for it, but the Node mutex is
+	// not held across its write: a slow store write would otherwise stall
+	// every request and subscription that begins meanwhile.
+	if err := node.begin(); err != nil {
+		return link.Admission{}, err
 	}
 	if err := ctx.Err(); err != nil {
+		node.work.Done()
 		return link.Admission{}, nodeFault(err)
 	}
 	completion := make(chan link.Response, 1)
@@ -170,15 +175,16 @@ func (node *Node) dispatchWorkspace(ctx context.Context, caller protocol.NodeID,
 			previous, err = admission.Admit(ctx, db, caller, request, body)
 			return err
 		}); err != nil {
+			node.work.Done()
 			return link.Admission{}, nodeFault(err)
 		}
 	}
 	if previous != nil {
 		completion <- *previous
 		close(completion)
+		node.work.Done()
 		return result, nil
 	}
-	node.work.Add(1)
 	go func() {
 		defer node.work.Done()
 		defer close(completion)
@@ -266,7 +272,11 @@ func (node *Node) workspaceIO(ctx context.Context, caller protocol.NodeID, reque
 		return node.workspaceGitEffect(ctx, request, root, effect)
 	}
 	if files.SupportsMutation(command.Kind) {
-		if err := node.protectWorkspaceMutation(source, root, command, prepared); err != nil {
+		scope := effect.fileScope
+		if scope.worktree != "" && resolvedPath(filepath.Clean(root)) != scope.worktree {
+			return protocol.Output{}, &protocol.Fault{Code: protocol.ErrorCodeConflict, Message: "worktree changed while the operation waited; retry"}
+		}
+		if err := node.protectWorkspaceMutation(source, root, command, prepared, scope); err != nil {
 			return protocol.Output{}, err
 		}
 		node.watches.changed(root, nil)
@@ -281,6 +291,10 @@ func (node *Node) workspaceIO(ctx context.Context, caller protocol.NodeID, reque
 				if err != nil {
 					return protocol.Output{}, err
 				}
+			}
+			if scope.worktree != "" {
+				output, err := files.Apply(ctx, scope.root, prepared)
+				return scope.result(output), err
 			}
 			return files.Apply(ctx, root, prepared)
 		}
@@ -412,6 +426,7 @@ func withinWorkspace(path, root string) bool {
 	relative, err := filepath.Rel(root, path)
 	return err == nil && (relative == "." || relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)))
 }
+
 type entryTarget struct{ root, path string }
 
 func (node *Node) protectEntry(root, path string) error {
@@ -529,9 +544,16 @@ func (node *Node) managedWorkspace(db *sql.Conn, tree protocol.Worktree) (bool, 
 	}
 	return false, nil
 }
-func (node *Node) protectWorkspaceMutation(source, root string, command protocol.Command, prepared *files.Prepared) error {
+func (node *Node) protectWorkspaceMutation(source, root string, command protocol.Command, prepared *files.Prepared, scope externalFileScope) error {
 	var targets []entryTarget
 	add := func(root, path string) {
+		if scope.worktree != "" {
+			if local := scope.resultPath(path); filepath.IsAbs(local) {
+				root = scope.root
+			} else {
+				path = local
+			}
+		}
 		if !slices.Contains(targets, entryTarget{root, path}) {
 			targets = append(targets, entryTarget{root, path})
 		}

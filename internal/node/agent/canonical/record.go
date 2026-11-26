@@ -5,6 +5,7 @@ package canonical
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
@@ -85,12 +86,36 @@ type Grounding struct {
 	Title *string `json:"title,omitempty"`
 }
 type Compaction struct {
-	Boundary string          `json:"boundary"`
-	Summary  Message         `json:"summary"`
-	Start    time.Time       `json:"start"`
-	End      time.Time       `json:"end"`
-	Files    []CompactedFile `json:"files,omitempty"`
+	Boundary string            `json:"boundary"`
+	Summary  Message           `json:"summary"`
+	Start    time.Time         `json:"start"`
+	End      time.Time         `json:"end"`
+	Files    []CompactedFile   `json:"files,omitempty"`
+	Native   *NativeCompaction `json:"native,omitempty"`
 }
+
+// NativeCompaction is provider-owned context, meaningful only to its source.
+type NativeCompaction struct {
+	Source ModelSource     `json:"source"`
+	Items  json.RawMessage `json:"items"`
+}
+
+func (c Compaction) Readable() bool {
+	for _, block := range c.Summary.Content {
+		switch v := block.Data.(type) {
+		case *TextContent:
+			if strings.TrimSpace(v.Text) != "" {
+				return true
+			}
+		case TextContent:
+			if strings.TrimSpace(v.Text) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 type CompactedFile struct {
 	Path     string  `json:"path"`
 	Modified *bool   `json:"modified,omitempty"`

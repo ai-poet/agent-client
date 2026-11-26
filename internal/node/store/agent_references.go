@@ -219,10 +219,14 @@ func validateAgentReferences(ctx context.Context, db *sql.Conn, session protocol
 			}
 		case "agent":
 			selected, _ := dispatchValue[protocol.RoleReference](reference.Target.Data)
-			if role || !slices.ContainsFunc(session.Roles.Profiles, func(profile protocol.RoleProfile) bool {
+			index := slices.IndexFunc(session.Roles.Profiles, func(profile protocol.RoleProfile) bool {
 				return profile.ID == selected.ID && profile.Revision == selected.Revision
-			}) {
+			})
+			if role || index < 0 {
 				return invalid("select one role from the frozen session roster")
+			}
+			if err := CapturedRoleAvailability(session.Roles, session.Roles.Profiles[index]); err != nil {
+				return err
 			}
 			role = true
 		case "session":

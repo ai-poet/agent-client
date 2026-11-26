@@ -47,6 +47,10 @@ cheaprouter_account_description: 管理账号登录、套餐信息和模型网�
 cheaprouter_signed_out: 未登录
 cheaprouter_signed_out_description: 登录后自动接入 CheapRouter 模型网关；不登录也可使用其他模型和本地功能。
 cheaprouter_signed_in: 已登录 CheapRouter
+cheaprouter_login_expired: 登录状态已失效，请重新登录
+cheaprouter_login_expired_action: 重新登录
+cheaprouter_login_expired_dismiss: 关闭登录提醒
+cheaprouter_disable_failed: 未能停用 CheapRouter 服务商，请在模型设置中关闭。
 settings_providers: 模型
 settings_providers_description: 管理会话使用的供应商、认证和模型
 settings_connectors: 连接器
@@ -137,6 +141,10 @@ tool_failed: 工具执行失败
 approval_pending: 等待审批
 content_copied: 已复制
 tool_copy: 复制
+tool_rows_earlier: 显示更早的 %{count} 项
+output_show_all: 显示全部 %{count} 行
+output_show_less: 收起
+diff_more_lines: 还有 %{count} 行
 tool_interrupted: 结果未确认
 tool_not_executed: 审批已中断，未执行
 tool_not_found: 未找到目标
@@ -668,6 +676,7 @@ location_create: 新建工作树并继续
 git_no_matches: 无匹配项
 composer_model_settings: 模型与强度
 composer_model_empty: 没有匹配的可用模型
+composer_model_search_more: 继续输入以缩小范围
 composer_models_recent: 最近使用
 composer_effort_reset: 恢复默认
 composer_feature_description: 可能额外计费
@@ -1156,6 +1165,10 @@ provider_deployment_id: 部署名
 provider_api_version: API 版本
 form_api_version_hint: 如 2024-10-21
 provider_cloud_required: 请填写云渠道配置
+provider_project: 项目 ID
+provider_location: 位置
+provider_service_account: 服务账号密钥
+provider_service_account_hint: 粘贴服务账号 JSON 密钥
 form_model_hint: 模型 ID
 provider_context: 上下文容量（Tokens）
 form_tokens_hint: Token 数量
@@ -1690,7 +1703,9 @@ session_changed: 会话已变化，请重新操作
 project_changed: 项目已变化，请重新打开编辑
 chat_action_failed: 操作失败，请重试
 chat_action_unknown: 结果未确认，可重试原请求
-chat_config_unavailable: 会话配置不可用，请检查供应商
+chat_selected_model_unavailable: 所选模型不可用，请检查供应商设置
+chat_agent_model_unavailable: 某个 Agent 的模型不可用，请到「设置 › 团队」检查
+chat_login_expired: 登录状态已失效，请重新登录
 notification_update_failed: 通知更新失败，请重试
 session_archive_named: 归档“%{name}”并从活动会话中隐藏
 power_request_failed: 无法阻止设备休眠
@@ -1840,6 +1855,11 @@ team_conflict: 团队已变更，请重新打开
 role_model_unavailable: 所选模型或供应商不可用
 role_capacity: 子代理数量已达上限
 role_unknown: 结果未确认，请重试原请求
+cheaprouter_roles_affected: 有 %{count} 个 Agent 引用了已停用的渠道
+cheaprouter_roles_migrate: 迁移到可用的同名渠道
+cheaprouter_roles_receipt: 成功 %{saved}，失败 %{failed}，跳过 %{skipped}。
+cheaprouter_roles_manual: 没有可用的同名渠道，请在「设置 › 团队」中手动修改：%{names}。
+cheaprouter_roles_unknown: 另有 %{count} 条结果未确认，请检查角色绑定。
 role_failed: 操作失败，请重试
 chat_child_unavailable: 子会话尚不可用，请重试
 reference_load_failed: 引用加载失败
@@ -2637,3 +2657,131 @@ gateway_node_unauthorized: 密钥被拒绝
 gateway_node_http: HTTP %{status}
 gateway_node_unreachable: 无法连通
 gateway_node_invalid_url: URL 无效
+trace_title: 请求轨迹
+trace_view: 查看轨迹
+trace_locate: 在会话中定位
+trace_export: 导出轨迹
+trace_export_saved: 轨迹已保存
+trace_export_limit: 轨迹超过 64 MiB，请缩小导出范围。
+trace_recording: 录制中
+trace_off: 录制已关闭
+trace_retries: 重试
+trace_miss: 缓存未命中
+trace_request: 请求
+trace_response: 响应
+trace_metrics: 用量与计时
+trace_cache_write: 缓存写入
+trace_equal: 等宽
+trace_actual: 实际时间
+trace_scope: 范围
+trace_turn: 选中轮次
+trace_mode: 模式
+trace_shareable: 可分享
+trace_raw: 原始
+trace_raw_confirm: 原始轨迹可能包含提示词、代码及私人会话内容。仍要导出？
+trace_partial: 内容不完整
+trace_load: 加载正文
+trace_events: 按事件拆分
+trace_private: 本地轨迹可能包含系统提示词和私人会话内容。
+trace_dispatch: 调度
+trace_sent: 请求已发送
+trace_gap: 最长间隔
+trace_dropped_headers: 已省略的请求头或响应头
+trace_turn_number: 第 %{count} 轮
+trace_export_failed: 轨迹导出失败
+trace_load_failed: 轨迹加载失败
+trace_response_headers: 响应头
+trace_request_id: 请求 ID
+trace_started: 开始时间
+trace_empty: 暂无请求
+trace_empty_hint: 此会话的模型请求会显示在这里。
+trace_body_missing: 未记录正文
+trace_body_capture_hint: 在「设置 › 通用」中开启「记录请求正文」后，新请求会保存正文。
+trace_body_not_saved: 轨迹已达存储上限，或正文写入失败。
+trace_body_failed: 无法加载正文
+trace_export_shareable_hint: 系统指令会替换为指纹，仍包含会话内容。
+trace_export_raw_hint: 包含完整的请求与响应。
+trace_export_count: '%{count} 条已记录的请求'
+trace_export_none: 此范围内没有已记录的请求
+trace_turn_label: 轮次
+trace_timing: 计时
+approval_cancelled: 已取消
+diagnosis_action_account: 请网关运维核对上游账号是否变化。
+diagnosis_action_balance: 检查余额和额度。
+diagnosis_action_billing: 无法由此响应推断费用。
+diagnosis_action_compact: 压缩历史或换用更大窗口。
+diagnosis_action_credential: 检查凭据和权限。
+diagnosis_action_fluctuation: 重试时错误类型有变，请检查上游路由。
+diagnosis_action_network: 检查 DNS、代理和网络连接。
+diagnosis_action_prefix: 与前一次请求比对前缀。
+diagnosis_action_protocol: 检查接口模式与响应格式。
+diagnosis_action_route: 若持续出现，请检查渠道状态。
+diagnosis_action_timing: 查看请求耗时明细。
+diagnosis_action_wait: 按上游建议的间隔重试。
+diagnosis_authentication: 访问被拒
+diagnosis_cache_miss: 提示词缓存未命中
+diagnosis_cache_partial: 提示词缓存部分命中
+diagnosis_cancelled: 请求已取消
+diagnosis_context_overflow: 超出上下文窗口
+diagnosis_failed: 请求失败
+diagnosis_invalid_request: 请求被拒绝
+diagnosis_invalid_response: 响应无效或中断
+diagnosis_lost: 估算未复用的 token
+diagnosis_network: 网络连接失败
+diagnosis_no_usage: 上游未报告用量
+diagnosis_normal: 未发现异常
+diagnosis_prefix_broken: 缓存前缀已变化
+diagnosis_quota: 余额或额度不足
+diagnosis_rate_limited: 请求受限流
+diagnosis_slow_first: 首个 token 延迟高
+diagnosis_slow_output: 生成缓慢
+diagnosis_unavailable: 上游或网关不可用
+insights_all: 全部
+insights_apply: 应用筛选
+insights_attempts: 尝试次数
+insights_cost_coverage: 已计价尝试占比
+insights_credential: 凭据 ID
+insights_end: 结束原因
+insights_failure: 失败类型
+insights_failure_rate: 失败率（已知结果）
+insights_groups: 分组统计
+insights_host: 节点
+insights_index: 追踪
+insights_invalid: 请检查日期范围、状态码和筛选 ID。
+insights_outcome: 结果
+insights_provider_id: 提供商 ID
+insights_samples: '%{count} 个样本'
+insights_session: 会话 ID
+insights_start: 开始日期
+insights_status: HTTP 状态码
+insights_title: 请求洞察
+insights_unassigned: 无凭据
+insights_until: 结束日期
+insights_worktree: 工作树 ID
+model: 示例模型
+project: cheaprouter
+session: 桌面界面重构
+trace_all_cleared: 已清除记录的轨迹
+trace_capture_privacy: 正文可能含有提示词、代码和私密对话。
+trace_clear_all: 清除全部轨迹
+trace_clear_consequence: 删除此节点所有会话已记录的轨迹？会话历史和用量将保留。
+trace_enable_capture: 记录请求正文
+trace_gateway_allowlist: 仅在录制时发送至白名单中的 HTTPS 网关。
+trace_gateway_header: 发送网关轨迹 ID
+trace_settings_saved: 轨迹设置已保存
+usage: 用量
+usage_column_model: 模型
+usage_column_project: 归属
+usage_column_provider: 供应商
+usage_cost: 估算费用（USD）
+usage_duration: 模型调用耗时
+usage_empty: 暂无用量记录
+usage_filters: 筛选
+usage_loading: 正在读取用量
+usage_query_failed: 无法读取用量，请缩小时间范围或筛选条件
+usage_range: 时间范围
+usage_range_days: 近 %{days} 天
+usage_uncached_input: 未缓存输入
+insights_gateway_id: 网关请求 ID
+usage_column_duration: 总耗时
+usage_column_first_token: TTFT

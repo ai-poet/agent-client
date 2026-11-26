@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -33,6 +34,10 @@ type catalogModel struct {
 		BindsContext bool   `json:"binds_context"`
 		ThinkingOff  string `json:"thinking_off"`
 	} `json:"rig"`
+	Limit struct {
+		Context uint32 `json:"context"`
+		Output  uint32 `json:"output"`
+	} `json:"limit"`
 }
 
 func catalogEntry(provider, model string) (catalogModel, bool) {
@@ -46,6 +51,9 @@ func catalogEntry(provider, model string) (catalogModel, bool) {
 		}
 	})
 	models := catalog[provider].Models
+	if provider == "anthropic" {
+		model = bedrockClaudeModel(model)
+	}
 	lookup := func(id string) (catalogModel, bool) {
 		if provider == "anthropic" {
 			// Some compatible providers spell the minor version with a dot.
@@ -80,6 +88,25 @@ func catalogEntry(provider, model string) (catalogModel, bool) {
 	}
 	return catalogModel{}, false
 }
+
+// bedrockModel matches a Bedrock Claude model or inference profile ID: an
+// optional geographic or global profile prefix ("us.", "eu.", "apac.",
+// "global."), "anthropic.", the Claude name and an optional version suffix
+// ("-v1", "-v1:0", ":0"). An inference profile ARN names it after its last
+// slash.
+var bedrockModel = regexp.MustCompile(`^(?:[a-z]{2,8}\.)?anthropic\.(claude-[a-z0-9.-]+?)(?:-v\d+)?(?::\d+)?$`)
+
+// bedrockClaudeModel is the Anthropic API name of a Bedrock Claude model ID,
+// or the ID unchanged when it names none. Capability lookups use it; the
+// wire model stays the Bedrock ID.
+func bedrockClaudeModel(id string) string {
+	leaf := id[strings.LastIndex(id, "/")+1:]
+	if match := bedrockModel.FindStringSubmatch(leaf); match != nil {
+		return match[1]
+	}
+	return id
+}
+
 func (entry catalogModel) canDisable() bool {
 	for _, option := range entry.ReasoningOptions {
 		if option.Type == "toggle" {

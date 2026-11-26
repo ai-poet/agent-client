@@ -44,6 +44,9 @@ type AuthError struct {
 	Kind   ErrorKind
 	Op     string
 	Status int
+	// RejectedOrigin identifies a business bearer rejection, not a rejected
+	// refresh or a locally signed-out session. Never include it in diagnostics.
+	RejectedOrigin string
 }
 
 func (e *AuthError) Error() string {

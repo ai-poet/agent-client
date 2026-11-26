@@ -71,7 +71,8 @@ func requestParameters(binding Binding, call *fantasy.Call) *callParameters {
 	if level == "default" || level == "budget" {
 		level = ""
 	}
-	api := provider.Api
+	// Bedrock and Vertex AI shape requests as the protocol they carry.
+	api := provider.Api.Family()
 	if api == protocol.ConversationModelApiAzureAi {
 		if strings.HasPrefix(strings.ToLower(binding.Config.Model), "claude") {
 			api = protocol.ConversationModelApiAnthropic
@@ -261,7 +262,8 @@ func requestParameters(binding Binding, call *fantasy.Call) *callParameters {
 		}
 		params.Remove = append(params.Remove, "budget_tokens")
 	case protocol.ConversationModelApiGemini:
-		name := strings.ToLower(binding.Config.Model)
+		// Vertex AI also accepts a full "publishers/google/models/..." path.
+		name := strings.ToLower(binding.Config.Model[strings.LastIndex(binding.Config.Model, "/")+1:])
 		var thinking map[string]any
 		if !enabled || effort.Kind == "none" {
 			if strings.HasPrefix(name, "gemini-3.5") || strings.HasPrefix(name, "gemini-3.6") {

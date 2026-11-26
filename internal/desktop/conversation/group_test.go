@@ -5,14 +5,13 @@ import (
 	"image"
 	"math"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
+	"github.com/egoist/mygo/ui"
 )
 
 func named(name string, n int) []Call {
@@ -29,7 +28,7 @@ func TestGrouping(t *testing.T) {
 	t.Run("RunsAndSequence", testRunsAndSequence)
 	t.Run("Summary", testSummary)
 	t.Run("AnswerFrom", testAnswerFrom)
-	t.Run("LastLines", testLastLines)
+	t.Run("PreviewLines", testPreviewLines)
 	t.Run("Elapsed", testElapsed)
 	t.Run("Disclosures", testDisclosures)
 	t.Run("TextSize", testTextSize)
@@ -449,14 +448,22 @@ func testAnswerFrom(t *testing.T) {
 	}
 }
 
-func testLastLines(t *testing.T) {
-	var lines []string
-	for i := range 130 {
-		lines = append(lines, fmt.Sprint(i))
+func testPreviewLines(t *testing.T) {
+	lines := make([]int, 412)
+	for i := range lines {
+		lines[i] = i
 	}
-	text, hidden := lastLines(strings.Join(lines, "\n") + "\n")
-	if hidden != 30 || !strings.HasPrefix(text, "30\n") || !strings.HasSuffix(text, "129") {
-		t.Errorf("hidden %d, text starts %q", hidden, text[:4])
+	for _, tc := range []struct {
+		full, tail          bool
+		first, last, hidden int
+	}{
+		{false, true, 400, 411, 400}, {false, false, 0, 11, 400},
+		{true, true, 12, 411, 12}, {true, false, 0, 399, 12},
+	} {
+		got, hidden := previewLinesOf(lines, tc.full, tc.tail)
+		if len(got) != tc.last-tc.first+1 || got[0] != tc.first || got[len(got)-1] != tc.last || hidden != tc.hidden {
+			t.Errorf("full=%v tail=%v: got %v, hidden %d", tc.full, tc.tail, got, hidden)
+		}
 	}
 }
 

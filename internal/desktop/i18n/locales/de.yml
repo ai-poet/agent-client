@@ -47,6 +47,10 @@ cheaprouter_account_description: Manage sign-in, plan details and the model gate
 cheaprouter_signed_out: Not signed in
 cheaprouter_signed_out_description: Sign in to connect the CheapRouter model gateway. Other models and local features work without an account.
 cheaprouter_signed_in: Signed in to CheapRouter
+cheaprouter_login_expired: Ihre CheapRouter-Anmeldung ist abgelaufen. Bitte melden Sie sich erneut an.
+cheaprouter_login_expired_action: Erneut anmelden
+cheaprouter_login_expired_dismiss: Anmeldehinweis ausblenden
+cheaprouter_disable_failed: CheapRouter konnte nicht deaktiviert werden. Deaktivieren Sie den Anbieter in den Modelleinstellungen.
 settings_providers: Modelle
 settings_providers_description: Verwalten von Sitzungsanbietern, Authentifizierung und Modellen
 settings_connectors: Konnektoren
@@ -137,6 +141,10 @@ tool_failed: Werkzeugausführung fehlgeschlagen
 approval_pending: Warten auf Genehmigung
 content_copied: Kopiert
 tool_copy: Kopieren
+tool_rows_earlier: '%{count} frühere Einträge anzeigen'
+output_show_all: Alle %{count} Zeilen anzeigen
+output_show_less: Weniger anzeigen
+diff_more_lines: '%{count} mehr Zeilen'
 tool_interrupted: Ergebnis unbestätigt
 tool_not_executed: Genehmigung unterbrochen; nicht ausgeführt
 tool_not_found: Ziel nicht gefunden
@@ -668,6 +676,7 @@ location_create: Neuer Worktree
 git_no_matches: Keine Treffer gefunden
 composer_model_settings: Modell und Aufwand
 composer_model_empty: Keine passenden verfügbaren Modelle
+composer_model_search_more: Weiter tippen, um die Ergebnisse einzugrenzen
 composer_models_recent: Zuletzt verwendete Modelle
 composer_effort_reset: Zurücksetzen
 composer_feature_description: Kann mehr kosten
@@ -1156,6 +1165,10 @@ provider_deployment_id: Name der Bereitstellung
 provider_api_version: API Version
 form_api_version_hint: z. B. 2024-10-21
 provider_cloud_required: Cloud-Anbieterkonfiguration eingeben
+provider_project: Projekt-ID
+provider_location: Standort
+provider_service_account: Dienstkontoschlüssel
+provider_service_account_hint: JSON-Schlüssel des Dienstkontos einfügen
 form_model_hint: Modell-ID
 provider_context: Kontextbegrenzung (Token)
 form_tokens_hint: Anzahl der Token
@@ -1690,7 +1703,9 @@ session_changed: Sitzung geändert; erneut versuchen
 project_changed: Projekt geändert; Editor neu öffnen
 chat_action_failed: Vorgang fehlgeschlagen; versuchen Sie es erneut
 chat_action_unknown: Ergebnis nicht bestätigt; versuchen Sie die ursprüngliche Anfrage erneut
-chat_config_unavailable: Sitzungskonfiguration nicht verfügbar; überprüfen Sie den Anbieter
+chat_selected_model_unavailable: Das ausgewählte Modell ist nicht verfügbar. Prüfen Sie die Anbietereinstellungen.
+chat_agent_model_unavailable: Das Modell eines Agenten ist nicht verfügbar. Prüfen Sie Einstellungen › Teams.
+chat_login_expired: Ihre Anmeldung ist abgelaufen. Melden Sie sich erneut an.
 notification_update_failed: Benachrichtigungen konnten nicht aktualisiert werden; erneut versuchen
 session_archive_named: „%{name}“ archivieren und aus aktiven Unterhaltungen ausblenden
 power_request_failed: Ruhezustand konnte nicht verhindert werden
@@ -1840,6 +1855,11 @@ team_conflict: Team wurde geändert; erneut öffnen
 role_model_unavailable: Ausgewähltes Modell oder Anbieter ist nicht verfügbar
 role_capacity: Unteragent-Limit erreicht
 role_unknown: Ergebnis nicht bestätigt; versuchen Sie die ursprüngliche Anfrage erneut
+cheaprouter_roles_affected: 'Agenten mit deaktiviertem Kanal: %{count}'
+cheaprouter_roles_migrate: Zum verfügbaren gleichnamigen Kanal wechseln
+cheaprouter_roles_receipt: 'Erfolgreich: %{saved}. Fehlgeschlagen: %{failed}. Übersprungen: %{skipped}.'
+cheaprouter_roles_manual: 'Kein passender Kanal. Diese Agenten unter Einstellungen › Teams bearbeiten: %{names}.'
+cheaprouter_roles_unknown: 'Unbestätigt: %{count}. Bitte die Kanalzuordnung prüfen.'
 role_failed: Vorgang fehlgeschlagen; versuchen Sie es erneut
 chat_child_unavailable: Untersitzung nicht verfügbar; versuchen Sie es erneut
 reference_load_failed: Referenzen konnten nicht geladen werden
@@ -2637,3 +2657,131 @@ gateway_node_unauthorized: Key refused
 gateway_node_http: HTTP %{status}
 gateway_node_unreachable: Unreachable
 gateway_node_invalid_url: Invalid URL
+trace_title: Anfrageprotokoll
+trace_view: Protokoll anzeigen
+trace_locate: Im Gespräch anzeigen
+trace_export: Protokoll exportieren
+trace_export_saved: Protokoll gespeichert
+trace_export_limit: Mehr als 64 MiB. Bitte einen kleineren Bereich wählen.
+trace_recording: Aufzeichnung läuft
+trace_off: Aufzeichnung aus
+trace_retries: Wiederholungen
+trace_miss: Cache-Fehltreffer
+trace_request: Anfrage
+trace_response: Antwort
+trace_metrics: Nutzung und Zeiten
+trace_cache_write: Cache-Schreibzugriffe
+trace_equal: Gleiche Breite
+trace_actual: Echtzeit
+trace_scope: Umfang
+trace_turn: Ausgewählter Gesprächsschritt
+trace_mode: Modus
+trace_shareable: Zum Teilen
+trace_raw: Rohdaten
+trace_raw_confirm: Rohdaten können Prompts, Code und private Gesprächsinhalte enthalten. Trotzdem exportieren?
+trace_partial: Unvollständige Aufzeichnung
+trace_load: Inhalt laden
+trace_events: Nach Ereignis aufteilen
+trace_private: Lokale Protokolle können Systemprompts und private Gesprächsinhalte enthalten.
+trace_dispatch: Weiterleitung
+trace_sent: Anfrage gesendet
+trace_gap: Längste Pause
+trace_dropped_headers: Ausgelassene Header
+trace_turn_number: Gesprächsschritt %{count}
+trace_export_failed: Protokoll konnte nicht exportiert werden
+trace_load_failed: Protokoll konnte nicht geladen werden
+trace_response_headers: Antwort-Header
+trace_request_id: Anfrage-ID
+trace_started: Gestartet
+trace_empty: Noch keine Anfragen
+trace_empty_hint: Modellanfragen dieses Gesprächs erscheinen hier.
+trace_body_missing: Inhalt nicht aufgezeichnet
+trace_body_capture_hint: Aktivieren Sie „Anfragetexte aufzeichnen“ unter Einstellungen › Allgemein, um die Inhalte neuer Anfragen zu speichern.
+trace_body_not_saved: Das Protokoll hat sein Speicherlimit erreicht, oder der Inhalt konnte nicht geschrieben werden.
+trace_body_failed: Inhalt konnte nicht geladen werden
+trace_export_shareable_hint: Systemanweisungen werden durch Fingerabdrücke ersetzt. Gesprächsinhalte bleiben enthalten.
+trace_export_raw_hint: Enthält vollständige Anfragen und Antworten.
+trace_export_count: '%{count} aufgezeichnete Anfragen'
+trace_export_none: Keine aufgezeichneten Anfragen in diesem Umfang
+trace_turn_label: Gesprächsschritt
+trace_timing: Zeiten
+approval_cancelled: Abgebrochen
+diagnosis_action_account: Beim Gateway-Betreiber nach einem Kontowechsel fragen.
+diagnosis_action_balance: Guthaben und Kontingent prüfen.
+diagnosis_action_billing: Kosten sind aus der Antwort nicht ableitbar.
+diagnosis_action_compact: Verlauf kürzen oder größeres Kontextfenster verwenden.
+diagnosis_action_credential: Zugangsdaten und Rechte prüfen.
+diagnosis_action_fluctuation: Fehler wechseln bei Wiederholungen. Routing prüfen.
+diagnosis_action_network: DNS, Proxy und Netzwerk prüfen.
+diagnosis_action_prefix: Präfix mit der vorherigen Anfrage vergleichen.
+diagnosis_action_protocol: API-Modus und Antwortformat prüfen.
+diagnosis_action_route: Bei Wiederholung Anbieterstatus prüfen.
+diagnosis_action_timing: Zeitverlauf der Anfrage prüfen.
+diagnosis_action_wait: Wiederholungsintervall des Anbieters beachten.
+diagnosis_authentication: Zugriff verweigert
+diagnosis_cache_miss: Prompt-Cache verfehlt
+diagnosis_cache_partial: Teilweiser Cache-Treffer
+diagnosis_cancelled: Anfrage abgebrochen
+diagnosis_context_overflow: Kontextfenster überschritten
+diagnosis_failed: Anfrage fehlgeschlagen
+diagnosis_invalid_request: Anfrage abgelehnt
+diagnosis_invalid_response: Ungültige oder unterbrochene Antwort
+diagnosis_lost: Geschätzte verlorene Cache-Tokens
+diagnosis_network: Netzwerkverbindung fehlgeschlagen
+diagnosis_no_usage: Nutzung nicht gemeldet
+diagnosis_normal: Kein Problem erkannt
+diagnosis_prefix_broken: Cache-Präfix geändert
+diagnosis_quota: Kontingent oder Guthaben erschöpft
+diagnosis_rate_limited: Anfragelimit erreicht
+diagnosis_slow_first: Erstes Token verspätet
+diagnosis_slow_output: Langsame Generierung
+diagnosis_unavailable: Anbieter oder Gateway nicht verfügbar
+insights_all: Alle
+insights_apply: Filter anwenden
+insights_attempts: Versuche
+insights_cost_coverage: Anteil bewerteter Versuche
+insights_credential: Zugangsdaten-ID
+insights_end: Endgrund
+insights_failure: Fehlertyp
+insights_failure_rate: Fehlerquote (bekannte Ergebnisse)
+insights_groups: Aufschlüsselung
+insights_host: Knoten
+insights_index: Traces
+insights_invalid: Datumsbereich, Statuscode und Filter-IDs prüfen.
+insights_outcome: Ergebnis
+insights_provider_id: Anbieter-ID
+insights_samples: '%{count} Messwerte'
+insights_session: Sitzungs-ID
+insights_start: Startdatum
+insights_status: HTTP-Status
+insights_title: Anfrageanalyse
+insights_unassigned: Ohne Zugangsdaten
+insights_until: Enddatum
+insights_worktree: Worktree-ID
+model: Modell
+project: Projekt
+session: Desktop UI Refactor
+trace_all_cleared: Aufgezeichnete Traces gelöscht
+trace_capture_privacy: Die Inhalte können Prompts, Code und private Gespräche enthalten.
+trace_clear_all: Alle Traces löschen
+trace_clear_consequence: Aufgezeichnete Traces aller Sitzungen auf diesem Knoten löschen? Verlauf und Nutzungsdaten bleiben erhalten.
+trace_enable_capture: Anfragetexte aufzeichnen
+trace_gateway_allowlist: Nur während der Aufzeichnung an zugelassene HTTPS-Gateways.
+trace_gateway_header: Trace-ID an Gateway senden
+trace_settings_saved: Trace-Einstellungen gespeichert
+usage: Nutzung
+usage_column_model: Modell
+usage_column_project: Projekt
+usage_column_provider: Anbieter
+usage_cost: Geschätzte Kosten (USD)
+usage_duration: Dauer der Modellanfrage
+usage_empty: Noch keine Nutzung
+usage_filters: Filter
+usage_loading: Laden der Nutzung
+usage_query_failed: Nutzung konnte nicht geladen werden, Bereich oder Filter eingrenzen
+usage_range: Zeitbereich
+usage_range_days: Letzte %{days} Tage
+usage_uncached_input: Nicht gecachte Eingabe
+insights_gateway_id: Gateway-Anfrage-ID
+usage_column_duration: Dauer
+usage_column_first_token: TTFT

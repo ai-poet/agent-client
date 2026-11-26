@@ -52,6 +52,7 @@ type ToolFailure struct {
 	Message *string              `json:"message,omitempty"`
 }
 type ModelSource struct {
+	Credential     *protocol.CredentialRef       `json:"credential,omitempty"`
 	ID             protocol.ProviderID           `json:"id"`
 	Name           string                        `json:"name"`
 	API            protocol.ConversationModelApi `json:"api"`

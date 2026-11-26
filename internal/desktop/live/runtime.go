@@ -29,6 +29,10 @@ import (
 )
 
 type Runtime struct {
+	insights    *insightsPage
+	tracePanel  *sessionTrace
+	traceBadges map[protocol.SessionID]*traceBadge
+	exportTrace func(protocol.TraceExportQuery)
 	pluginViews *pluginViewState
 	// demoModels is the model each demo conversation's composer is set to,
 	// by conversation: what the statistics package reads as its model.
@@ -300,6 +304,9 @@ func NewWithPreferences(ctx context.Context, controller *client.Client, prefs *p
 	r.App.Hooks.DemoConversation = r.demoConversation
 	r.App.Hooks.RenderChild = r.renderLiveChild
 	r.App.Hooks.Overview = r.sessionOverview
+	r.App.Hooks.TraceStatus = r.traceStatus
+	r.App.Hooks.TraceFrame = r.traceFrame
+	r.App.Hooks.Insights = r.insightsFrame
 	r.conversationWatches = map[protocol.SessionID]func(){}
 	r.conversationSeen = map[protocol.SessionID]bool{}
 	r.composerInitialized = map[string]bool{}
@@ -372,6 +379,10 @@ func (r *Runtime) Close() error {
 	r.closed = true
 	r.mu.Unlock()
 	r.flushPreferences()
+	if r.backupSettings.scheduleTimer != nil {
+		r.backupSettings.scheduleTimer.Stop()
+		r.backupSettings.scheduleTimer = nil
+	}
 	r.cancel()
 	if r.updates != nil {
 		// A closing window no longer needs to acknowledge an installation's
@@ -380,6 +391,9 @@ func (r *Runtime) Close() error {
 	}
 	if r.unsubscribe != nil {
 		r.unsubscribe()
+	}
+	if r.cheapAuth != nil && r.cheapAuth.stopExpiryWatch != nil {
+		r.cheapAuth.stopExpiryWatch()
 	}
 	if r.unsubscribePrefs != nil {
 		r.unsubscribePrefs()
@@ -557,6 +571,8 @@ func (r *Runtime) attentionFrame() {
 }
 
 func (r *Runtime) afterFrame() {
+	r.finishTraceFrame()
+	r.finishInsightsFrame()
 	for _, bound := range r.bindings {
 		bound.finishFrame()
 		bound.finishConversationFrame()
@@ -606,6 +622,9 @@ func (r *Runtime) project() {
 	}
 	snapshot := r.snapshot()
 	r.projectAdmission(&snapshot)
+	if account := r.cheapAuth; account != nil && account.state != nil {
+		account.state.AffectedRoles = len(affectedCheapRoles(snapshot))
+	}
 	d := Sidebar(snapshot, r.Preferences.Data)
 	d.Notices = Notices(r.controller.Notices())
 	r.appendResourceDirectory(d)
@@ -668,7 +687,15 @@ func (r *Runtime) pruneSessions(snapshot protocol.Snapshot) {
 	maps.DeleteFunc(r.composerSaving, func(id string, saving bool) bool { return !saving && gone(id) })
 	maps.DeleteFunc(r.conversationEdits, func(id string, _ conversationEdit) bool { return gone(id) })
 	maps.DeleteFunc(r.composerOutgoing, func(id string, _ *conversationOutgoing) bool { return gone(id) })
+	maps.DeleteFunc(r.acknowledged, func(id string, _ uint64) bool { return gone(id) })
+	maps.DeleteFunc(r.queueHalts, func(id string, _ protocol.ConversationQueuePause) bool { return gone(id) })
+	maps.DeleteFunc(r.usageFailed, func(id string, _ bool) bool { return gone(id) })
+	maps.DeleteFunc(r.guidanceSent, func(id string, _ map[protocol.TurnID]sentGuidance) bool { return gone(id) })
 	maps.DeleteFunc(r.queuedSends, func(id protocol.SessionID, _ map[protocol.TurnID]*queuedSend) bool { return !known[id] })
+	if r.App != nil && !r.App.Demo() {
+		maps.DeleteFunc(r.composerBases, func(comp *composer.State, _ protocol.SessionConfig) bool { return !r.App.HasDraft(comp) })
+		maps.DeleteFunc(r.sessionBases, func(comp *composer.State, _ *sessionBaseStart) bool { return !r.App.HasDraft(comp) })
+	}
 	for id, retry := range r.turnRetries {
 		if !r.busy[retry.key] && gone(id) {
 			r.forgetTurnRetry(id)

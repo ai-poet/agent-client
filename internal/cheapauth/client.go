@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -19,6 +20,9 @@ type Client struct {
 	endpoint string
 	http     *http.Client
 	now      func() time.Time
+	// Set only on the private business client for a Service operation.
+	renew        func(context.Context, string) (string, error)
+	renewedToken string
 }
 
 func NewClient(endpoint string, httpClient *http.Client) (*Client, error) {
@@ -73,6 +77,28 @@ func (c *Client) do(ctx context.Context, method, path, accessToken string, input
 }
 
 func (c *Client) doData(ctx context.Context, method, path, accessToken string, input any) (json.RawMessage, int, error) {
+	if accessToken != "" && c.renewedToken != "" {
+		accessToken = c.renewedToken
+	}
+	data, status, err := c.requestData(ctx, method, path, accessToken, input)
+	if accessToken != "" && errors.Is(err, ErrUnauthorized) {
+		if c.renew != nil {
+			token, renewErr := c.renew(ctx, accessToken)
+			if renewErr != nil {
+				return nil, status, renewErr
+			}
+			c.renewedToken = token
+			data, status, err = c.requestData(ctx, method, path, token, input)
+		}
+		var auth *AuthError
+		if errors.As(err, &auth) && auth.Kind == ErrorUnauthorized {
+			auth.RejectedOrigin = c.endpoint
+		}
+	}
+	return data, status, err
+}
+
+func (c *Client) requestData(ctx context.Context, method, path, accessToken string, input any) (json.RawMessage, int, error) {
 	var body io.Reader
 	if input != nil {
 		encoded, err := json.Marshal(input)
@@ -202,7 +228,7 @@ func (c *Client) CreateKey(ctx context.Context, accessToken, name string) (APIKe
 // CreateKeyForGroup mints a gateway key optionally bound to groupID.
 func (c *Client) CreateKeyForGroup(ctx context.Context, accessToken, name string, groupID *int64) (APIKey, error) {
 	var key APIKey
-	payload := map[string]any{"name": name}
+	payload := map[string]any{"name": name, "client_source": CheapRouterClientSource}
 	if groupID != nil {
 		payload["group_id"] = *groupID
 	}

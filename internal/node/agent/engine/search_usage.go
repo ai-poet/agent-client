@@ -16,7 +16,7 @@ func (r *Runtime) RecordSearchUsage(ctx context.Context, session protocol.Sessio
 	record := canonical.NewRecord(turn, "message", &message, time.Now())
 	record.Provenance.Author = "system"
 	purpose := canonical.PurposeSearch
-	record.Metadata.Execution = &canonical.Execution{Purpose: &purpose, Source: &canonical.ModelSource{ID: provider.ID, Name: provider.Name, API: provider.Api, Authentication: provider.Authentication, Model: name}}
+	record.Metadata.Execution = &canonical.Execution{Purpose: &purpose, Source: &canonical.ModelSource{Credential: provider.Credential, ID: provider.ID, Name: provider.Name, API: provider.Api, Authentication: provider.Authentication, Model: name}}
 	record.Metadata.Runtime = &canonical.Runtime{UserVisible: false, AgentVisible: false}
 	return r.save(context.WithoutCancel(ctx), session, record)
 }
@@ -29,7 +29,7 @@ func (r *Runtime) RecordMediaUsage(ctx context.Context, session protocol.Session
 	message.Usage = &usage
 	record := canonical.NewRecord(turn, "message", &message, time.Now())
 	record.Provenance.Author = "system"
-	record.Metadata.Execution = &canonical.Execution{Media: &kind, Source: &canonical.ModelSource{ID: provider.ID, Name: provider.Name, API: provider.Api, Authentication: provider.Authentication, Model: name}}
+	record.Metadata.Execution = &canonical.Execution{Media: &kind, Source: &canonical.ModelSource{Credential: provider.Credential, ID: provider.ID, Name: provider.Name, API: provider.Api, Authentication: provider.Authentication, Model: name}}
 	record.Metadata.Runtime = &canonical.Runtime{UserVisible: false, AgentVisible: false}
 	return r.save(context.WithoutCancel(ctx), session, record)
 }

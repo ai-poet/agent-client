@@ -258,6 +258,7 @@ func (r *Runtime) releaseDraftComposer(id string) {
 		delete(owner.composerInitialized, id)
 		delete(owner.composerObserved, id)
 		delete(owner.composerBases, comp)
+		delete(owner.sessionBases, comp)
 		if owner.teams != nil {
 			delete(owner.teams.composers, id)
 		}

@@ -1,0 +1,4 @@
+cheaprouter_login_expired: "Votre session CheapRouter a expiré. Veuillez vous reconnecter."
+cheaprouter_login_expired_action: "Se reconnecter"
+cheaprouter_disable_failed: "Impossible de désactiver CheapRouter. Désactivez ce fournisseur dans les paramètres des modèles."
+cheaprouter_login_expired_dismiss: "Masquer le rappel de connexion"

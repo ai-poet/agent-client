@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/clock"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model/anthropic"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model/google"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/trace"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
@@ -18,22 +20,30 @@ type Purpose string
 const (
 	Main           Purpose = "main"
 	SummaryPurpose Purpose = "summary"
+	NativePurpose  Purpose = "native_compaction"
 )
 
 type Attempt struct {
-	RequestID      string
-	RequestStarted time.Time
-	Index          uint64
-	Started        time.Time
-	Finished       time.Time
-	FirstToken     *time.Time
-	Usage          canonical.Usage
-	Failure        *Failure
+	MaxGapUs, GapStartUs *uint64
+	Verdict              *protocol.TraceVerdict
+	RequestID            string
+	RequestStarted       time.Time
+	Index                uint64
+	Started              time.Time
+	Finished             time.Time
+	Timing               canonical.Timing
+	FirstToken           *time.Time
+	Usage                canonical.Usage
+	// Context is the window occupied by the last prompt of a multi-prompt reply.
+	Context *uint64
+	Failure *Failure
 	// RetryLimit is the last resend allowed if the current failure streak continues.
 	RetryLimit uint64
 	// RetryDelay is the wait before the next attempt; nil on the last attempt.
 	RetryDelay        *time.Duration
 	Status            *uint16
+	EndKind           *protocol.ConversationObservationEndKind
+	GatewayRequestID  *string
 	ResponseUs        *uint64
 	RequestBytes      *uint64
 	DispatchUs        *uint64
@@ -82,12 +92,12 @@ func mergeUsage(previous, current canonical.Usage) canonical.Usage {
 
 // MainRetries bounds resends of one main or summary request. Both also share
 // the request's cumulative wait budget, regardless of the transient cause.
-const MainRetries = 9
+const MainRetries = 10
 
 // Run uses reset to discard provisional output before replaying an interrupted attempt.
 // Without it, main output that escaped to the consumer cannot be retried safely.
 func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.Call, purpose Purpose, timer clock.Clock, observe func(Attempt) error, yield func(fantasy.StreamPart) bool, reset func()) error {
-	buffered := purpose == SummaryPurpose
+	buffered := purpose == SummaryPurpose || purpose == NativePurpose
 	schedule := newRetryPolicy()
 	requestID, requestStarted := protocol.NewRequestID().String(), timer.Now()
 	sdk, _ := languageModel.(*sdkModel)
@@ -100,6 +110,17 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 			secrets = append(secrets, protocol.NewSecret(sdk.config.Key))
 		}
 	}
+	var scope *trace.Scope
+	var protected []string
+	if sdk != nil {
+		scope, _ = call.ProviderOptions[trace.ProviderKey].(*trace.Scope)
+		if scope != nil {
+			for _, secret := range secrets {
+				protected = append(protected, secret.Expose())
+			}
+		}
+	}
+	var failureSequence []string
 	for index := uint64(0); ; index++ {
 		if err := ctx.Err(); err != nil {
 			return Classify(err)
@@ -108,12 +129,20 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 		owner, cancel := context.WithCancel(ctx)
 		firstOutputTimer := schedule.firstOutputTimer(attempt.Started, cancel)
 		owner, capture := captureAttempt(owner, call, timer, attempt.Started)
+		if scope != nil {
+			capture.trace = scope.Begin(requestID, int(index+1), protected...)
+		}
 		stream, err := nextModel.Stream(owner, call)
 		var pending []fantasy.StreamPart
 		streamed, escaped, finished, released := false, false, false, false
 		if err == nil && stream != nil {
+			var lastOutput time.Time
 			for part := range stream {
 				attempt.Usage = mergeUsage(attempt.Usage, PartUsage(part))
+				if metadata, ok := part.ProviderMetadata[UsageMetadataKey].(*UsageMetadata); ok && metadata != nil && metadata.Context != nil && *metadata.Context >= 0 {
+					window := uint64(*metadata.Context)
+					attempt.Context = &window
+				}
 				if part.Type == fantasy.StreamPartTypeReasoningDelta && part.Delta != "" {
 					attempt.ReasoningStreamed = true
 				}
@@ -125,16 +154,26 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 				if metadata, ok := part.ProviderMetadata[responseMetadataKey].(*responseMetadata); ok {
 					attempt.Status = metadata.Status
 				}
-				firstOutput := attempt.FirstToken == nil && outputPart(part)
+				hasOutput := outputPart(part)
+				firstOutput := attempt.FirstToken == nil && hasOutput
 				if firstOutputTimer != nil && (firstOutput || part.Type == fantasy.StreamPartTypeFinish) {
 					if !firstOutputTimer.Stop() {
 						break
 					}
 					firstOutputTimer = nil
 				}
-				if firstOutput {
-					first := timer.Now()
-					attempt.FirstToken = &first
+				if hasOutput {
+					now := timer.Now()
+					if firstOutput {
+						attempt.FirstToken = &now
+					} else if !lastOutput.IsZero() {
+						gap := uint64(max(0, now.Sub(lastOutput).Microseconds()))
+						if attempt.MaxGapUs == nil || gap > *attempt.MaxGapUs {
+							start := uint64(max(0, lastOutput.Sub(attempt.Started).Microseconds()))
+							attempt.MaxGapUs, attempt.GapStartUs = &gap, &start
+						}
+					}
+					lastOutput = now
 				}
 				if part.Type == fantasy.StreamPartTypeError {
 					err = part.Error
@@ -172,10 +211,12 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 			nextModel, releaseFallback = languageModel, nil
 		}
 		attempt.Finished = timer.Now()
+		attempt.Timing = attempt.observedTiming()
 		capture.apply(&attempt)
+		attemptSecrets := capture.redact(secrets)
 		exhausted := false
 		if err != nil {
-			attempt.Failure = Classify(err, secrets...)
+			attempt.Failure = Classify(err, attemptSecrets...)
 			if waitExhausted {
 				if attempt.Failure.Kind == Cancelled || attempt.Failure.truncated {
 					attempt.Failure = &Failure{Kind: Network, Message: "Model retry timed out waiting for output after HTTP 524"}
@@ -198,6 +239,14 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 				}
 			}
 		}
+		if attempt.Failure != nil {
+			entry := string(attempt.Failure.Kind)
+			if attempt.Status != nil {
+				entry = fmt.Sprintf("%s/%d", entry, *attempt.Status)
+			}
+			failureSequence = append(failureSequence, entry)
+		}
+		attempt.finishTransport(err, attemptSecrets, capture, failureSequence)
 		if observe != nil {
 			if observationErr := observe(attempt); observationErr != nil {
 				return observationErr

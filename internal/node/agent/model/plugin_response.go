@@ -172,7 +172,7 @@ func (accumulator *pluginAccumulator) push(deltas []protocol.PluginModelAdapterW
 			for _, field := range []struct {
 				from *uint64
 				to   **int64
-			}{{value.InputTokens, &accumulator.usage.Input}, {value.OutputTokens, &accumulator.usage.Output}, {value.CachedInputTokens, &accumulator.usage.CacheRead}, {value.ReasoningTokens, &accumulator.usage.Reasoning}} {
+			}{{value.InputTokens, &accumulator.usage.Input}, {value.OutputTokens, &accumulator.usage.Output}, {value.CachedInputTokens, &accumulator.usage.CacheRead}, {value.ReasoningTokens, &accumulator.usage.Reasoning}, {value.ContextTokens, &accumulator.usage.Context}} {
 				if field.from != nil {
 					if *field.from > math.MaxInt64 {
 						return nil, &Failure{Kind: InvalidResponse, Message: "model usage exceeds the supported counter range"}
@@ -241,10 +241,13 @@ func (accumulator *pluginAccumulator) finish() ([]fantasy.StreamPart, error) {
 }
 
 func pluginClassified(value protocol.PluginModelAdapterWireDeltaErrorPayload, secrets []protocol.Secret) *Failure {
-	kind := Unavailable
+	kind, forbidden := Unavailable, false
 	switch value.Class {
-	case protocol.PluginModelAdapterWireClassAuthentication, protocol.PluginModelAdapterWireClassPermission:
+	case protocol.PluginModelAdapterWireClassAuthentication:
 		kind = Authentication
+	case protocol.PluginModelAdapterWireClassPermission:
+		// The adapter's 403: retried like a gateway's refusal, unlike a rejected key.
+		kind, forbidden = Authentication, true
 	case protocol.PluginModelAdapterWireClassRateLimited:
 		kind = RateLimited
 	case protocol.PluginModelAdapterWireClassQuota:
@@ -256,7 +259,7 @@ func pluginClassified(value protocol.PluginModelAdapterWireDeltaErrorPayload, se
 	case protocol.PluginModelAdapterWireClassUnsupported:
 		kind = Unsupported
 	}
-	failure := &Failure{Kind: kind, Message: safeDiagnostic(value.Message, secrets)}
+	failure := &Failure{Kind: kind, Message: safeDiagnostic(value.Message, secrets), forbidden: forbidden}
 	if value.RetryAfterMs != nil {
 		delay := *value.RetryAfterMs
 		failure.retryAfterMs = &delay
@@ -266,6 +269,6 @@ func pluginClassified(value protocol.PluginModelAdapterWireDeltaErrorPayload, se
 			failure.overloaded = true
 		}
 	}
-	failure.overloaded = failure.Retryable() && (failure.overloaded || kind == RateLimited)
+	failure.overloaded = failure.loadRetryable() && (failure.overloaded || kind == RateLimited)
 	return failure
 }

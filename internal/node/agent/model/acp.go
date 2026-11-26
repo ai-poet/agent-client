@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	acp "github.com/coder/acp-go-sdk"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/program"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	acp "github.com/coder/acp-go-sdk"
 )
 
 // The Agent Client Protocol route uses a package's declared program as a
@@ -36,6 +36,9 @@ type ACPCapture struct {
 	Owner, Dir, Version string
 	Host                []string
 	Pool                *program.Pool
+	// Sessions is the Node's directory for the records of which agent
+	// session holds each Sailry session (acp_session.go). Empty keeps none.
+	Sessions string
 	// stall replaces the silence limit in tests.
 	stall time.Duration
 }
@@ -48,16 +51,33 @@ type acpModel struct {
 	capture ACPCapture
 }
 
+const acpSystemPrefix, acpSystemSuffix = "<system>\n", "\n</system>\n\n"
+
+// SummarySystemBytes accounts for the single summary message and ACP framing
+// when the agent cannot carry system text separately. Zero means no byte cap.
+func SummarySystemBytes(languageModel fantasy.LanguageModel, request string) int {
+	if model, ok := languageModel.(*acpModel); ok {
+		overhead := len(acpSystemPrefix) + len(acpDiscipline) + len("\n\n") + len(acpSystemSuffix) + len(request)
+		return max(1, int(model.capture.Adapter.Acp.ReplayBytes)-overhead)
+	}
+	return 0
+}
+
 func NewACP(binding Binding, capture ACPCapture) (fantasy.LanguageModel, error) {
 	if !PluginBound(binding.Provider) || capture.Adapter.Acp == nil || capture.Pool == nil ||
 		(**binding.Provider.Binding).Adapter.Adapter != capture.Adapter.ID || capture.Adapter.Acp.Program != capture.Program.ID {
 		return nil, &Failure{Kind: NotConfigured, Message: "captured model adapter is unavailable"}
 	}
 	if capture.stall == 0 {
-		capture.stall = stallTimeout
+		capture.stall = acpStallTimeout
 	}
 	return &acpModel{binding: binding, capture: capture}, nil
 }
+
+// acpStallTimeout is how long an ACP agent may stay silent. The agent runs its
+// own tools inside one prompt turn, so a long command can leave the session
+// quiet longer than a model stream's stallTimeout.
+const acpStallTimeout = 600 * time.Second
 
 func (model *acpModel) Provider() string { return "sailry-plugin" }
 func (model *acpModel) Model() string    { return model.binding.Config.Model }
@@ -106,19 +126,41 @@ type acpThought struct {
 	Values []string
 }
 
-// acpAgent is one running program and the one session it serves.
+// acpAgent is one running program. It serves several Sailry sessions at once,
+// each through its own agent session (acpSlot), as far as the package's
+// declared concurrency allows.
 type acpAgent struct {
 	conn    *acp.Connection
 	process *program.Process
 	images  bool
+	// resume, load and close are the session methods the agent offers.
+	resume, load, close bool
 	// metaSystem: the agent takes the system text in `session/new`.
 	metaSystem bool
 	// identity binds this process to its captured adapter and launch inputs.
 	// Only a digest is retained; credentials never become a pool key or log.
 	identity string
-	// owner is the Sailry session whose history the agent's session holds.
+
+	mu sync.Mutex
+	// slots holds the agent session of each Sailry session the program
+	// serves; the zero ID holds requests without a session.
+	slots map[protocol.SessionID]*acpSlot
+	// sinks receive the updates of each agent session whose prompt is in
+	// flight.
+	sinks map[string]func(reasoning bool, text string)
+	// commands are the commands each agent session advertised.
+	commands map[string]map[string]bool
+}
+
+// acpSlotCapacity bounds the agent sessions one program keeps; the least
+// recently used free one is closed first.
+const acpSlotCapacity = 64
+
+// acpSlot is the agent session that holds one Sailry session's history. One
+// request uses a slot at a time: agent.mu guards busy and used, and the
+// request that holds the slot owns the rest.
+type acpSlot struct {
 	owner   protocol.SessionID
-	claimed bool
 	session string
 	offers  []acpOffer
 	thought acpThought
@@ -128,9 +170,62 @@ type acpAgent struct {
 	prefixed bool
 	selected string
 	level    string
+	busy     bool
+	used     time.Time
+}
 
-	mu   sync.Mutex
-	sink func(reasoning bool, text string)
+// take reserves the slot of owner for one request: its free stored slot,
+// else a new one. A request without a Sailry session, or one whose session's
+// stored slot another request holds, gets a slot without an owner that is not
+// stored: its agent session ends with the request. take returns the agent
+// sessions of the slots a new one evicted.
+func (agent *acpAgent) take(owner protocol.SessionID) (*acpSlot, []string) {
+	agent.mu.Lock()
+	defer agent.mu.Unlock()
+	if owner == (protocol.SessionID{}) {
+		return &acpSlot{busy: true}, nil
+	}
+	if slot := agent.slots[owner]; slot != nil {
+		if slot.busy {
+			return &acpSlot{busy: true}, nil
+		}
+		slot.busy = true
+		return slot, nil
+	}
+	slot := &acpSlot{owner: owner, busy: true}
+	agent.slots[owner] = slot
+	var evicted []string
+	for len(agent.slots) > acpSlotCapacity {
+		var oldest *acpSlot
+		for _, held := range agent.slots {
+			if !held.busy && (oldest == nil || held.used.Before(oldest.used)) {
+				oldest = held
+			}
+		}
+		if oldest == nil {
+			break
+		}
+		delete(agent.slots, oldest.owner)
+		if oldest.session != "" {
+			evicted = append(evicted, oldest.session)
+		}
+	}
+	return slot, evicted
+}
+
+// give returns a slot that take reserved.
+func (agent *acpAgent) give(slot *acpSlot) {
+	agent.mu.Lock()
+	slot.busy, slot.used = false, time.Now()
+	agent.mu.Unlock()
+}
+
+// holds reports whether the program keeps a free slot for owner.
+func (agent *acpAgent) holds(owner protocol.SessionID) bool {
+	agent.mu.Lock()
+	defer agent.mu.Unlock()
+	slot := agent.slots[owner]
+	return slot != nil && !slot.busy
 }
 
 type acpInitialized struct {
@@ -138,6 +233,11 @@ type acpInitialized struct {
 		PromptCapabilities struct {
 			Image bool `json:"image"`
 		} `json:"promptCapabilities"`
+		LoadSession         bool `json:"loadSession"`
+		SessionCapabilities struct {
+			Resume *struct{} `json:"resume"`
+			Close  *struct{} `json:"close"`
+		} `json:"sessionCapabilities"`
 		Meta map[string]any `json:"_meta"`
 	} `json:"agentCapabilities"`
 }
@@ -160,16 +260,43 @@ type acpSession struct {
 	ConfigOptions []acpOption `json:"configOptions"`
 }
 
+type acpUsage struct {
+	InputTokens       *int64 `json:"inputTokens"`
+	OutputTokens      *int64 `json:"outputTokens"`
+	CachedReadTokens  *int64 `json:"cachedReadTokens"`
+	CachedWriteTokens *int64 `json:"cachedWriteTokens"`
+	ThoughtTokens     *int64 `json:"thoughtTokens"`
+	TotalTokens       *int64 `json:"totalTokens"`
+}
+
+// plus adds the usage of another prompt of the same reply.
+func (usage *acpUsage) plus(other *acpUsage) *acpUsage {
+	if usage == nil {
+		return other
+	}
+	if other == nil {
+		return usage
+	}
+	sum := func(a, b *int64) *int64 {
+		if a == nil {
+			return b
+		}
+		if b == nil {
+			return a
+		}
+		total := *a + *b
+		return &total
+	}
+	return &acpUsage{InputTokens: sum(usage.InputTokens, other.InputTokens), OutputTokens: sum(usage.OutputTokens, other.OutputTokens),
+		CachedReadTokens: sum(usage.CachedReadTokens, other.CachedReadTokens), CachedWriteTokens: sum(usage.CachedWriteTokens, other.CachedWriteTokens),
+		ThoughtTokens: sum(usage.ThoughtTokens, other.ThoughtTokens), TotalTokens: sum(usage.TotalTokens, other.TotalTokens)}
+}
+
 type acpPrompted struct {
-	StopReason string `json:"stopReason"`
-	Usage      *struct {
-		InputTokens       *int64 `json:"inputTokens"`
-		OutputTokens      *int64 `json:"outputTokens"`
-		CachedReadTokens  *int64 `json:"cachedReadTokens"`
-		CachedWriteTokens *int64 `json:"cachedWriteTokens"`
-		ThoughtTokens     *int64 `json:"thoughtTokens"`
-		TotalTokens       *int64 `json:"totalTokens"`
-	} `json:"usage"`
+	StopReason string    `json:"stopReason"`
+	Usage      *acpUsage `json:"usage"`
+	// last is the final prompt's usage when Usage sums a corrected reply.
+	last *acpUsage
 }
 
 // acpChoices flattens a select option's values, grouped or not.
@@ -201,27 +328,44 @@ func (agent *acpAgent) handle(_ context.Context, method string, params json.RawM
 		var update struct {
 			SessionID string `json:"sessionId"`
 			Update    struct {
-				Kind    string `json:"sessionUpdate"`
-				Content struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
-				} `json:"content"`
+				Kind string `json:"sessionUpdate"`
+				// A message chunk's content is one block; a tool call's is a
+				// list, so it is read only for the kinds that carry text.
+				Content  json.RawMessage `json:"content"`
+				Commands []struct {
+					Name string `json:"name"`
+				} `json:"availableCommands"`
 			} `json:"update"`
 		}
 		if json.Unmarshal(params, &update) != nil {
 			return nil, acp.NewInvalidParams(nil)
 		}
-		agent.mu.Lock()
-		sink, session := agent.sink, agent.session
-		agent.mu.Unlock()
-		if sink == nil || update.SessionID != session || update.Update.Content.Type != "text" || update.Update.Content.Text == "" {
+		if update.Update.Kind == "available_commands_update" {
+			// The list can arrive before the request that opened its session
+			// returns, so it is kept by session.
+			agent.mu.Lock()
+			delete(agent.commands, update.SessionID)
+			for _, command := range update.Update.Commands {
+				agent.advertise(update.SessionID, strings.TrimPrefix(command.Name, "/"))
+			}
+			agent.mu.Unlock()
 			return nil, nil
 		}
-		switch update.Update.Kind {
-		case "agent_message_chunk":
-			sink(false, update.Update.Content.Text)
-		case "agent_thought_chunk":
-			sink(true, update.Update.Content.Text)
+		// Each prompt in flight receives only its own session's updates.
+		agent.mu.Lock()
+		sink := agent.sinks[update.SessionID]
+		agent.mu.Unlock()
+		thought := update.Update.Kind == "agent_thought_chunk"
+		if sink == nil || !thought && update.Update.Kind != "agent_message_chunk" {
+			return nil, nil
+		}
+		var content struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		// A chunk without one text block carries nothing to show.
+		if json.Unmarshal(update.Update.Content, &content) == nil && content.Type == "text" && content.Text != "" {
+			sink(thought, content.Text)
 		}
 		return nil, nil
 	case acp.ClientMethodSessionRequestPermission:
@@ -321,7 +465,7 @@ func (model *acpModel) start(ctx context.Context, spec program.Spec, identity st
 	if err != nil {
 		return nil, nil, &Failure{Kind: Unavailable, Message: fmt.Sprintf("%s could not be started", spec.Command)}
 	}
-	agent := &acpAgent{process: process, identity: identity}
+	agent := &acpAgent{process: process, identity: identity, slots: map[protocol.SessionID]*acpSlot{}, sinks: map[string]func(bool, string){}}
 	agent.conn = acp.NewConnection(agent.handle, process.Stdin, process.Stdout)
 	initialized, err := acpCall[acpInitialized](ctx, agent, acp.AgentMethodInitialize, map[string]any{
 		"protocolVersion": 1,
@@ -333,7 +477,9 @@ func (model *acpModel) start(ctx context.Context, spec program.Spec, identity st
 	if err != nil {
 		return process, nil, model.failure(ctx, agent, err)
 	}
-	agent.images = initialized.AgentCapabilities.PromptCapabilities.Image && model.capture.Adapter.Capabilities.Vision
+	capabilities := initialized.AgentCapabilities
+	agent.images = capabilities.PromptCapabilities.Image && model.capture.Adapter.Capabilities.Vision
+	agent.resume, agent.load, agent.close = capabilities.SessionCapabilities.Resume != nil, capabilities.LoadSession, capabilities.SessionCapabilities.Close != nil
 	if path := model.capture.Adapter.Acp.SystemMeta; path != nil {
 		var value any = initialized.AgentCapabilities.Meta
 		for _, name := range strings.Split(*path, ".") {
@@ -382,9 +528,9 @@ func (model *acpModel) failure(ctx context.Context, agent *acpAgent, err error) 
 	return &Failure{Kind: Other, Message: command + ": " + failed.Message}
 }
 
-// open starts a session of the agent and reads the models it offers. An
+// open starts an agent session for slot and reads the models it offers. An
 // agent that requires authentication is asked once to use its declared method.
-func (model *acpModel) open(ctx context.Context, agent *acpAgent, system string) error {
+func (model *acpModel) open(ctx context.Context, agent *acpAgent, slot *acpSlot, system string) error {
 	params := map[string]any{"cwd": model.capture.Dir, "mcpServers": []any{}}
 	if agent.metaSystem && system != "" {
 		var meta any = system
@@ -407,6 +553,14 @@ func (model *acpModel) open(ctx context.Context, agent *acpAgent, system string)
 	if session.SessionID == "" {
 		return &Failure{Kind: InvalidResponse, Message: model.capture.Program.Command + " opened no session"}
 	}
+	slot.session = session.SessionID
+	slot.offers, slot.thought = acpOffers(session)
+	slot.system, slot.seen, slot.prefixed, slot.selected, slot.level = system, nil, false, "", ""
+	return nil
+}
+
+// acpOffers reads the models and thought levels a session offers.
+func acpOffers(session acpSession) ([]acpOffer, acpThought) {
 	offers, thought := []acpOffer{}, acpThought{}
 	for _, option := range session.ConfigOptions {
 		if option.Type != "select" {
@@ -427,26 +581,21 @@ func (model *acpModel) open(ctx context.Context, agent *acpAgent, system string)
 			offers = append(offers, acpOffer{ID: offered.ModelID, Name: offered.Name})
 		}
 	}
-	agent.mu.Lock()
-	agent.session = session.SessionID
-	agent.mu.Unlock()
-	agent.offers, agent.thought = offers, thought
-	agent.system, agent.seen, agent.prefixed, agent.selected, agent.level = system, nil, false, "", ""
-	return nil
+	return offers, thought
 }
 
 // choose applies the requested model and effort to the session. A level is
 // a model variant where the package declares suffixes, else the session's
 // thought-level option.
-func (model *acpModel) choose(ctx context.Context, agent *acpAgent, effort string) error {
+func (model *acpModel) choose(ctx context.Context, agent *acpAgent, slot *acpSlot, effort string) error {
 	if model.capture.Adapter.Acp.ModelArgument {
 		return nil
 	}
 	requested := model.binding.Config.Model
 	find := func(id string) *acpOffer {
-		for index := range agent.offers {
-			if agent.offers[index].ID == id {
-				return &agent.offers[index]
+		for index := range slot.offers {
+			if slot.offers[index].ID == id {
+				return &slot.offers[index]
 			}
 		}
 		return nil
@@ -457,7 +606,7 @@ func (model *acpModel) choose(ctx context.Context, agent *acpAgent, effort strin
 		offer = find(requested + suffix)
 	}
 	if offer == nil {
-		if offer = find(requested); offer != nil && slices.Contains(agent.thought.Values, effort) {
+		if offer = find(requested); offer != nil && slices.Contains(slot.thought.Values, effort) {
 			level = effort
 		}
 	}
@@ -469,60 +618,122 @@ func (model *acpModel) choose(ctx context.Context, agent *acpAgent, effort strin
 	if offer == nil {
 		return &Failure{Kind: NotConfigured, Message: fmt.Sprintf("%s does not offer the model %s", model.capture.Program.Command, requested)}
 	}
-	if agent.selected != offer.ID {
+	if slot.selected != offer.ID {
 		var err error
 		if offer.Option != "" {
-			_, err = acpCall[json.RawMessage](ctx, agent, acp.AgentMethodSessionSetConfigOption, map[string]any{"sessionId": agent.session, "configId": offer.Option, "value": offer.ID})
+			_, err = acpCall[json.RawMessage](ctx, agent, acp.AgentMethodSessionSetConfigOption, map[string]any{"sessionId": slot.session, "configId": offer.Option, "value": offer.ID})
 		} else {
-			_, err = acpCall[json.RawMessage](ctx, agent, "session/set_model", map[string]any{"sessionId": agent.session, "modelId": offer.ID})
+			_, err = acpCall[json.RawMessage](ctx, agent, "session/set_model", map[string]any{"sessionId": slot.session, "modelId": offer.ID})
 		}
 		if err != nil {
 			return model.failure(ctx, agent, err)
 		}
-		agent.selected, agent.level = offer.ID, ""
+		slot.selected, slot.level = offer.ID, ""
 	}
-	if level != "" && agent.level != level {
-		if _, err := acpCall[json.RawMessage](ctx, agent, acp.AgentMethodSessionSetConfigOption, map[string]any{"sessionId": agent.session, "configId": agent.thought.Option, "value": level}); err != nil {
+	if level != "" && slot.level != level {
+		if _, err := acpCall[json.RawMessage](ctx, agent, acp.AgentMethodSessionSetConfigOption, map[string]any{"sessionId": slot.session, "configId": slot.thought.Option, "value": level}); err != nil {
 			return model.failure(ctx, agent, err)
 		}
-		agent.level = level
+		slot.level = level
 	}
 	return nil
 }
 
-// lease takes the program that serves the session, else an unclaimed one,
-// else a new one.
-func (model *acpModel) lease(ctx context.Context, discovery bool) (*program.Entry, *acpAgent, error) {
+// launch is the specification a request starts and the identity that binds
+// a running program to it.
+func (model *acpModel) launch(discovery bool) (program.Spec, string) {
 	argument := ""
 	if model.capture.Adapter.Acp.ModelArgument && !discovery {
 		argument = model.binding.Config.Model
 	}
 	spec := model.specification(argument)
-	identity := model.identity(spec, argument)
-	// The session's own program is preferred over one no session has used.
+	return spec, model.identity(spec, argument)
+}
+
+// lease takes a compatible program that keeps a free slot for the session,
+// else a compatible one with room for another request, else a new one.
+func (model *acpModel) lease(ctx context.Context, discovery bool) (*program.Entry, *acpAgent, error) {
+	spec, identity := model.launch(discovery)
+	session := model.binding.Session
 	rank := func(entry *program.Entry) int {
 		agent, ok := entry.Value.(*acpAgent)
 		switch {
 		case !ok || agent.identity != identity:
 			return 0
-		case !discovery && agent.claimed && agent.owner == model.binding.Session:
+		case !discovery && session != (protocol.SessionID{}) && agent.holds(session):
 			return 2
-		case discovery || !agent.claimed:
-			return 1
 		}
-		return 0
+		return 1
 	}
-	entry, err := model.capture.Pool.Lease(model.capture.Owner, rank, func() (*program.Process, any, error) {
+	// A program serves as many requests at once as the package declares,
+	// each in its own agent session. When the package runs its most programs
+	// and all are full, a request, such as one of many parallel delegations,
+	// waits for a running one to finish.
+	entry, err := model.capture.Pool.Lease(ctx, model.capture.Owner, int(model.capture.Adapter.Acp.Concurrency), rank, func() (*program.Process, any, error) {
 		process, agent, err := model.start(ctx, spec, identity)
 		return process, agent, err
 	})
-	if errors.Is(err, program.ErrBusy) {
-		return nil, nil, &Failure{Kind: Unavailable, Message: fmt.Sprintf("every %s process is busy", model.capture.Program.Command)}
-	}
 	if err != nil {
 		return nil, nil, err
 	}
 	return entry, entry.Value.(*acpAgent), nil
+}
+
+// reserve takes the slot of the request's Sailry session in agent and ends
+// the agent sessions it evicted.
+func (model *acpModel) reserve(ctx context.Context, agent *acpAgent) *acpSlot {
+	slot, evicted := agent.take(model.binding.Session)
+	for _, session := range evicted {
+		model.discard(ctx, agent, session, true)
+	}
+	// A request that found this slot busy may have continued its session in
+	// another program, whose record then shows what this program's copy has
+	// not seen. This program closes its outdated copy, so the request resumes
+	// the session as recorded: an agent asked to resume a session it still
+	// holds could answer with the copy in its memory.
+	if slot.owner != (protocol.SessionID{}) && slot.session != "" {
+		if kept := model.recall(agent.identity, slot.owner); kept != nil && kept.Session == slot.session && !slices.Equal(kept.Seen, slot.seen) {
+			model.discard(ctx, agent, slot.session, true)
+			slot.session, slot.seen = "", nil
+		}
+	}
+	return slot
+}
+
+// discard ends an agent session this program no longer uses: it is closed
+// where the agent offers that, and its advertised commands are forgotten. A
+// program that is retired takes its sessions with it.
+func (model *acpModel) discard(ctx context.Context, agent *acpAgent, session string, live bool) {
+	if session == "" {
+		return
+	}
+	// The agent answers the close after the commands it advertised before, so
+	// none is recorded again once the session is forgotten.
+	if live && agent.close {
+		_, _ = acpCall[json.RawMessage](context.WithoutCancel(ctx), agent, acp.AgentMethodSessionClose, map[string]any{"sessionId": session})
+	}
+	agent.mu.Lock()
+	delete(agent.commands, session)
+	agent.mu.Unlock()
+}
+
+// acpCancel asks the agent to end the prompt in flight in session and waits
+// for its answer, handing updates that arrive meanwhile to drain. It reports
+// false when the agent did not answer in time; its program is then retired.
+func acpCancel[T any](agent *acpAgent, session string, done <-chan T, wake <-chan struct{}, drain func()) bool {
+	_ = agent.conn.SendNotification(context.Background(), acp.AgentMethodSessionCancel, map[string]any{"sessionId": session})
+	settle := time.NewTimer(acpSettle)
+	defer settle.Stop()
+	for {
+		select {
+		case <-wake:
+			drain()
+		case <-done:
+			return true
+		case <-settle.C:
+			return false
+		}
+	}
 }
 
 type acpEvent struct {
@@ -532,17 +743,9 @@ type acpEvent struct {
 
 func (model *acpModel) stream(ctx context.Context, request protocol.PluginModelAdapterWireRequest, yield func(fantasy.StreamPart) bool) (result error) {
 	settings := model.capture.Adapter.Acp
-	system, err := acpSystem(request)
+	system, digests, err := acpHistory(request)
 	if err != nil {
 		return err
-	}
-	digests := make([]string, len(request.Messages))
-	for index, message := range request.Messages {
-		if reply, assistant := acpStoredReply(message); assistant {
-			digests[index] = reply
-		} else {
-			digests[index] = acpDigest(message)
-		}
 	}
 	entry, agent, err := model.lease(ctx, false)
 	if err != nil {
@@ -550,28 +753,51 @@ func (model *acpModel) stream(ctx context.Context, request protocol.PluginModelA
 	}
 	keep := false
 	defer func() { model.capture.Pool.Release(entry, keep) }()
-	agent.owner, agent.claimed = model.binding.Session, true
+	slot := model.reserve(ctx, agent)
+	defer agent.give(slot)
+	if slot.owner == (protocol.SessionID{}) {
+		defer func() { model.discard(ctx, agent, slot.session, keep) }()
+	}
+	// A session this slot opened for its Sailry session holds a history that
+	// a new session replaces. A request without a session claims nothing.
+	previous := ""
+	if slot.owner != (protocol.SessionID{}) {
+		previous = slot.session
+	}
 
-	// A session that has seen a prefix of this history receives the rest;
-	// any other history is replayed into a new session.
+	// A session that has seen a prefix of this history receives the rest,
+	// whether this program holds it or resumes it; any other history is
+	// replayed into a new session.
 	sent := 0
-	if agent.session != "" && agent.system == system && len(agent.seen) > 0 && len(agent.seen) < len(digests) && slices.Equal(agent.seen, digests[:len(agent.seen)]) {
-		sent = len(agent.seen)
-	} else if err := model.open(ctx, agent, system); err != nil {
-		return err
+	switch {
+	case slot.session != "" && slot.system == system && acpExtends(slot.seen, digests, request.Messages):
+		sent = len(slot.seen)
+	case model.resume(ctx, agent, slot, system, digests, request.Messages):
+		sent = len(slot.seen)
+	default:
+		if err := model.open(ctx, agent, slot, system); err != nil {
+			return err
+		}
+	}
+	if previous != slot.session {
+		// The replaced session's context is no longer used; the agent may
+		// release it. A failure leaves only an unused session behind.
+		model.discard(ctx, agent, previous, true)
 	}
 	keep = true
-	if err := model.choose(ctx, agent, request.Reasoning.Effort.Kind); err != nil {
+	if err := model.choose(ctx, agent, slot, request.Reasoning.Effort.Kind); err != nil {
 		return err
 	}
 	text, images, err := acpPrompt(request.Messages[sent:], sent == 0)
 	if err != nil {
 		return err
 	}
-	if !agent.metaSystem && !agent.prefixed {
-		text = "<system>\n" + system + "\n</system>\n\n" + text
+	if !agent.metaSystem && !slot.prefixed {
+		text = acpSystemPrefix + system + acpSystemSuffix + text
 	}
-	if len(text) > int(settings.ReplayBytes) {
+	// The bound applies to a replay. A session that continues receives only
+	// new messages, whatever its history has grown to.
+	if sent == 0 && len(text) > int(settings.ReplayBytes) {
 		return &Failure{Kind: ContextOverflow, Message: fmt.Sprintf("The conversation is larger than %s accepts in one prompt", model.capture.Program.Command)}
 	}
 	if len(images) > 0 && !agent.images {
@@ -586,20 +812,40 @@ func (model *acpModel) stream(ctx context.Context, request protocol.PluginModelA
 	capturePrepared(ctx, []byte(text), false)
 
 	// From here the session's content is uncertain until the reply is whole.
-	agent.seen, agent.prefixed = nil, true
-	events, finished := make(chan acpEvent), make(chan struct{})
-	defer close(finished)
+	slot.seen, slot.prefixed = nil, true
+	model.keep(agent, slot)
+	// One SDK goroutine delivers the notifications of every session in the
+	// program, so the sink only queues: a slow consumer of this reply must not
+	// hold back the others. The SDK answers a prompt after handling the
+	// notifications sent before the answer, so the queue holds the whole reply
+	// once the answer arrives.
+	var queue struct {
+		sync.Mutex
+		events []acpEvent
+	}
+	wake := make(chan struct{}, 1)
+	drain := func() []acpEvent {
+		queue.Lock()
+		defer queue.Unlock()
+		events := queue.events
+		queue.events = nil
+		return events
+	}
+	session := slot.session
 	agent.mu.Lock()
-	agent.sink = func(reasoning bool, text string) {
+	agent.sinks[session] = func(reasoning bool, text string) {
+		queue.Lock()
+		queue.events = append(queue.events, acpEvent{reasoning, text})
+		queue.Unlock()
 		select {
-		case events <- acpEvent{reasoning, text}:
-		case <-finished:
+		case wake <- struct{}{}:
+		default:
 		}
 	}
 	agent.mu.Unlock()
 	defer func() {
 		agent.mu.Lock()
-		agent.sink = nil
+		delete(agent.sinks, session)
 		agent.mu.Unlock()
 	}()
 	type outcome struct {
@@ -607,28 +853,22 @@ func (model *acpModel) stream(ctx context.Context, request protocol.PluginModelA
 		err      error
 	}
 	done := make(chan outcome, 1)
-	go func() {
-		prompted, err := acp.SendRequest[acpPrompted](agent.conn, context.WithoutCancel(ctx), acp.AgentMethodSessionPrompt, map[string]any{"sessionId": agent.session, "prompt": blocks})
-		done <- outcome{prompted, err}
-	}()
+	send := func(blocks []any) {
+		go func() {
+			prompted, err := acp.SendRequest[acpPrompted](agent.conn, context.WithoutCancel(ctx), acp.AgentMethodSessionPrompt, map[string]any{"sessionId": session, "prompt": blocks})
+			done <- outcome{prompted, err}
+		}()
+	}
+	send(blocks)
 	// abandon asks the agent to stop and kills it when it does not.
 	abandon := func() {
-		_ = agent.conn.SendNotification(context.Background(), acp.AgentMethodSessionCancel, map[string]any{"sessionId": agent.session})
-		settle := time.NewTimer(acpSettle)
-		defer settle.Stop()
-		for {
-			select {
-			case <-events:
-			case <-done:
-				return
-			case <-settle.C:
-				keep = false
-				return
-			}
+		if !acpCancel(agent, session, done, wake, func() { drain() }) {
+			keep = false
 		}
 	}
 
-	parser, accumulator := &acpParser{}, pluginAccumulator{secrets: model.secrets()}
+	// Without tools no reply contains a call: a summary may quote the tags.
+	parser, accumulator := &acpParser{plain: len(request.Tools) == 0}, pluginAccumulator{secrets: model.secrets()}
 	emit := func(deltas ...protocol.PluginModelAdapterWireDelta) (bool, error) {
 		parts, err := accumulator.push(deltas)
 		if err != nil {
@@ -650,7 +890,7 @@ func (model *acpModel) stream(ctx context.Context, request protocol.PluginModelA
 		}
 		return true, nil
 	}
-	calls := uint64(0)
+	calls, resends, spent := uint64(0), 0, (*acpUsage)(nil)
 	answer := func(text string) (bool, error) {
 		out, found, err := parser.feed(text)
 		if err != nil {
@@ -666,6 +906,21 @@ func (model *acpModel) stream(ctx context.Context, request protocol.PluginModelA
 		}
 		return emit(deltas...)
 	}
+	deliver := func(events []acpEvent) (bool, error) {
+		for _, event := range events {
+			var open bool
+			var err error
+			if event.reasoning {
+				open, err = emit(protocol.PluginModelAdapterWireDelta{Kind: "reasoning", Data: &protocol.PluginModelAdapterWireDeltaReasoningPayload{Text: &event.text}})
+			} else {
+				open, err = answer(event.text)
+			}
+			if err != nil || !open {
+				return open, err
+			}
+		}
+		return true, nil
+	}
 	stall := time.NewTimer(model.capture.stall)
 	defer stall.Stop()
 	for {
@@ -676,15 +931,9 @@ func (model *acpModel) stream(ctx context.Context, request protocol.PluginModelA
 		case <-stall.C:
 			keep = false
 			return &Failure{Kind: Network, Message: fmt.Sprintf("Model stream sent no data for %d seconds", int(model.capture.stall.Seconds()))}
-		case event := <-events:
+		case <-wake:
 			stall.Reset(model.capture.stall)
-			var open bool
-			if event.reasoning {
-				open, err = emit(protocol.PluginModelAdapterWireDelta{Kind: "reasoning", Data: &protocol.PluginModelAdapterWireDeltaReasoningPayload{Text: &event.text}})
-			} else {
-				open, err = answer(event.text)
-			}
-			if err != nil || !open {
+			if open, err := deliver(drain()); err != nil || !open {
 				abandon()
 				return err
 			}
@@ -693,14 +942,36 @@ func (model *acpModel) stream(ctx context.Context, request protocol.PluginModelA
 				keep = false
 				return model.failure(ctx, agent, finished.err)
 			}
-			return model.finish(agent, digests, parser, finished.prompted, emit)
+			// The reply's last chunks were queued before its answer.
+			if open, err := deliver(drain()); err != nil || !open {
+				return err
+			}
+			// A call the agent wrote wrong is asked for again in the same
+			// session; the calls read before it stand.
+			if malformed := parser.pending(); malformed != nil && finished.prompted.StopReason == "end_turn" {
+				if resends == acpResends {
+					return errACPCall
+				}
+				resends, spent = resends+1, spent.plus(finished.prompted.Usage)
+				parser.resume(malformed)
+				stall.Reset(model.capture.stall)
+				send([]any{map[string]any{"type": "text", "text": acpCorrection(malformed)}})
+				continue
+			}
+			// Every prompt of the reply counts, its corrections included; the
+			// window is what the last prompt occupied.
+			if spent != nil {
+				finished.prompted.last = finished.prompted.Usage
+			}
+			finished.prompted.Usage = spent.plus(finished.prompted.Usage)
+			return model.finish(agent, slot, digests, parser, finished.prompted, emit)
 		}
 	}
 }
 
 // finish ends the reply: its stop reason, its usage and what the session
 // now holds.
-func (model *acpModel) finish(agent *acpAgent, digests []string, parser *acpParser, prompted acpPrompted, emit func(...protocol.PluginModelAdapterWireDelta) (bool, error)) error {
+func (model *acpModel) finish(agent *acpAgent, slot *acpSlot, digests []string, parser *acpParser, prompted acpPrompted, emit func(...protocol.PluginModelAdapterWireDelta) (bool, error)) error {
 	command := model.capture.Program.Command
 	reason := protocol.PluginModelAdapterWireFinishStop
 	switch prompted.StopReason {
@@ -714,8 +985,14 @@ func (model *acpModel) finish(agent *acpAgent, digests []string, parser *acpPars
 	default:
 		reason = protocol.PluginModelAdapterWireFinishOther
 	}
+	// A correction's reply must write the call it was asked for, however it
+	// ends: the calls before that call are already out, so dropping it would
+	// lose a call silently.
+	if parser.asked > 0 && parser.pending() != nil {
+		return errACPCall
+	}
 	rest, err := parser.finish()
-	if err != nil && reason != protocol.PluginModelAdapterWireFinishLength {
+	if err != nil && (reason != protocol.PluginModelAdapterWireFinishLength || parser.failed != nil) {
 		return err
 	}
 	for _, marker := range model.capture.Adapter.Acp.FailureMarkers {
@@ -746,10 +1023,19 @@ func (model *acpModel) finish(agent *acpAgent, digests []string, parser *acpPars
 			}
 			return &total
 		}
-		deltas = append(deltas, protocol.PluginModelAdapterWireDelta{Kind: "usage", Data: &protocol.PluginModelAdapterWireDeltaUsagePayload{
+		payload := &protocol.PluginModelAdapterWireDeltaUsagePayload{
 			InputTokens: count(usage.InputTokens, usage.CachedReadTokens, usage.CachedWriteTokens), OutputTokens: count(usage.OutputTokens),
 			CachedInputTokens: count(usage.CachedReadTokens), ReasoningTokens: count(usage.ThoughtTokens),
-		}})
+		}
+		if last := prompted.last; last != nil && last.InputTokens != nil && last.OutputTokens != nil {
+			// Thoughts are not replayed, so they leave the next window.
+			occupied := *count(last.InputTokens, last.CachedReadTokens, last.CachedWriteTokens) + *count(last.OutputTokens)
+			if thought := count(last.ThoughtTokens); thought != nil {
+				occupied -= min(occupied, *thought)
+			}
+			payload.ContextTokens = &occupied
+		}
+		deltas = append(deltas, protocol.PluginModelAdapterWireDelta{Kind: "usage", Data: payload})
 	}
 	if len(parser.calls) > 0 && reason == protocol.PluginModelAdapterWireFinishStop {
 		reason = protocol.PluginModelAdapterWireFinishToolCalls
@@ -761,7 +1047,8 @@ func (model *acpModel) finish(agent *acpAgent, digests []string, parser *acpPars
 	// A reply that is whole extends what the session holds; one that ended
 	// early leaves it unknown, and the next step replays.
 	if reason == protocol.PluginModelAdapterWireFinishStop || reason == protocol.PluginModelAdapterWireFinishToolCalls {
-		agent.seen = append(slices.Clone(digests), acpReply(parser.text.String(), parser.calls))
+		slot.seen = append(slices.Clone(digests), acpReply(parser.text.String(), parser.calls))
+		model.keep(agent, slot)
 	}
 	return nil
 }

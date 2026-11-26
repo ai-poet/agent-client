@@ -107,37 +107,19 @@ func (r *Runtime) infer(x *execution, captured model.Binding, languageModel fant
 		state.Records = append(state.Records, *contextRecord)
 	}
 	instruction := prompt.Instruction(x.inv.Session.Delegation != nil)
-	system := prompt.System(instruction, state.Context)
-	tools := r.declarations(x, binding, state)
-	schemas := map[string]json.RawMessage{}
-	for _, tool := range tools {
-		if captured := findTool(x.tools, tool.Name); captured != nil && len(captured.SchemaJSON) > 0 {
-			schemas[tool.Name] = captured.SchemaJSON
-		}
-	}
-	projected := x.output.Project(model.Answered(model.VisibleRecords(state.Records)))
-	hydrated, attachmentAssets, err := r.hydrateAttachments(x, projected)
+	request, err := r.mainRequest(x, binding, state, instruction)
 	if err != nil {
 		return err
 	}
-	projected = hydrated
-	assets, err := r.modelAssetsWith(x.ctx, projected, attachmentAssets)
+	call, err := model.BuildProjectedCall(binding, request)
 	if err != nil {
 		return err
 	}
-	projected, tools, schemas = x.names.request(projected, tools, schemas)
-	if err = r.toolMediaAssets(x.ctx, binding, projected, assets); err != nil {
-		return err
-	}
-	call, err := model.BuildProjectedCall(binding, model.Request{System: system, Records: projected, Tools: tools, ToolSchemas: schemas, Assets: assets, Delegated: x.inv.Session.Delegation != nil})
-	if err != nil {
-		return err
-	}
-	inventory := &observation.Inventory{System: system}
+	inventory := &observation.Inventory{System: request.System}
 	for _, part := range prompt.SystemParts(instruction, state.Context)[1:] {
 		inventory.Sources = append(inventory.Sources, observation.Source{Kind: protocol.ConversationObservationCategoryKindInjected, Text: part})
 	}
-	for _, record := range handoff.Pending(projected) {
+	for _, record := range handoff.Pending(request.Records) {
 		if runtime := record.Metadata.Runtime; runtime != nil && runtime.TurnContext {
 			var parts []string
 			for _, block := range record.Message().Content {
@@ -155,9 +137,13 @@ func (r *Runtime) infer(x *execution, captured model.Binding, languageModel fant
 	// Source empty-response recovery is separate from transient HTTP recovery.
 	// Every retry reuses this exact request without prompt rewriting.
 	purpose := canonical.PurposeMain
+	recording := r.scopeTrace(&call, languageModel, x, binding, purpose)
 	newOutput := func() streamOutput {
 		out := streamOutput{record: canonical.NewRecord(x.inv.Run.Turn, "message", canonical.NewMessage(canonical.Assistant), r.clock.Now()), slots: map[string]int{}, calls: map[string]bool{}}
 		out.record.Provenance.Author = "assistant"
+		if recording != nil {
+			recording.Record = out.record.ID
+		}
 		scope := model.Scope(binding)
 		out.record.Metadata.Execution = &canonical.Execution{Source: &scope, Purpose: &purpose}
 		out.record.Metadata.Runtime = &canonical.Runtime{UserVisible: true, AgentVisible: true, Inference: &canonical.Inference{Provider: "sailry:" + binding.Provider.ID.String(), RequestedModel: binding.Config.Model, ReplayPrefix: model.ReplayPrefix(call)}}
@@ -209,7 +195,13 @@ func (r *Runtime) infer(x *execution, captured model.Binding, languageModel fant
 		empty := out.empty()
 		var billing []canonical.Record
 		for _, attempt := range attempts {
-			billing = append(billing, r.observationRecord(x, binding, purpose, attempt))
+			record := r.observationRecord(x, binding, purpose, attempt)
+			if recording != nil {
+				// A final attempt with no output keeps only its observation.
+				// Anchor it to the same draft ID as an attempt with an answer.
+				record.ID = out.record.ID
+			}
+			billing = append(billing, record)
 		}
 		if x.ctx.Err() != nil || err != nil || !empty || emptyAttempt == 3 || out.limited || successfulTool(state.Records) {
 			finish := canonical.Completed
@@ -282,6 +274,34 @@ func (r *Runtime) infer(x *execution, captured model.Binding, languageModel fant
 		}
 	}
 	return nil
+}
+
+// mainRequest materializes only the visible history, using the same tools,
+// attachments and tool names for inference and native compaction.
+func (r *Runtime) mainRequest(x *execution, binding model.Binding, state store.AgentState, instruction string) (model.Request, error) {
+	system := prompt.System(instruction, state.Context)
+	tools := r.declarations(x, binding, state)
+	schemas := map[string]json.RawMessage{}
+	for _, tool := range tools {
+		if captured := findTool(x.tools, tool.Name); captured != nil && len(captured.SchemaJSON) > 0 {
+			schemas[tool.Name] = captured.SchemaJSON
+		}
+	}
+	projected := x.output.Project(model.Answered(model.VisibleRecords(state.Records)))
+	hydrated, attachmentAssets, err := r.hydrateAttachments(x, projected)
+	if err != nil {
+		return model.Request{}, err
+	}
+	projected = hydrated
+	assets, err := r.modelAssetsWith(x.ctx, projected, attachmentAssets)
+	if err != nil {
+		return model.Request{}, err
+	}
+	projected, tools, schemas = x.names.request(projected, tools, schemas)
+	if err = r.toolMediaAssets(x.ctx, binding, projected, assets); err != nil {
+		return model.Request{}, err
+	}
+	return model.Request{System: system, Records: projected, Tools: tools, ToolSchemas: schemas, Assets: assets, Delegated: x.inv.Session.Delegation != nil}, nil
 }
 
 func (out *streamOutput) slot(id, kind string) *canonical.Block {
@@ -417,15 +437,27 @@ func successfulTool(records []canonical.Record) bool {
 	return found
 }
 
+// quietRetryDelay is the longest wait, in milliseconds, of a first retry that
+// shows no row.
+const quietRetryDelay = 5000
+
 // retryRecord is the observation of an attempt that waits to be sent again,
 // which the conversation shows as the request's retry row. It is the attempt's
 // only record: its usage and timing are not observed a second time.
+//
+// The first retry is a quick resend that most transient failures clear on, so
+// it is numbered 0, which shows no row, and the rows count the retries after
+// it. A first retry that must wait at least quietRetryDelay still shows.
 func (r *Runtime) retryRecord(x *execution, binding model.Binding, purpose canonical.Purpose, attempt model.Attempt) canonical.Record {
 	record := r.observationRecord(x, binding, purpose, attempt)
-	limit, delay := attempt.RetryLimit, uint64(attempt.RetryDelay.Milliseconds())
+	number, limit, delay := attempt.Index, attempt.RetryLimit, uint64(attempt.RetryDelay.Milliseconds())
+	if number == 0 && delay >= quietRetryDelay {
+		number = 1
+	}
+	limit = max(limit-min(limit, 1), number)
 	code := string(attempt.Failure.Kind)
 	message := attempt.Failure.Message
-	record.Metadata.Execution.Retry = &protocol.ConversationRecoveryRetry{Attempt: attempt.Index + 1, Limit: &limit, DelayMs: &delay, Status: attempt.Status, Code: &code, Error: &message}
+	record.Metadata.Execution.Retry = &protocol.ConversationRecoveryRetry{Attempt: number, Limit: &limit, DelayMs: &delay, Status: attempt.Status, Code: &code, Error: &message}
 	record.Metadata.Runtime.UserVisible = true
 	return record
 }
@@ -436,34 +468,34 @@ func (r *Runtime) observationRecord(x *execution, binding model.Binding, purpose
 	message.Usage = &attempt.Usage
 	record := canonical.NewRecord(x.inv.Run.Turn, "message", message, attempt.Finished)
 	record.Provenance.Author = "assistant"
-	elapsed := uint64(max(0, attempt.Finished.Sub(attempt.Started).Microseconds()))
-	timing := canonical.Timing{ElapsedUs: &elapsed}
-	if attempt.FirstToken != nil {
-		first := uint64(max(0, attempt.FirstToken.Sub(attempt.Started).Microseconds()))
-		timing.FirstTokenUs = &first
-	}
+	timing := attempt.Timing
 	observation := protocol.DefaultConversationObservationRequest()
 	observation.ID = attempt.RequestID
 	observation.Turn = x.inv.Run.Turn
 	observation.Model = binding.Config.Model
 	observation.TimestampMs = attempt.RequestStarted.UnixMilli()
 	observed := protocol.DefaultConversationObservationAttempt()
+	observed.Verdict = attempt.Verdict
 	observed.Index = attempt.Index + 1
 	observed.Transport = "http"
 	observed.HeadersUs, observed.ResponseUs = attempt.ResponseUs, attempt.ResponseUs
 	observed.RequestBytes, observed.DispatchUs, observed.RequestSentUs = attempt.RequestBytes, attempt.DispatchUs, attempt.RequestSentUs
 	observed.Categories, observed.CompleteContext = attempt.Categories, attempt.CompleteContext
 	observed.ReasoningStreamed = attempt.ReasoningStreamed
-	observed.ElapsedUs = &elapsed
+	observed.ElapsedUs = timing.ElapsedUs
 	observed.FirstTokenUs = timing.FirstTokenUs
 	observed.Status = attempt.Status
-	observed.Outcome = protocol.ConversationObservationOutcomeSucceeded
+	observed.CacheWrite = attempt.Usage.CacheWrite
+	observed.EndKind = attempt.EndKind
+	observed.GatewayRequestID = attempt.GatewayRequestID
 	if attempt.Failure != nil {
-		observed.Outcome = protocol.ConversationObservationOutcomeFailed
-		if attempt.Failure.Kind == "cancelled" {
-			observed.Outcome = protocol.ConversationObservationOutcomeCancelled
+		kind := string(attempt.Failure.Kind)
+		observed.FailureKind = &kind
+		if attempt.RetryDelay != nil {
+			observed.RetryReason = &kind
 		}
 	}
+	observed.Outcome = attempt.Outcome()
 	if attempt.Usage.Input != nil && attempt.Usage.Output != nil {
 		usage := protocol.ConversationUsage{Input: *attempt.Usage.Input, Output: *attempt.Usage.Output}
 		if attempt.Usage.CacheRead != nil {
@@ -482,7 +514,11 @@ func (r *Runtime) observationRecord(x *execution, binding model.Binding, purpose
 	if !estimated {
 		observation.ContextLimit = &selected.Context
 	}
-	record.Metadata.Execution = &canonical.Execution{Source: &scope, Purpose: &purpose, Timing: &timing, Observation: &observation, ContextTokens: attempt.Usage.Total}
+	occupied := attempt.Usage.Total
+	if attempt.Context != nil {
+		occupied = attempt.Context
+	}
+	record.Metadata.Execution = &canonical.Execution{Source: &scope, Purpose: &purpose, Timing: &timing, Observation: &observation, ContextTokens: occupied}
 	runtime := canonical.DefaultRuntime()
 	runtime.UserVisible = false
 	runtime.AgentVisible = false

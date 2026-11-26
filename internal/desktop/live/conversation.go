@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/shell"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
 	nodeproviders "github.com/ai-poet/cheaprouter-harness/internal/node/providers"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/egoist/mygo/ui"
@@ -95,6 +97,154 @@ func modelKey(provider protocol.ProviderID, model string) string {
 	return provider.String() + "/" + model
 }
 
+func (r *Runtime) providerCredentialReady(p protocol.ConversationProvider) bool {
+	if p.Authentication == "" {
+		return true
+	}
+	if p.Authentication == protocol.AuthenticationApiKey {
+		if p.Credential != nil {
+			return true
+		}
+		if p.Preset == nil && (p.Binding == nil || *p.Binding == nil) && supportsOptionalKey(p.Api) {
+			return true
+		}
+		if p.Preset != nil {
+			reference := *p.Preset
+			matched := false
+			for _, entry := range r.providerPresets {
+				if entry.Preset.ID == reference.ID && samePresetSource(entry.Source, reference.Source) {
+					matched = true
+					switch entry.Preset.Auth.Kind {
+					case "none":
+						return true
+					case "api_key", "builtin":
+						return presetKeyAuth(entry) == viewmodel.AuthOptionalKey
+					}
+					return false
+				}
+			}
+			if !matched {
+				if reference.Source.Kind == "package" {
+					return true
+				}
+				switch strings.ToLower(reference.ID) {
+				case "compatible-responses", "compatible-chat", "compatible-anthropic", "ollama", "lmstudio", "lm-studio":
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if p.Credential == nil {
+		return false
+	}
+	if r.authorizations != nil && r.authorizations.credentialKey != "" {
+		credentialKey := r.providerCredentialKey(r.snapshot().Providers)
+		if credentialKey == r.authorizations.credentialKey {
+			credential, ok := r.authorizations.credentials[p.Credential.ID]
+			now := uint64(time.Now().UnixMilli())
+			return ok && !credential.Revoked && (credential.ExpiresAtMs == nil || *credential.ExpiresAtMs > now)
+		}
+	}
+	return true
+}
+
+func (r *Runtime) projectModel(p protocol.ConversationProvider, m protocol.ConversationModel, cheapHints *cheapGroupHintProjector) composer.Model {
+	name := m.ID
+	if m.DisplayName != nil {
+		name = *m.DisplayName
+	}
+	key := modelKey(p.ID, m.ID)
+	limits, contextEstimated := nodeproviders.ResolveModelLimits(p.Api, m, nodeproviders.ModelLimits{})
+	v := composer.Model{
+		ID:             key,
+		Name:           name,
+		Provider:       p.Name,
+		ProviderID:     p.ID.String(),
+		ProviderIcon:   providerIcon(p),
+		ProviderTag:    providerTag(p),
+		Reasoning:      m.Reasoning,
+		Family:         composerModelVendor(p, m),
+		ContextWindow:  limits.Context,
+		ContextUnknown: contextEstimated,
+		DefaultEffort:  effortName(m.DefaultEffort),
+		Score:          r.measuredScore(key, m.DefaultEffort),
+	}
+	if nodeproviders.IsCheapRouterProvider(p.ID) {
+		v.Group = cheapHints.forModel(p.ID, m.ID, m.Platform)
+	}
+	for _, e := range m.Efforts {
+		v.Efforts = append(v.Efforts, effortName(e))
+	}
+	if m.Reasoning && !slices.Contains(v.Efforts, v.DefaultEffort) {
+		v.Efforts = append(v.Efforts, v.DefaultEffort)
+	}
+	v.Scores = map[string]*composer.Score{}
+	for _, effort := range v.Efforts {
+		if score := r.measuredScore(v.ID, parseEffort(effort)); score != nil {
+			v.Scores[effort] = score
+		}
+	}
+	if m.Capabilities != nil {
+		for _, feature := range m.Capabilities.Features {
+			f := composer.Feature{ID: feature.ID, Name: feature.ID}
+			if feature.Name != nil {
+				f.Name = *feature.Name
+			}
+			for _, option := range feature.Options {
+				o := composer.FeatureOption{ID: option.ID, Name: option.ID}
+				if option.Name != nil {
+					o.Name = *option.Name
+				}
+				f.Options = append(f.Options, o)
+			}
+			v.Features = append(v.Features, f)
+		}
+	}
+	return v
+}
+
+func (r *Runtime) unavailableSelectedModel(cvID, selectedID string) (composer.Model, bool) {
+	providerKey, modelID, ok := strings.Cut(selectedID, "/")
+	if !ok || providerKey == "" || modelID == "" {
+		return composer.Model{}, false
+	}
+	cheapHints := r.cheapModelGroupHints()
+	for _, p := range r.composerProviders() {
+		if p.ID.String() != providerKey {
+			continue
+		}
+		for _, m := range p.Models {
+			if m.ID == modelID {
+				v := r.projectModel(p, m, cheapHints)
+				v.Unavailable = true
+				return v, true
+			}
+		}
+		return composer.Model{
+			ID:           selectedID,
+			Name:         modelID,
+			Provider:     p.Name,
+			ProviderID:   p.ID.String(),
+			ProviderIcon: providerIcon(p),
+			ProviderTag:  providerTag(p),
+			Family:       composerModelVendor(p, protocol.ConversationModel{ID: modelID}),
+			Unavailable:  true,
+		}, true
+	}
+	if s, exists := r.session(cvID); exists && modelKey(s.Config.Provider, s.Config.Model) == selectedID {
+		return composer.Model{
+			ID:          selectedID,
+			Name:        s.Config.Model,
+			Provider:    providerKey,
+			ProviderID:  providerKey,
+			Family:      composerModelVendor(protocol.ConversationProvider{ID: s.Config.Provider}, protocol.ConversationModel{ID: s.Config.Model}),
+			Unavailable: true,
+		}, true
+	}
+	return composer.Model{}, false
+}
+
 func (r *Runtime) projectModels() {
 	var models []composer.Model
 	var providers []viewmodel.Provider
@@ -103,49 +253,14 @@ func (r *Runtime) projectModels() {
 	}
 	cheapHints := r.cheapModelGroupHints()
 	for _, p := range r.composerProviders() {
-		if !p.Enabled {
+		if !p.Enabled || !r.providerCredentialReady(p) {
 			continue
 		}
 		for _, m := range p.Models {
-			name := m.ID
-			if m.DisplayName != nil {
-				name = *m.DisplayName
+			if isPureMediaModel(m) {
+				continue
 			}
-			key := modelKey(p.ID, m.ID)
-			limits, contextEstimated := nodeproviders.ResolveModelLimits(p.Api, m, nodeproviders.ModelLimits{})
-			v := composer.Model{ID: key, Name: name, Provider: p.Name, Reasoning: m.Reasoning, Family: composerModelVendor(p, m), ContextWindow: limits.Context, ContextUnknown: contextEstimated, DefaultEffort: effortName(m.DefaultEffort), Score: r.measuredScore(key, m.DefaultEffort)}
-			if nodeproviders.IsCheapRouterProvider(p.ID) {
-				v.Group = cheapHints.forModel(p.ID, m.ID, m.Platform)
-			}
-			for _, e := range m.Efforts {
-				v.Efforts = append(v.Efforts, effortName(e))
-			}
-			if m.Reasoning && !slices.Contains(v.Efforts, v.DefaultEffort) {
-				v.Efforts = append(v.Efforts, v.DefaultEffort)
-			}
-			v.Scores = map[string]*composer.Score{}
-			for _, effort := range v.Efforts {
-				if score := r.measuredScore(v.ID, parseEffort(effort)); score != nil {
-					v.Scores[effort] = score
-				}
-			}
-			if m.Capabilities != nil {
-				for _, feature := range m.Capabilities.Features {
-					f := composer.Feature{ID: feature.ID, Name: feature.ID}
-					if feature.Name != nil {
-						f.Name = *feature.Name
-					}
-					for _, option := range feature.Options {
-						o := composer.FeatureOption{ID: option.ID, Name: option.ID}
-						if option.Name != nil {
-							o.Name = *option.Name
-						}
-						f.Options = append(f.Options, o)
-					}
-					v.Features = append(v.Features, f)
-				}
-			}
-			models = append(models, v)
+			models = append(models, r.projectModel(p, m, cheapHints))
 		}
 	}
 	r.nodeModels = models
@@ -472,6 +587,11 @@ func (r *Runtime) conversation(c *ui.Context, cv *viewmodel.Conversation, comp *
 			r.saveComposerConfig(s, config, nil)
 		}
 	}
+	if comp.Model != "" && !slices.ContainsFunc(ctx.Models, func(m composer.Model) bool { return m.ID == comp.Model }) {
+		if missing, ok := r.unavailableSelectedModel(cv.ID, comp.Model); ok {
+			ctx.Models = append([]composer.Model{missing}, ctx.Models...)
+		}
+	}
 	r.nameModelSources(c, cv.ID, ctx.Models)
 	ctx.MemberModels = r.memberModels(ctx.Models)
 	ctx.RecentModels = r.recentComposerModels(ctx.Models)
@@ -651,6 +771,36 @@ func (r *Runtime) composerConfig(id string, comp *composer.State, m composer.Mes
 	return protocol.SessionConfig{}, 0, &link.FaultError{Fault: protocol.Fault{Code: protocol.ErrorCodeNotConfigured, Message: "Select a configured model"}}
 }
 
+func logDraftModelRejection(selection string, providers []protocol.ConversationProvider) {
+	key, model, _ := strings.Cut(selection, "/")
+	id, err := protocol.ParseProviderID(key)
+	managed := err == nil && nodeproviders.IsCheapRouterProvider(id)
+	lane := ""
+	if managed {
+		for _, name := range core.CanonicalLanes {
+			if nodeproviders.CheapRouterLaneID(name) == id {
+				lane = name
+				break
+			}
+		}
+	}
+	present, enabled, contains := false, false, false
+	providerID := ""
+	if err == nil {
+		providerID = id.String()
+		for _, p := range providers {
+			if p.ID == id {
+				present, enabled = true, p.Enabled
+				contains = slices.ContainsFunc(p.Models, func(m protocol.ConversationModel) bool { return m.ID == model })
+				break
+			}
+		}
+	}
+	slog.Warn(logging.Target, "area", "draft_model", "phase", logging.Failed, "code", string(protocol.ErrorCodeNotConfigured),
+		"provider", providerID, "cheaprouter_managed", managed, "cheaprouter_lane", lane,
+		"provider_present", present, "provider_enabled", enabled, "model_present", contains)
+}
+
 func (r *Runtime) rememberConfig(config protocol.SessionConfig, team string) {
 	source := r.controller.Target()
 	if r.forwards(config.Provider) {
@@ -682,7 +832,7 @@ func (r *Runtime) recentComposerModels(models []composer.Model) []string {
 			continue
 		}
 		id := modelKey(choice.Provider, choice.Model)
-		if !slices.Contains(ids, id) && slices.ContainsFunc(models, func(m composer.Model) bool { return m.ID == id }) {
+		if !slices.Contains(ids, id) && slices.ContainsFunc(models, func(m composer.Model) bool { return m.ID == id && !m.Unavailable }) {
 			ids = append(ids, id)
 		}
 	}
@@ -950,6 +1100,11 @@ func (x *conversationActions) submit(m composer.Message, guide, queue bool, draf
 		if _, exists := x.r.session(x.cv.ID); exists {
 			x.r.report(x.c, err, "session_changed")
 		} else {
+			providers := x.r.snapshot().Providers
+			if x.r.parent != nil {
+				providers = slices.Concat(providers, x.r.parent.snapshot().Providers)
+			}
+			logDraftModelRejection(m.Model, providers)
 			x.r.reportCreation(x.c, err)
 		}
 		return

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/core"
@@ -20,11 +21,14 @@ const allLeases = math.MaxInt64
 
 // Handle owns one file's writer and its independent read-only connection pool.
 type Handle struct {
-	path    string
-	leases  *semaphore.Weighted
-	mu      sync.Mutex
-	state   *connections
-	stopped bool
+	path                string
+	leases              *semaphore.Weighted
+	mu                  sync.Mutex
+	state               *connections
+	stopped             bool
+	traceEnabled        atomic.Bool
+	traceGatewayEnabled atomic.Bool
+	traceSettingsMu     sync.Mutex
 }
 
 type connections struct {
@@ -97,6 +101,9 @@ func (handle *Handle) acquire(ctx context.Context) (*connections, error) {
 }
 
 func openConnections(ctx context.Context, path string) (_ *connections, result error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := checkDatabaseFiles(path); err != nil {
 		return nil, err
 	}
@@ -131,12 +138,8 @@ func openConnections(ctx context.Context, path string) (_ *connections, result e
 			_ = connection.Close()
 		}
 	}()
-	var mode string
-	journal := "PRAGMA journal_mode"
-	if !initialized {
-		journal = "PRAGMA journal_mode=mvcc"
-	}
-	if err := connection.QueryRowContext(ctx, journal).Scan(&mode); err != nil {
+	mode, err := initializeJournalMode(ctx, connection, initialized)
+	if err != nil {
 		return nil, err
 	}
 	if !strings.EqualFold(mode, "mvcc") && !strings.EqualFold(mode, "wal") {
@@ -172,6 +175,24 @@ func openConnections(ctx context.Context, path string) (_ *connections, result e
 	}
 	go state.writer.run()
 	return state, nil
+}
+
+func initializeJournalMode(ctx context.Context, connection *sql.Conn, initialized bool) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	journal, operation := "PRAGMA journal_mode", ctx
+	if !initialized {
+		// Turso publishes the MVCC header before bootstrapping its metadata.
+		// Finish this transition before honoring cancellation so the next
+		// owner never opens a half-initialized database.
+		journal, operation = "PRAGMA journal_mode=mvcc", context.WithoutCancel(ctx)
+	}
+	var mode string
+	if err := connection.QueryRowContext(operation, journal).Scan(&mode); err != nil {
+		return "", err
+	}
+	return mode, ctx.Err()
 }
 
 func checkDatabaseFiles(path string) error {

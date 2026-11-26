@@ -70,9 +70,48 @@ func TestAnthropicCacheWriteCost(t *testing.T) {
 		if cost != nil {
 			t.Fatalf("compatible API invented the reseller's one-hour price: %#v", cost)
 		}
+		// Bedrock bills Claude's one-hour writes as Anthropic does.
+		if _, err = db.ExecContext(ctx, "INSERT INTO model_catalog(provider,id,body) VALUES('amazon-bedrock','fixture',?1)", tier); err != nil {
+			return err
+		}
+		cost, err = estimateAgentCost(ctx, db, modelPrices{}, "bedrock", "bedrock", "fixture", usage)
+		if err != nil {
+			return err
+		}
+		if cost == nil || cost.UsdMicros != 1671 || cost.Breakdown == nil || cost.Breakdown.CacheWrite != 435 {
+			// Errorf: a Fatalf here would exit while holding the writer.
+			t.Errorf("Bedrock cost = %#v, want total 1671 and cache writes 435", cost)
+		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCloudUsageCost(t *testing.T) {
+	const model = "fixture"
+	for _, tc := range []struct{ api, preset, supplier string }{
+		{"bedrock", "bedrock", "amazon-bedrock"},
+		{"vertex_ai", "vertex-ai", "google-vertex"},
+	} {
+		prices := modelPrices{{tc.supplier, model}: []byte(`{"cost":{"input":3,"output":15,"cache_read":0.3,"cache_write":3.75}}`)}
+		usage := canonical.Usage{Input: ptr(uint64(200)), Output: ptr(uint64(20)), CacheRead: ptr(uint64(60)), CacheWrite: ptr(uint64(40))}
+		for _, preset := range []string{tc.preset, ""} {
+			suppliers := priceSuppliers(preset, tc.api)
+			if len(suppliers) == 0 || suppliers[0] != tc.supplier {
+				t.Fatalf("%s/%s: suppliers %v", preset, tc.api, suppliers)
+			}
+			cost, err := estimateAgentCost(t.Context(), nil, prices, preset, tc.api, model, usage)
+			if err != nil || cost == nil || cost.UsdMicros != 768 || cost.Breakdown.CacheWrite != 150 {
+				t.Errorf("%s/%s: cost %+v, %v", preset, tc.api, cost, err)
+			}
+		}
+		if tc.api == "bedrock" {
+			usage.Provider = json.RawMessage(`{"cache_creation":{"ephemeral_5m_input_tokens":39,"ephemeral_1h_input_tokens":0}}`)
+			if cost, err := estimateAgentCost(t.Context(), nil, prices, tc.preset, tc.api, model, usage); err != nil || cost != nil {
+				t.Errorf("inconsistent Bedrock cache writes: cost %+v, %v", cost, err)
+			}
+		}
 	}
 }

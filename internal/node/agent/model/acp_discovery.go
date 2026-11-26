@@ -27,11 +27,12 @@ func DiscoverACP(ctx context.Context, binding Binding, capture ACPCapture) (prot
 	if err != nil {
 		return catalog, Classify(err)
 	}
-	err = model.open(owner, agent, "")
-	// The session's state is copied before the release: the next lease of the
-	// program reopens the same agent and rewrites it.
-	offers, images, thought := slices.Clone(agent.offers), agent.images, slices.Clone(agent.thought.Values)
-	// A session opened only to read its models holds no history.
+	// A session opened only to read its models holds no history, stays
+	// outside the program's slots and ends at once.
+	slot := &acpSlot{}
+	err = model.open(owner, agent, slot, "")
+	model.discard(owner, agent, slot.session, true)
+	offers, images, thought := slot.offers, agent.images, slot.thought.Values
 	model.capture.Pool.Release(entry, err == nil)
 	if err != nil {
 		return catalog, Classify(err)
@@ -58,6 +59,15 @@ func DiscoverACP(ctx context.Context, binding Binding, capture ACPCapture) (prot
 			vision, tools, reasoning := images, capture.Adapter.Capabilities.Tools, false
 			capabilities.Vision, capabilities.Tools, capabilities.Reasoning = &vision, &tools, &reasoning
 			entry := protocol.ConversationDiscoveryModel{ID: id, Capabilities: &capabilities}
+			// Agents do not report a window before a prompt. A window the
+			// bundled catalog knows replaces the generic default a new model
+			// would otherwise get; an unknown model keeps that default.
+			if window, output, known := catalogWindow(id); known {
+				entry.Context = &window
+				if output > 0 {
+					entry.Output = &output
+				}
+			}
 			if name != "" && name != id {
 				display := name
 				entry.DisplayName = &display

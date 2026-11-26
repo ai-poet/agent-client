@@ -99,6 +99,11 @@
         "program": {
           "type": "string"
         },
+        "concurrency": {
+          "maximum": 16,
+          "minimum": 1,
+          "type": "integer"
+        },
         "replay_bytes": {
           "maximum": 8388608,
           "minimum": 4096,
@@ -3169,6 +3174,8 @@
         "opencode-zen",
         "azure-openai",
         "azure-ai",
+        "bedrock",
+        "vertex-ai",
         "plugin"
       ],
       "type": "string"

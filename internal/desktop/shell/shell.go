@@ -74,6 +74,7 @@ const (
 	ProjectPage
 	PluginPage
 	ImageStudioPage
+	InsightsPage
 )
 
 // App is the window's state.
@@ -144,10 +145,10 @@ type App struct {
 	OnMode  func(theme.Mode)
 	applied theme.Mode
 
-	Sidebar           *sidebar.State
-	Settings          *settings.State
-	Messages          *conversation.State
-	ImageStudio       *imagestudio.State
+	Sidebar          *sidebar.State
+	Settings         *settings.State
+	Messages         *conversation.State
+	ImageStudio      *imagestudio.State
 	accountOpen      bool
 	accountGroupLane string
 	accountNodesOpen bool
@@ -293,6 +294,7 @@ func newApp(d *viewmodel.Data, selected string, st *settings.State) *App {
 	}
 	for _, f := range Features {
 		a.features = append(a.features, f.ID)
+		a.unpinned[f.ID] = !f.Fixed && !f.DefaultPinned
 	}
 	// The sidebar's sort menu and the settings' session order are one choice.
 	a.Sidebar.Sort = &st.Model.SessionOrder
@@ -366,9 +368,9 @@ func (a *App) View(c *ui.Context) {
 		return
 	}
 	a.shortcuts(c)
-	a.MountPanel()
 	a.followSelection()
 	a.followPanes()
+	a.MountPanel()
 	a.sweepOverviews()
 	if a.paged() != "" {
 		a.SetPluginWorkspace(a.feature(), 0, 260, 320)
@@ -399,6 +401,7 @@ func (a *App) View(c *ui.Context) {
 	a.mainLayoutShift = f.mainShift
 	root.Children(func() {
 		a.header(c, f)
+		a.expiryBanner(c)
 		ui.Row(c).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
 			a.rail(c)
 			// The panel's outline: a 1 DIP top and left edge, rounded at the top left.
@@ -537,6 +540,7 @@ func (a *App) nav(c *ui.Context, f frame, panel ui.Color) {
 			} else if a.Page == PluginPage && a.PluginNavigation != nil {
 				a.PluginNavigation(c)
 			} else {
+				a.Sidebar.Terminal = a.ActiveTerminal()
 				sidebar.View(c, a.Sidebar)
 			}
 			a.accountFooter(c)
@@ -617,6 +621,9 @@ func (a *App) details(c *ui.Context, f frame, fill ui.Color) {
 				return
 			}
 			a.syncPanel()
+			if a.Panel.Active.Kind == panel.Trace && a.Hooks.TraceFrame != nil && !a.sampled() {
+				a.Hooks.TraceFrame(c, a.FocusedConversation())
+			}
 			panel.View(c, a.Panel, a.project(), kit.KeyText)
 		})
 	})
@@ -626,13 +633,22 @@ func (a *App) details(c *ui.Context, f frame, fill ui.Color) {
 // in the header and its content in the column are built.
 func (a *App) syncPanel() {
 	a.Panel.Paged = a.paged()
-	a.Panel.HasProject = a.Data.ProjectOf(a.Sidebar.Selected) != nil
-	a.Panel.Cwd = ""
-	if pr := a.Data.ProjectOf(a.Sidebar.Selected); pr != nil {
-		a.Panel.Cwd = pr.Path
-	}
-	if cv := a.Data.Find(a.Sidebar.Selected); cv != nil && cv.WorktreePath != "" {
-		a.Panel.Cwd = cv.WorktreePath
+	if a.ActiveTerminal() == "" {
+		a.Panel.HasProject = a.Data.ProjectOf(a.Sidebar.Selected) != nil
+		a.Panel.Cwd = ""
+		if pr := a.Data.ProjectOf(a.Sidebar.Selected); pr != nil {
+			a.Panel.Cwd = pr.Path
+		}
+		if cv := a.Data.Find(a.Sidebar.Selected); cv != nil && cv.WorktreePath != "" {
+			a.Panel.Cwd = cv.WorktreePath
+		}
+	} else if a.sampled() {
+		// Live terminals get their workspace from their Node.
+		pr := a.panelProject()
+		a.Panel.HasProject, a.Panel.Cwd = pr != nil, ""
+		if pr != nil {
+			a.Panel.Cwd = pr.Path
+		}
 	}
 	a.Panel.Focus = func(c *ui.Context) { a.panelPane.Focus(c) }
 }
@@ -674,6 +690,9 @@ func (a *App) togglePanel() {
 		a.Metrics = !a.Metrics
 		return
 	}
+	if a.panelOwner() != a.panels.mounted {
+		return
+	}
 	a.PanelOpen = !a.PanelOpen
 }
 
@@ -706,6 +725,9 @@ func (a *App) pane(c *ui.Context, e ui.Element, ref *ui.Handle, closes bool, clo
 // panel for the next, or the panel itself with none left, the focus then
 // going back to the conversation.
 func (a *App) closeTab(c *ui.Context) {
+	if a.Page != ConversationPage || !a.PanelOpen || a.panelOwner() != a.panels.mounted {
+		return
+	}
 	if a.Panel.Active != (panel.Tab{}) && a.Panel.Close(a.Panel.Active) {
 		a.panelPane.Focus(c)
 		return
@@ -733,7 +755,7 @@ func (a *App) page(c *ui.Context) {
 	case MarketPage:
 		settings.MarketPage(c, a.Settings)
 		return
-	case FilesPage, GitPage, ActivityPage, PluginPage:
+	case FilesPage, GitPage, ActivityPage, PluginPage, InsightsPage:
 		a.featurePage(c)
 		return
 	case HostPage:

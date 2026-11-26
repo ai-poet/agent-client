@@ -34,6 +34,18 @@ func TestCommandAuthorizationCoverage(t *testing.T) {
 	}
 }
 
+func TestUsageV2RefusesPlugin(t *testing.T) {
+	node := nodeFixture(t)
+	query := protocol.DefaultUsageQuery()
+	query.Dimension, query.EndMs = protocol.UsageDimensionModel, 1
+	req := protocol.NewRequest(node.ID(), protocol.Command{Kind: "read_usage_v2", Data: query})
+	scope := protocol.DefaultPluginContext()
+	req.Plugin = &scope
+	if reply := dispatchFixture(t, node, node.ID(), req); reply.Fault == nil || reply.Fault.Code != protocol.ErrorCodePermissionDenied {
+		t.Fatalf("plugin read_usage_v2: %+v", reply)
+	}
+}
+
 func TestProjectUsersAndSubscriptionRevocation(t *testing.T) {
 	node := nodeFixture(t)
 	ctx := t.Context()

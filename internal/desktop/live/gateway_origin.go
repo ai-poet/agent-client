@@ -181,57 +181,27 @@ func (r *Runtime) syncCheapOriginChange(
 		}
 		account.effects.Unlock()
 
-		user, accountErr := account.service.Account(ctx)
-		var gateway core.Gateway
-		var groups []core.Group
-		var groupsErr error
-		var statuses []core.GroupStatus
-		var statusErr error
-		statusAttempted := false
-		if !cheapAuthRejected(accountErr) && ctx.Err() == nil {
-			groups, groupsErr = account.service.AvailableGroups(ctx)
-			if groupsErr != nil && len(account.service.LaneBindings()) > 0 && gatewayErr == nil {
-				gatewayErr = groupsErr
-			}
-			if !cheapAuthRejected(groupsErr) && ctx.Err() == nil && gatewayErr == nil {
-				gateway, gatewayErr = account.service.GatewayWithGroups(ctx, groups)
-			}
-			if !cheapAuthRejected(groupsErr) && !cheapAuthRejected(gatewayErr) && ctx.Err() == nil {
-				statusAttempted = true
-				statuses, statusErr = account.service.GroupStatuses(ctx)
-			}
-		}
-
-		authErr := accountErr
-		if !cheapAuthRejected(authErr) {
-			authErr = gatewayErr
-		}
-		if !cheapAuthRejected(authErr) {
-			authErr = groupsErr
+		result := readCheapGateway(ctx, account.service, gatewayErr, false)
+		if result.recoveringOrigin {
+			nextCfg = account.service.GatewayOriginConfig()
 		}
 
 		var modelCount int
 		var disableErr error
 		rolledBack := false
 		if ctx.Err() == nil {
-			if cheapAuthRejected(authErr) {
+			if cheapAuthRejected(result.authErr) {
 				account.effects.Lock()
 				if ctx.Err() == nil {
-					authErr = errors.Join(authErr, account.service.Invalidate())
-					disableErr = r.disableCheapGateway(account, generation)
+					result.authErr, disableErr = r.invalidateCheapSession(account, generation, result.authErr, "origin_switch", result.sameOrigin)
 				}
 				account.effects.Unlock()
-			} else if gatewayErr != nil {
-				// Switching to the new origin failed: restore gateway-origin.json
-				// to the previous origin and leave working Node routes untouched.
+			} else if result.gatewayErr == nil {
+				modelCount, result.gatewayErr = r.saveCheapGateway(ctx, account, generation, result.gateway)
+			}
+			if result.gatewayErr != nil && result.authErr == nil && !result.recoveringOrigin {
 				_ = account.service.SaveGatewayOriginConfig(prevCfg)
 				rolledBack = true
-			} else {
-				modelCount, gatewayErr = r.saveCheapGateway(ctx, account, generation, gateway)
-				if gatewayErr != nil {
-					_ = account.service.SaveGatewayOriginConfig(prevCfg)
-					rolledBack = true
-				}
 			}
 		}
 		selectedGroup := account.service.SelectedGroup()
@@ -242,12 +212,13 @@ func (r *Runtime) syncCheapOriginChange(
 				return
 			}
 			account.state.OriginSwitching = false
-			if cheapAuthRejected(authErr) {
+			account.state.OriginConfig = nextCfg
+			if cheapAuthRejected(result.authErr) {
 				account.autoBindDone = false
 				account.originChecked = false
-				account.state.Stage, account.state.Failure = cheapauthui.SignedOut, cheapAuthError(authErr)
+				account.state.Stage, account.state.Failure = cheapauthui.SignedOut, cheapAuthError(result.authErr)
 				if disableErr != nil {
-					account.state.Failure += "；CheapRouter provider 未能停用，请在模型设置中关闭"
+					account.state.Failure = i18n.T(c, "cheaprouter_disable_failed")
 				}
 				account.state.Account, account.state.ModelCount = core.User{}, 0
 				account.state.Groups, account.state.Catalog = nil, nil
@@ -264,39 +235,44 @@ func (r *Runtime) syncCheapOriginChange(
 			if rolledBack {
 				account.state.OriginConfig = prevCfg
 				account.state.Stage = prevStage
-				msg := i18n.T(c, "gateway_origin_switch_failed", "url", targetOrigin, "error", cheapAuthError(gatewayErr))
+				msg := i18n.T(c, "gateway_origin_switch_failed", "url", targetOrigin, "error", cheapAuthError(result.gatewayErr))
 				account.state.OriginError = msg
 				kit.Toast(c, kit.Failed, msg)
 				return
 			}
-			account.state.OriginConfig = nextCfg
+			if result.gatewayErr != nil {
+				account.state.Stage, account.state.Failure = cheapauthui.GatewayFailed, cheapAuthError(result.gatewayErr)
+				account.state.OriginError = account.state.Failure
+				kit.Toast(c, kit.Failed, account.state.OriginError)
+				return
+			}
 			account.state.OriginError = ""
-			account.state.Account = user
-			if accountErr != nil {
-				account.state.AccountFailure = cheapAuthError(accountErr)
+			account.state.Account = result.user
+			if result.accountErr != nil {
+				account.state.AccountFailure = cheapAuthError(result.accountErr)
 			} else {
 				account.state.AccountFailure = ""
 			}
-			if groupsErr == nil {
-				account.state.Groups = groups
+			if result.groupsErr == nil {
+				account.state.Groups = result.groups
 				account.state.GroupsError = ""
 			} else if len(account.state.Groups) == 0 {
-				account.state.GroupsError = cheapAuthError(groupsErr)
+				account.state.GroupsError = cheapAuthError(result.groupsErr)
 			}
-			if statusAttempted {
+			if result.statusAttempted {
 				account.state.GroupStatusLoading = false
-				if statusErr == nil {
-					account.state.GroupStatuses = core.IndexGroupStatuses(statuses)
+				if result.statusErr == nil {
+					account.state.GroupStatuses = core.IndexGroupStatuses(result.statuses)
 					account.state.GroupStatusLoaded = true
 					account.state.GroupStatusError = ""
 				} else {
 					account.state.GroupStatuses = nil
 					account.state.GroupStatusLoaded = false
-					account.state.GroupStatusError = cheapAuthError(statusErr)
+					account.state.GroupStatusError = cheapAuthError(result.statusErr)
 				}
 			}
-			if len(gateway.Catalog) > 0 {
-				account.state.Catalog = gateway.Catalog
+			if len(result.gateway.Catalog) > 0 {
+				account.state.Catalog = result.gateway.Catalog
 			}
 			account.state.SelectedGroupID = selectedGroup
 			account.state.LaneBindings = laneBindings
@@ -307,6 +283,11 @@ func (r *Runtime) syncCheapOriginChange(
 			r.syncImageStudioCatalog()
 			r.projectModels()
 			r.project()
+			if result.recoveringOrigin {
+				account.state.OriginError = i18n.T(c, "gateway_origin_fallback", "url", account.state.ActiveOrigin())
+				kit.Toast(c, kit.Failed, account.state.OriginError)
+				return
+			}
 			key := toastKey
 			if key == "" {
 				key = "gateway_origin_switched"

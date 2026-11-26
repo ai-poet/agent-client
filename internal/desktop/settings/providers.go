@@ -13,6 +13,7 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -460,34 +461,44 @@ type modelDraft struct {
 	catalog *preview.ChannelModel
 }
 
+type providerMethodID struct{ brand, method string }
+
+type providerAuthDraft struct {
+	key     string
+	headers []header
+}
+
 // providerEditor is the step, the brand, the methods its choice offered and
 // the method and route chosen, the fields and the models. editing is the
 // channel edited, "" for a new one.
 type providerEditor struct {
-	generation          uint64
-	id                  string
-	revision            uint64
-	open                bool
-	step                providerStep
-	editing             string
-	brand               *preview.Brand
-	methods             []preview.Method
-	method              preview.Method
-	route               int
-	name, endpoint, key string
-	keySet              bool
-	originalKey         string
-	keyShown            bool
-	apiVersion          string    // Azure OpenAI's, asked for where the route is that API
-	oauth               [4]string // catalog, user agent, editor, editor plugin versions
-	headers             []header  // an API-key channel's request headers, a row each
-	headersRemoved      int       // header rows taken out, part of a row's identity
-	advanced            bool
-	models              []modelDraft
-	removed             int // models taken out, part of a model row's identity (mcpEditor.removed)
-	def                 int
-	probing             bool
-	saving              bool // probing is the save's, not a discovery's
+	generation                uint64
+	id                        string
+	revision                  uint64
+	open                      bool
+	step                      providerStep
+	editing                   string
+	brand                     *preview.Brand
+	methods                   []preview.Method
+	method                    preview.Method
+	activeMethod              providerMethodID
+	authDrafts                map[providerMethodID]providerAuthDraft
+	route                     int
+	name, endpoint, key       string
+	keySet                    bool
+	originalKey               string
+	keyShown                  bool
+	region, project, location string
+	apiVersion                string    // Azure OpenAI's, asked for where the route is that API
+	oauth                     [4]string // catalog, user agent, editor, editor plugin versions
+	headers                   []header  // an API-key channel's request headers, a row each
+	headersRemoved            int       // header rows taken out, part of a row's identity
+	advanced                  bool
+	models                    []modelDraft
+	removed                   int // models taken out, part of a model row's identity (mcpEditor.removed)
+	def                       int
+	probing                   bool
+	saving                    bool // probing is the save's, not a discovery's
 	// returnTo reopens the welcome guide from the first step's Back, when
 	// the guide opened the editor; nil otherwise.
 	returnTo func()
@@ -524,6 +535,7 @@ func (e *providerEditor) edit(m *Model, ch *preview.Channel) {
 	e.revision = ch.Revision
 	e.oauth = ch.OAuth
 	e.apiVersion = ch.APIVersion
+	e.region, e.project, e.location = ch.Region, ch.Project, ch.Location
 	e.headers = headerRows(ch.Headers)
 	if m.Live && !ch.ConfigurationReadOnly && (ch.Auth == preview.AuthKey || ch.Auth == viewmodel.AuthOptionalKey && ch.KeySet) && m.ProviderActions.ReadKey != nil {
 		id := ch.ID
@@ -568,6 +580,39 @@ const azureDefaultVersion = "2024-10-21"
 // azure reports an Azure OpenAI route: its form asks for the API version
 // and names a model by its deployment.
 func (e *providerEditor) azure() bool { return e.current().API == "azure_open_ai" }
+
+// bedrock and vertex report a cloud route: its form asks for the region, or
+// the project and location, instead of an endpoint.
+func (e *providerEditor) bedrock() bool { return e.current().API == "bedrock" }
+func (e *providerEditor) vertex() bool  { return e.current().API == "vertex_ai" }
+
+// A new cloud form starts on these: the region and location most models serve.
+const (
+	bedrockDefaultRegion  = "us-east-1"
+	vertexDefaultLocation = "global"
+)
+
+// connection sets only the connection fields used by this route, for both
+// saving the form and discovering models against the draft.
+func (e *providerEditor) connection(ch *preview.Channel) {
+	ch.Endpoint, ch.APIVersion = e.endpoint, ""
+	ch.Region, ch.Project, ch.Location = "", "", ""
+	derive := strings.TrimSpace(e.endpoint) == "" || string(protocol.CloudEndpointApi(e.endpoint)) == e.current().API
+	switch {
+	case e.azure():
+		ch.APIVersion = strings.TrimSpace(e.apiVersion)
+	case e.bedrock():
+		ch.Region = strings.TrimSpace(e.region)
+		if derive {
+			ch.Endpoint = protocol.ConversationConnectionOptionsBedrockPayload{Region: ch.Region}.Endpoint()
+		}
+	case e.vertex():
+		ch.Project, ch.Location = strings.TrimSpace(e.project), strings.TrimSpace(e.location)
+		if derive {
+			ch.Endpoint = protocol.ConversationConnectionOptionsVertexAiPayload{Location: ch.Location}.Endpoint()
+		}
+	}
+}
 
 // methodRoutes are a method's routes: its own, or the method as its only
 // one.
@@ -635,10 +680,17 @@ func (e *providerEditor) switchRoute(i int) {
 			i = j
 		}
 	}
-	if e.endpoint == cur.Endpoint {
+	cloud := func(api string) bool { return api == "bedrock" || api == "vertex_ai" }
+	if e.endpoint == cur.Endpoint || routes[i].API != cur.API && (cloud(cur.API) || cloud(routes[i].API)) {
 		e.endpoint = routes[i].Endpoint
 	}
 	e.route = i
+	if e.region == "" {
+		e.region = bedrockDefaultRegion
+	}
+	if e.location == "" {
+		e.location = vertexDefaultLocation
+	}
 	e.refreshImageGeneration()
 	if !slices.ContainsFunc(e.models, func(d modelDraft) bool { return !d.seeded || d.id != d.model.ID }) {
 		e.models, e.def = nil, 0
@@ -672,11 +724,31 @@ func (e *providerEditor) choose(b *preview.Brand, methods []preview.Method) {
 
 // configure opens the form on a method's first route.
 func (e *providerEditor) configure(x preview.Method) {
+	next := providerMethodID{method: x.ID}
+	if e.brand != nil {
+		next.brand = e.brand.ID
+	}
+	// The picker may already have changed e.brand. Park the outgoing fields
+	// under the method that owned the form, not the newly selected brand.
+	if next != e.activeMethod {
+		if e.activeMethod.method != "" && !e.login() {
+			if e.authDrafts == nil {
+				e.authDrafts = make(map[providerMethodID]providerAuthDraft)
+			}
+			e.authDrafts[e.activeMethod] = providerAuthDraft{key: e.key, headers: e.headers}
+		}
+		draft := e.authDrafts[next]
+		delete(e.authDrafts, next)
+		e.activeMethod = next
+		e.key, e.headers = draft.key, draft.headers
+		e.originalKey, e.keySet, e.keyShown = "", false, false
+	}
 	e.method, e.route, e.step = x, 0, stepConfigure
 	e.name, e.endpoint = x.Name, e.current().Endpoint
 	e.models, e.def = nil, 0
 	e.oauth = x.OAuth
 	e.apiVersion = ""
+	e.region, e.project, e.location = bedrockDefaultRegion, "", vertexDefaultLocation
 	if e.azure() {
 		e.apiVersion = azureDefaultVersion
 	}
@@ -721,13 +793,15 @@ func (e *providerEditor) Check() string {
 	if strings.TrimSpace(e.name) == "" {
 		return "provider_name_required"
 	}
-	if e.current().Custom && !strings.HasPrefix(e.endpoint, "http://") && !strings.HasPrefix(e.endpoint, "https://") {
+	if e.current().Custom && !e.bedrock() && !e.vertex() && !strings.HasPrefix(e.endpoint, "http://") && !strings.HasPrefix(e.endpoint, "https://") {
 		return "provider_endpoint_required"
 	}
 	if e.usesKey() && e.method.Auth != viewmodel.AuthOptionalKey && !e.keySet && strings.TrimSpace(e.key) == "" {
 		return "provider_key_required"
 	}
-	if e.azure() && strings.TrimSpace(e.apiVersion) == "" {
+	if e.azure() && strings.TrimSpace(e.apiVersion) == "" ||
+		e.bedrock() && strings.TrimSpace(e.region) == "" ||
+		e.vertex() && (strings.TrimSpace(e.project) == "" || strings.TrimSpace(e.location) == "") {
 		return "provider_cloud_required"
 	}
 	if !e.login() {
@@ -842,10 +916,8 @@ func (e *providerEditor) save(m *Model) string {
 			return ""
 		}
 		e.probing, e.saving = true, true
-		channel := preview.Channel{ID: e.id, Revision: e.revision, Name: strings.TrimSpace(e.name), Brand: brand, Icon: e.method.Icon, Method: route.ID, API: route.API, Endpoint: e.endpoint, Auth: auth, Enabled: true, KeySet: e.keySet, Models: models, Default: e.def}
-		if e.azure() {
-			channel.APIVersion = strings.TrimSpace(e.apiVersion)
-		}
+		channel := preview.Channel{ID: e.id, Revision: e.revision, Name: strings.TrimSpace(e.name), Brand: brand, Icon: e.method.Icon, Method: route.ID, API: route.API, Auth: auth, Enabled: true, KeySet: e.keySet, Models: models, Default: e.def}
+		e.connection(&channel)
 		if !e.login() {
 			channel.Headers, _ = parseHeaders(e.headers)
 		}
@@ -859,7 +931,7 @@ func (e *providerEditor) save(m *Model) string {
 			e.probing, e.saving = false, false
 			if ok {
 				e.open = false
-				e.key = ""
+				e.clearAuthDrafts()
 				if signIn {
 					m.signIn(id)
 				}
@@ -868,11 +940,9 @@ func (e *providerEditor) save(m *Model) string {
 		return ""
 	}
 	if ch := m.channel(e.editing); ch != nil {
-		ch.Name, ch.Endpoint, ch.Models, ch.Default = strings.TrimSpace(e.name), e.endpoint, models, e.def
+		ch.Name, ch.Models, ch.Default = strings.TrimSpace(e.name), models, e.def
 		ch.Method, ch.API = route.ID, route.API
-		if e.azure() {
-			ch.APIVersion = strings.TrimSpace(e.apiVersion)
-		}
+		e.connection(ch)
 		if !e.login() {
 			ch.Headers, _ = parseHeaders(e.headers)
 		}
@@ -880,12 +950,19 @@ func (e *providerEditor) save(m *Model) string {
 		return ""
 	}
 	id := fmt.Sprintf("%s-%d", e.method.ID, len(m.Channels)+1)
-	m.Channels = append(m.Channels, preview.Channel{ID: id, Name: strings.TrimSpace(e.name), Brand: brand, Icon: e.method.Icon, Method: route.ID,
-		API: route.API, Endpoint: e.endpoint, Auth: auth, Enabled: true, KeySet: e.key != "", Models: models, Default: e.def})
+	added := preview.Channel{ID: id, Name: strings.TrimSpace(e.name), Brand: brand, Icon: e.method.Icon, Method: route.ID,
+		API: route.API, Auth: auth, Enabled: true, KeySet: e.key != "", Models: models, Default: e.def}
+	e.connection(&added)
+	m.Channels = append(m.Channels, added)
 	if e.login() {
 		m.signIn(id)
 	}
 	return ""
+}
+
+func (e *providerEditor) clearAuthDrafts() {
+	e.key, e.originalKey, e.keyShown = "", "", false
+	e.headers, e.authDrafts = nil, nil
 }
 
 // providerEditorDialog is 560 wide for brands, 540 for methods, 640 to
@@ -893,7 +970,7 @@ func (e *providerEditor) save(m *Model) string {
 func providerEditorDialog(c *ui.Context, m *Model) {
 	e := &m.provider
 	if !e.open {
-		e.key, e.originalKey, e.keyShown = "", "", false
+		e.clearAuthDrafts()
 		return
 	}
 	p := theme.Of(c)
@@ -942,7 +1019,7 @@ func providerEditorDialog(c *ui.Context, m *Model) {
 		}
 	}).Width(min(w, width(c)-48)).Label(t(title))
 	if !e.open {
-		e.key = ""
+		e.clearAuthDrafts()
 	}
 }
 
@@ -1164,7 +1241,7 @@ func providerForm(c *ui.Context, m *Model, e *providerEditor) {
 				ui.Text(c, protocolName(c, e.method.API)).FontSize(14).Height(32).Padding(6, 0).FillWidth().TextColor(p.MutedForeground)
 			})
 		}
-		if e.current().Custom {
+		if e.current().Custom && !e.bedrock() && !e.vertex() {
 			input("endpoint", t("provider_endpoint"), t("provider_endpoint_hint"), &e.endpoint, false)
 		}
 		routeField(c, e, "product", t("provider_product"), axisProduct)
@@ -1172,12 +1249,23 @@ func providerForm(c *ui.Context, m *Model, e *providerEditor) {
 		if e.azure() {
 			input("api-version", t("provider_api_version"), t("form_api_version_hint"), &e.apiVersion, false)
 		}
+		if e.bedrock() {
+			input("cloud-region", t("provider_region"), bedrockDefaultRegion, &e.region, false)
+		}
+		if e.vertex() {
+			input("cloud-project", t("provider_project"), "", &e.project, false)
+			input("cloud-location", t("provider_location"), vertexDefaultLocation, &e.location, false)
+		}
 		if e.usesKey() {
-			hint := t("provider_key_hint")
+			label, hint := t("provider_api_key"), t("provider_key_hint")
+			if e.vertex() {
+				// The service account's JSON key is the channel's credential.
+				label, hint = t("provider_service_account"), t("provider_service_account_hint")
+			}
 			if e.keySet {
 				hint = t("backup_keep_secret")
 			}
-			input("key", t("provider_api_key"), hint, &e.key, true)
+			input("key", label, hint, &e.key, true)
 		}
 		if e.method.KeyURL != "" {
 			b := ui.ButtonBase(c.Key("key-link")).Label(t("provider_get_key")).Cursor(ui.CursorPointer).AlignSelf(ui.Start).OnClick(func() {
@@ -1197,8 +1285,8 @@ func providerForm(c *ui.Context, m *Model, e *providerEditor) {
 			}
 			kit.GhostLook(c, ui.ButtonBase(c.Key("advanced")).Label(label).Expanded(e.advanced), false).Height(28).PaddingX(4).Gap(4).AlignSelf(ui.Start).
 				Children(func() {
-					ui.Icon(c, chevron).FontSize(14).TextColor(theme.Of(c).MutedForeground)
 					ui.Text(c, label).FontSize(14).SingleLine()
+					ui.Icon(c, chevron).FontSize(14).TextColor(theme.Of(c).MutedForeground)
 				}).OnClick(func() {
 				e.advanced = !e.advanced
 				// Opening starts a channel without headers on an empty row;
@@ -1255,7 +1343,8 @@ func providerForm(c *ui.Context, m *Model, e *providerEditor) {
 				if m.Live && m.ProviderActions.Discover != nil {
 					e.probing = true
 					generation := e.generation
-					draft := ProviderDraft{Channel: preview.Channel{ID: e.id, API: e.current().API, Endpoint: e.endpoint, Method: e.current().ID, APIVersion: strings.TrimSpace(e.apiVersion)}, Key: e.keyUpdate(), OAuth: e.oauth, ExpectedRevision: e.revision, EditorGeneration: generation}
+					draft := ProviderDraft{Channel: preview.Channel{ID: e.id, API: e.current().API, Method: e.current().ID}, Key: e.keyUpdate(), OAuth: e.oauth, ExpectedRevision: e.revision, EditorGeneration: generation}
+					e.connection(&draft.Channel)
 					m.ProviderActions.Discover(draft, func(models []preview.ChannelModel) {
 						if e.generation != generation || !e.open {
 							return

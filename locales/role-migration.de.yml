@@ -1,0 +1,5 @@
+cheaprouter_roles_affected: "Agenten mit deaktiviertem Kanal: %{count}"
+cheaprouter_roles_migrate: "Zum verfügbaren gleichnamigen Kanal wechseln"
+cheaprouter_roles_receipt: "Erfolgreich: %{saved}. Fehlgeschlagen: %{failed}. Übersprungen: %{skipped}."
+cheaprouter_roles_manual: "Kein passender Kanal. Diese Agenten unter Einstellungen › Teams bearbeiten: %{names}."
+cheaprouter_roles_unknown: "Unbestätigt: %{count}. Bitte die Kanalzuordnung prüfen."

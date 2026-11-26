@@ -90,7 +90,7 @@ func TestCompactionHandoff(t *testing.T) {
 			record(canonical.User, canonical.Block{Kind: "tool_response", Data: &canonical.ToolResponse{ID: "audience", Status: canonical.ToolSuccess, Format: canonical.MCP, Revision: strings.Repeat("b", 64), Result: canonical.Payload{Value: json.RawMessage(`{"content":[{"type":"text","text":"Private UI table","annotations":{"audience":["user"]}},{"type":"text","text":"Model evidence","annotations":{"audience":["assistant"]}}]}`)}}}),
 		}
 		before, _ := json.Marshal(history)
-		prepared, err := handoff.Prepare(history, 64000, 8000)
+		prepared, err := handoff.Prepare(history, 64000, 8000, "", 0)
 		if err != nil || !strings.Contains(prepared, latest) || !strings.Contains(prepared, "Old start") || !strings.Contains(prepared, "Old end") || strings.Contains(prepared, "OLD_MIDDLE") {
 			t.Fatalf("latest transcript was altered or older evidence was not previewed: %v", err)
 		}
@@ -102,18 +102,18 @@ func TestCompactionHandoff(t *testing.T) {
 		if !strings.Contains(prepared, "Model evidence") || !strings.Contains(prepared, `"call":"latest"`) {
 			t.Fatal("visible evidence or original output reference was lost")
 		}
-		base, _ := handoff.Prepare(nil, 64000, 8000)
+		base, _ := handoff.Prepare(nil, 64000, 8000, "", 0)
 		tight := uint64(8000+256+100) + tokens.Text(base)
 		// A latest turn over the budget is shortened and keeps the user's message.
-		if shortened, err := handoff.Prepare(history, tight, 8000); err != nil || !strings.Contains(shortened, "[user]: Current request") || strings.Contains(shortened, "Keep the public API") || strings.Contains(shortened, "LATEST_MIDDLE") {
+		if shortened, err := handoff.Prepare(history, tight, 8000, "", 0); err != nil || !strings.Contains(shortened, "[user]: Current request") || strings.Contains(shortened, "Keep the public API") || strings.Contains(shortened, "LATEST_MIDDLE") {
 			t.Fatalf("oversized latest turn was not shortened to its request: %v", err)
 		}
-		if _, err = handoff.Prepare(history, 8000, 8000); err == nil {
+		if _, err = handoff.Prepare(history, 8000, 8000, "", 0); err == nil {
 			t.Fatal("summary prompt and output reserve were not counted")
 		}
 		older := record(canonical.User, canonical.Text(0, strings.Repeat("Old constraint ", 1000)))
 		newest := record(canonical.User, canonical.Text(0, "Newest exact request"))
-		fitted, err := handoff.Prepare([]canonical.Record{older, newest}, tight, 8000)
+		fitted, err := handoff.Prepare([]canonical.Record{older, newest}, tight, 8000, "", 0)
 		if err != nil || !strings.Contains(fitted, "Newest exact request") || strings.Contains(fitted, "Old constraint") {
 			t.Fatal("older turns were not omitted as the final fitting fallback")
 		}
@@ -149,7 +149,7 @@ func TestCompactionHandoff(t *testing.T) {
 			return nil
 		}
 		before, _ := json.Marshal(state.Records)
-		if err := f.r.compact(x, binding, state, true); err != nil {
+		if err := f.r.compact(x, binding, model.Route{}, state, true); err != nil {
 			t.Fatal(err)
 		}
 		if captured.Secret == nil || captured.Secret.Expose() != renewed {
@@ -199,7 +199,7 @@ func TestCompactionHandoff(t *testing.T) {
 					part.ProviderMetadata = fantasy.ProviderMetadata{model.UsageMetadataKey: row.metadata}
 				}
 				f, x, binding, before := compactionFixture(t, &scriptedModel{scripts: []script{response(text(`{"user_intent":["Continue task"]}`), part)}})
-				if err := f.r.compact(x, binding, before, true); err != nil {
+				if err := f.r.compact(x, binding, model.Route{}, before, true); err != nil {
 					t.Fatal(err)
 				}
 				summary := f.state().Records[len(before.Records)].MutableMessage()
@@ -224,7 +224,7 @@ func TestCompactionHandoff(t *testing.T) {
 			m := &scriptedModel{scripts: []script{response(text(string(document)), finish())}}
 			f, x, binding, state := compactionFixture(t, m)
 			binding.Provider.Models[0].Context, binding.Provider.Models[0].Output = row.context, 64000
-			if err := f.r.compact(x, binding, state, true); err != nil {
+			if err := f.r.compact(x, binding, model.Route{}, state, true); err != nil {
 				t.Fatal(err)
 			}
 			request := m.calls[0]
@@ -269,7 +269,7 @@ func TestCompactionHandoff(t *testing.T) {
 					binding.Provider.Models[0].Output = 64
 				}
 				visibleBefore := model.VisibleRecords(before.Records)
-				err := f.r.compact(x, binding, before, true)
+				err := f.r.compact(x, binding, model.Route{}, before, true)
 				if err == nil {
 					t.Fatal("invalid summary replaced context")
 				}
@@ -332,7 +332,7 @@ func TestCompactionHandoff(t *testing.T) {
 				response(text("Handoff:\n~~~JsOn\n{\"GOALS\":\"Keep working\",\"NextStep\":\"Verify\"}\n~~~"), finish()),
 			}}
 			f, x, binding, before := compactionFixture(t, m)
-			if err := f.r.compact(x, binding, before, true); err != nil {
+			if err := f.r.compact(x, binding, model.Route{}, before, true); err != nil {
 				t.Fatal(err)
 			}
 			after := f.state()
@@ -347,7 +347,7 @@ func TestCompactionHandoff(t *testing.T) {
 			if got := summary.Summary.Content[0].Data.(*canonical.TextContent).Text; got != "# Handoff Summary\n\n## Goal\n- Keep working\n\n## Next Steps\nVerify" {
 				t.Fatalf("unexpected rendered handoff: %q", got)
 			}
-			if err := f.r.compact(x, binding, after, true); err != nil {
+			if err := f.r.compact(x, binding, model.Route{}, after, true); err != nil {
 				t.Fatal(err)
 			}
 			if m.count() != 2 || !reflect.DeepEqual(after.Records, f.state().Records) {
@@ -358,7 +358,7 @@ func TestCompactionHandoff(t *testing.T) {
 			doc := "Here is the handoff summary:\n\n```\n{\n  \"goal\": \"Ship compaction fix\",\n  \"state\": \"Parser updated\",\n  \"nextSteps\": \"Run tests\"\n}\n```\n\nReady to continue."
 			m := &scriptedModel{scripts: []script{response(text(doc), finish())}}
 			f, x, binding, before := compactionFixture(t, m)
-			if err := f.r.compact(x, binding, before, true); err != nil {
+			if err := f.r.compact(x, binding, model.Route{}, before, true); err != nil {
 				t.Fatalf("compact failed: %v", err)
 			}
 			if m.count() != 1 {
@@ -386,7 +386,7 @@ func TestCompactionHandoff(t *testing.T) {
 				response(text("```json\n{\"user_intent\":[\"Recovered on retry\"],\"current_work\":\"Verified\"}\n```"), secondDone),
 			}}
 			f, x, binding, before := compactionFixture(t, m)
-			if err := f.r.compact(x, binding, before, true); err != nil {
+			if err := f.r.compact(x, binding, model.Route{}, before, true); err != nil {
 				t.Fatalf("compact retry failed: %v", err)
 			}
 			if m.count() != 2 {
@@ -421,7 +421,7 @@ func TestCompactionHandoff(t *testing.T) {
 			}}
 			f, x, binding, before := compactionFixture(t, m)
 			visibleBefore := model.VisibleRecords(before.Records)
-			err := f.r.compact(x, binding, before, true)
+			err := f.r.compact(x, binding, model.Route{}, before, true)
 			if err == nil {
 				t.Fatal("expected error for non-JSON output on both attempts")
 			}
@@ -486,7 +486,7 @@ func TestCompactionHandoff(t *testing.T) {
 						}}}, nil
 					}
 				}
-				if err := f.r.compact(x, binding, before, false); err == nil {
+				if err := f.r.compact(x, binding, model.Route{}, before, false); err == nil {
 					t.Fatal("failed compaction returned no error")
 				}
 				if row.stage == protocol.ConversationCompactionStageBudget && language.count() != 0 {
@@ -524,7 +524,7 @@ func TestCompactionHandoff(t *testing.T) {
 		fail := func(manual bool) protocol.ConversationCompactionFailure {
 			t.Helper()
 			before := f.state()
-			if err := f.r.compact(x, binding, before, manual); err == nil {
+			if err := f.r.compact(x, binding, model.Route{}, before, manual); err == nil {
 				t.Fatal("refused summary compacted")
 			}
 			added := f.state().Records[len(before.Records):]
@@ -568,7 +568,7 @@ func TestCompactionHandoff(t *testing.T) {
 			t.Fatalf("summary requests = %d", m.count())
 		}
 		// A compaction that succeeds ends the pause.
-		if err := f.r.compact(x, binding, f.state(), true); err != nil {
+		if err := f.r.compact(x, binding, model.Route{}, f.state(), true); err != nil {
 			t.Fatal(err)
 		}
 		if automaticFailures(binding, f.state().Records) != 0 {
@@ -593,7 +593,7 @@ func TestCompactionHandoff(t *testing.T) {
 				state = f.state()
 			}
 			state = compactionOverflow(t, f, x)
-			if err := f.r.compact(x, binding, state, false); err != nil {
+			if err := f.r.compact(x, binding, model.Route{}, state, false); err != nil {
 				t.Fatal(err)
 			}
 			added := f.state().Records[len(state.Records):]
@@ -632,7 +632,7 @@ func TestCompactionHandoff(t *testing.T) {
 					t.Fatal(err)
 				}
 				before := compactionOverflow(t, f, x)
-				if err := f.r.compact(x, binding, before, false); err != nil {
+				if err := f.r.compact(x, binding, model.Route{}, before, false); err != nil {
 					t.Fatal(err)
 				}
 				after := f.state()
@@ -676,6 +676,78 @@ func TestCompactionHandoff(t *testing.T) {
 			t.Fatalf("retained tools=%v", got)
 		}
 	})
+}
+
+func TestCompactionRetriesContextOverflowWithSmallerTranscript(t *testing.T) {
+	overflow := fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: &fantasy.ProviderError{
+		StatusCode:   400,
+		ResponseBody: []byte(`{"error":{"message":"Your input exceeds the context window of this model. Please adjust your input and try again."}}`),
+	}}
+	for _, exhausted := range []bool{false, true} {
+		name := "recovers"
+		second := response(text(`{"user_intent":["Continue the current task"]}`), finish())
+		if exhausted {
+			name, second = "reports a second refusal", response(overflow)
+		}
+		t.Run(name, func(t *testing.T) {
+			m := &scriptedModel{scripts: []script{response(overflow), second}}
+			f, x, binding, state := compactionFixture(t, m)
+			original := state.Records[0]
+			summary := canonical.NewRecord(x.inv.Run.Turn, "compaction", &canonical.Compaction{Boundary: original.ID, Summary: canonical.NewMessage(canonical.User, canonical.Text(0, "Keep the earlier handoff")), Start: original.Created, End: original.Created}, f.r.clock.Now())
+			input := inputRecord(x.inv.Run.Turn, protocol.ConversationInput{Text: "Keep the newest user request"}, f.r)
+			evidence := canonical.NewRecord(x.inv.Run.Turn, "message", canonical.NewMessage(canonical.Assistant, canonical.Text(0, strings.Repeat("Older long response evidence. ", 2000))), f.r.clock.Now())
+			if err := f.r.save(f.ctx, f.session.ID, summary, input, evidence); err != nil {
+				t.Fatal(err)
+			}
+			before := compactionOverflow(t, f, x)
+			originalHistory, _ := json.Marshal(before.Records)
+			err := f.r.compact(x, binding, model.Route{}, before, false)
+			if exhausted && (err == nil || model.Classify(err).Kind != model.ContextOverflow) || !exhausted && err != nil {
+				t.Fatalf("compaction error = %v", err)
+			}
+			if m.count() != 2 {
+				t.Fatalf("made %d summary calls, want two", m.count())
+			}
+			first := m.calls[0].Prompt[0].Content[0].(fantasy.TextPart).Text
+			narrowed := m.calls[1].Prompt[0].Content[0].(fantasy.TextPart).Text
+			if !strings.Contains(first, "Older long response evidence") || len(narrowed) >= len(first)/2 || !strings.Contains(narrowed, "Keep the earlier handoff") || !strings.Contains(narrowed, "Keep the newest user request") {
+				t.Fatalf("retry did not preserve essentials within a smaller transcript (%d to %d bytes)", len(first), len(narrowed))
+			}
+			after := f.state().Records
+			retained, _ := json.Marshal(after[:len(before.Records)])
+			if string(originalHistory) != string(retained) {
+				t.Fatal("recovery rewrote original history")
+			}
+			added := after[len(before.Records):]
+			if exhausted {
+				if len(added) != 3 {
+					t.Fatal("summary refusal did not preserve both attempts and one final failure")
+				}
+				failure := compactionFailed(t, f, added[2])
+				if failure.Reason != protocol.ConversationCompactionReasonContextOverflow || failure.Status == nil || *failure.Status != 400 {
+					t.Fatalf("summary refusal = %+v", failure)
+				}
+			} else if len(added) != 4 || added[1].Kind != "compaction" || added[3].Message().Content[0].Data.(*canonical.TextContent).Text != "Keep the newest user request" {
+				t.Fatal("successful retry did not record the checkpoint and carry the newest user request")
+			}
+		})
+	}
+}
+
+func TestContextTokensExcludesUnreplayedReasoning(t *testing.T) {
+	turn := protocol.NewTurnID()
+	input, output, reasoning, total := uint64(10_000), uint64(8_000), uint64(6_000), uint64(18_000)
+	unsigned := canonical.NewMessage(canonical.Assistant, canonical.Block{Index: 0, Kind: "thinking", Data: &canonical.Thinking{Text: "Scratchpad"}}, canonical.Text(1, "Answer"))
+	unsigned.Usage = &canonical.Usage{Input: &input, Output: &output, Reasoning: &reasoning, Total: &total}
+	if got := contextTokens([]canonical.Record{{ID: "a", Turn: turn, Kind: "message", Data: &unsigned}}); got != 12_000 {
+		t.Fatalf("unsigned reasoning contextTokens = %d, want 12000", got)
+	}
+	sig := "signed-thinking-blob"
+	signed := canonical.NewMessage(canonical.Assistant, canonical.Block{Index: 0, Kind: "thinking", Data: &canonical.Thinking{Text: "Plan", Signature: &sig}}, canonical.Text(1, "Answer"))
+	signed.Usage = &canonical.Usage{Input: &input, Output: &output, Reasoning: &reasoning, Total: &total}
+	if got := contextTokens([]canonical.Record{{ID: "b", Turn: turn, Kind: "message", Data: &signed}}); got != 18_000 {
+		t.Fatalf("signed reasoning contextTokens = %d, want 18000", got)
+	}
 }
 
 // compactionFailed checks the stored failure record and returns the failure the

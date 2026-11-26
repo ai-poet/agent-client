@@ -251,6 +251,7 @@ func TestConversationProjection(t *testing.T) {
 		{"failed_call", []protocol.ConversationPart{{Kind: "tool_result", Data: protocol.ConversationPartToolResultPayload{Name: "read", Summary: &protocol.ToolDetailSummary{Failure: &protocol.ToolFailure{Origin: "runtime"}}}}}, conversation.ToolsBlock, 1, true, false},
 		{"returned_tool_error", []protocol.ConversationPart{{Kind: "tool_result", Data: protocol.ConversationPartToolResultPayload{Name: "read", Summary: &protocol.ToolDetailSummary{Failure: &protocol.ToolFailure{Origin: "tool"}}}}}, conversation.ToolsBlock, 1, false, true},
 		{"retry", []protocol.ConversationPart{{Kind: "resource", Data: json.RawMessage(`{"type":"model_retry","attempt":2,"limit":5}`)}}, conversation.RetryBlock, 1, false, false},
+		{"quiet_resend", []protocol.ConversationPart{{Kind: "resource", Data: json.RawMessage(`{"type":"model_retry","attempt":0,"limit":9}`)}}, conversation.RetryBlock, 0, false, false},
 		{"compacting", []protocol.ConversationPart{{Kind: "resource", Data: json.RawMessage(`{"type":"compacting","started_ms":1}`)}}, conversation.TextBlock, 0, false, false},
 		{"output_limit", []protocol.ConversationPart{{Kind: "resource", Data: json.RawMessage(`{"type":"output_limit"}`)}}, conversation.LimitBlock, 1, false, false},
 		{"compaction_failure", []protocol.ConversationPart{{Kind: "resource", Data: json.RawMessage(`{"type":"compaction_failure","failure":{"source":"automatic","stage":"request","reason":"request_failed","continued":true,"cause":"Unavailable"}}`)}}, conversation.ErrorBlock, 1, false, false},
@@ -1793,7 +1794,7 @@ func TestComposerSendRouting(t *testing.T) {
 		snapshot := protocol.DefaultSnapshot()
 		snapshot.Node = protocol.NodeID{1}
 		source := protocol.ConversationPresetsSource{Kind: "builtin"}
-		snapshot.Providers = []protocol.ConversationProvider{{ID: provider, Enabled: true, Preset: &protocol.ConversationPresetsPresetRef{Source: source, ID: "fixture"}, Models: []protocol.ConversationModel{{ID: "reasoning", Reasoning: true, Efforts: []protocol.Effort{{Kind: "low"}, {Kind: "high"}}, DefaultEffort: protocol.Effort{Kind: "medium"}}}}}
+		snapshot.Providers = []protocol.ConversationProvider{{ID: provider, Enabled: true, Api: protocol.ConversationModelApiAnthropic, Preset: &protocol.ConversationPresetsPresetRef{Source: source, ID: "fixture"}, Models: []protocol.ConversationModel{{ID: "reasoning", Reasoning: true, Efforts: []protocol.Effort{{Kind: "low"}, {Kind: "high"}}, DefaultEffort: protocol.Effort{Kind: "medium"}}}}}
 		snapshot.Plugins = []protocol.PluginSummary{{Name: "first"}, {Name: "second"}}
 		transport := &conversationTestTransport{snapshot: snapshot}
 		controller := client.New(transport)
@@ -1844,7 +1845,11 @@ func TestComposerSendRouting(t *testing.T) {
 			t.Fatal("connector package reads were not coalesced", passes)
 		}
 		// A provider saved without a route shows the first route of its preset in every projection.
-		entry := protocol.ConversationPresetsEntry{Source: source, Preset: protocol.ConversationPresetsPreset{ID: "fixture", Routes: make([]protocol.ConversationPresetsRoute, 4)}}
+		routes := make([]protocol.ConversationPresetsRoute, 4)
+		for i := range routes {
+			routes[i].Protocol = protocol.ConversationPresetsProtocolAnthropic
+		}
+		entry := protocol.ConversationPresetsEntry{Source: source, Preset: protocol.ConversationPresetsPreset{ID: "fixture", Routes: routes}}
 		r.providerPresets = map[string]protocol.ConversationPresetsEntry{"builtin:fixture/3": entry, "builtin:fixture/0": entry, "builtin:fixture/2": entry, "builtin:fixture/1": entry}
 		for range 20 {
 			r.projectProviderSnapshot()
@@ -1897,7 +1902,7 @@ func testSessionForwarding(t *testing.T) {
 		defer controllers[index].Close()
 	}
 	// refusal answers the next forward; forwarded counts the sessions made.
-	var refusal protocol.ErrorCode
+	var refusal *protocol.Fault
 	forwarded := byte(0)
 	// unconfirmed is the forward the local Node recorded as not known.
 	var unconfirmed *protocol.RequestID
@@ -1910,11 +1915,11 @@ func testSessionForwarding(t *testing.T) {
 		if request.Command.Kind != "create_session_at" {
 			return link.Response{}, false
 		}
-		if refusal != "" {
-			if refusal == protocol.ErrorCodeOutcomeUnknown {
+		if refusal != nil {
+			if refusal.Code == protocol.ErrorCodeOutcomeUnknown {
 				unconfirmed = &request.ID
 			}
-			return link.Response{Fault: &protocol.Fault{Code: refusal, Message: "Claude sign-in is required on the execution Node"}}, true
+			return link.Response{Fault: refusal}, true
 		}
 		input := request.Command.Data.(protocol.CommandCreateSessionAtPayload)
 		forwarded++
@@ -2021,29 +2026,34 @@ func testSessionForwarding(t *testing.T) {
 		t.Fatalf("a member on the local Node is offered a narrower list: %v", own)
 	}
 	for _, outcome := range []struct {
-		code  protocol.ErrorCode
+		fault *protocol.Fault
 		toast string
 	}{
-		{protocol.ErrorCodeNotConfigured, "chat_config_unavailable"},
-		{protocol.ErrorCodeRevisionConflict, "session_changed"},
-		{protocol.ErrorCodeOutcomeUnknown, "chat_action_unknown"},
+		{protocol.NewConfigurationFault(protocol.ConfigurationProviderDisabled, "model provider is unavailable"), "chat_selected_model_unavailable"},
+		{protocol.NewConfigurationFault(protocol.ConfigurationProviderDisabled, "role provider is unavailable"), "chat_agent_model_unavailable"},
+		{&protocol.Fault{Code: protocol.ErrorCodeNotConfigured, Message: "role model is unavailable"}, "chat_agent_model_unavailable"},
+		{protocol.NewConfigurationFault(protocol.ConfigurationLoginRequired, "Claude sign-in is required on the execution Node"), "chat_login_expired"},
+		{&protocol.Fault{Code: protocol.ErrorCodeRevisionConflict}, "session_changed"},
+		{&protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown}, "chat_action_unknown"},
 	} {
 		transports[0].mu.Lock()
-		refusal = outcome.code
+		refusal = outcome.fault
 		transports[0].mu.Unlock()
+		tester.Advance(10 * time.Second) // Expire earlier toasts before checking this refusal.
+		tester.Frame()
 		before := len(sent(0, "create_session_at"))
 		send(actions, comp)
 		requests := sent(0, "create_session_at")
 		if len(requests) != before+1 || !slices.Contains(toasts, i18n.In("en", outcome.toast)) {
-			t.Fatalf("%s: %d forwards, toasts %q", outcome.code, len(requests)-before, toasts)
+			t.Fatalf("%s: %d forwards, toasts %q", outcome.fault, len(requests)-before, toasts)
 		}
 		if comp.Draft != "Captured draft" || !strings.HasPrefix(cv.ID, "draft/") || len(sent(1, "submit_turn")) != 0 {
-			t.Fatalf("%s: draft %q, conversation %s, %d turns", outcome.code, comp.Draft, cv.ID, len(sent(1, "submit_turn")))
+			t.Fatalf("%s: draft %q, conversation %s, %d turns", outcome.fault, comp.Draft, cv.ID, len(sent(1, "submit_turn")))
 		}
 	}
 	// The unconfirmed forward is sent again as the request it was.
 	transports[0].mu.Lock()
-	refusal = ""
+	refusal = nil
 	transports[0].mu.Unlock()
 	send(actions, comp)
 	requests := sent(0, "create_session_at")
@@ -2231,5 +2241,16 @@ func TestTurnOwners(t *testing.T) {
 	}
 	if owners[orphan] != orphan {
 		t.Fatalf("a run joined to a turn off the page is owned by %v", owners[orphan])
+	}
+}
+
+func TestBalanceFailureTitles(t *testing.T) {
+	t.Parallel()
+	request := protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "insufficient balance (HTTP 403)", Details: &protocol.FaultDetails{Kind: "model_request", Data: protocol.FaultDetailsModelRequestPayload{Reason: protocol.ModelFailureQuota}}}
+	exhausted := protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "insufficient balance (HTTP 403)", Details: &protocol.FaultDetails{Kind: "model_recovery", Data: protocol.FaultDetailsModelRecoveryPayload{Reason: protocol.ConversationRecoveryStopQuotaExceeded}}}
+	for _, fault := range []protocol.Fault{request, exhausted} {
+		if title := failureKey(fault); title != "chat_model_usage_exhausted" || i18n.In("zh-CN", title) == title {
+			t.Fatalf("balance failure title = %s", title)
+		}
 	}
 }
