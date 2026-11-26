@@ -461,6 +461,13 @@ type modelDraft struct {
 	catalog *preview.ChannelModel
 }
 
+type providerMethodID struct{ brand, method string }
+
+type providerAuthDraft struct {
+	key     string
+	headers []header
+}
+
 // providerEditor is the step, the brand, the methods its choice offered and
 // the method and route chosen, the fields and the models. editing is the
 // channel edited, "" for a new one.
@@ -474,6 +481,8 @@ type providerEditor struct {
 	brand                     *preview.Brand
 	methods                   []preview.Method
 	method                    preview.Method
+	activeMethod              providerMethodID
+	authDrafts                map[providerMethodID]providerAuthDraft
 	route                     int
 	name, endpoint, key       string
 	keySet                    bool
@@ -715,10 +724,24 @@ func (e *providerEditor) choose(b *preview.Brand, methods []preview.Method) {
 
 // configure opens the form on a method's first route.
 func (e *providerEditor) configure(x preview.Method) {
-	// Going back and choosing another provider must not send it the previous
-	// provider's credential (in particular, a Vertex service account key).
-	if e.method.ID != x.ID {
-		e.key, e.originalKey, e.keySet, e.keyShown = "", "", false, false
+	next := providerMethodID{method: x.ID}
+	if e.brand != nil {
+		next.brand = e.brand.ID
+	}
+	// The picker may already have changed e.brand. Park the outgoing fields
+	// under the method that owned the form, not the newly selected brand.
+	if next != e.activeMethod {
+		if e.activeMethod.method != "" && !e.login() {
+			if e.authDrafts == nil {
+				e.authDrafts = make(map[providerMethodID]providerAuthDraft)
+			}
+			e.authDrafts[e.activeMethod] = providerAuthDraft{key: e.key, headers: e.headers}
+		}
+		draft := e.authDrafts[next]
+		delete(e.authDrafts, next)
+		e.activeMethod = next
+		e.key, e.headers = draft.key, draft.headers
+		e.originalKey, e.keySet, e.keyShown = "", false, false
 	}
 	e.method, e.route, e.step = x, 0, stepConfigure
 	e.name, e.endpoint = x.Name, e.current().Endpoint
@@ -908,7 +931,7 @@ func (e *providerEditor) save(m *Model) string {
 			e.probing, e.saving = false, false
 			if ok {
 				e.open = false
-				e.key = ""
+				e.clearAuthDrafts()
 				if signIn {
 					m.signIn(id)
 				}
@@ -937,12 +960,17 @@ func (e *providerEditor) save(m *Model) string {
 	return ""
 }
 
+func (e *providerEditor) clearAuthDrafts() {
+	e.key, e.originalKey, e.keyShown = "", "", false
+	e.headers, e.authDrafts = nil, nil
+}
+
 // providerEditorDialog is 560 wide for brands, 540 for methods, 640 to
 // configure; a back button and the step's title over it.
 func providerEditorDialog(c *ui.Context, m *Model) {
 	e := &m.provider
 	if !e.open {
-		e.key, e.originalKey, e.keyShown = "", "", false
+		e.clearAuthDrafts()
 		return
 	}
 	p := theme.Of(c)
@@ -991,7 +1019,7 @@ func providerEditorDialog(c *ui.Context, m *Model) {
 		}
 	}).Width(min(w, width(c)-48)).Label(t(title))
 	if !e.open {
-		e.key = ""
+		e.clearAuthDrafts()
 	}
 }
 

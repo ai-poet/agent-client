@@ -1,10 +1,33 @@
 package settings
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/preview"
 )
+
+func TestProviderKeyAndHeaderDraftsStayWithBrandAndMethod(t *testing.T) {
+	m := NewModel(preview.SettingsData())
+	e := &m.provider
+	e.add(m)
+	first, second := preview.Brand{ID: "first"}, preview.Brand{ID: "second"}
+	method := preview.Method{ID: "keyed", Keyed: true}
+	pick := func(b *preview.Brand) { m.chooseProvider(b, []preview.Method{method}) }
+	pick(&first)
+	e.key, e.keyShown, e.headers = "first-key", true, []header{{"X-First", "one"}}
+	e.back()
+	pick(&second)
+	if e.keyUpdate() != "" || e.keyShown || len(e.headers) != 0 {
+		t.Fatal("another brand inherited the first brand's authentication draft")
+	}
+	e.key, e.headers = "second-key", []header{{"X-Second", "two"}}
+	e.back()
+	pick(&first)
+	if e.keyUpdate() != "first-key" || e.keyShown || !slices.Equal(e.headers, []header{{"X-First", "one"}}) {
+		t.Fatal("returning to the first brand did not restore only its own masked key and headers")
+	}
+}
 
 func TestProviderOAuthSaveIgnoresHiddenKeyHeaderDraft(t *testing.T) {
 	m := NewModel(preview.SettingsData())
