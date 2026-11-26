@@ -181,6 +181,8 @@ func (r *Runtime) syncCheapOriginChange(
 		}
 		account.effects.Unlock()
 
+		login := account.service.Endpoint()
+		sameOrigin := nextCfg.ResolveAPIOrigin(login) == login
 		user, accountErr := account.service.Account(ctx)
 		var gateway core.Gateway
 		var groups []core.Group
@@ -217,8 +219,7 @@ func (r *Runtime) syncCheapOriginChange(
 			if cheapAuthRejected(authErr) {
 				account.effects.Lock()
 				if ctx.Err() == nil {
-					authErr = errors.Join(authErr, account.service.Invalidate())
-					disableErr = r.disableCheapGateway(account, generation)
+					authErr, disableErr = r.invalidateCheapSession(account, generation, authErr, "origin_switch", sameOrigin)
 				}
 				account.effects.Unlock()
 			} else if gatewayErr != nil {

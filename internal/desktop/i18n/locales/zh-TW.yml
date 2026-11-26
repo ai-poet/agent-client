@@ -1699,7 +1699,9 @@ session_changed: 會話已變化，請重新操作
 project_changed: 專案已變化，請重新開啟編輯
 chat_action_failed: 操作失敗，請重試
 chat_action_unknown: 結果未確認，可重試原請求
-chat_config_unavailable: 會話配置不可用，請檢查供應商
+chat_selected_model_unavailable: 所選模型無法使用，請檢查供應商設定
+chat_agent_model_unavailable: 某個 Agent 的模型無法使用，請到「設定 › 團隊」檢查
+chat_login_expired: 登入狀態已失效，請重新登入
 notification_update_failed: 通知更新失敗，請重試
 session_archive_named: 歸檔「%{name}」並從活動會話中隱藏
 power_request_failed: 無法阻止裝置休眠

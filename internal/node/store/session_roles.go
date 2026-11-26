@@ -57,8 +57,24 @@ func CaptureSessionRoles(ctx context.Context, db *sql.Conn, node protocol.NodeID
 	}
 	return completeRoleSnapshot(ctx, db, node, value)
 }
+
+// RoleCaptureError carries local roster identifiers. Only its underlying
+// fault is returned on the wire and recorded in the admission ledger.
+type RoleCaptureError struct {
+	Role     protocol.RoleID
+	Provider protocol.ProviderID
+	err      error
+}
+
+func (e *RoleCaptureError) Error() string { return e.err.Error() }
+func (e *RoleCaptureError) Unwrap() error { return e.err }
+
 func completeRoleSnapshot(ctx context.Context, db *sql.Conn, node protocol.NodeID, value protocol.RoleSnapshot) (protocol.RoleSnapshot, error) {
-	required := map[protocol.ProviderID]bool{}
+	type memberModel struct {
+		role  protocol.RoleID
+		model protocol.RoleModel
+	}
+	required := map[protocol.ProviderID][]memberModel{}
 	ids := map[protocol.RoleID]bool{}
 	keys := map[string]bool{}
 	for _, role := range value.Profiles {
@@ -70,14 +86,18 @@ func completeRoleSnapshot(ctx context.Context, db *sql.Conn, node protocol.NodeI
 		}
 		ids[role.ID], keys[role.Key] = true, true
 		if role.Model != nil {
-			required[role.Model.Provider] = true
+			required[role.Model.Provider] = append(required[role.Model.Provider], memberModel{role.ID, *role.Model})
 		}
 	}
-	for id, model := range value.Models {
+	for id := range value.Models {
 		if !ids[id] {
 			return value, invalid("member model requires a role in the session roster")
 		}
-		required[model.Provider] = true
+	}
+	for _, role := range value.Profiles {
+		if model, ok := value.Models[role.ID]; ok {
+			required[model.Provider] = append(required[model.Provider], memberModel{role.ID, model})
+		}
 	}
 	captured := value.Providers
 	value.Providers = []protocol.ConversationProvider{}
@@ -87,39 +107,31 @@ func completeRoleSnapshot(ctx context.Context, db *sql.Conn, node protocol.NodeI
 	}
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].String() < ordered[j].String() })
 	for _, id := range ordered {
+		members := required[id]
 		provider, err := listedRoleProvider(ctx, db, id)
 		if err != nil {
 			index := slices.IndexFunc(captured, func(p protocol.ConversationProvider) bool { return p.ID == id })
 			if index < 0 {
-				return value, err
+				return value, &RoleCaptureError{members[0].role, id, err}
 			}
 			provider = captured[index]
 		}
 		provider, err = CaptureProvider(ctx, db, provider)
 		if err != nil {
-			return value, err
+			return value, &RoleCaptureError{members[0].role, id, err}
 		}
 		if provider.Credential != nil {
 			controller, err := CurrentController(ctx, db, node)
 			if err != nil {
-				return value, err
+				return value, &RoleCaptureError{members[0].role, id, err}
 			}
 			if provider.Credential.Node != controller {
-				return value, fault(protocol.ErrorCodePermissionDenied, "role provider belongs to another controller")
+				return value, &RoleCaptureError{members[0].role, id, fault(protocol.ErrorCodePermissionDenied, "role provider belongs to another controller")}
 			}
 		}
-		for _, role := range value.Profiles {
-			if role.Model != nil && role.Model.Provider == id {
-				if err = validateRoleModel(provider, *role.Model); err != nil {
-					return value, err
-				}
-			}
-		}
-		for _, model := range value.Models {
-			if model.Provider == id {
-				if err = validateRoleModel(provider, model); err != nil {
-					return value, err
-				}
+		for _, member := range members {
+			if err = validateRoleModel(provider, member.model); err != nil {
+				return value, &RoleCaptureError{member.role, id, err}
 			}
 		}
 		value.Providers = append(value.Providers, provider)

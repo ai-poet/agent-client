@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/shell"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
 	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
 	nodeproviders "github.com/ai-poet/cheaprouter-harness/internal/node/providers"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/egoist/mygo/ui"
@@ -769,6 +771,36 @@ func (r *Runtime) composerConfig(id string, comp *composer.State, m composer.Mes
 	return protocol.SessionConfig{}, 0, &link.FaultError{Fault: protocol.Fault{Code: protocol.ErrorCodeNotConfigured, Message: "Select a configured model"}}
 }
 
+func logDraftModelRejection(selection string, providers []protocol.ConversationProvider) {
+	key, model, _ := strings.Cut(selection, "/")
+	id, err := protocol.ParseProviderID(key)
+	managed := err == nil && nodeproviders.IsCheapRouterProvider(id)
+	lane := ""
+	if managed {
+		for _, name := range core.CanonicalLanes {
+			if nodeproviders.CheapRouterLaneID(name) == id {
+				lane = name
+				break
+			}
+		}
+	}
+	present, enabled, contains := false, false, false
+	providerID := ""
+	if err == nil {
+		providerID = id.String()
+		for _, p := range providers {
+			if p.ID == id {
+				present, enabled = true, p.Enabled
+				contains = slices.ContainsFunc(p.Models, func(m protocol.ConversationModel) bool { return m.ID == model })
+				break
+			}
+		}
+	}
+	slog.Warn(logging.Target, "area", "draft_model", "phase", logging.Failed, "code", string(protocol.ErrorCodeNotConfigured),
+		"provider", providerID, "cheaprouter_managed", managed, "cheaprouter_lane", lane,
+		"provider_present", present, "provider_enabled", enabled, "model_present", contains)
+}
+
 func (r *Runtime) rememberConfig(config protocol.SessionConfig, team string) {
 	source := r.controller.Target()
 	if r.forwards(config.Provider) {
@@ -1068,6 +1100,11 @@ func (x *conversationActions) submit(m composer.Message, guide, queue bool, draf
 		if _, exists := x.r.session(x.cv.ID); exists {
 			x.r.report(x.c, err, "session_changed")
 		} else {
+			providers := x.r.snapshot().Providers
+			if x.r.parent != nil {
+				providers = slices.Concat(providers, x.r.parent.snapshot().Providers)
+			}
+			logDraftModelRejection(m.Model, providers)
 			x.r.reportCreation(x.c, err)
 		}
 		return

@@ -30,7 +30,7 @@ var fields = []struct {
 }{
 	{"area", public}, {"phase", public}, {"node", local}, {"caller", local}, {"request", local}, {"incident", local},
 	{"plugin_version", local}, {"app_version", version}, {"platform", local}, {"exception", local}, {"session", local},
-	{"turn", local}, {"worktree", local}, {"provider", local}, {"provider_name", local}, {"model", local},
+	{"turn", local}, {"worktree", local}, {"role", local}, {"provider", local}, {"provider_name", local}, {"model", local},
 	{"package", local}, {"digest", local}, {"settings_revision", local}, {"handler", local}, {"invocation", local},
 	{"call", local}, {"artifact_id", local}, {"attachment_id", local}, {"revision", local}, {"command", local},
 	{"operation", public}, {"stage", local}, {"detail", local}, {"source_kind", local}, {"reason", local},
@@ -38,12 +38,14 @@ var fields = []struct {
 	{"cause_code", public}, {"cause_component", local}, {"cause_category", local}, {"upstream_status", local},
 	{"websocket_close_code", local}, {"attempt", local}, {"limit", local}, {"request_mode", local}, {"transport", local},
 	{"connection_reused", local}, {"communication_outcome", local}, {"execution_outcome", local},
+	{"cheaprouter_managed", local}, {"cheaprouter_lane", local}, {"provider_present", local}, {"provider_enabled", local}, {"model_present", local},
 	{"recovery_decision", local}, {"wait_ms", local}, {"end_to_end_us", local}, {"rtt_ms", local}, {"generation", local},
 	{"sequence", local}, {"fallback_reason", local}, {"continuation", local}, {"stream", local}, {"budget", local},
 	{"parse_layer", local}, {"parse_category", local}, {"parse_cause", local}, {"parse_field", local},
 	{"parse_event", local}, {"parse_line", local}, {"parse_column", local}, {"code", public}, {"status", local},
 	{"duration_us", public}, {"first_token_us", local}, {"bytes", local}, {"count", public}, {"durable", local},
 	{"elapsed_us", public}, {"last_content_us", local},
+	{"auth_flow", local}, {"auth_interface", local}, {"gateway_matches_login", local}, {"disable_succeeded", local},
 }
 
 var known = func() map[string]bool {

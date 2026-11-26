@@ -76,6 +76,7 @@ func (node *Node) dispatchSessionForward(ctx context.Context, caller protocol.No
 	if !reserved {
 		// An unknown outcome that cannot be sent again now stays unknown.
 		if previous == nil {
+			rememberRoleCapture(ctx, rejected)
 			result := response(protocol.Output{}, rejected)
 			previous = &result
 		}

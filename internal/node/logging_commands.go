@@ -12,6 +12,7 @@ import (
 
 	"github.com/ai-poet/cheaprouter-harness/internal/link"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
@@ -239,6 +240,9 @@ func rejectCommand(span *logging.Span, kind string, fault *protocol.Fault, aband
 		// The native Git service reports a missing executable without a configuration reason.
 		expected = true
 	}
+	if fault.Code == protocol.ErrorCodeNotConfigured && fault.Details == nil && fault.Message == "role model is unavailable" {
+		span.Set(slog.String("reason", "role_model_missing"))
+	}
 	if reason := fault.ConfigurationReason(); reason.Known() {
 		span.Set(slog.String("configuration_reason", string(reason)))
 		if fault.Code == protocol.ErrorCodeNotConfigured {
@@ -267,9 +271,27 @@ func faultDiagnostic(fault *protocol.Fault) (protocol.NotificationSystemSystemDi
 	return protocol.NotificationSystemSystemDiagnostic{}, false
 }
 
+// A durable completion carries a wire fault, not the store error. Keep the
+// identifiers with this dispatch until completion, not with the receipt.
+type roleCaptureLogKey struct{}
+
+type commandLogContext struct{ capture *store.RoleCaptureError }
+
+func rememberRoleCapture(ctx context.Context, err error) {
+	if ctx != nil && err != nil {
+		if record, ok := ctx.Value(roleCaptureLogKey{}).(*commandLogContext); ok {
+			errors.As(err, &record.capture)
+		}
+	}
+}
+
 // Dispatch admits a command and observes every one that changes data.
 func (node *Node) Dispatch(ctx context.Context, caller protocol.NodeID, request protocol.Request) (link.Admission, error) {
 	span := node.commandSpan(caller, request)
+	var record commandLogContext
+	if span != nil {
+		ctx = context.WithValue(ctx, roleCaptureLogKey{}, &record)
+	}
 	accepted, err := node.admitCommand(ctx, caller, request)
 	if span == nil {
 		return accepted, err
@@ -295,6 +317,10 @@ func (node *Node) Dispatch(ctx context.Context, caller protocol.NodeID, request 
 			span.Finish(logging.Interrupted, string(protocol.ErrorCodeOutcomeUnknown), false)
 			return
 		case result.Fault != nil:
+			if capture := record.capture; capture != nil {
+				span.Set(slog.String("role", capture.Role.String()))
+				span.Set(slog.String("provider", capture.Provider.String()))
+			}
 			span.Set(slog.String("command_stage", "completion"))
 			rejectCommand(span, request.Command.Kind, result.Fault, !accepted.Receipt.Durable && ctx.Err() != nil)
 		default:

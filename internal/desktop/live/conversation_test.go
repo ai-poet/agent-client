@@ -1902,7 +1902,7 @@ func testSessionForwarding(t *testing.T) {
 		defer controllers[index].Close()
 	}
 	// refusal answers the next forward; forwarded counts the sessions made.
-	var refusal protocol.ErrorCode
+	var refusal *protocol.Fault
 	forwarded := byte(0)
 	// unconfirmed is the forward the local Node recorded as not known.
 	var unconfirmed *protocol.RequestID
@@ -1915,11 +1915,11 @@ func testSessionForwarding(t *testing.T) {
 		if request.Command.Kind != "create_session_at" {
 			return link.Response{}, false
 		}
-		if refusal != "" {
-			if refusal == protocol.ErrorCodeOutcomeUnknown {
+		if refusal != nil {
+			if refusal.Code == protocol.ErrorCodeOutcomeUnknown {
 				unconfirmed = &request.ID
 			}
-			return link.Response{Fault: &protocol.Fault{Code: refusal, Message: "Claude sign-in is required on the execution Node"}}, true
+			return link.Response{Fault: refusal}, true
 		}
 		input := request.Command.Data.(protocol.CommandCreateSessionAtPayload)
 		forwarded++
@@ -2026,29 +2026,34 @@ func testSessionForwarding(t *testing.T) {
 		t.Fatalf("a member on the local Node is offered a narrower list: %v", own)
 	}
 	for _, outcome := range []struct {
-		code  protocol.ErrorCode
+		fault *protocol.Fault
 		toast string
 	}{
-		{protocol.ErrorCodeNotConfigured, "chat_config_unavailable"},
-		{protocol.ErrorCodeRevisionConflict, "session_changed"},
-		{protocol.ErrorCodeOutcomeUnknown, "chat_action_unknown"},
+		{protocol.NewConfigurationFault(protocol.ConfigurationProviderDisabled, "model provider is unavailable"), "chat_selected_model_unavailable"},
+		{protocol.NewConfigurationFault(protocol.ConfigurationProviderDisabled, "role provider is unavailable"), "chat_agent_model_unavailable"},
+		{&protocol.Fault{Code: protocol.ErrorCodeNotConfigured, Message: "role model is unavailable"}, "chat_agent_model_unavailable"},
+		{protocol.NewConfigurationFault(protocol.ConfigurationLoginRequired, "Claude sign-in is required on the execution Node"), "chat_login_expired"},
+		{&protocol.Fault{Code: protocol.ErrorCodeRevisionConflict}, "session_changed"},
+		{&protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown}, "chat_action_unknown"},
 	} {
 		transports[0].mu.Lock()
-		refusal = outcome.code
+		refusal = outcome.fault
 		transports[0].mu.Unlock()
+		tester.Advance(10 * time.Second) // Expire earlier toasts before checking this refusal.
+		tester.Frame()
 		before := len(sent(0, "create_session_at"))
 		send(actions, comp)
 		requests := sent(0, "create_session_at")
 		if len(requests) != before+1 || !slices.Contains(toasts, i18n.In("en", outcome.toast)) {
-			t.Fatalf("%s: %d forwards, toasts %q", outcome.code, len(requests)-before, toasts)
+			t.Fatalf("%s: %d forwards, toasts %q", outcome.fault, len(requests)-before, toasts)
 		}
 		if comp.Draft != "Captured draft" || !strings.HasPrefix(cv.ID, "draft/") || len(sent(1, "submit_turn")) != 0 {
-			t.Fatalf("%s: draft %q, conversation %s, %d turns", outcome.code, comp.Draft, cv.ID, len(sent(1, "submit_turn")))
+			t.Fatalf("%s: draft %q, conversation %s, %d turns", outcome.fault, comp.Draft, cv.ID, len(sent(1, "submit_turn")))
 		}
 	}
 	// The unconfirmed forward is sent again as the request it was.
 	transports[0].mu.Lock()
-	refusal = ""
+	refusal = nil
 	transports[0].mu.Unlock()
 	send(actions, comp)
 	requests := sent(0, "create_session_at")
