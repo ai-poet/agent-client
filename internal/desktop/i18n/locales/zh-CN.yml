@@ -47,6 +47,10 @@ cheaprouter_account_description: 管理账号登录、套餐信息和模型网�
 cheaprouter_signed_out: 未登录
 cheaprouter_signed_out_description: 登录后自动接入 CheapRouter 模型网关；不登录也可使用其他模型和本地功能。
 cheaprouter_signed_in: 已登录 CheapRouter
+cheaprouter_login_expired: 登录状态已失效，请重新登录
+cheaprouter_login_expired_action: 重新登录
+cheaprouter_login_expired_dismiss: 关闭登录提醒
+cheaprouter_disable_failed: 未能停用 CheapRouter 服务商，请在模型设置中关闭。
 settings_providers: 模型
 settings_providers_description: 管理会话使用的供应商、认证和模型
 settings_connectors: 连接器

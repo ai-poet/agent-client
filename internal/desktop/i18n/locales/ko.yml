@@ -47,6 +47,10 @@ cheaprouter_account_description: Manage sign-in, plan details and the model gate
 cheaprouter_signed_out: Not signed in
 cheaprouter_signed_out_description: Sign in to connect the CheapRouter model gateway. Other models and local features work without an account.
 cheaprouter_signed_in: Signed in to CheapRouter
+cheaprouter_login_expired: CheapRouter 로그인이 만료되었습니다. 다시 로그인하세요.
+cheaprouter_login_expired_action: 다시 로그인
+cheaprouter_login_expired_dismiss: 로그인 알림 닫기
+cheaprouter_disable_failed: CheapRouter를 비활성화하지 못했습니다. 모델 설정에서 공급자를 끄세요.
 settings_providers: 모델
 settings_providers_description: 세션 공급자, 인증 및 모델 관리
 settings_connectors: 커넥터

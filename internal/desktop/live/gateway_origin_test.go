@@ -118,6 +118,9 @@ func TestCheapGatewayOriginRejectionLogsInvalidation(t *testing.T) {
 	d.await("initial sync ready", func() bool { return d.account().Stage == cheapauthui.Ready })
 	d.account().SelectOrigin(alt.URL)
 	d.await("rejected origin signs out", func() bool { return d.account().Stage == cheapauthui.SignedOut })
+	if !d.account().LoginExpired {
+		t.Fatal("origin rejection did not show recovery guidance")
+	}
 	// An envelope can signal rejection even when its HTTP response was OK.
 	checkLog("origin_switch", "/groups/available", http.StatusOK, false)
 }

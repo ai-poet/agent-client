@@ -27,6 +27,9 @@ const (
 // the PKCE verifier, or a gateway API key.
 type State struct {
 	Stage                  Stage
+	LoginExpired           bool
+	ExpiryBannerDismissed  bool
+	DismissExpiryBanner    func()
 	Endpoint               string
 	LoginURL               string
 	Loopback               bool
@@ -92,9 +95,18 @@ func NewState() *State {
 	}
 }
 
+// LoginStage includes credential rejection observed outside this window's sync
+// (for example, a payment request renewing the shared refresh token).
+func (s *State) LoginStage() Stage {
+	if s.LoginExpired && s.Stage != Starting && s.Stage != WaitingForCode {
+		return SignedOut
+	}
+	return s.Stage
+}
+
 // SignedIn reports whether credentials are established, whatever the gateway's state.
 func (s *State) SignedIn() bool {
-	return s != nil && (s.Stage == SyncingGateway || s.Stage == Ready || s.Stage == GatewayFailed)
+	return s != nil && !s.LoginExpired && (s.Stage == SyncingGateway || s.Stage == Ready || s.Stage == GatewayFailed)
 }
 func (s *State) Busy() bool {
 	return s != nil && (s.Stage == Starting || s.Stage == SyncingGateway)

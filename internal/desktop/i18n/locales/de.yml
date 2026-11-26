@@ -47,6 +47,10 @@ cheaprouter_account_description: Manage sign-in, plan details and the model gate
 cheaprouter_signed_out: Not signed in
 cheaprouter_signed_out_description: Sign in to connect the CheapRouter model gateway. Other models and local features work without an account.
 cheaprouter_signed_in: Signed in to CheapRouter
+cheaprouter_login_expired: Ihre CheapRouter-Anmeldung ist abgelaufen. Bitte melden Sie sich erneut an.
+cheaprouter_login_expired_action: Erneut anmelden
+cheaprouter_login_expired_dismiss: Anmeldehinweis ausblenden
+cheaprouter_disable_failed: CheapRouter konnte nicht deaktiviert werden. Deaktivieren Sie den Anbieter in den Modelleinstellungen.
 settings_providers: Modelle
 settings_providers_description: Verwalten von Sitzungsanbietern, Authentifizierung und Modellen
 settings_connectors: Konnektoren

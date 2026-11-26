@@ -1,0 +1,4 @@
+cheaprouter_login_expired: "Ihre CheapRouter-Anmeldung ist abgelaufen. Bitte melden Sie sich erneut an."
+cheaprouter_login_expired_action: "Erneut anmelden"
+cheaprouter_disable_failed: "CheapRouter konnte nicht deaktiviert werden. Deaktivieren Sie den Anbieter in den Modelleinstellungen."
+cheaprouter_login_expired_dismiss: "Anmeldehinweis ausblenden"

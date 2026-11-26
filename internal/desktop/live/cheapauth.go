@@ -24,6 +24,7 @@ import (
 // taking it, a worker must check its generation's context before admission.
 // Already admitted writes settle before another mutation can overtake them.
 type cheapAuthRuntime struct {
+	stopExpiryWatch  func()
 	service          *core.Service
 	state            *cheapauthui.State
 	generation       *cheapAuthGeneration
@@ -114,6 +115,14 @@ func (r *Runtime) initCheapAuth() {
 		state.Failure = cheapAuthError(err)
 		return
 	}
+	account.stopExpiryWatch = desktopExpiry.watch(profile, func() {
+		r.enqueue(func(*ui.Context) {
+			state.LoginExpired, state.ExpiryBannerDismissed = desktopExpiry.snapshot(profile)
+		})
+	})
+	state.LoginExpired, state.ExpiryBannerDismissed = desktopExpiry.snapshot(profile)
+	state.DismissExpiryBanner = desktopExpiry.dismiss
+	service.SetExpiryListener(func(expired bool) { desktopExpiry.set(profile, expired) })
 	state.OriginConfig = service.GatewayOriginConfig()
 	if err := service.Restore(); err != nil {
 		state.Failure = "无法读取已保存的登录状态，请重新登录"
@@ -129,7 +138,7 @@ func (r *Runtime) initCheapAuth() {
 
 func (r *Runtime) startCheapLogin(manual bool) {
 	account := r.cheapAuth
-	if account == nil || account.service == nil || account.state.LoggingOut || account.state.Stage != cheapauthui.SignedOut {
+	if account == nil || account.service == nil || account.state.LoggingOut || account.state.LoginStage() != cheapauthui.SignedOut {
 		return
 	}
 	generation := account.advance(r.ctx)
@@ -367,7 +376,7 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 		}
 		selectedGroup := account.service.SelectedGroup()
 		laneBindings := account.service.LaneBindings()
-		r.enqueue(func(*ui.Context) {
+		r.enqueue(func(c *ui.Context) {
 			if account.generation != generation || ctx.Err() != nil {
 				return
 			}
@@ -375,9 +384,9 @@ func (r *Runtime) startCheapSync(account *cheapAuthRuntime, generation *cheapAut
 			account.stopSync = nil
 			if cheapAuthRejected(authErr) {
 				account.autoBindDone = false
-				account.state.Stage, account.state.Failure = cheapauthui.SignedOut, cheapAuthError(authErr)
+				account.state.Stage, account.state.Failure = cheapauthui.SignedOut, ""
 				if disableErr != nil {
-					account.state.Failure += "；CheapRouter provider 未能停用，请在模型设置中关闭"
+					account.state.Failure = i18n.T(c, "cheaprouter_disable_failed")
 				}
 				account.state.Account, account.state.ModelCount = core.User{}, 0
 				account.state.Groups, account.state.Catalog = nil, nil

@@ -1,0 +1,4 @@
+cheaprouter_login_expired: "Sua sessão do CheapRouter expirou. Entre novamente."
+cheaprouter_login_expired_action: "Entrar novamente"
+cheaprouter_disable_failed: "Não foi possível desativar o CheapRouter. Desative o provedor nas configurações de modelos."
+cheaprouter_login_expired_dismiss: "Dispensar lembrete de login"

@@ -246,9 +246,9 @@ func (r *Runtime) syncCheapOriginChange(
 			if cheapAuthRejected(authErr) {
 				account.autoBindDone = false
 				account.originChecked = false
-				account.state.Stage, account.state.Failure = cheapauthui.SignedOut, cheapAuthError(authErr)
+				account.state.Stage, account.state.Failure = cheapauthui.SignedOut, ""
 				if disableErr != nil {
-					account.state.Failure += "；CheapRouter provider 未能停用，请在模型设置中关闭"
+					account.state.Failure = i18n.T(c, "cheaprouter_disable_failed")
 				}
 				account.state.Account, account.state.ModelCount = core.User{}, 0
 				account.state.Groups, account.state.Catalog = nil, nil

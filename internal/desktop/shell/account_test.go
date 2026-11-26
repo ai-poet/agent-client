@@ -68,3 +68,22 @@ func TestHooksCannotHideWorkspace(t *testing.T) {
 		t.Fatal("the composer is not reachable")
 	}
 }
+
+func TestDismissingExpiryKeepsAccountGuidance(t *testing.T) {
+	a, tt := newTester(t)
+	state := cheapauthui.NewState()
+	state.LoginExpired = true
+	state.DismissExpiryBanner = func() { state.ExpiryBannerDismissed = true }
+	a.Settings.CheapRouter = state
+	a.openCheapAccountSettings()
+	tt.Frame()
+	banner := i18n.In("en", "cheaprouter_login_expired_action")
+	if _, ok := tt.AccessByRole(ui.RoleButton, banner); !ok {
+		t.Fatal("missing expiry banner in Settings")
+	}
+	click(t, tt, i18n.In("en", "cheaprouter_login_expired_dismiss"))
+	tt.Frame()
+	if _, ok := tt.AccessByRole(ui.RoleButton, banner); ok || !tt.HasText(i18n.In("en", "cheaprouter_login_expired")) || tt.HasText(i18n.In("en", "cheaprouter_signed_out")) {
+		t.Fatalf("dismissed banner changed the account status: %q", tt.Texts())
+	}
+}

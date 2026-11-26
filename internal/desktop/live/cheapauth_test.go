@@ -420,7 +420,7 @@ func TestCheapAccountIsOptionalAtStartup(t *testing.T) {
 	gateway := newCheapGateway(t)
 	d := openCheapDesktop(t, nil)
 	d.workspace("startup without credentials")
-	if state := d.account(); state.Stage != cheapauthui.SignedOut || state.Failure != "" {
+	if state := d.account(); state.LoginExpired || state.Stage != cheapauthui.SignedOut || state.Failure != "" {
 		t.Fatalf("startup account state: stage %d, failure %q", state.Stage, state.Failure)
 	}
 	d.accountPage()
@@ -459,7 +459,7 @@ func TestCheapGatewayOutageKeepsWorkspace(t *testing.T) {
 	d.workspace("startup with an unreachable gateway")
 	d.await("the gateway sync to fail", func() bool { return d.account().Stage == cheapauthui.GatewayFailed })
 	failure := (&core.AuthError{Kind: core.ErrorNetwork}).Error()
-	if d.account().Failure != failure {
+	if d.account().LoginExpired || d.account().Failure != failure {
 		t.Fatalf("the unreachable gateway is reported as %q", d.account().Failure)
 	}
 	d.workspace("after the gateway sync failed")
@@ -486,10 +486,10 @@ func TestCheapSignInAddsProviderAndSignOutDisablesOnlyIt(t *testing.T) {
 	gateway := newCheapGateway(t)
 	exchange := make(chan struct{})
 	gateway.exchange = exchange
-	d := openCheapDesktop(t, nil)
-	d.accountPage()
-	d.account().Endpoint = gateway.URL
-	d.click(cheapSignIn)
+	d := openCheapDesktop(t, func(d *cheapDesktop) { d.signedIn(gateway.URL, "stale-access", time.Hour) })
+	banner := i18n.In("zh-CN", "cheaprouter_login_expired_action")
+	d.await("recovery guidance", func() bool { return d.account().Stage == cheapauthui.SignedOut && d.tester.HasText(banner) })
+	d.click(banner)
 	d.await("the sign-in to wait for the browser", func() bool { return d.account().Stage == cheapauthui.WaitingForCode })
 	opened := d.tester.OpenedURLs()
 	if len(opened) != 1 {
@@ -520,12 +520,18 @@ func TestCheapSignInAddsProviderAndSignOutDisablesOnlyIt(t *testing.T) {
 	d.await("the code to reach the gateway", func() bool { return slices.Contains(gateway.requests(), "POST /auth/desktop-session/exchange") })
 	d.click(i18n.In("zh-CN", "settings"))
 	d.workspace("while the code is exchanged")
+	if !d.tester.HasText(banner) {
+		t.Fatal("starting sign-in cleared the expiry notice")
+	}
 	close(exchange)
 	d.await("the gateway to connect", func() bool { return d.account().Stage == cheapauthui.Ready })
 	if status := <-delivered; status != http.StatusOK {
 		t.Fatalf("the loopback delivery answered %d", status)
 	}
 	d.workspace("after signing in")
+	if d.account().LoginExpired || d.tester.HasText(banner) {
+		t.Fatal("successful sign-in retained expiry guidance")
+	}
 	if !d.tester.HasText(i18n.In("zh-CN", "cheaprouter_signed_in")) {
 		t.Fatalf("the sign-in was not reported: %q", d.tester.Texts())
 	}
@@ -557,7 +563,7 @@ func TestCheapSignInAddsProviderAndSignOutDisablesOnlyIt(t *testing.T) {
 
 	d.accountLogout()
 	d.await("the sign-out", func() bool { return d.account().Stage == cheapauthui.SignedOut && !d.account().LoggingOut })
-	if d.account().Failure != "" || !d.tester.HasText(cheapSignIn) {
+	if d.account().LoginExpired || d.account().Failure != "" || !d.tester.HasText(cheapSignIn) {
 		t.Fatalf("signing out left %q: %q", d.account().Failure, d.tester.Texts())
 	}
 	disabled := provider
@@ -628,11 +634,10 @@ func TestCheapSessionRejectionDisablesOnlyGateway(t *testing.T) {
 	for name, fixture := range map[string]struct {
 		access  string
 		expires time.Duration
-		failure core.ErrorKind
 		op      string
 	}{
-		"refresh token refused": {cheapTestAccess, -time.Hour, core.ErrorRefresh, "/auth/refresh"},
-		"access token refused":  {"stale-access", time.Hour, core.ErrorUnauthorized, "/auth/me"},
+		"refresh token refused": {cheapTestAccess, -time.Hour, "/auth/refresh"},
+		"access token refused":  {"stale-access", time.Hour, "/auth/me"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			gateway := newCheapGateway(t)
@@ -644,11 +649,10 @@ func TestCheapSessionRejectionDisablesOnlyGateway(t *testing.T) {
 				enabled = d.saveGateway(gateway.URL)
 			})
 			d.workspace("startup with a rejected session")
-			d.await("the session to end", func() bool { return d.account().Stage == cheapauthui.SignedOut && d.account().Failure != "" })
+			d.await("the session to end", func() bool { return d.account().Stage == cheapauthui.SignedOut && d.account().LoginExpired })
 			checkLog("sync", fixture.op, http.StatusUnauthorized, true)
-			failure := (&core.AuthError{Kind: fixture.failure, Status: http.StatusUnauthorized}).Error()
-			if d.account().Failure != failure {
-				t.Fatalf("the rejected session is reported as %q, want %q", d.account().Failure, failure)
+			if !d.tester.HasText(i18n.In("zh-CN", "cheaprouter_login_expired_action")) {
+				t.Fatal("rejection did not show the main window banner")
 			}
 			disabled := enabled
 			disabled.Enabled, disabled.Revision = false, enabled.Revision+1
@@ -661,7 +665,7 @@ func TestCheapSessionRejectionDisablesOnlyGateway(t *testing.T) {
 			}
 			d.workspace("after the session ended")
 			d.accountPage()
-			for _, text := range []string{failure, i18n.In("zh-CN", "cheaprouter_signed_out"), cheapSignIn} {
+			for _, text := range []string{i18n.In("zh-CN", "cheaprouter_login_expired"), cheapSignIn} {
 				if !d.tester.HasText(text) {
 					t.Errorf("the account page lacks %q: %q", text, d.tester.Texts())
 				}

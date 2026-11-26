@@ -959,8 +959,11 @@ presentation needs them. Floating surfaces remain Kit's frost; right-click menus
 and confirmation-only dialogs use the operating system. Forms remain Kit surfaces.
 
 CheapRouter sign-in is optional and lives on its account page in Settings; no
-account state hides the workspace, and a failed gateway sync is reported on that
-page alone. `internal/desktop/cheapauth` uses the pinned lobe-mygo actions,
+account state hides the workspace. Ordinary gateway failures stay on that page.
+A definite credential rejection also shows a window banner that starts the
+existing sign-in flow. Dismissing it silences banners for the process, without
+clearing the profile's expired status; successful sign-in clears that status.
+`internal/desktop/cheapauth` uses the pinned lobe-mygo actions,
 fields and feedback with Lobe's semantic tokens, scoped to a `ui.Themed` subtree
 of the page. Connected account settings and other pages retain Kit. Presentation
 state and callbacks still belong to the existing CheapRouter controller; the

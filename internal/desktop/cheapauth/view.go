@@ -77,12 +77,16 @@ func content(c *ui.Context, state *State) {
 		})
 	}
 
-	switch state.Stage {
+	switch state.LoginStage() {
 	case SignedOut, Starting:
 		disabled := state.Stage == Starting || state.LoggingOut
 		ui.Column(c.Key("signed-out")).Gap(16).Children(func() {
 			ui.Column(c).Gap(6).Children(func() {
-				ui.Text(c, i18n.T(c, "cheaprouter_signed_out")).FontSize(16).FontWeight(600)
+				key := "cheaprouter_signed_out"
+				if state.LoginExpired {
+					key = "cheaprouter_login_expired"
+				}
+				ui.Text(c, i18n.T(c, key)).FontSize(16).FontWeight(600)
 				ui.Text(c, i18n.T(c, "cheaprouter_signed_out_description")).FontSize(13).TextColor(p.TextSecondary)
 			})
 			ui.Column(c).Gap(6).Children(func() {

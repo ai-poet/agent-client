@@ -162,6 +162,26 @@ func (a *App) openCheapAccountSettings() {
 	a.Settings.Open(settings.CheapAccount)
 }
 
+func (a *App) resumeCheapLogin(state *cheapauthui.State) {
+	a.openCheapAccountSettings()
+	if state.Start != nil && state.LoginStage() == cheapauthui.SignedOut && !state.LoggingOut {
+		state.Start(false)
+	}
+}
+
+func (a *App) expiryBanner(c *ui.Context) {
+	state := a.Settings.CheapRouter
+	if state == nil || !state.LoginExpired || state.ExpiryBannerDismissed {
+		return
+	}
+	p := theme.Of(c)
+	ui.Row(c.Key("login-expiry")).FillWidth().Shrink(0).Padding(4, 12).AlignItems(ui.Center).Background(p.Muted).Children(func() {
+		ui.Text(c, i18n.T(c, "cheaprouter_login_expired")).Grow(1).Shrink(1).MinWidth(0)
+		kit.Secondary(c.Key("sign-in-again"), i18n.T(c, "cheaprouter_login_expired_action")).OnClick(func() { a.resumeCheapLogin(state) })
+		kit.IconButton(c.Key("dismiss"), icons.Close, i18n.T(c, "cheaprouter_login_expired_dismiss"), 28, false).OnClick(state.DismissExpiryBanner)
+	})
+}
+
 func (a *App) accountSignedOutContent(c *ui.Context, state *cheapauthui.State) {
 	p := theme.Of(c)
 	ui.Column(c.Key("signed-out-panel")).Padding(12).Gap(12).Children(func() {
@@ -173,10 +193,7 @@ func (a *App) accountSignedOutContent(c *ui.Context, state *cheapauthui.State) {
 			})
 		})
 		kit.Primary(c.Key("popover-login"), "在浏览器中登录", false).FillWidth().OnClick(func() {
-			a.openCheapAccountSettings()
-			if state.Start != nil && state.Stage == cheapauthui.SignedOut {
-				state.Start(false)
-			}
+			a.resumeCheapLogin(state)
 		})
 		kit.Ghost(c.Key("popover-settings"), "账号设置", false).FillWidth().Height(32).OnClick(a.openCheapAccountSettings)
 	})

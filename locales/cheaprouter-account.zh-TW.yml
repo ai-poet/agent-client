@@ -1,0 +1,4 @@
+cheaprouter_login_expired: "登入狀態已失效，請重新登入"
+cheaprouter_login_expired_action: "重新登入"
+cheaprouter_disable_failed: "無法停用 CheapRouter 供應商，請在模型設定中關閉。"
+cheaprouter_login_expired_dismiss: "關閉登入提醒"

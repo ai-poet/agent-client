@@ -392,6 +392,9 @@ func (r *Runtime) Close() error {
 	if r.unsubscribe != nil {
 		r.unsubscribe()
 	}
+	if r.cheapAuth != nil && r.cheapAuth.stopExpiryWatch != nil {
+		r.cheapAuth.stopExpiryWatch()
+	}
 	if r.unsubscribePrefs != nil {
 		r.unsubscribePrefs()
 	}
