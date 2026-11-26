@@ -16,13 +16,14 @@ import (
 // Service serializes credential refresh and persistence for background UI
 // workers. Its public snapshots never contain OAuth tokens.
 type Service struct {
-	mu          sync.Mutex
-	store       *Store
-	originStore *GatewayOriginStore
-	client      *Client // always bound to credentials.Endpoint (the login origin)
-	credentials *Credentials
-	probeKey    string // last resolved gateway key in memory for speed tests
-	now         func() time.Time
+	mu              sync.Mutex
+	store           *Store
+	originStore     *GatewayOriginStore
+	client          *Client // always bound to credentials.Endpoint (the login origin)
+	credentials     *Credentials
+	onExpiryChanged func(bool)
+	probeKey        string // last resolved gateway key in memory for speed tests
+	now             func() time.Time
 }
 
 // credentialLock serializes every renewal and every write of the credential
@@ -45,6 +46,15 @@ func NewService(profileDir string) (*Service, error) {
 		return nil, err
 	}
 	return &Service{store: store, originStore: originStore, now: time.Now}, nil
+}
+
+// SetExpiryListener installs a notification for definite rejection or successful
+// establishment. Mutations notify under the credential lock, in file-write order;
+// the listener must not call back into Service.
+func (s *Service) SetExpiryListener(notify func(bool)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onExpiryChanged = notify
 }
 
 // Restore loads the saved account without making network requests.
@@ -126,6 +136,9 @@ func (s *Service) Establish(ctx context.Context, credentials Credentials) error 
 	}
 	client.now = s.now
 	s.credentials, s.client = &credentials, client
+	if s.onExpiryChanged != nil {
+		s.onExpiryChanged(false)
+	}
 	return nil
 }
 
@@ -555,7 +568,7 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 	}
 	if err != nil {
 		if errors.Is(err, ErrRefresh) || errors.Is(err, ErrUnauthorized) {
-			return errors.Join(err, s.clearLocked())
+			return errors.Join(err, s.invalidateLocked())
 		}
 		return err
 	}
@@ -1493,6 +1506,14 @@ func (s *Service) Invalidate() error {
 	defer s.mu.Unlock()
 	credentialLock.Lock()
 	defer credentialLock.Unlock()
+	return s.invalidateLocked()
+}
+
+func (s *Service) invalidateLocked() error {
+	// An absent session (including logout in another window) is not a rejection.
+	if s.credentials != nil && s.onExpiryChanged != nil {
+		s.onExpiryChanged(true)
+	}
 	return s.clearLocked()
 }
 

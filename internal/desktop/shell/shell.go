@@ -401,6 +401,7 @@ func (a *App) View(c *ui.Context) {
 	a.mainLayoutShift = f.mainShift
 	root.Children(func() {
 		a.header(c, f)
+		a.expiryBanner(c)
 		ui.Row(c).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
 			a.rail(c)
 			// The panel's outline: a 1 DIP top and left edge, rounded at the top left.

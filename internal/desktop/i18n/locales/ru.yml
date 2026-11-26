@@ -47,6 +47,10 @@ cheaprouter_account_description: Manage sign-in, plan details and the model gate
 cheaprouter_signed_out: Not signed in
 cheaprouter_signed_out_description: Sign in to connect the CheapRouter model gateway. Other models and local features work without an account.
 cheaprouter_signed_in: Signed in to CheapRouter
+cheaprouter_login_expired: Срок действия сеанса CheapRouter истёк. Войдите снова.
+cheaprouter_login_expired_action: Войти снова
+cheaprouter_login_expired_dismiss: Скрыть напоминание о входе
+cheaprouter_disable_failed: Не удалось отключить CheapRouter. Отключите поставщика в настройках моделей.
 settings_providers: Модели
 settings_providers_description: Управление поставщиками сеансов, проверкой подлинности и моделями
 settings_connectors: Коннекторы
@@ -1851,6 +1855,11 @@ team_conflict: Команда изменилась; откройте её сно
 role_model_unavailable: Выбранная модель или поставщик недоступен
 role_capacity: Выполнен предел субагента
 role_unknown: Результат не подтвержден; повторите первоначальный запрос
+cheaprouter_roles_affected: 'Агенты, использующие отключённый канал: %{count}'
+cheaprouter_roles_migrate: Перенести на доступный одноимённый канал
+cheaprouter_roles_receipt: 'Успешно: %{saved}. Ошибок: %{failed}. Пропущено: %{skipped}.'
+cheaprouter_roles_manual: 'Подходящего канала нет. Измените настройки этих агентов в разделе «Настройки › Команды»: %{names}.'
+cheaprouter_roles_unknown: 'Не подтверждено: %{count}. Проверьте каналы агентов.'
 role_failed: Операция не удалась; повторите попытку
 chat_child_unavailable: Дочерний сеанс недоступен; попробуйте еще раз
 reference_load_failed: Не удалось загрузить ссылки

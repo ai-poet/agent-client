@@ -47,6 +47,10 @@ cheaprouter_account_description: Manage sign-in, plan details and the model gate
 cheaprouter_signed_out: Not signed in
 cheaprouter_signed_out_description: Sign in to connect the CheapRouter model gateway. Other models and local features work without an account.
 cheaprouter_signed_in: Signed in to CheapRouter
+cheaprouter_login_expired: Tu sesión de CheapRouter ha caducado. Vuelve a iniciar sesión.
+cheaprouter_login_expired_action: Volver a iniciar sesión
+cheaprouter_login_expired_dismiss: Ocultar el aviso de inicio de sesión
+cheaprouter_disable_failed: No se pudo desactivar CheapRouter. Desactiva el proveedor en los ajustes de modelos.
 settings_providers: Modelos
 settings_providers_description: Administrar proveedores de sesiones, autenticación y modelos
 settings_connectors: Conectores
@@ -1851,6 +1855,11 @@ team_conflict: El equipo cambió; vuelve a abrirlo
 role_model_unavailable: El modelo o proveedor seleccionado no está disponible
 role_capacity: Límite de subagent alcanzado
 role_unknown: Resultado no confirmado; reintentar la solicitud original
+cheaprouter_roles_affected: 'Agentes que usan un canal desactivado: %{count}'
+cheaprouter_roles_migrate: Migrar al canal disponible del mismo nombre
+cheaprouter_roles_receipt: 'Éxitos: %{saved}. Fallos: %{failed}. Omitidos: %{skipped}.'
+cheaprouter_roles_manual: 'No hay un canal equivalente. Edita estos agentes en Ajustes › Equipos: %{names}.'
+cheaprouter_roles_unknown: 'Sin confirmar: %{count}. Revisa los canales de los agentes.'
 role_failed: Operación fallida; vuelva a intentarlo
 chat_child_unavailable: Subsesión no disponible; inténtelo de nuevo
 reference_load_failed: No se pudieron cargar las referencias

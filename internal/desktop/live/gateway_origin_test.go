@@ -147,6 +147,12 @@ func TestCheapGatewayOriginInvalidatesOnConfirmedLoginRejection(t *testing.T) {
 	}
 	d.account().SelectOrigin(alt.URL)
 	d.await("login confirms rejection", func() bool { return d.account().Stage == cheapauthui.SignedOut })
+	if !d.account().LoginExpired {
+		t.Fatal("origin rejection did not show recovery guidance")
+	}
+	// The rejected origin was rolled back to the login origin, which renewed
+	// once and then confirmed the rejection itself: the session ends, and the
+	// invalidation is recorded against the login origin, not the rejected one.
 	checkLog("origin_switch", "/groups/available", http.StatusOK, true)
 	if d.stored() != nil || d.runtime.cheapAuth.service.GatewayOriginConfig().SelectedOrigin() != "" ||
 		!slices.Contains(login.requests(), "POST /auth/refresh") || slices.Contains(alt.requests(), "POST /auth/refresh") {

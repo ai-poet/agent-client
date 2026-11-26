@@ -51,6 +51,13 @@ func content(c *ui.Context, state *State) {
 	if state.SignedIn() && state.AccountFailure != "" && state.AccountFailure != state.Failure {
 		feedback.Alert(c.Key("account-failure"), state.AccountFailure, feedback.AlertProps{Type: feedback.Error, Selectable: true})
 	}
+	if state.AffectedRoles > 0 {
+		kit.Row(c, "affected-roles", i18n.T(c, "cheaprouter_roles_affected", "count", state.AffectedRoles), "", func() {
+			kit.Secondary(c.Key("migrate-roles"), i18n.T(c, "cheaprouter_roles_migrate")).
+				Disabled(state.MigratingRoles || state.LoggingOut || state.SwitchingGroup || state.Stage == SyncingGateway || state.MigrateRoles == nil).
+				OnClick(state.MigrateRoles)
+		})
+	}
 	if state.MigrationFailure != "" {
 		message := i18n.T(c, state.MigrationFailure) + "：" + i18n.T(c, "migration_failed_retry")
 		if state.MigrationFailureDetail != "" {
@@ -70,12 +77,16 @@ func content(c *ui.Context, state *State) {
 		})
 	}
 
-	switch state.Stage {
+	switch state.LoginStage() {
 	case SignedOut, Starting:
 		disabled := state.Stage == Starting || state.LoggingOut
 		ui.Column(c.Key("signed-out")).Gap(16).Children(func() {
 			ui.Column(c).Gap(6).Children(func() {
-				ui.Text(c, i18n.T(c, "cheaprouter_signed_out")).FontSize(16).FontWeight(600)
+				key := "cheaprouter_signed_out"
+				if state.LoginExpired {
+					key = "cheaprouter_login_expired"
+				}
+				ui.Text(c, i18n.T(c, key)).FontSize(16).FontWeight(600)
 				ui.Text(c, i18n.T(c, "cheaprouter_signed_out_description")).FontSize(13).TextColor(p.TextSecondary)
 			})
 			ui.Column(c).Gap(6).Children(func() {

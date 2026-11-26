@@ -225,6 +225,8 @@ func TestRefreshSuccessAndFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var notifications []bool
+	service.SetExpiryListener(func(expired bool) { notifications = append(notifications, expired) })
 	client, _ := NewClient(server.URL, server.Client())
 	fixed := time.Unix(1_000_000, 0)
 	service.now = func() time.Time { return fixed }
@@ -247,6 +249,9 @@ func TestRefreshSuccessAndFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = service.AccessToken(t.Context())
+	if !slices.Equal(notifications, []bool{true}) {
+		t.Fatalf("refresh expiry notifications = %v", notifications)
+	}
 	if !errors.Is(err, ErrRefresh) {
 		t.Fatalf("刷新失败分类 = %v, want refresh_failed", err)
 	}

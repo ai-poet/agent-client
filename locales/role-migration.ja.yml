@@ -1,0 +1,5 @@
+cheaprouter_roles_affected: "無効なチャネルを使用しているエージェント：%{count} 件"
+cheaprouter_roles_migrate: "利用可能な同名のチャネルに移行"
+cheaprouter_roles_receipt: "成功：%{saved} 件、失敗：%{failed} 件、スキップ：%{skipped} 件。"
+cheaprouter_roles_manual: "対応するチャネルがありません。「設定 › チーム」で編集してください：%{names}。"
+cheaprouter_roles_unknown: "未確認：%{count} 件。エージェントの設定を確認してください。"

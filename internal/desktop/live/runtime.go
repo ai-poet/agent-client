@@ -392,6 +392,9 @@ func (r *Runtime) Close() error {
 	if r.unsubscribe != nil {
 		r.unsubscribe()
 	}
+	if r.cheapAuth != nil && r.cheapAuth.stopExpiryWatch != nil {
+		r.cheapAuth.stopExpiryWatch()
+	}
 	if r.unsubscribePrefs != nil {
 		r.unsubscribePrefs()
 	}
@@ -619,6 +622,9 @@ func (r *Runtime) project() {
 	}
 	snapshot := r.snapshot()
 	r.projectAdmission(&snapshot)
+	if account := r.cheapAuth; account != nil && account.state != nil {
+		account.state.AffectedRoles = len(affectedCheapRoles(snapshot))
+	}
 	d := Sidebar(snapshot, r.Preferences.Data)
 	d.Notices = Notices(r.controller.Notices())
 	r.appendResourceDirectory(d)

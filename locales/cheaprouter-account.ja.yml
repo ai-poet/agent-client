@@ -1,0 +1,4 @@
+cheaprouter_login_expired: "CheapRouter のログイン期限が切れました。再度ログインしてください。"
+cheaprouter_login_expired_action: "再ログイン"
+cheaprouter_disable_failed: "CheapRouter を無効にできませんでした。モデル設定でプロバイダーを無効にしてください。"
+cheaprouter_login_expired_dismiss: "ログインの通知を閉じる"

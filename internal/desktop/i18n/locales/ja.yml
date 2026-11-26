@@ -47,6 +47,10 @@ cheaprouter_account_description: Manage sign-in, plan details and the model gate
 cheaprouter_signed_out: Not signed in
 cheaprouter_signed_out_description: Sign in to connect the CheapRouter model gateway. Other models and local features work without an account.
 cheaprouter_signed_in: Signed in to CheapRouter
+cheaprouter_login_expired: CheapRouter のログイン期限が切れました。再度ログインしてください。
+cheaprouter_login_expired_action: 再ログイン
+cheaprouter_login_expired_dismiss: ログインの通知を閉じる
+cheaprouter_disable_failed: CheapRouter を無効にできませんでした。モデル設定でプロバイダーを無効にしてください。
 settings_providers: モデル
 settings_providers_description: セッションプロバイダ、認証、モデルの管理Name
 settings_connectors: コネクター
@@ -1851,6 +1855,11 @@ team_conflict: チームが変更されました。開き直してください
 role_model_unavailable: 選択したモデルまたはプロバイダは利用できません
 role_capacity: サブエージェント限界に達しました
 role_unknown: 結果が確認されていません。元の要求をやり直します
+cheaprouter_roles_affected: 無効なチャネルを使用しているエージェント：%{count} 件
+cheaprouter_roles_migrate: 利用可能な同名のチャネルに移行
+cheaprouter_roles_receipt: 成功：%{saved} 件、失敗：%{failed} 件、スキップ：%{skipped} 件。
+cheaprouter_roles_manual: 対応するチャネルがありません。「設定 › チーム」で編集してください：%{names}。
+cheaprouter_roles_unknown: 未確認：%{count} 件。エージェントの設定を確認してください。
 role_failed: 操作に失敗しました。やり直します
 chat_child_unavailable: サブセッションが利用できません。もう一度試してください
 reference_load_failed: 参照を読み込めませんでした

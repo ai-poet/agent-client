@@ -420,7 +420,7 @@ func TestCheapAccountIsOptionalAtStartup(t *testing.T) {
 	gateway := newCheapGateway(t)
 	d := openCheapDesktop(t, nil)
 	d.workspace("startup without credentials")
-	if state := d.account(); state.Stage != cheapauthui.SignedOut || state.Failure != "" {
+	if state := d.account(); state.LoginExpired || state.Stage != cheapauthui.SignedOut || state.Failure != "" {
 		t.Fatalf("startup account state: stage %d, failure %q", state.Stage, state.Failure)
 	}
 	d.accountPage()
@@ -459,7 +459,7 @@ func TestCheapGatewayOutageKeepsWorkspace(t *testing.T) {
 	d.workspace("startup with an unreachable gateway")
 	d.await("the gateway sync to fail", func() bool { return d.account().Stage == cheapauthui.GatewayFailed })
 	failure := (&core.AuthError{Kind: core.ErrorNetwork}).Error()
-	if d.account().Failure != failure {
+	if d.account().LoginExpired || d.account().Failure != failure {
 		t.Fatalf("the unreachable gateway is reported as %q", d.account().Failure)
 	}
 	d.workspace("after the gateway sync failed")
@@ -486,10 +486,13 @@ func TestCheapSignInAddsProviderAndSignOutDisablesOnlyIt(t *testing.T) {
 	gateway := newCheapGateway(t)
 	exchange := make(chan struct{})
 	gateway.exchange = exchange
-	d := openCheapDesktop(t, nil)
-	d.accountPage()
-	d.account().Endpoint = gateway.URL
-	d.click(cheapSignIn)
+	// The stored access token is refused and its renewal is refused too, so the
+	// session really expires and the guidance appears.
+	gateway.set(func() { gateway.rejected = true })
+	d := openCheapDesktop(t, func(d *cheapDesktop) { d.signedIn(gateway.URL, "stale-access", time.Hour) })
+	banner := i18n.In("zh-CN", "cheaprouter_login_expired_action")
+	d.await("recovery guidance", func() bool { return d.account().Stage == cheapauthui.SignedOut && d.tester.HasText(banner) })
+	d.click(banner)
 	d.await("the sign-in to wait for the browser", func() bool { return d.account().Stage == cheapauthui.WaitingForCode })
 	opened := d.tester.OpenedURLs()
 	if len(opened) != 1 {
@@ -520,12 +523,18 @@ func TestCheapSignInAddsProviderAndSignOutDisablesOnlyIt(t *testing.T) {
 	d.await("the code to reach the gateway", func() bool { return slices.Contains(gateway.requests(), "POST /auth/desktop-session/exchange") })
 	d.click(i18n.In("zh-CN", "settings"))
 	d.workspace("while the code is exchanged")
+	if !d.tester.HasText(banner) {
+		t.Fatal("starting sign-in cleared the expiry notice")
+	}
 	close(exchange)
 	d.await("the gateway to connect", func() bool { return d.account().Stage == cheapauthui.Ready })
 	if status := <-delivered; status != http.StatusOK {
 		t.Fatalf("the loopback delivery answered %d", status)
 	}
 	d.workspace("after signing in")
+	if d.account().LoginExpired || d.tester.HasText(banner) {
+		t.Fatal("successful sign-in retained expiry guidance")
+	}
 	if !d.tester.HasText(i18n.In("zh-CN", "cheaprouter_signed_in")) {
 		t.Fatalf("the sign-in was not reported: %q", d.tester.Texts())
 	}
@@ -557,7 +566,7 @@ func TestCheapSignInAddsProviderAndSignOutDisablesOnlyIt(t *testing.T) {
 
 	d.accountLogout()
 	d.await("the sign-out", func() bool { return d.account().Stage == cheapauthui.SignedOut && !d.account().LoggingOut })
-	if d.account().Failure != "" || !d.tester.HasText(cheapSignIn) {
+	if d.account().LoginExpired || d.account().Failure != "" || !d.tester.HasText(cheapSignIn) {
 		t.Fatalf("signing out left %q: %q", d.account().Failure, d.tester.Texts())
 	}
 	disabled := provider
@@ -644,11 +653,16 @@ func TestCheapSessionRejectionDisablesOnlyGateway(t *testing.T) {
 				enabled = d.saveGateway(gateway.URL)
 			})
 			d.workspace("startup with a rejected session")
-			d.await("the session to end", func() bool { return d.account().Stage == cheapauthui.SignedOut && d.account().Failure != "" })
+			d.await("the session to end", func() bool { return d.account().Stage == cheapauthui.SignedOut && d.account().LoginExpired })
+			// The rejection is confirmed on the login origin: a since-renewed
+			// bearer is refused there, so the refresh is the interface to blame.
 			checkLog("sync", fixture.op, http.StatusUnauthorized, true)
 			failure := (&core.AuthError{Kind: fixture.failure, Status: http.StatusUnauthorized}).Error()
 			if d.account().Failure != failure {
 				t.Fatalf("the rejected session is reported as %q, want %q", d.account().Failure, failure)
+			}
+			if !d.tester.HasText(i18n.In("zh-CN", "cheaprouter_login_expired_action")) {
+				t.Fatal("rejection did not show the main window banner")
 			}
 			disabled := enabled
 			disabled.Enabled, disabled.Revision = false, enabled.Revision+1
@@ -661,13 +675,40 @@ func TestCheapSessionRejectionDisablesOnlyGateway(t *testing.T) {
 			}
 			d.workspace("after the session ended")
 			d.accountPage()
-			for _, text := range []string{failure, i18n.In("zh-CN", "cheaprouter_signed_out"), cheapSignIn} {
+			for _, text := range []string{failure, i18n.In("zh-CN", "cheaprouter_login_expired"), cheapSignIn} {
 				if !d.tester.HasText(text) {
 					t.Errorf("the account page lacks %q: %q", text, d.tester.Texts())
 				}
 			}
 		})
 	}
+}
+
+// A stored access token the gateway refuses is renewed once on the login
+// origin; the request then continues, so the session and its credentials stay
+// and no recovery guidance appears.
+func TestCheapAccessRejectionRefreshesWithoutSigningOut(t *testing.T) {
+	gateway := newCheapGateway(t)
+	d := openCheapDesktop(t, func(d *cheapDesktop) { d.signedIn(gateway.URL, "stale-access", time.Hour) })
+	d.await("the renewed session to connect", func() bool { return d.account().Stage == cheapauthui.Ready })
+	if d.account().LoginExpired || d.account().Failure != "" {
+		t.Fatalf("a renewed access token ended the session: %q", d.account().Failure)
+	}
+	if stored := d.stored(); stored == nil || stored.AccessToken != cheapTestAccess || stored.RefreshToken != cheapTestRefresh {
+		t.Fatalf("the renewal was not kept: %+v", stored)
+	}
+	requests := gateway.requests()
+	renewals := 0
+	for _, request := range requests {
+		if request == "POST /auth/refresh" {
+			renewals++
+		}
+	}
+	if renewals != 1 || slices.Contains(requests, "POST /auth/logout") {
+		t.Fatalf("renewals = %d of %q, want exactly one and no sign-out", renewals, requests)
+	}
+	d.gateway(true)
+	d.workspace("after the access token was renewed")
 }
 
 // A CheapRouter provider that another window wrote between this window's

@@ -50,6 +50,10 @@ cheaprouter_account_description
 cheaprouter_signed_out
 cheaprouter_signed_out_description
 cheaprouter_signed_in
+cheaprouter_login_expired
+cheaprouter_login_expired_action
+cheaprouter_login_expired_dismiss
+cheaprouter_disable_failed
 settings_providers
 settings_providers_description
 settings_connectors
@@ -1864,6 +1868,11 @@ team_conflict
 role_model_unavailable
 role_capacity
 role_unknown
+cheaprouter_roles_affected
+cheaprouter_roles_migrate
+cheaprouter_roles_receipt
+cheaprouter_roles_manual
+cheaprouter_roles_unknown
 role_failed
 chat_child_unavailable
 reference_load_failed

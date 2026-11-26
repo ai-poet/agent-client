@@ -1,0 +1,5 @@
+cheaprouter_roles_affected: "Agents utilisant un canal désactivé : %{count}"
+cheaprouter_roles_migrate: "Migrer vers le canal disponible du même nom"
+cheaprouter_roles_receipt: "Réussites : %{saved}. Échecs : %{failed}. Ignorés : %{skipped}."
+cheaprouter_roles_manual: "Aucun canal correspondant. Modifiez ces agents dans Paramètres › Équipes : %{names}."
+cheaprouter_roles_unknown: "Résultats non confirmés : %{count}. Vérifiez les canaux des agents."
