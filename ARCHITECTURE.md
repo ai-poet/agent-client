@@ -645,8 +645,9 @@ For an unfocused compaction within the replay window, Anthropic Messages
 uses `compaction: {type: "summarize"}` and the `compact-2026-09-04` beta;
 Responses uses `/responses/compact`. Other routes, focused requests, and
 overflow recovery use the transcript handoff. Rejected native endpoints
-and features are remembered per provider, protocol, endpoint and model for
-the Node's lifetime. A completed reply with no compaction item also disables
+and features are remembered for the current provider revision, protocol,
+endpoint and model (at most 256 routes). Editing the channel permits a new
+native attempt. A completed reply with no compaction item also disables
 native compaction for that route. An unusable item falls back without disabling it.
 Transient native provider errors get one resend before the transcript handoff,
 even after waiting for load. They do not mark the route unsupported. Rate

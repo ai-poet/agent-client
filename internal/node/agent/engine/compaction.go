@@ -536,8 +536,7 @@ func compactedFiles(summary handoff.Summary) []canonical.CompactedFile {
 }
 
 func (r *Runtime) nativeCompaction(x *execution, binding model.Binding, route model.Route, state store.AgentState, selection handoff.Selection, observe func(model.Attempt) error) (model.Compacted, bool, error) {
-	key := binding.Provider.ID.String() + "\x00" + route.Native
-	if _, rejected := r.nativeRejected.Load(key); rejected {
+	if model.NativeRejected(binding, route.Native) {
 		return model.Compacted{}, false, nil
 	}
 	try := func() (model.Compacted, error) {
@@ -564,7 +563,6 @@ func (r *Runtime) nativeCompaction(x *execution, binding model.Binding, route mo
 		nativeOutcome(binding, route, "native", nil)
 		return compacted, true, nil
 	case errors.Is(err, model.ErrNativeUnsupported):
-		r.nativeRejected.Store(key, true)
 		nativeOutcome(binding, route, "unsupported", err)
 	case errors.Is(err, model.ErrNativeUnusable):
 		nativeOutcome(binding, route, "unusable", err)
