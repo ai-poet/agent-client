@@ -123,6 +123,12 @@ func CompactNative(ctx context.Context, languageModel fantasy.LanguageModel, bin
 		if nativeRejected(err) {
 			return Compacted{}, fmt.Errorf("%w: %w", ErrNativeUnsupported, err)
 		}
+		if failure := Classify(err); failure.nativeFallback() {
+			// The quick resend is spent, not the ordinary recovery: Sailry's
+			// summary still has its own.
+			failure.Exhausted, failure.WaitExhausted = false, false
+			return Compacted{}, failure
+		}
 		return Compacted{}, err
 	}
 	if output != nil && output.Ignored {
@@ -140,7 +146,7 @@ func CompactNative(ctx context.Context, languageModel fantasy.LanguageModel, bin
 // route's support unchanged.
 func nativeRejected(err error) bool {
 	failure := Classify(err)
-	if failure.status == nil {
+	if failure.status == nil || failure.Kind != InvalidRequest {
 		return false
 	}
 	switch *failure.status {

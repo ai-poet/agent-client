@@ -25,6 +25,7 @@ type retryPolicy struct {
 	dialTimeouts   uint64
 	originDeadline time.Time
 	retryAt        time.Time
+	nativeResends  uint64
 }
 
 func newRetryPolicy() retryPolicy {
@@ -39,10 +40,10 @@ func newRetryPolicy() retryPolicy {
 }
 
 func (policy *retryPolicy) limit(purpose Purpose, attempt Attempt, streamed bool) uint64 {
-	// Give rate limits and overload the ordinary wait budget. For other
-	// transient failures, prefer the transcript handoff over more resends.
-	if purpose == NativePurpose && (attempt.Failure == nil || !attempt.Failure.overloaded) {
-		return nativeRetries
+	// A provider error gets one quick resend, even after waits for load.
+	if purpose == NativePurpose && attempt.Failure.nativeFallback() {
+		policy.nativeResends++
+		return min(MainRetries, attempt.Index+nativeRetries+1-policy.nativeResends)
 	}
 	if purpose == Main && attempt.Failure.tcpDialTimeout && !streamed && attempt.RequestSentUs == nil && attempt.Status == nil {
 		policy.dialTimeouts++
