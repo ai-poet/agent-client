@@ -1711,7 +1711,9 @@ session_changed
 project_changed
 chat_action_failed
 chat_action_unknown
-chat_config_unavailable
+chat_selected_model_unavailable
+chat_agent_model_unavailable
+chat_login_expired
 notification_update_failed
 session_archive_named
 power_request_failed

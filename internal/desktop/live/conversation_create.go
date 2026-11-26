@@ -227,12 +227,23 @@ func (r *Runtime) executeCreation(scope string, command protocol.Command, finish
 	r.executeScoped(scope, command, finished)
 }
 
-// reportCreation toasts why a session was not created. A model that is not
-// configured, as a provider the local Node no longer has or an account
-// sign-in that stays with the Node it was made on, is its own failure.
 func (r *Runtime) reportCreation(c *ui.Context, err error) {
-	if faultCode(err) == protocol.ErrorCodeNotConfigured {
-		kit.Toast(c, kit.Failed, i18n.T(c, "chat_config_unavailable"))
+	if f := commandFault(err); f != nil && f.Code == protocol.ErrorCodeNotConfigured {
+		key := "chat_selected_model_unavailable"
+		switch f.ConfigurationReason() {
+		case protocol.ConfigurationLoginRequired, protocol.ConfigurationAuthorizationExpired, protocol.ConfigurationAuthenticationChanged:
+			key = "chat_login_expired"
+		case protocol.ConfigurationRoleCaptureMissing:
+			key = "chat_agent_model_unavailable"
+		default:
+			// Roster validation shares provider reasons with other operations.
+			// These existing Node messages identify its source even on peers
+			// that send no reason for a model missing from the provider.
+			if f.Message == "role provider is unavailable" || f.Message == "role model is unavailable" {
+				key = "chat_agent_model_unavailable"
+			}
+		}
+		kit.Toast(c, kit.Failed, i18n.T(c, key))
 		return
 	}
 	r.report(c, err, "session_changed")

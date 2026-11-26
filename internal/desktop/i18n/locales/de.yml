@@ -1698,7 +1698,9 @@ session_changed: Sitzung geändert; erneut versuchen
 project_changed: Projekt geändert; Editor neu öffnen
 chat_action_failed: Vorgang fehlgeschlagen; versuchen Sie es erneut
 chat_action_unknown: Ergebnis nicht bestätigt; versuchen Sie die ursprüngliche Anfrage erneut
-chat_config_unavailable: Sitzungskonfiguration nicht verfügbar; überprüfen Sie den Anbieter
+chat_selected_model_unavailable: Das ausgewählte Modell ist nicht verfügbar. Prüfen Sie die Anbietereinstellungen.
+chat_agent_model_unavailable: Das Modell eines Agenten ist nicht verfügbar. Prüfen Sie Einstellungen › Teams.
+chat_login_expired: Ihre Anmeldung ist abgelaufen. Melden Sie sich erneut an.
 notification_update_failed: Benachrichtigungen konnten nicht aktualisiert werden; erneut versuchen
 session_archive_named: „%{name}“ archivieren und aus aktiven Unterhaltungen ausblenden
 power_request_failed: Ruhezustand konnte nicht verhindert werden
