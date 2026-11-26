@@ -960,6 +960,13 @@ of the page. Connected account settings and other pages retain Kit. Presentation
 state and callbacks still belong to the existing CheapRouter controller; the
 component library owns no credentials or network work.
 
+A business API bearer rejection on the login origin triggers one serialized
+renewal and a retry of the rejected request. A refused refresh ends the login;
+a network failure does not. During gateway sync, a different origin cannot
+invalidate the account: Desktop first restores routing to the login origin
+and resyncs its account, catalog and keys before updating Node providers. A
+confirmed rejection there after renewal ends the session.
+
 The account's Kit payment sheet uses `internal/cheapauth` to renew the session
 at the login endpoint and to call `/pay` at the selected API origin. The live
 controller keeps the order's separate status token out of presentation state.

@@ -140,6 +140,68 @@ func TestExchangeRejectsExpiredCode(t *testing.T) {
 	}
 }
 
+func TestFreshAccessTokenRejectionRefreshesAndRetriesOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name                       string
+		refreshStatus, retryStatus int
+		wantErr                    error
+	}{
+		{"renewed", 200, 200, nil},
+		{"refresh rejected", 403, 0, ErrRefresh},
+		{"refresh unavailable", 503, 0, &AuthError{Kind: ErrorResponse}},
+		{"renewed bearer rejected", 200, 401, ErrUnauthorized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var attempts, refreshes atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				switch req.URL.Path {
+				case "/api/v1/auth/refresh":
+					refreshes.Add(1)
+					writeEnvelope(t, w, tc.refreshStatus, `{"data":{"access_token":"rotated","refresh_token":"rotated-refresh","expires_in":3600}}`)
+				case "/api/v1/auth/me":
+					if attempts.Add(1) == 1 {
+						if req.Header.Get("Authorization") != "Bearer "+testAccess {
+							t.Error("first request did not use stored access token")
+						}
+						w.WriteHeader(http.StatusUnauthorized)
+						return
+					}
+					if req.Header.Get("Authorization") != "Bearer rotated" {
+						t.Error("retry did not use rotated access token")
+					}
+					writeEnvelope(t, w, tc.retryStatus, `{"data":{"id":42}}`)
+				default:
+					http.NotFound(w, req)
+				}
+			}))
+			defer server.Close()
+			s, err := NewService(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Establish(t.Context(), Credentials{Endpoint: server.URL, AccessToken: testAccess, RefreshToken: testRefresh, ExpiresAt: time.Now().Add(time.Hour).Unix()}); err != nil {
+				t.Fatal(err)
+			}
+			user, err := s.Account(t.Context())
+			if !errors.Is(err, tc.wantErr) || err == nil && user.ID != 42 {
+				t.Fatalf("account: id=%d err=%v", user.ID, err)
+			}
+			wantAttempts := int32(1)
+			if tc.retryStatus != 0 {
+				wantAttempts++
+			}
+			if refreshes.Load() != 1 || attempts.Load() != wantAttempts {
+				t.Fatalf("refreshes=%d requests=%d", refreshes.Load(), attempts.Load())
+			}
+			stored, err := s.store.Load()
+			if err != nil || (stored == nil) != errors.Is(tc.wantErr, ErrRefresh) ||
+				stored != nil && tc.refreshStatus == 200 && stored.RefreshToken != "rotated-refresh" {
+				t.Fatal("incorrect credential state after recovery")
+			}
+		})
+	}
+}
+
 func TestRefreshSuccessAndFailure(t *testing.T) {
 	var refreshCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

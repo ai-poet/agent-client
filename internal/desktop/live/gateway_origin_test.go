@@ -107,17 +107,50 @@ func TestCheapGatewayOriginSwitchUpdatesProvidersAndRollsBackOnFailure(t *testin
 	}
 }
 
-func TestCheapGatewayOriginRejectionLogsInvalidation(t *testing.T) {
+func TestCheapGatewayOriginRejectionReturnsToLogin(t *testing.T) {
 	login := newCheapGateway(t)
+	previous := newCheapGateway(t)
 	alt := newCheapGateway(t)
 	alt.set(func() { alt.groupsBody = `{"code":401,"message":"sensitive-response-fixture"}` })
+	d := openCheapDesktop(t, func(d *cheapDesktop) {
+		d.signedIn(login.URL, cheapTestAccess, time.Hour)
+	})
+	d.await("initial sync ready", func() bool { return d.account().Stage == cheapauthui.Ready })
+	d.account().SelectOrigin(previous.URL)
+	d.await("routed away from login", func() bool {
+		return !d.account().OriginSwitching && d.account().ActiveOrigin() == previous.URL
+	})
+	d.account().SelectOrigin(alt.URL)
+	d.await("rejected origin returns to login", func() bool {
+		return !d.account().OriginSwitching && d.account().ActiveOrigin() == login.URL
+	})
+	p := d.gateway(true)
+	if d.account().Stage != cheapauthui.Ready || d.account().OriginError == "" ||
+		!strings.HasPrefix(p.Endpoint, login.URL) || d.runtime.cheapAuth.service.GatewayOrigin() != login.URL ||
+		d.stored() == nil || d.stored().AccessToken != cheapTestAccess {
+		t.Fatal("rollback did not preserve credentials and resync the provider on the login origin")
+	}
+	if slices.Contains(alt.requests(), "POST /auth/refresh") {
+		t.Fatal("sent a refresh token to the rejected origin")
+	}
+}
+
+func TestCheapGatewayOriginInvalidatesOnConfirmedLoginRejection(t *testing.T) {
+	login, alt := newCheapGateway(t), newCheapGateway(t)
 	checkLog := captureCheapInvalidation(t)
 	d := openCheapDesktop(t, func(d *cheapDesktop) {
 		d.signedIn(login.URL, cheapTestAccess, time.Hour)
 	})
 	d.await("initial sync ready", func() bool { return d.account().Stage == cheapauthui.Ready })
+	for _, gw := range []*cheapGateway{alt, login} {
+		gw.set(func() { gw.groupsBody = `{"code":401,"message":"sensitive-response-fixture"}` })
+	}
 	d.account().SelectOrigin(alt.URL)
-	d.await("rejected origin signs out", func() bool { return d.account().Stage == cheapauthui.SignedOut })
-	// An envelope can signal rejection even when its HTTP response was OK.
-	checkLog("origin_switch", "/groups/available", http.StatusOK, false)
+	d.await("login confirms rejection", func() bool { return d.account().Stage == cheapauthui.SignedOut })
+	checkLog("origin_switch", "/groups/available", http.StatusOK, true)
+	if d.stored() != nil || d.runtime.cheapAuth.service.GatewayOriginConfig().SelectedOrigin() != "" ||
+		!slices.Contains(login.requests(), "POST /auth/refresh") || slices.Contains(alt.requests(), "POST /auth/refresh") {
+		t.Fatal("session did not end after rollback and login-only renewal")
+	}
+	d.gateway(false)
 }

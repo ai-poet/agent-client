@@ -631,8 +631,8 @@ func TestCheapSessionRejectionDisablesOnlyGateway(t *testing.T) {
 		failure core.ErrorKind
 		op      string
 	}{
-		"refresh token refused": {cheapTestAccess, -time.Hour, core.ErrorRefresh, "/auth/refresh"},
-		"access token refused":  {"stale-access", time.Hour, core.ErrorUnauthorized, "/auth/me"},
+		"refresh token refused":       {cheapTestAccess, -time.Hour, core.ErrorRefresh, "/auth/refresh"},
+		"access then refresh refused": {"stale-access", time.Hour, core.ErrorRefresh, "/auth/refresh"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			gateway := newCheapGateway(t)
