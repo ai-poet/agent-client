@@ -141,15 +141,15 @@ func (r *Runtime) mountTrace(idText string) *sessionTrace {
 		}
 		ctx, cancel := context.WithCancel(v.ctx)
 		v.bodyCancel = cancel
-		p.TraceContent, p.TraceError = protocol.TracePage{}, ""
+		p.TraceContent, p.TraceBodyFailed = protocol.TracePage{}, false
 		owner.async(func() {
 			body, err := owner.controller.ReadTrace(ctx, protocol.TraceQuery{Session: id, Body: name, PreviewBytes: protocol.TracePreviewLimit})
-			r.enqueue(func(c *ui.Context) {
+			r.enqueue(func(*ui.Context) {
 				if ctx.Err() != nil {
 					return
 				}
 				if err != nil {
-					p.TraceError = i18n.T(c, "chat_history_failed")
+					p.TraceBodyFailed = true
 				} else {
 					p.TraceContent = body
 				}
@@ -232,7 +232,7 @@ func (r *Runtime) traceFrame(c *ui.Context, session string) {
 				if err != nil {
 					v.tail = ""
 					p.TracePage, p.TraceContent = nil, protocol.TracePage{}
-					p.TraceError = i18n.T(c, "chat_history_failed")
+					p.TraceError = i18n.T(c, "trace_load_failed")
 					return
 				}
 				if reset {

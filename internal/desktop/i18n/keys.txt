@@ -2709,6 +2709,23 @@ trace_sent
 trace_gap
 trace_dropped_headers
 trace_turn_number
+trace_export_failed
+trace_load_failed
+trace_response_headers
+trace_request_id
+trace_started
+trace_empty
+trace_empty_hint
+trace_body_missing
+trace_body_capture_hint
+trace_body_not_saved
+trace_body_failed
+trace_export_shareable_hint
+trace_export_raw_hint
+trace_export_count
+trace_export_none
+trace_turn_label
+trace_timing
 
 # Trace diagnostics, profile controls and insights
 approval_cancelled

@@ -2688,6 +2688,23 @@ trace_sent: Запрос отправлен
 trace_gap: Самая долгая пауза
 trace_dropped_headers: Скрытые заголовки
 trace_turn_number: Ход %{count}
+trace_export_failed: Не удалось экспортировать трассировку
+trace_load_failed: Не удалось загрузить трассировку
+trace_response_headers: Заголовки ответа
+trace_request_id: ID запроса
+trace_started: Начало
+trace_empty: Запросов пока нет
+trace_empty_hint: Здесь появятся запросы к модели в этом диалоге.
+trace_body_missing: Тело не записано
+trace_body_capture_hint: Включите «Записывать тела запросов» в разделе Настройки › Общие, чтобы сохранять тела новых запросов.
+trace_body_not_saved: Трассировка достигла лимита хранения, или тело не удалось записать.
+trace_body_failed: Не удалось загрузить тело
+trace_export_shareable_hint: Системные инструкции заменяются отпечатками. Содержимое диалога остаётся.
+trace_export_raw_hint: Включает полные запросы и ответы.
+trace_export_count: 'Записанных запросов: %{count}'
+trace_export_none: В этом диапазоне нет записанных запросов
+trace_turn_label: Ход
+trace_timing: Время
 approval_cancelled: Отменено
 diagnosis_action_account: Уточните у оператора шлюза, менялся ли аккаунт провайдера.
 diagnosis_action_balance: Проверьте баланс и квоту.

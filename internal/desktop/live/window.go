@@ -13,7 +13,7 @@ func (r *Runtime) ReportTraceExport(err error) {
 			kit.Toast(c, kit.Done, i18n.T(c, "trace_export_saved"))
 			return
 		}
-		key := "conversation_export_failed"
+		key := "trace_export_failed"
 		if f := commandFault(err); f != nil && f.Code == protocol.ErrorCodeInvalidRequest && f.Message == protocol.TraceExportTooLargeMessage {
 			key = "trace_export_limit"
 		}

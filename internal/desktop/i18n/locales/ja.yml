@@ -2688,6 +2688,23 @@ trace_sent: 送信完了
 trace_gap: 最大間隔
 trace_dropped_headers: 省略されたヘッダー
 trace_turn_number: ターン %{count}
+trace_export_failed: トレースをエクスポートできませんでした
+trace_load_failed: トレースを読み込めませんでした
+trace_response_headers: レスポンスヘッダー
+trace_request_id: リクエスト ID
+trace_started: 開始時刻
+trace_empty: リクエストはまだありません
+trace_empty_hint: この会話のモデルリクエストがここに表示されます。
+trace_body_missing: 本文は記録されていません
+trace_body_capture_hint: 「設定 › 一般」で「リクエスト本文を記録」をオンにすると、新しいリクエストの本文が保存されます。
+trace_body_not_saved: トレースが保存上限に達したか、本文を書き込めませんでした。
+trace_body_failed: 本文を読み込めませんでした
+trace_export_shareable_hint: システム指示はフィンガープリントに置き換えられます。会話の内容は含まれます。
+trace_export_raw_hint: リクエストとレスポンスをすべて含みます。
+trace_export_count: 記録済みリクエスト %{count} 件
+trace_export_none: この範囲に記録済みのリクエストはありません
+trace_turn_label: ターン
+trace_timing: タイミング
 approval_cancelled: キャンセル済み
 diagnosis_action_account: 上流アカウントが変わったかゲートウェイ管理者に確認してください。
 diagnosis_action_balance: 残高と割り当てを確認してください。

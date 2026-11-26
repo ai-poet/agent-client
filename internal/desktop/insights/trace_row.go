@@ -25,8 +25,8 @@ func requestRow(c *ui.Context, r protocol.UsageRequest, open func(protocol.Usage
 			line := func(v string) { ui.Text(c, v).FillWidth().SingleLine().FontSize(12) }
 			ui.Text(c, title).FillWidth().SingleLine().FontSize(15)
 			line(at + "   #" + number(r.Attempt))
-			line(t("trace_turn") + ": " + r.Turn.String())
-			line(t("image_studio_channel") + ": " + r.ProviderName + " / " + r.Model)
+			line(t("trace_turn_label") + ": " + r.Turn.String())
+			line(t("usage_column_provider") + ": " + r.ProviderName + " / " + r.Model)
 			bits := []string{}
 			if r.Status != nil {
 				bits = append(bits, fmt.Sprintf("HTTP %d", *r.Status))
@@ -60,7 +60,7 @@ func requestRow(c *ui.Context, r protocol.UsageRequest, open func(protocol.Usage
 				metric("trace_cache_write", number(r.CacheWrite))
 			})
 			if r.RequestID != nil {
-				line(t("trace_request") + ": " + *r.RequestID)
+				line(t("trace_request_id") + ": " + *r.RequestID)
 			}
 			if r.GatewayRequestID != nil {
 				line(t("insights_gateway_id") + ": " + *r.GatewayRequestID)

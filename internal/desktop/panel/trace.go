@@ -2,6 +2,7 @@ package panel
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -44,8 +45,11 @@ type traceRow struct {
 	observedCache                  *uint64
 	CompleteContext                bool `json:"complete_context"`
 	turnNumber                     int
-	Request, Response              traceSide
-	Bytes                          struct {
+	// captured is a row of the session's private index, as opposed to an
+	// observation or Insights fallback without sidecars.
+	captured          bool
+	Request, Response traceSide
+	Bytes             struct {
 		ReqTruncated bool `json:"req_truncated"`
 		ResTruncated bool `json:"res_truncated"`
 	}
@@ -54,22 +58,38 @@ type traceRow struct {
 type tracePresentation struct {
 	// indexed is a metadata-only fallback for the deep-linked attempt,
 	// not a captured record or part of the conversation watch.
-	indexed                                      *traceRow
-	request, filter, query, tab                  string
-	attempt                                      int
-	detail, real, split, export, confirm, reveal bool
-	scope, mode, exportTurn                      string
-	page                                         []json.RawMessage
-	projected                                    []traceRow
+	indexed                                               *traceRow
+	request, filter, query, tab                           string
+	attempt, mode                                         int
+	detail, real, split, export, confirm, reveal, headers bool
+	scope, exportTurn                                     string
+	page                                                  []json.RawMessage
+	projected                                             []traceRow
+	// requested is the body last asked for, so a frame never repeats a
+	// read that is in flight or failed.
+	requested string
 
 	preview tracePreview
 }
+
+// The detail tabs, in order: their ids and labels.
+var traceTabs = []struct{ id, label string }{
+	{"", "market_details_overview"}, {"request", "trace_request"}, {"response", "trace_response"}, {"metrics", "trace_metrics"},
+}
+
+// The list filters, in order: their ids and labels.
+var traceFilters = []struct{ id, label string }{
+	{"", "market_all"}, {"failed", "meter_failed"}, {"retry", "trace_retries"}, {"miss", "trace_miss"},
+}
+
+// traceNarrow is the width below which the list and the detail take turns.
+const traceNarrow = 520
 
 func (s *State) ResetTrace() {
 	s.TraceReadBody, s.TraceJump, s.TraceExport = nil, nil, nil
 	s.TracePage, s.TraceRecent, s.TraceTurnNumbers, s.TraceMarkers = nil, nil, nil, nil
 	s.TraceContent = protocol.TracePage{}
-	s.TraceError = ""
+	s.TraceError, s.TraceBodyFailed = "", false
 	s.trace = tracePresentation{}
 }
 
@@ -90,6 +110,7 @@ func decodeTraceRows(page []json.RawMessage) []traceRow {
 		if json.Unmarshal(raw, &r) != nil || r.RequestID == "" {
 			continue
 		}
+		r.captured = true
 		out = append(out, r)
 	}
 	return out
@@ -141,7 +162,7 @@ func (s *State) traceRows(decoded []traceRow, filter, query string) []traceRow {
 				break
 			}
 		}
-		if filter == "failed" && r.Outcome != "failed" || filter == "retry" && r.Attempt <= 1 && r.Retry == nil || filter == "miss" && r.metric("cache_read") != "0" {
+		if !r.matches(filter) {
 			continue
 		}
 		if query != "" && !strings.Contains(strings.ToLower(strings.Join([]string{r.status(), r.Failure.Kind, r.Failure.Code, r.Provider.Model, r.Response.Gateway}, " ")), query) {
@@ -152,12 +173,48 @@ func (s *State) traceRows(decoded []traceRow, filter, query string) []traceRow {
 		}
 		groups[r.Turn] = append(groups[r.Turn], r)
 	}
+	// Captures precede the observation fallback in decoded, so a session
+	// recorded only after its first turns would list those turns last.
+	// Order turns, and each turn's requests, by their earliest start.
+	first := func(rows []traceRow, request string) int64 {
+		var at int64
+		for _, r := range rows {
+			if r.TS > 0 && (request == "" || r.RequestID == request) && (at == 0 || r.TS < at) {
+				at = r.TS
+			}
+		}
+		if at == 0 {
+			return 1<<63 - 1
+		}
+		return at
+	}
+	slices.SortStableFunc(turns, func(a, b string) int { return cmp.Compare(first(groups[a], ""), first(groups[b], "")) })
 	var out []traceRow
 	for _, turn := range turns {
-		out = append(out, groups[turn]...)
+		rows := groups[turn]
+		slices.SortStableFunc(rows, func(a, b traceRow) int {
+			if a.RequestID == b.RequestID {
+				return cmp.Compare(a.Attempt, b.Attempt)
+			}
+			return cmp.Compare(first(rows, a.RequestID), first(rows, b.RequestID))
+		})
+		out = append(out, rows...)
 	}
 	return out
 }
+
+func (r traceRow) matches(filter string) bool {
+	switch filter {
+	case "failed":
+		return r.Outcome == "failed"
+	case "retry":
+		return r.Attempt > 1 || r.Retry != nil
+	case "miss":
+		return r.metric("cache_read") == "0"
+	}
+	return true
+}
+
 func (r traceRow) status() string {
 	if r.Status == 0 {
 		return "-"
@@ -180,10 +237,52 @@ func (r traceRow) metric(k string) string {
 }
 func (r traceRow) elapsed() string {
 	if v, ok := r.Timing["elapsed_us"]; ok {
-		return (time.Duration(v) * time.Microsecond).String()
+		return traceDuration(v)
 	}
 	return "-"
 }
+
+// traceDuration is a microsecond span at the precision a reader compares:
+// whole milliseconds under a second, then seconds to two places.
+func traceDuration(us uint64) string {
+	d := time.Duration(us) * time.Microsecond
+	switch {
+	case d < time.Millisecond:
+		return fmt.Sprintf("%.1fms", float64(d)/float64(time.Millisecond))
+	case d < time.Second:
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	case d < time.Minute:
+		return fmt.Sprintf("%.2fs", d.Seconds())
+	}
+	return d.Round(time.Second).String()
+}
+
+// tone is the attempt's state at a glance: its outcome, unless a warning
+// qualifies a success.
+func (r traceRow) tone() kit.Tone {
+	switch {
+	case r.Outcome == "failed":
+		return kit.Negative
+	case r.Verdict != nil && r.Verdict.Severity == "warning":
+		return kit.Caution
+	case r.Outcome == "succeeded":
+		return kit.Positive
+	}
+	return kit.Neutral
+}
+
+func toneColor(p *theme.Palette, t kit.Tone) ui.Color {
+	switch t {
+	case kit.Positive:
+		return p.Success
+	case kit.Caution:
+		return p.Warning
+	case kit.Negative:
+		return p.Danger
+	}
+	return p.MutedForeground
+}
+
 func (r traceRow) badge(c *ui.Context) {
 	key, tone := "unavailable", kit.Neutral
 	switch r.Outcome {
@@ -197,30 +296,41 @@ func (r traceRow) badge(c *ui.Context) {
 	kit.Badge(c, i18n.T(c, key), tone)
 }
 
+// finding is the attempt's diagnosis unless it found nothing.
+func (r traceRow) finding() *protocol.TraceVerdict {
+	if r.Verdict == nil || r.Verdict.Code == "normal" || r.Verdict.Summary == "" {
+		return nil
+	}
+	return r.Verdict
+}
+
+func (r traceRow) turnLabel(c *ui.Context) string {
+	if r.turnNumber > 0 {
+		return i18n.T(c, "trace_turn_number", "count", r.turnNumber)
+	}
+	id := r.Turn
+	if len(id) > 8 {
+		id = id[:8]
+	}
+	return i18n.T(c, "trace_turn_label") + " " + id
+}
+
 func (s *State) traceView(c *ui.Context) {
 	v := &s.trace
+	p := theme.Of(c)
 	box := ui.Column(c.Key("trace")).Grow(1).MinHeight(0)
-	narrow := box.LayoutBounds().W < 480
+	narrow := box.LayoutBounds().W < traceNarrow
 	box.Children(func() {
-		ui.Row(c.Key("actions")).Gap(4).PaddingX(6).Children(func() {
-			if narrow && v.detail {
-				kit.IconButton(c.Key("back"), icons.ArrowLeft, i18n.T(c, "provider_step_back"), 28, false).OnClick(func() { v.detail = false })
-			}
-			ui.Text(c, i18n.T(c, "trace_title")).Grow(1).FontWeight(600)
-			kit.Ghost(c.Key("export"), i18n.T(c, "trace_export"), false).Disabled(s.TraceExport == nil).OnClick(func() { v.scope, v.mode, v.export = "all", "shareable", true })
-		})
-		ui.Text(c, i18n.T(c, "trace_private")).FontSize(12).TextColor(theme.Of(c).MutedForeground).PaddingX(6)
-		if s.TraceError != "" {
-			ui.Text(c, s.TraceError).TextColor(theme.Of(c).Danger)
-		}
 		// Read results are immutable. Repeated frames and timeline hover do not
 		// decode headers or provider metadata again unless the index changes.
 		if !slices.EqualFunc(v.page, s.TracePage, func(a, b json.RawMessage) bool { return bytes.Equal(a, b) }) {
 			v.page = slices.Clone(s.TracePage)
 			v.projected = decodeTraceRows(v.page)
+			// A changed index may have dropped the body being read.
+			v.requested = ""
 		}
-		rows := s.traceRows(v.projected, v.filter, v.query)
-		s.traceTimeline(c, rows)
+		all := s.traceRows(v.projected, "", v.query)
+		rows := slices.DeleteFunc(slices.Clone(all), func(r traceRow) bool { return !r.matches(v.filter) })
 		var selected *traceRow
 		for i := range rows {
 			if rows[i].RequestID == v.request && rows[i].Attempt == v.attempt {
@@ -229,64 +339,43 @@ func (s *State) traceView(c *ui.Context) {
 			}
 		}
 		if selected == nil && len(rows) > 0 && (!v.detail || v.request == "") {
-			selected = &rows[0]
+			// The latest attempt is the one a reader opens the trace for.
+			selected = &rows[len(rows)-1]
+			v.request, v.attempt, v.reveal = selected.RequestID, selected.Attempt, true
+			v.preview = tracePreview{}
 		}
-		ui.Row(c.Key("columns")).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
+		toolbar(c, "toolbar", func() {
+			if narrow && v.detail {
+				kit.Action(c.Key("back"), icons.ArrowLeft, i18n.T(c, "composer_back"), false).OnClick(func() { v.detail = false })
+			}
+			search := i18n.T(c, "search")
+			ui.TextInput(c.Key("search"), &v.query).Label(search).Placeholder(search).Grow(1).MinWidth(0).Height(28)
+			kit.TextAction(c.Key("export"), i18n.T(c, "trace_export"), s.TraceExport == nil || len(v.projected) == 0).OnClick(func() {
+				v.scope, v.mode, v.export = "all", 0, true
+			})
+		})
+		if s.TraceError != "" {
+			ui.Column(c.Key("error")).Padding(8, 8, 0, 8).Children(func() { kit.Alert(c, "alert", kit.Negative, s.TraceError, nil) })
+		}
+		if len(all) == 0 && v.query == "" {
+			kit.Result(c, kit.ResultProps{Icon: icons.ListTree, Title: i18n.T(c, "trace_empty"), SubTitle: i18n.T(c, "trace_empty_hint")}).Grow(1).Justify(ui.Center)
+			return
+		}
+		s.traceTimeline(c, rows, selected)
+		ui.Row(c.Key("columns")).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Clip().BorderWidth(1, 0, 0, 0).BorderColor(p.Border).Children(func() {
 			if !narrow || !v.detail {
 				list := ui.Column(c.Key("list")).MinHeight(0)
 				if narrow {
 					list.Grow(1)
 				} else {
-					list.Width(200).Shrink(0)
+					list.Width(232).Shrink(0).BorderWidth(0, 1, 0, 0).BorderColor(p.Border)
 				}
-				list.Children(func() {
-					ui.TextInput(c.Key("search"), &v.query).Label(i18n.T(c, "search")).Placeholder(i18n.T(c, "search")).FillWidth()
-					ui.ScrollHorizontal(c.Key("filters")).Height(30).Scrollbars(false).Children(func() {
-						ui.Row(c).Gap(3).Children(func() {
-							for i, id := range []string{"", "failed", "retry", "miss"} {
-								key := []string{"market_all", "meter_failed", "trace_retries", "trace_miss"}[i]
-								kit.Ghost(c.Key(i), i18n.T(c, key), v.filter == id).PaddingX(5).OnClick(func() { v.filter = id; v.detail = false })
-							}
-						})
-					})
-					ui.Scroll(c.Key("attempts")).Grow(1).MinHeight(0).Children(func() {
-						prev := ""
-						for i, r := range rows {
-							if i == 0 || prev != r.Turn {
-								label := r.Turn
-								if r.turnNumber > 0 {
-									label = i18n.T(c, "trace_turn_number", "count", r.turnNumber)
-								}
-								ui.Text(c.Key("turn:"+r.Turn), label).FontSize(12).SingleLine()
-								prev = r.Turn
-							}
-							active := selected != nil && selected.RequestID == r.RequestID && selected.Attempt == r.Attempt
-							row := kit.GhostLook(c, ui.ButtonBase(c.Key(fmt.Sprintf("attempt:%s:%d", r.RequestID, r.Attempt))).Label(fmt.Sprintf("#%d %s %s", r.Attempt, r.Provider.Model, r.Outcome)), active)
-							if active && v.reveal {
-								row.ScrollIntoView()
-								v.reveal = false
-							}
-							row.FillWidth().Children(func() {
-								ui.Column(c).FillWidth().Padding(4).Children(func() {
-									ui.Row(c).Gap(4).Children(func() { ui.Text(c, fmt.Sprintf("#%d  %s", r.Attempt, r.status())); r.badge(c) })
-									ui.Text(c, r.elapsed()+"   "+r.metric("input")+"/"+r.metric("output")).FontSize(12)
-									ui.Text(c, r.Provider.Model).FontSize(12).SingleLine()
-								})
-							}).OnClick(func() {
-								v.request, v.attempt, v.detail, v.tab = r.RequestID, r.Attempt, true, ""
-								v.preview = tracePreview{}
-							})
-						}
-						if len(rows) == 0 {
-							ui.Text(c, i18n.T(c, "file_search_empty"))
-						}
-					})
-				})
+				list.Children(func() { s.traceList(c, all, rows, selected) })
 			}
 			if !narrow || v.detail {
 				ui.Column(c.Key("detail")).Grow(1).MinWidth(0).MinHeight(0).Children(func() {
 					if selected == nil {
-						ui.Text(c, i18n.T(c, "unavailable"))
+						empty(c, icons.ListTree, "unavailable")
 						return
 					}
 					s.traceDetail(c, *selected)
@@ -297,109 +386,377 @@ func (s *State) traceView(c *ui.Context) {
 		if selected != nil {
 			turn = selected.Turn
 		}
-		s.traceExportForm(c, turn)
+		s.traceExportForm(c, turn, selected)
+	})
+}
+
+func (s *State) traceList(c *ui.Context, all, rows []traceRow, selected *traceRow) {
+	v := &s.trace
+	p := theme.Of(c)
+	ui.Row(c.Key("filters")).Wrap().Gap(4).Padding(8, 8, 4, 8).Children(func() {
+		for i, f := range traceFilters {
+			label := i18n.T(c, f.label)
+			if f.id != "" {
+				n := 0
+				for _, r := range all {
+					if r.matches(f.id) {
+						n++
+					}
+				}
+				// A filter that matches nothing is not offered, unless chosen.
+				if n == 0 && v.filter != f.id {
+					continue
+				}
+				label += " " + strconv.Itoa(n)
+			}
+			kit.GhostLook(c, ui.ButtonBase(c.Key(i)).Label(label), v.filter == f.id).Height(24).PaddingX(8).Children(func() {
+				ui.Text(c, label).FontSize(12).SingleLine()
+			}).OnClick(func() { v.filter = f.id; v.detail = false })
+		}
+	})
+	ui.Scroll(c.Key("attempts")).Grow(1).MinHeight(0).Children(func() {
+		ui.Column(c).FillWidth().Padding(0, 4, 8, 4).Children(func() {
+			prev := ""
+			for i, r := range rows {
+				if i == 0 || prev != r.Turn {
+					ui.Text(c.Key("turn:"+r.Turn), r.turnLabel(c)).FontSize(12).FontWeight(500).TextColor(p.MutedForeground).
+						SingleLine().Padding(10, 6, 4, 6)
+					prev = r.Turn
+				}
+				active := selected != nil && selected.RequestID == r.RequestID && selected.Attempt == r.Attempt
+				s.traceItem(c, r, active)
+			}
+			if len(rows) == 0 {
+				ui.Text(c, i18n.T(c, "file_search_empty")).FontSize(13).TextColor(p.MutedForeground).Padding(12, 6)
+			}
+		})
+	})
+}
+
+func (s *State) traceItem(c *ui.Context, r traceRow, active bool) {
+	v := &s.trace
+	p := theme.Of(c)
+	muted := p.MutedForeground
+	label := fmt.Sprintf("#%d %s %s", r.Attempt, r.Provider.Model, r.Outcome)
+	row := kit.GhostLook(c, ui.ButtonBase(c.Key(fmt.Sprintf("attempt:%s:%d", r.RequestID, r.Attempt))).Label(label), active)
+	if active && v.reveal {
+		row.ScrollIntoView()
+		v.reveal = false
+	}
+	row.FillWidth().Children(func() {
+		ui.Column(c).FillWidth().MinWidth(0).Padding(6, 8).Gap(2).Children(func() {
+			ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
+				kit.StatusDot(c, r.tone(), "")
+				ui.Text(c, "#"+strconv.Itoa(r.Attempt)).FontSize(13).FontWeight(500).FontFeatures("tnum")
+				if r.Status != 0 {
+					ui.Text(c, strconv.Itoa(r.Status)).FontSize(12).TextColor(muted).FontFeatures("tnum")
+				}
+				if r.Purpose == "compaction" {
+					kit.Tag(c, i18n.T(c, "chat_compact"))
+				}
+				ui.Spacer(c)
+				ui.Text(c, r.elapsed()).FontSize(12).TextColor(muted).FontFeatures("tnum").SingleLine()
+			})
+			if r.Provider.Model != "" {
+				ui.Text(c, r.Provider.Model).FontSize(12).TextColor(muted).SingleLine().PaddingStart(14)
+			}
+			if f := r.finding(); f != nil {
+				ui.Text(c, i18n.T(c, f.Summary)).FontSize(12).TextColor(toneColor(p, r.tone())).SingleLine().PaddingStart(14)
+			} else if in, out := r.metric("input"), r.metric("output"); in != "-" || out != "-" {
+				ui.Text(c, i18n.T(c, "meter_input")+" "+in+" · "+i18n.T(c, "meter_output")+" "+out).
+					FontSize(12).TextColor(muted).FontFeatures("tnum").SingleLine().PaddingStart(14)
+			}
+		})
+	}).OnClick(func() {
+		// The tab stays, so attempts compare side by side.
+		v.request, v.attempt, v.detail = r.RequestID, r.Attempt, true
+		v.preview = tracePreview{}
 	})
 }
 
 func (s *State) traceDetail(c *ui.Context, r traceRow) {
 	v := &s.trace
-	ui.ScrollHorizontal(c.Key("tabs")).Height(30).Scrollbars(false).Children(func() {
-		ui.Row(c).Children(func() {
-			for i, id := range []string{"", "request", "response", "metrics"} {
-				key := []string{"market_details_overview", "trace_request", "trace_response", "trace_metrics"}[i]
-				kit.Ghost(c.Key(i), i18n.T(c, key), v.tab == id).PaddingX(6).OnClick(func() {
-					v.tab = id
-					v.preview = tracePreview{}
-					var ref string
-					if id == "request" {
-						ref = r.Request.Body
-					} else if id == "response" {
-						ref = r.Response.Body
-					}
-					if ref != "" && ref != s.TraceContent.Body && s.TraceReadBody != nil {
-						s.TraceReadBody(ref)
-					}
-				})
+	p := theme.Of(c)
+	ui.Column(c.Key("summary")).Padding(10, 12, 6, 12).Gap(6).Children(func() {
+		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "#"+strconv.Itoa(r.Attempt)).FontSize(15).FontWeight(600).FontFeatures("tnum")
+			ui.Text(c, r.Provider.Model).FontSize(15).FontWeight(600).SingleLine().Shrink(1).MinWidth(0)
+			ui.Spacer(c)
+			kit.TextAction(c.Key("jump"), i18n.T(c, "trace_locate"), s.TraceJump == nil || (r.Record == "" && r.Turn == "")).
+				OnClick(func() { s.TraceJump(r.Record, r.Turn) })
+		})
+		ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Wrap().Children(func() {
+			r.badge(c)
+			if f := r.finding(); f != nil {
+				kit.Badge(c.Key("finding"), i18n.T(c, f.Summary), r.tone())
+			}
+			if r.Purpose == "compaction" {
+				kit.Tag(c.Key("purpose"), i18n.T(c, "chat_compact"))
+			}
+			var meta []string
+			if r.Status != 0 {
+				meta = append(meta, "HTTP "+strconv.Itoa(r.Status))
+			}
+			if e := r.elapsed(); e != "-" {
+				meta = append(meta, e)
+			}
+			if r.TS != 0 {
+				meta = append(meta, time.UnixMilli(r.TS).Local().Format("15:04:05"))
+			}
+			if len(meta) > 0 {
+				ui.Text(c, strings.Join(meta, " · ")).FontSize(12).TextColor(p.MutedForeground).FontFeatures("tnum").SingleLine()
 			}
 		})
 	})
-	ui.Scroll(c.Key(r.RequestID).Key(r.Attempt).Key(v.tab)).Grow(1).MinHeight(0).Padding(8).Children(func() {
-		switch v.tab {
-		case "request", "response":
-			s.traceBody(c, r)
-		case "metrics":
-			for i, key := range []string{"input", "output", "cache_read", "cache_write", "reasoning"} {
-				label := []string{"meter_input", "meter_output", "meter_cache_read", "trace_cache_write", "meter_reasoning"}[i]
-				ui.Text(c, i18n.T(c, label)+"   "+r.metric(key))
+	tab := slices.IndexFunc(traceTabs, func(t struct{ id, label string }) bool { return t.id == v.tab })
+	chosen := max(tab, 0)
+	labels := make([]string, len(traceTabs))
+	for i, t := range traceTabs {
+		labels[i] = i18n.T(c, t.label)
+	}
+	ui.ScrollHorizontal(c.Key("tabs")).Scrollbars(false).Shrink(0).Children(func() {
+		ui.Row(c).Padding(0, 12, 8, 12).Children(func() {
+			kit.Segmented(c, "segments", &chosen, labels, kit.SegmentedProps{Size: kit.SizeSmall})
+		})
+	})
+	if chosen != tab {
+		v.tab = traceTabs[chosen].id
+		v.preview = tracePreview{}
+	}
+	ui.Box(c.Key("rule")).FillWidth().Height(1).Shrink(0).Background(p.Border)
+	switch v.tab {
+	case "request", "response":
+		// The body's editor scrolls itself, so its find bar stays in view.
+		ui.Column(c.Key(r.RequestID).Key(r.Attempt).Key(v.tab)).Grow(1).MinHeight(0).Children(func() { s.traceBody(c, r) })
+		return
+	}
+	ui.Scroll(c.Key(r.RequestID).Key(r.Attempt).Key(v.tab)).Grow(1).MinHeight(0).Children(func() {
+		ui.Column(c).FillWidth().Padding(12).Gap(16).Children(func() {
+			if v.tab == "metrics" {
+				traceUsage(c, r)
+				traceTiming(c, r)
+				return
 			}
-			if len(r.Usage) > 0 {
-				raw, _ := json.Marshal(r.Usage)
-				ui.Text(c, string(raw)).FontSize(12)
-			}
-			traceTiming(c, r)
-		default:
-			r.badge(c)
 			r.diagnosis(c)
-			if r.TS != 0 {
-				ui.Text(c, time.UnixMilli(r.TS).Local().Format("2006-01-02 15:04:05.000 MST -07:00")).FontSize(12)
-			}
-			ui.Text(c, r.Provider.Model+"   "+r.status())
-			if r.Failure.Kind != "" {
-				ui.Text(c, r.Failure.Kind+" "+r.Failure.Code)
-			}
-			if r.Response.Gateway != "" {
-				ui.Text(c, r.Response.Gateway)
-				kit.Ghost(c.Key("gateway"), i18n.T(c, "connections_copy_id"), false).OnClick(func() { c.WriteClipboard(r.Response.Gateway) })
-			}
-			ui.Text(c, i18n.T(c, "meter_input")+" "+r.metric("input")+"   "+i18n.T(c, "meter_output")+" "+r.metric("output"))
+			traceFacts(c, r)
 			traceCategories(c, r)
-			for _, pair := range [][3]string{{"cache_read", "input", "meter_cache_read"}, {"reasoning", "output", "meter_reasoning"}} {
-				n, e1 := strconv.ParseUint(r.metric(pair[0]), 10, 64)
-				total, e2 := strconv.ParseUint(r.metric(pair[1]), 10, 64)
-				if e1 == nil && e2 == nil && total > 0 && n <= total {
-					ui.Text(c, i18n.T(c, pair[2])+fmt.Sprintf("   %.1f%%", 100*float64(n)/float64(total))).FontSize(12)
-					ui.Box(c).Height(4).Width(140 * float32(n) / float32(total)).Background(theme.Of(c).Primary)
-				}
-			}
-			traceTiming(c, r)
-			kit.Secondary(c.Key("jump"), i18n.T(c, "trace_locate")).Disabled(s.TraceJump == nil || (r.Record == "" && r.Turn == "")).OnClick(func() { s.TraceJump(r.Record, r.Turn) })
+		})
+	})
+}
+
+// traceSection is a group of the detail's facts, under its title unless
+// the tab already names it.
+func traceSection(c *ui.Context, key any, title string, body func()) {
+	ui.Column(c.Key(key)).FillWidth().Gap(4).Children(func() {
+		if title != "" {
+			ui.Text(c, title).FontSize(13).FontWeight(600).Padding(0, 0, 2, 0)
+		}
+		body()
+	})
+}
+
+// traceFact is one label and value row of a section.
+func traceFact(c *ui.Context, key any, label string, value func()) {
+	ui.Row(c.Key(key)).FillWidth().Gap(12).AlignItems(ui.Center).MinHeight(24).Children(func() {
+		ui.Text(c, label).Width(96).Shrink(0).FontSize(13).TextColor(theme.Of(c).MutedForeground).SingleLine()
+		ui.Row(c).Grow(1).MinWidth(0).Gap(6).AlignItems(ui.Center).Children(value)
+	})
+}
+
+func traceFactText(c *ui.Context, key any, label, value string) {
+	traceFact(c, key, label, func() { ui.Text(c, value).FontSize(13).Selectable().Shrink(1).MinWidth(0) })
+}
+
+// traceFactID is an identifier a reader quotes to a provider or gateway.
+func traceFactID(c *ui.Context, key any, label, value string) {
+	traceFact(c, key, label, func() {
+		ui.Text(c, value).FontSize(12).Font("monospace").Selectable().SingleLine().TruncateMiddle().Shrink(1).MinWidth(0)
+		kit.IconButton(c.Key("copy"), icons.Copy, i18n.T(c, "connections_copy_id"), 20, false).
+			TextColor(theme.Of(c).MutedForeground).OnClick(func() {
+			c.WriteClipboard(value)
+			kit.Copied(c)
+		})
+	})
+}
+
+func traceFacts(c *ui.Context, r traceRow) {
+	t := func(k string) string { return i18n.T(c, k) }
+	traceSection(c, "facts", "", func() {
+		if r.TS != 0 {
+			traceFactText(c, "started", t("trace_started"), time.UnixMilli(r.TS).Local().Format("2006-01-02 15:04:05.000 MST"))
+		}
+		if r.Provider.Model != "" {
+			traceFactText(c, "model", t("teams_model"), r.Provider.Model)
+		}
+		if r.Provider.ID != "" {
+			traceFactID(c, "provider", t("insights_provider_id"), r.Provider.ID)
+		}
+		traceFactText(c, "status", t("insights_status"), r.status())
+		if r.Response.End != "" {
+			traceFactText(c, "end", t("insights_end"), r.Response.End)
+		}
+		if r.Failure.Kind != "" {
+			traceFactText(c, "failure", t("insights_failure"), strings.TrimSpace(r.Failure.Kind+" "+r.Failure.Code))
+		}
+		traceFactID(c, "request", t("trace_request_id"), r.RequestID)
+		if r.Response.Gateway != "" {
+			traceFactID(c, "gateway", t("insights_gateway_id"), r.Response.Gateway)
 		}
 	})
 }
-func traceTiming(c *ui.Context, r traceRow) {
+
+// traceUsage lists the reported usage, the shares of cached input and
+// reasoning output, then any other field the provider reported.
+func traceUsage(c *ui.Context, r traceRow) {
 	p := theme.Of(c)
-	for i, key := range []string{"dispatch_us", "sent_us", "headers_us", "first_token_us", "elapsed_us", "max_gap_us"} {
-		if t, ok := r.Timing[key]; ok {
-			label := []string{"trace_dispatch", "trace_sent", "mcp_headers", "meter_first_response", "meter_request_time", "trace_gap"}[i]
-			ui.Text(c, i18n.T(c, label)+"   "+(time.Duration(t)*time.Microsecond).String()).FontSize(12)
-			if total := r.Timing["elapsed_us"]; total > 0 {
-				ui.Box(c.Key(key)).Height(3).Width(140 * float32(min(t, total)) / float32(total)).Background(p.Primary)
-			}
-		}
+	known := []struct{ key, label, of string }{
+		{"input", "meter_input", ""}, {"output", "meter_output", ""}, {"cache_read", "meter_cache_read", "input"},
+		{"cache_write", "trace_cache_write", ""}, {"reasoning", "meter_reasoning", "output"},
 	}
+	traceSection(c, "usage", i18n.T(c, "usage"), func() {
+		for _, k := range known {
+			value := r.metric(k.key)
+			traceFact(c, k.key, i18n.T(c, k.label), func() {
+				ui.Text(c, value).FontSize(13).FontFeatures("tnum").Width(72).Shrink(0)
+				n, e1 := strconv.ParseUint(value, 10, 64)
+				total, e2 := strconv.ParseUint(r.metric(k.of), 10, 64)
+				if k.of == "" || e1 != nil || e2 != nil || total == 0 || n > total {
+					return
+				}
+				share := float32(n) / float32(total)
+				traceBar(c, 0, share, p.Primary)
+				ui.Text(c, fmt.Sprintf("%.1f%%", 100*share)).FontSize(12).TextColor(p.MutedForeground).FontFeatures("tnum").Width(48).Shrink(0)
+			})
+		}
+		for _, key := range slices.Sorted(maps.Keys(r.Usage)) {
+			if slices.ContainsFunc(known, func(k struct{ key, label, of string }) bool { return k.key == key }) || string(r.Usage[key]) == "null" {
+				continue
+			}
+			traceFact(c, "extra:"+key, key, func() {
+				ui.Text(c, string(r.Usage[key])).FontSize(12).Font("monospace").Shrink(1).MinWidth(0)
+			})
+		}
+	})
 }
 
-func (s *State) traceExportForm(c *ui.Context, turn string) {
+// traceBar is a span of a track as wide as the space left in its row:
+// from and to are shares of the track.
+func traceBar(c *ui.Context, from, to float32, color ui.Color) {
+	p := theme.Of(c)
+	from, to = min(max(from, 0), 1), min(max(to, 0), 1)
+	ui.Row(c).Grow(1).MinWidth(40).Height(6).Radius(3).Background(p.Muted).Children(func() {
+		if from > 0 {
+			ui.Box(c.Key("lead")).Basis(0).Grow(from).Height(6)
+		}
+		ui.Box(c.Key("span")).Basis(0).Grow(max(to-from, 0.004)).MinWidth(2).Height(6).Radius(3).Background(color)
+		if to < 1 {
+			ui.Box(c.Key("rest")).Basis(0).Grow(1 - to).Height(6)
+		}
+	})
+}
+
+// traceTiming is the attempt's milestones over its elapsed time: each
+// from the attempt's start, the longest gap where it began.
+func traceTiming(c *ui.Context, r traceRow) {
+	p := theme.Of(c)
+	total := r.Timing["elapsed_us"]
+	var shown bool
+	for key := range r.Timing {
+		shown = shown || slices.Contains([]string{"dispatch_us", "sent_us", "headers_us", "first_token_us", "elapsed_us", "max_gap_us"}, key)
+	}
+	if !shown {
+		return
+	}
+	traceSection(c, "timing", i18n.T(c, "trace_timing"), func() {
+		for i, key := range []string{"dispatch_us", "sent_us", "headers_us", "first_token_us", "elapsed_us", "max_gap_us"} {
+			t, ok := r.Timing[key]
+			if !ok {
+				continue
+			}
+			label := []string{"trace_dispatch", "trace_sent", "trace_response_headers", "meter_first_response", "meter_request_time", "trace_gap"}[i]
+			traceFact(c, key, i18n.T(c, label), func() {
+				if total > 0 {
+					from := float32(0)
+					color := p.Primary
+					if key == "max_gap_us" {
+						color = p.Warning
+						if v := r.Verdict; v != nil && v.GapStartUs != nil {
+							from = float32(*v.GapStartUs) / float32(total)
+						}
+						traceBar(c, from, from+float32(t)/float32(total), color)
+					} else {
+						traceBar(c, 0, float32(min(t, total))/float32(total), color)
+					}
+				}
+				ui.Text(c, traceDuration(t)).FontSize(12).FontFeatures("tnum").Width(64).Shrink(0).TextAlign(ui.End)
+			})
+		}
+	})
+}
+
+// traceExportCount is how many captured attempts an export would contain.
+func (s *State) traceExportCount(scope, turn string) int {
+	n := 0
+	for _, r := range s.trace.projected {
+		if scope == "failed" && r.Outcome != "failed" || scope == "turn" && r.Turn != turn {
+			continue
+		}
+		n++
+	}
+	return n
+}
+
+func (s *State) traceExportForm(c *ui.Context, turn string, selected *traceRow) {
 	v := &s.trace
+	p := theme.Of(c)
 	title := i18n.T(c, "trace_export")
 	if v.export {
 		kit.Dialog(c.Key("trace-export"), &v.export, func() {
-			ui.Text(c, title).FontWeight(600)
-			kit.Select(c.Key("scope"), "trace-scope", i18n.T(c, "trace_scope"), &v.scope, []string{i18n.T(c, "market_all"), i18n.T(c, "meter_failed"), i18n.T(c, "trace_turn")}, false, []string{"all", "failed", "turn"})
-			kit.Select(c.Key("mode"), "trace-mode", i18n.T(c, "trace_mode"), &v.mode, []string{i18n.T(c, "trace_shareable"), i18n.T(c, "trace_raw")}, false, []string{"shareable", "raw"})
-			kit.Primary(c.Key("export-go"), title, s.TraceExport == nil || v.scope == "turn" && turn == "").OnClick(func() {
-				v.export = false
-				v.exportTurn = ""
-				if v.scope == "turn" {
-					v.exportTurn = turn
+			ui.Text(c, title).FontSize(16).FontWeight(600).PaddingEnd(32).TextColor(p.PopoverForeground)
+			ui.Text(c, i18n.T(c, "trace_private")).FontSize(13).TextColor(p.MutedForeground)
+			turnLabel := i18n.T(c, "trace_turn")
+			if selected != nil && selected.turnNumber > 0 {
+				turnLabel = i18n.T(c, "trace_turn_number", "count", selected.turnNumber)
+			}
+			if turn == "" && v.scope == "turn" {
+				v.scope = "all"
+			}
+			count := s.traceExportCount(v.scope, turn)
+			hint := i18n.T(c, "trace_export_count", "count", count)
+			if count == 0 {
+				hint = i18n.T(c, "trace_export_none")
+			}
+			scope := i18n.T(c, "trace_scope")
+			kit.Field(c, "scope", scope, hint, func() {
+				names, values := []string{i18n.T(c, "market_all"), i18n.T(c, "meter_failed")}, []string{"all", "failed"}
+				if turn != "" {
+					names, values = append(names, turnLabel), append(values, "turn")
 				}
-				if v.mode == "raw" {
-					v.confirm = true
-					return
-				}
-				s.TraceExport(v.scope, v.mode, v.exportTurn)
+				kit.Select(c.Key("scope"), "trace-scope", scope, &v.scope, names, false, values)
 			})
-		}).Width(360).Label(title)
+			hint = i18n.T(c, "trace_export_shareable_hint")
+			if v.mode == 1 {
+				hint = i18n.T(c, "trace_export_raw_hint")
+			}
+			kit.Field(c, "mode", i18n.T(c, "trace_mode"), hint, func() {
+				kit.Segmented(c, "trace-mode", &v.mode, []string{i18n.T(c, "trace_shareable"), i18n.T(c, "trace_raw")}, kit.SegmentedProps{Block: true})
+			})
+			ui.Row(c.Key("footer")).Gap(8).Justify(ui.End).Children(func() {
+				kit.Secondary(c.Key("cancel"), i18n.T(c, "settings_cancel")).OnClick(func() { v.export = false })
+				kit.Primary(c.Key("export-go"), title, s.TraceExport == nil || count == 0).OnClick(func() {
+					v.export = false
+					v.exportTurn = ""
+					if v.scope == "turn" {
+						v.exportTurn = turn
+					}
+					if v.mode == 1 {
+						v.confirm = true
+						return
+					}
+					s.TraceExport(v.scope, "shareable", v.exportTurn)
+				})
+			})
+		}).Width(400).Label(title)
 	}
 	if v.confirm {
 		if kit.Confirm(c.Key("trace-raw"), &v.confirm, kit.Confirmation{Title: title, Message: i18n.T(c, "trace_raw_confirm"), Buttons: []string{i18n.T(c, "settings_cancel"), title}, Default: 0}) == 1 && s.TraceExport != nil {
@@ -409,8 +766,13 @@ func (s *State) traceExportForm(c *ui.Context, turn string) {
 	}
 }
 
+// traceHeaders lists a side's retained headers, a name per line.
 func traceHeaders(c *ui.Context, h map[string][]string) {
+	p := theme.Of(c)
 	for _, name := range slices.Sorted(maps.Keys(h)) {
-		ui.Text(c, name+": "+strings.Join(h[name], ", ")).FontSize(12)
+		ui.Row(c.Key(name)).FillWidth().Gap(8).Children(func() {
+			ui.Text(c, name).FontSize(12).Font("monospace").TextColor(p.MutedForeground).Shrink(0).MaxWidth(180)
+			ui.Text(c, strings.Join(h[name], ", ")).FontSize(12).Font("monospace").Grow(1).Shrink(1).MinWidth(0)
+		})
 	}
 }

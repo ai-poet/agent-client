@@ -5,10 +5,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
-	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/egoist/mygo/ui"
 )
@@ -73,43 +73,63 @@ func withObservedDiagnoses(rows []traceRow, recent []protocol.ConversationObserv
 	return rows
 }
 
+// diagnosis is the attempt's verdict as a card: the finding, its evidence
+// and what to do about it.
 func (r traceRow) diagnosis(c *ui.Context) {
 	v := r.Verdict
 	if v == nil {
 		return
 	}
-	tone := kit.Neutral
-	if v.Severity == "error" {
-		tone = kit.Negative
-	} else if v.Severity == "warning" {
-		tone = kit.Caution
+	p := theme.Of(c)
+	accent, icon := p.MutedForeground, icons.Info
+	switch {
+	case v.Severity == "error":
+		accent, icon = p.Danger, icons.CircleX
+	case v.Severity == "warning":
+		accent, icon = p.Warning, icons.TriangleAlert
+	case v.Code == "normal":
+		accent, icon = p.Success, icons.CircleCheck
 	}
-	kit.Badge(c.Key("verdict"), i18n.T(c, v.Summary), tone)
-	if v.CauseKey != "" {
-		key := v.CauseKey
-		if v.KeyOrderOnly {
-			key += ":key-order-only"
+	detail := func(text string) {
+		ui.Text(c, text).FontSize(12).TextColor(p.MutedForeground).Selectable().FillWidth()
+	}
+	ui.Column(c.Key("verdict")).FillWidth().Gap(6).Padding(10, 12).Radius(p.Radius).
+		Background(p.Background.Mix(accent, 0.05)).InsetShadow(0, 0, 0, 1, accent.Alpha(0.16)).Children(func() {
+		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Icon(c, icon).FontSize(16).TextColor(accent).Shrink(0)
+			ui.Text(c, i18n.T(c, v.Summary)).FontSize(14).FontWeight(500).Grow(1).Shrink(1).MinWidth(0)
+		})
+		if v.CauseKey != "" {
+			key := v.CauseKey
+			if v.KeyOrderOnly {
+				key += ":key-order-only"
+			}
+			cause := slices.DeleteFunc([]string{key, v.Path, v.Volatile}, func(s string) bool { return s == "" })
+			ui.Text(c, strings.Join(cause, "  ")).FontSize(12).Font("monospace").TextColor(p.MutedForeground).Selectable().FillWidth()
 		}
-		ui.Text(c, key+"  "+v.Path+"  "+v.Volatile).FontSize(12)
-	}
-	if v.LostTokens > 0 {
-		ui.Text(c, i18n.T(c, "diagnosis_lost")+"  "+strconv.FormatUint(v.LostTokens, 10))
-	}
-	if v.GapStartUs != nil && v.MaxGapUs != nil {
-		ui.Text(c, i18n.T(c, "trace_gap")+": "+(time.Duration(*v.MaxGapUs)*time.Microsecond).String()+" @ "+(time.Duration(*v.GapStartUs)*time.Microsecond).String())
-	}
-	for _, key := range v.Actions {
-		if key != "connections_copy_id" {
-			ui.Text(c, i18n.T(c, key)).FontSize(12)
+		if v.LostTokens > 0 {
+			detail(i18n.T(c, "diagnosis_lost") + "  " + strconv.FormatUint(v.LostTokens, 10))
 		}
-	}
-	if v.RetryAfterMs != nil {
-		ui.Text(c, "Retry-After: "+(time.Duration(*v.RetryAfterMs)*time.Millisecond).String())
-	}
-	if v.RetryDelayMs != nil {
-		ui.Text(c, i18n.T(c, "trace_retries")+": "+(time.Duration(*v.RetryDelayMs)*time.Millisecond).String())
-	}
-	if len(v.RetrySequence) > 1 {
-		ui.Text(c, strings.Join(v.RetrySequence, "  >  ")).FontSize(12)
-	}
+		if v.GapStartUs != nil && v.MaxGapUs != nil {
+			detail(i18n.T(c, "trace_gap") + ": " + traceDuration(*v.MaxGapUs) + " @ " + traceDuration(*v.GapStartUs))
+		}
+		if v.RetryAfterMs != nil {
+			detail("Retry-After: " + traceDuration(*v.RetryAfterMs*1000))
+		}
+		if v.RetryDelayMs != nil {
+			detail(i18n.T(c, "trace_retries") + ": " + traceDuration(*v.RetryDelayMs*1000))
+		}
+		if len(v.RetrySequence) > 1 {
+			detail(strings.Join(v.RetrySequence, "  >  "))
+		}
+		for _, key := range v.Actions {
+			if key == "connections_copy_id" {
+				continue
+			}
+			ui.Row(c.Key(key)).FillWidth().Gap(6).Children(func() {
+				ui.Text(c, "•").FontSize(13).TextColor(accent).Shrink(0)
+				ui.Text(c, i18n.T(c, key)).FontSize(13).Grow(1).Shrink(1).MinWidth(0)
+			})
+		}
+	})
 }

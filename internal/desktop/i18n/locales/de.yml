@@ -2688,6 +2688,23 @@ trace_sent: Anfrage gesendet
 trace_gap: Längste Pause
 trace_dropped_headers: Ausgelassene Header
 trace_turn_number: Gesprächsschritt %{count}
+trace_export_failed: Protokoll konnte nicht exportiert werden
+trace_load_failed: Protokoll konnte nicht geladen werden
+trace_response_headers: Antwort-Header
+trace_request_id: Anfrage-ID
+trace_started: Gestartet
+trace_empty: Noch keine Anfragen
+trace_empty_hint: Modellanfragen dieses Gesprächs erscheinen hier.
+trace_body_missing: Inhalt nicht aufgezeichnet
+trace_body_capture_hint: Aktivieren Sie „Anfragetexte aufzeichnen“ unter Einstellungen › Allgemein, um die Inhalte neuer Anfragen zu speichern.
+trace_body_not_saved: Das Protokoll hat sein Speicherlimit erreicht, oder der Inhalt konnte nicht geschrieben werden.
+trace_body_failed: Inhalt konnte nicht geladen werden
+trace_export_shareable_hint: Systemanweisungen werden durch Fingerabdrücke ersetzt. Gesprächsinhalte bleiben enthalten.
+trace_export_raw_hint: Enthält vollständige Anfragen und Antworten.
+trace_export_count: '%{count} aufgezeichnete Anfragen'
+trace_export_none: Keine aufgezeichneten Anfragen in diesem Umfang
+trace_turn_label: Gesprächsschritt
+trace_timing: Zeiten
 approval_cancelled: Abgebrochen
 diagnosis_action_account: Beim Gateway-Betreiber nach einem Kontowechsel fragen.
 diagnosis_action_balance: Guthaben und Kontingent prüfen.

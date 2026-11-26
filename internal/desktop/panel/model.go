@@ -108,6 +108,7 @@ type State struct {
 	TraceMarkers     []TraceMarker
 	TraceContent     protocol.TracePage
 	TraceError       string
+	TraceBodyFailed  bool
 	TraceReadBody    func(string)
 	TraceJump        func(record, turn string)
 	TraceExport      func(scope, mode, turn string)

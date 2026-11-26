@@ -2688,6 +2688,23 @@ trace_sent: Solicitud enviada
 trace_gap: Intervalo máximo
 trace_dropped_headers: Cabeceras omitidas
 trace_turn_number: Turno %{count}
+trace_export_failed: No se pudo exportar la traza
+trace_load_failed: No se pudo cargar la traza
+trace_response_headers: Encabezados de respuesta
+trace_request_id: ID de solicitud
+trace_started: Inicio
+trace_empty: Aún no hay solicitudes
+trace_empty_hint: Las solicitudes al modelo de esta conversación aparecen aquí.
+trace_body_missing: Cuerpo no registrado
+trace_body_capture_hint: Active «Registrar cuerpos de solicitud» en Ajustes › General para guardar los cuerpos de las nuevas solicitudes.
+trace_body_not_saved: La traza alcanzó su límite de almacenamiento o no se pudo escribir el cuerpo.
+trace_body_failed: No se pudo cargar el cuerpo
+trace_export_shareable_hint: Las instrucciones del sistema se sustituyen por huellas. El contenido de la conversación se incluye.
+trace_export_raw_hint: Incluye las solicitudes y respuestas completas.
+trace_export_count: '%{count} solicitudes registradas'
+trace_export_none: No hay solicitudes registradas en este alcance
+trace_turn_label: Turno
+trace_timing: Tiempos
 approval_cancelled: Cancelado
 diagnosis_action_account: Consulta con el operador si cambió la cuenta de origen.
 diagnosis_action_balance: Comprueba el saldo y la cuota.

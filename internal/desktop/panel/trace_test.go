@@ -97,3 +97,33 @@ func TestTraceMarkersSelectNearestAttemptWithinTurn(t *testing.T) {
 		t.Fatalf("marker targets: %+v", points)
 	}
 }
+
+func TestTraceTurnsFollowStartTime(t *testing.T) {
+	// Capture began after the first turn: its observation follows the
+	// captured rows in decoded order but still lists first.
+	early := protocol.TurnID{1}
+	v := &protocol.TraceVerdict{Code: "normal", Severity: "info", Summary: "diagnosis_normal"}
+	s := State{TraceRecent: []protocol.ConversationObservationRequest{{ID: "old", Turn: early, TimestampMs: 100, Attempts: []protocol.ConversationObservationAttempt{{Index: 1, Verdict: v}}}}}
+	page := []json.RawMessage{
+		json.RawMessage(`{"turn":"late","request_id":"new","attempt":2,"ts":300}`),
+		json.RawMessage(`{"turn":"late","request_id":"new","attempt":1,"ts":200}`),
+	}
+	rows := s.traceRows(decodeTraceRows(page), "", "")
+	if len(rows) != 3 || rows[0].RequestID != "old" || rows[1].Attempt != 1 || rows[2].Attempt != 2 || !rows[1].captured || rows[0].captured {
+		t.Fatalf("turn order: %+v", rows)
+	}
+}
+
+func TestTraceIndentKeepsTruncatedJSONReadable(t *testing.T) {
+	shown, ok := indentJSON(`{"a":[],"b":{"c":"x,y{\"z\"}"},"d":[1,`)
+	want := "{\n  \"a\": [],\n  \"b\": {\n    \"c\": \"x,y{\\\"z\\\"}\"\n  },\n  \"d\": [\n    1,\n    "
+	if !ok || shown != want {
+		t.Fatalf("indent: %q", shown)
+	}
+	if _, ok := indentJSON("data: [DONE]"); ok {
+		t.Fatal("indented text that is not JSON")
+	}
+	if got := traceDuration(85_000); got != "85ms" {
+		t.Fatalf("duration: %s", got)
+	}
+}
