@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	pathpkg "path"
 	"slices"
 	"strings"
 	"sync"
@@ -58,7 +59,7 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 		calls := map[string]*workspaceToolCall{}
 		tool := engine.Tool{Definition: fantasy.FunctionTool{Name: declaration.Name, Description: declaration.Description, InputSchema: schema}, SchemaJSON: declaration.Parameters, ReadOnly: declaration.ReadOnly, Concurrent: declaration.Concurrent, Deferred: !declaration.Initial, Approval: !declaration.ReadOnly, Binding: &store.ApprovalBinding{Owner: declaration.Owner, Tool: declaration.Name, Operation: &declaration.Operation}}
 		var observed workspaceRevisions
-		if declaration.Operation == protocol.ToolOperationApplyChanges {
+		if observesRevisions(declaration.Operation) {
 			tool.ObserveHistory = observed.update
 		}
 		tool.Prepare = func(ctx context.Context, call canonical.ToolRequest) error {
@@ -76,7 +77,11 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 			}
 			// Full access is the admitted turn's policy, including for children.
 			// Normalize access before approval captures the command to execute.
-			command, err := operations.Command(declaration.Operation, call.Arguments, inv.Run.Worktree, inv.Session.ID, inv.Run.Turn, inv.Worktree.Project, sandbox.Enabled && inv.Turn.Config.Permission != protocol.PermissionFull)
+			arguments, err := observed.resolve(declaration.Operation, call.Arguments)
+			if err != nil {
+				return err
+			}
+			command, err := operations.Command(declaration.Operation, arguments, inv.Run.Worktree, inv.Session.ID, inv.Run.Turn, inv.Worktree.Project, sandbox.Enabled && inv.Turn.Config.Permission != protocol.PermissionFull)
 			if declaration.Operation == protocol.ToolOperationApplyChanges {
 				var patch struct {
 					Input string `json:"input"`
@@ -229,7 +234,7 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 					node.agent.Committed()
 				}
 			}
-			value := node.workspaceToolValue(ctx, request, output)
+			value := node.workspaceToolValue(ctx, request, output, effect.timedOut)
 			return engine.ToolResult{Value: value, ReturnedError: workspaceOutputFailed(output), ReturnedFailure: workspaceOutputFailure(output)}
 		}
 		tools = append(tools, tool)
@@ -314,7 +319,7 @@ func workspaceOutputFailure(output protocol.Output) *protocol.ToolFailure {
 	}
 	return failure
 }
-func (node *Node) workspaceToolValue(ctx context.Context, request protocol.Request, output protocol.Output) any {
+func (node *Node) workspaceToolValue(ctx context.Context, request protocol.Request, output protocol.Output, timedOut bool) any {
 	if value, shaped := codeToolValue(output); shaped {
 		return value
 	}
@@ -350,9 +355,18 @@ func (node *Node) workspaceToolValue(ctx context.Context, request protocol.Reque
 			value["sailry_command"] = preview
 		}
 	}
+	if input, ok := request.Command.Data.(*protocol.CommandRunCommandPayload); ok && !input.Background && timedOut && output.Kind == "command_result" {
+		if data, ok := value["data"].(map[string]any); ok {
+			data["notice"] = "Background command capacity was full, so the command was stopped at its timeout."
+		}
+	}
 	if input, ok := request.Command.Data.(*protocol.CommandRunCommandPayload); ok && output.Kind == "command_started" && !input.Background {
 		if data, ok := value["data"].(map[string]any); ok {
-			data["notice"] = "The user sent a new message while this command was running. The command was moved to the background and is still running; use the command read and stop tools with this id to check it. Its completion is reported automatically."
+			notice := "The user sent a new message while this command was running. The command was moved to the background and is still running; use the command read and stop tools with this id to check it. Its completion is reported automatically."
+			if timedOut {
+				notice = "The command reached timeout_ms and is still running in the background. Use read_command with this id (wait_ms, until) to follow it, or stop_command to end it. Its completion is reported automatically."
+			}
+			data["notice"] = notice
 		}
 	}
 	if workspaceOutputFailed(output) {
@@ -473,6 +487,52 @@ func (r *workspaceRevisions) observe(response *canonical.ToolResponse) {
 		r.invalidateTree(data.From)
 		r.invalidateTree(data.To)
 	}
+}
+
+func observesRevisions(operation protocol.ToolOperation) bool {
+	switch operation {
+	case protocol.ToolOperationApplyChanges, protocol.ToolOperationWriteFile, protocol.ToolOperationEditFile,
+		protocol.ToolOperationDeleteFile, protocol.ToolOperationMoveFile, protocol.ToolOperationEditNotebook:
+		return true
+	}
+	return false
+}
+
+// resolve fills an omitted expected_revision of a single-file mutation with
+// the revision this conversation last observed, so the admitted command
+// carries a concrete revision and a later external change still conflicts.
+// write_file never defaults to replacing: an omitted revision creates, so its
+// approval prompt, which reads the model's arguments, names the real effect.
+// Other mutations require a prior read.
+func (r *workspaceRevisions) resolve(operation protocol.ToolOperation, arguments json.RawMessage) (json.RawMessage, error) {
+	if operation == protocol.ToolOperationApplyChanges || !observesRevisions(operation) {
+		return arguments, nil
+	}
+	var values map[string]json.RawMessage
+	if json.Unmarshal(arguments, &values) != nil || values == nil {
+		// operations.Command reports malformed arguments.
+		return arguments, nil
+	}
+	if _, ok := values["expected_revision"]; ok {
+		return arguments, nil
+	}
+	var path string
+	if json.Unmarshal(values["path"], &path) != nil {
+		return arguments, nil
+	}
+	revision, ok := r.paths[path]
+	if !ok && path != "" {
+		revision, ok = r.paths[pathpkg.Clean(path)]
+	}
+	switch {
+	case operation == protocol.ToolOperationWriteFile:
+		values["expected_revision"] = json.RawMessage("null")
+	case ok:
+		values["expected_revision"], _ = json.Marshal(revision)
+	default:
+		return nil, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: path + " has not been read in this conversation; read it first or pass expected_revision"}
+	}
+	return json.Marshal(values)
 }
 
 func (r *workspaceRevisions) invalidateTree(path string) {

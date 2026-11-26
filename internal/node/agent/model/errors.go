@@ -13,6 +13,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
@@ -156,11 +157,13 @@ func Classify(err error, secrets ...protocol.Secret) *Failure {
 		json.Unmarshal(provider.ResponseBody, &body)
 		code := provider.ErrorType
 		overloaded := overloadedCode(code)
+		overflow := provider.ContextTooLargeErr || contextOverflowCode(code)
 		usageMissing := containsCode(code, "upstream_usage_missing")
 		foundCode := false
-		for _, path := range [][]string{{"error", "code"}, {"error", "type"}, {"response", "error", "code"}, {"code"}, {"type"}} {
+		for _, path := range [][]string{{"error", "code"}, {"error", "type"}, {"response", "error", "code"}, {"response", "error", "type"}, {"code"}, {"type"}} {
 			if value := jsonString(body, path...); value != "" {
 				overloaded = overloaded || overloadedCode(value)
+				overflow = overflow || contextOverflowCode(value)
 				usageMissing = usageMissing || containsCode(value, "upstream_usage_missing")
 				if !foundCode {
 					code, foundCode = value, true
@@ -199,7 +202,8 @@ func Classify(err error, secrets ...protocol.Secret) *Failure {
 		switch {
 		case status >= 300 && status <= 399:
 			f.Kind = InvalidRequest
-		case provider.ContextTooLargeErr || containsCode(code, "context_length_exceeded", "context_window_exceeded", "prompt_too_long", "request_too_large") || strings.Contains(lower, "maximum context length"):
+		case overflow || strings.Contains(lower, "maximum context length") ||
+			strings.Contains(strings.ToLower(message), "input exceeds the context window"):
 			f.Kind = ContextOverflow
 		case status == 401 || status == 403 || provider.AuthError || containsCode(code, "invalid_api_key", "authentication_error", "invalid_authentication", "unauthorized", "permission_denied"):
 			f.Kind = Authentication
@@ -234,11 +238,15 @@ func Classify(err error, secrets ...protocol.Secret) *Failure {
 		f.Message = "Model stream ended before a completion event"
 	}
 	if errors.Is(err, stallError{}) {
-		f.Kind, f.Message = Network, "Model stream sent no data for 600 seconds"
+		f.Kind, f.Message = Network, fmt.Sprintf("Model stream sent no data for %d seconds", int(stallTimeout/time.Second))
 	}
 	f.retainResponseHints(err)
 	f.Message = safeDiagnostic(f.Message, secrets)
 	return f
+}
+
+func contextOverflowCode(code string) bool {
+	return containsCode(code, "context_length_exceeded", "context_window_exceeded", "prompt_too_long", "request_too_large")
 }
 
 func isTCPDialTimeout(err error) bool {

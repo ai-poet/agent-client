@@ -88,8 +88,10 @@ func TestRetryTransient(t *testing.T) {
 		body string
 		wait time.Duration
 	}{
-		{"service unavailable", `{"error":{"code":"service_unavailable","message":"unavailable"}}`, time.Second},
-		{"explicit overload", `{"error":{"code":"api_error","type":"overloaded_error","message":"busy"}}`, 5 * time.Second},
+		{"service unavailable", `{"error":{"code":"service_unavailable","message":"unavailable"}}`, 300 * time.Millisecond},
+		// Overload shares the quick schedule; a provider that needs a slower
+		// pace sends a wait hint.
+		{"explicit overload", `{"error":{"code":"api_error","type":"overloaded_error","message":"busy"}}`, 300 * time.Millisecond},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			fake := &policyModel{responses: [][]fantasy.StreamPart{{{
@@ -115,11 +117,9 @@ func TestRetryTransient(t *testing.T) {
 				if err != nil || fake.calls != 2 || len(observations) != 2 || len(output) != 2 {
 					t.Fatalf("retry result: calls=%d observations=%d output=%d error=%v", fake.calls, len(observations), len(output), err)
 				}
-				// Main and summary requests use the same transient policy.
-				want := time.Second
-				if kind == RateLimited {
-					want = 5 * time.Second
-				}
+				// Main and summary requests, and every transient cause, use the
+				// same schedule.
+				want := 300 * time.Millisecond
 				if len(timer.delays) != 1 || timer.delays[0] < want*4/5 || timer.delays[0] > want*6/5 {
 					t.Errorf("retry delays = %v", timer.delays)
 				}
@@ -135,24 +135,24 @@ func TestRetryTransient(t *testing.T) {
 			})
 		}
 	}
-	t.Run("main_exhausts_nine_retries", func(t *testing.T) {
+	t.Run("main_exhausts_ten_retries", func(t *testing.T) {
 		fake := &policyModel{}
-		for i := 0; i < 11; i++ {
+		for i := 0; i < 12; i++ {
 			fake.responses = append(fake.responses, []fantasy.StreamPart{errorPart(Network)})
 		}
 		timer := &policyClock{}
 		var announced []*time.Duration
 		err := Run(t.Context(), fake, fantasy.Call{}, Main, timer, func(attempt Attempt) error { announced = append(announced, attempt.RetryDelay); return nil }, nil, nil)
-		if err == nil || fake.calls != 10 || len(timer.delays) != 9 || len(announced) != 10 || announced[9] != nil {
+		if err == nil || fake.calls != 11 || len(timer.delays) != 10 || len(announced) != 11 || announced[10] != nil {
 			t.Fatalf("exhaustion: calls=%d delays=%v error=%v", fake.calls, timer.delays, err)
 		}
 		fault := Fault(err)
 		if fault.Details.Kind != "model_recovery" || fault.Details.Data.(protocol.FaultDetailsModelRecoveryPayload).Reason != protocol.ConversationRecoveryStopAttemptsExhausted {
 			t.Fatalf("exhaustion lost its recovery reason: %+v", fault)
 		}
-		intervals := []time.Duration{1, 2, 4, 8, 16, 30, 30, 30, 30}
+		intervals := []time.Duration{300, 600, 1200, 2400, 4800, 9600, 19200, 30000, 30000, 30000}
 		for index, delay := range timer.delays {
-			base := intervals[index] * time.Second
+			base := intervals[index] * time.Millisecond
 			if delay < base*4/5 || delay > min(base*6/5, 30*time.Second) || *announced[index] != delay {
 				t.Fatalf("delay %d = %v, announced %v", index, delay, *announced[index])
 			}
@@ -160,16 +160,16 @@ func TestRetryTransient(t *testing.T) {
 	})
 	t.Run("summary_retries_as_a_main_request", func(t *testing.T) {
 		fake := &policyModel{}
-		for i := 0; i < 11; i++ {
+		for i := 0; i < 12; i++ {
 			fake.responses = append(fake.responses, []fantasy.StreamPart{errorPart(Network)})
 		}
 		timer := &policyClock{}
-		if err := Run(t.Context(), fake, fantasy.Call{}, SummaryPurpose, timer, nil, nil, nil); err == nil || fake.calls != 10 || len(timer.delays) != 9 {
+		if err := Run(t.Context(), fake, fantasy.Call{}, SummaryPurpose, timer, nil, nil, nil); err == nil || fake.calls != 11 || len(timer.delays) != 10 {
 			t.Fatalf("summary: calls=%d delays=%v error=%v", fake.calls, timer.delays, err)
 		}
-		intervals := []time.Duration{1, 2, 4, 8, 16, 30, 30, 30, 30}
+		intervals := []time.Duration{300, 600, 1200, 2400, 4800, 9600, 19200, 30000, 30000, 30000}
 		for index, delay := range timer.delays {
-			base := intervals[index] * time.Second
+			base := intervals[index] * time.Millisecond
 			if delay < base*4/5 || delay > min(base*6/5, 30*time.Second) {
 				t.Fatalf("summary delay %d = %v", index, delay)
 			}

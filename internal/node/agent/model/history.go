@@ -51,27 +51,12 @@ func BuildCall(binding Binding, request Request) (fantasy.Call, error) {
 	}
 	records := VisibleRecords(request.Records)
 	origins := map[int]string{}
-	active := -1
-	for i := len(records) - 1; i >= 0 && active < 0; i-- {
-		runtime := records[i].Metadata.Runtime
-		if runtime != nil && runtime.TurnContext {
-			continue
-		}
-		if message, _, _ := records[i].ModelContent(); message != nil && message.Role == canonical.User {
-			for _, block := range message.Content {
-				if block.Kind != "tool_response" {
-					active = i
-					break
-				}
-			}
-		}
-	}
 	appendBackground := func(text string) {
 		if text != "" {
 			call.Prompt = append(call.Prompt, fantasy.Message{Role: fantasy.MessageRoleAssistant, Content: []fantasy.MessagePart{fantasy.TextPart{Text: text}}})
 		}
 	}
-	for i, record := range records {
+	for _, record := range records {
 		record = request.audienceRecord(record)
 		message, background, err := record.ModelContent()
 		if err != nil {
@@ -158,9 +143,7 @@ func BuildCall(binding Binding, request Request) (fantasy.Call, error) {
 						if err != nil {
 							return call, &Failure{Kind: InvalidRequest, Message: "stored thought signature is invalid"}
 						}
-						if active < 0 || i >= active {
-							part.ProviderOptions[google.Name] = &google.ReasoningMetadata{Signature: string(decoded)}
-						}
+						part.ProviderOptions[google.Name] = &google.ReasoningMetadata{Signature: string(decoded)}
 					}
 				}
 				current.Content = append(current.Content, part)
@@ -177,7 +160,7 @@ func BuildCall(binding Binding, request Request) (fantasy.Call, error) {
 					return call, &Failure{Kind: InvalidRequest, Message: "stored tool call is invalid"}
 				}
 				options := fantasy.ProviderOptions{}
-				if keep && binding.Provider.Api == "gemini" && (active < 0 || i >= active) && value.Provider != nil {
+				if keep && binding.Provider.Api == "gemini" && value.Provider != nil {
 					if raw := (*value.Provider)["thoughtSignature"]; len(raw) > 0 {
 						var signature string
 						if json.Unmarshal(raw, &signature) == nil {
@@ -246,6 +229,13 @@ func BuildCall(binding Binding, request Request) (fantasy.Call, error) {
 			if call.Prompt[i].Role == fantasy.MessageRoleUser || call.Prompt[i].Role == fantasy.MessageRoleTool {
 				call.Prompt[i].ProviderOptions = cacheOptions(binding)
 				remaining--
+				// Treat a parallel tool-response batch as one logical turn so
+				// both breakpoints are not spent on the newest tool results.
+				if call.Prompt[i].Role == fantasy.MessageRoleTool {
+					for i > 0 && call.Prompt[i-1].Role == fantasy.MessageRoleTool {
+						i--
+					}
+				}
 			}
 		}
 	}

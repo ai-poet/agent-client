@@ -113,7 +113,8 @@ func TestStallMonitor(t *testing.T) {
 		value := start(t)
 		promotion := make(chan struct{})
 		close(promotion)
-		output, err := value.service.ExecutePromotable(context.Background(), value.launch, promotion)
+		value.launch.TimeoutMs = 2 * uint64(StallWindow/time.Millisecond)
+		output, _, err := value.service.ExecutePromotable(context.Background(), value.launch, promotion)
 		if err != nil || output.Kind != "command_started" {
 			t.Fatal(output, err)
 		}

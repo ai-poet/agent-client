@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"slices"
 	"strings"
 
 	"charm.land/fantasy"
 	anthropic "github.com/ai-poet/cheaprouter-harness/internal/node/agent/model/anthropic"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/providers"
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
@@ -20,15 +22,33 @@ type anthropicBlock struct {
 }
 
 func (model *sdkModel) streamAnthropic(ctx context.Context, raw []byte, call fantasy.Call, emitter *sdkEmitter) {
-	endpoint := strings.TrimSuffix(strings.TrimSuffix(model.config.Endpoint, "/messages"), "/v1")
+	parsed, err := url.Parse(model.config.Endpoint)
+	if err != nil {
+		emitter.fail(err)
+		return
+	}
+	base := providers.AnthropicBaseURL(*parsed)
+	endpoint := base.String() + "/"
 	// WithoutEnvironmentDefaults keeps the SDK from adding ANTHROPIC_* variables
 	// or a local profile of the machine to a request for the configured provider.
 	opts := []option.RequestOption{option.WithoutEnvironmentDefaults(), option.WithHTTPClient(model.client), option.WithBaseURL(endpoint), option.WithAPIKey(model.config.Key), option.WithMaxRetries(0)}
 	for key, value := range model.config.Headers {
+		if strings.EqualFold(key, "anthropic-beta") {
+			continue
+		}
 		opts = append(opts, option.WithHeader(key, value))
 	}
 	for key, value := range call.Headers {
+		if strings.EqualFold(key, "anthropic-beta") {
+			continue
+		}
 		opts = append(opts, option.WithHeader(key, value))
+	}
+	if beta := anthropicBetaHeader(endpoint, model.config.OAuth, model.config.AnthropicAPIKey, raw, model.config.Headers, call.Headers); beta != "" {
+		opts = append(opts, option.WithHeader("anthropic-beta", beta))
+		if !model.config.OAuth {
+			opts = append(opts, option.WithQuery("beta", "true"))
+		}
 	}
 	if call.UserAgent != "" {
 		opts = append(opts, option.WithHeader("User-Agent", call.UserAgent))
@@ -211,4 +231,71 @@ func (model *sdkModel) streamAnthropic(ctx context.Context, raw []byte, call fan
 		finish = fantasy.FinishReasonUnknown
 	}
 	emitter.emit(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: finish})
+}
+
+func anthropicBetaHeader(endpoint string, oauth, apiKey bool, raw []byte, configHeaders, callHeaders map[string]string) string {
+	var betas []string
+	seen := map[string]bool{}
+	addList := func(value string) {
+		for _, part := range strings.Split(value, ",") {
+			token := strings.TrimSpace(part)
+			if token == "" || seen[token] {
+				continue
+			}
+			seen[token] = true
+			betas = append(betas, token)
+		}
+	}
+	if apiKey {
+		addList("claude-code-20250219")
+		var payload struct {
+			Thinking struct {
+				Type string `json:"type"`
+			} `json:"thinking"`
+			OutputConfig struct {
+				Effort string `json:"effort"`
+			} `json:"output_config"`
+		}
+		if json.Unmarshal(raw, &payload) == nil {
+			if payload.Thinking.Type == "adaptive" || payload.Thinking.Type == "enabled" {
+				addList("interleaved-thinking-2025-05-14")
+			}
+			if payload.OutputConfig.Effort != "" {
+				addList("effort-2025-11-24")
+			}
+		}
+	}
+	for _, headers := range []map[string]string{configHeaders, callHeaders} {
+		for key, value := range headers {
+			if strings.EqualFold(key, "anthropic-beta") {
+				addList(value)
+			}
+		}
+	}
+	if !oauth && isOfficialAnthropicEndpoint(endpoint) {
+		var payload struct {
+			Thinking struct {
+				Type string `json:"type"`
+			} `json:"thinking"`
+			Tools []json.RawMessage `json:"tools"`
+			Speed string            `json:"speed"`
+		}
+		if json.Unmarshal(raw, &payload) == nil {
+			if payload.Thinking.Type == "enabled" && len(payload.Tools) > 0 {
+				addList("interleaved-thinking-2025-05-14")
+			}
+			if payload.Speed == "fast" {
+				addList("fast-mode-2026-02-01")
+			}
+		}
+	}
+	return strings.Join(betas, ",")
+}
+
+func isOfficialAnthropicEndpoint(endpoint string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(parsed.Hostname(), "api.anthropic.com")
 }

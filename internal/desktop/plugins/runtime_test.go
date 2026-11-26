@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MoeForge/moejs"
 	sailry "github.com/ai-poet/cheaprouter-harness"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/theme"
@@ -674,6 +675,75 @@ export default class Example extends View {render(){return `+current.expression+
 		scope.Package.Name = "other"
 		if _, err := runtime.Mount(bundle, scope); err == nil {
 			t.Fatal("foreign package context was accepted")
+		}
+	})
+	t.Run("replacing timer stops prior handle", func(t *testing.T) {
+		clock := clockwork.NewFakeClock()
+		runtime, err := NewRuntime(RuntimeBindings{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := runtime.SetClock(clock); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = runtime.Close() })
+		bundle, scope := runtimeBundle(`
+import {View} from "gpui-kit";
+export default class extends View {
+  render(){return "ok";}
+}`)
+		mounted, err := runtime.Mount(bundle, scope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := mounted.execute(desktopTaskBudget, func(context.Context) error {
+			_, err := mounted.schedule(nil, moejs.Undefined(), []moejs.Value{moejs.Number(1), moejs.Number(10)})
+			if err != nil {
+				return err
+			}
+			_, err = mounted.schedule(nil, moejs.Undefined(), []moejs.Value{moejs.Number(1), moejs.Number(100)})
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		clock.Advance(20 * time.Millisecond)
+		mounted.queueMu.Lock()
+		firedEarly := len(mounted.queue)
+		mounted.queueMu.Unlock()
+		if firedEarly != 0 {
+			t.Fatalf("replaced timer still fired at old deadline: %d completions", firedEarly)
+		}
+	})
+	t.Run("unmounted dynamic widgets and images are pruned on rerender", func(t *testing.T) {
+		_, mounted := runtimeFixture(t, `
+import {View,div,image} from "gpui-kit";
+import {Button,Checkbox} from "gpui-component";
+export default class extends View {
+  init(){this.show=true;}
+  render(){
+    const root = div().child(new Button("toggle").label("Toggle").on_click((e,cx)=>{this.show=!this.show;cx.notify();}));
+    if(this.show){
+      root.child(new Checkbox("dyn-check").label("Dynamic").checked(true)).child(image("dev.sailry.platform/desktop/dyn.svg"));
+    }
+    return root;
+  }
+}`, RuntimeBindings{})
+		mounted.bundle.Files["dev.sailry.platform/desktop/dyn.svg"] = `<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 8 8"><rect width="8" height="8" fill="blue"/></svg>`
+		var renderErr error
+		tester := ui.NewTester(func(view *ui.Context) {
+			theme.Apply(view, "", theme.Light)
+			_, renderErr = mounted.Render(view)
+		}, 420, 260)
+		tester.Frame()
+		if renderErr != nil || len(mounted.toggles) != 1 || len(mounted.images) != 1 {
+			t.Fatalf("initial render: err=%v toggles=%d images=%d", renderErr, len(mounted.toggles), len(mounted.images))
+		}
+		if err := tester.Click("Toggle"); err != nil {
+			t.Fatal(err)
+		}
+		tester.Frame()
+		if renderErr != nil || len(mounted.toggles) != 0 || len(mounted.images) != 0 {
+			t.Fatalf("unmounted widgets/images were not pruned: err=%v toggles=%d images=%d", renderErr, len(mounted.toggles), len(mounted.images))
 		}
 	})
 }

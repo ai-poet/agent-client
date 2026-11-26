@@ -17,6 +17,7 @@ func requestJSON(config transportConfig, call fantasy.Call) (map[string]any, err
 	switch config.Kind {
 	case "anthropic":
 		messages, system := []any{}, []any{}
+		lastWasTool := false
 		for _, message := range call.Prompt {
 			blocks := []any{}
 			for index, part := range message.Content {
@@ -65,7 +66,7 @@ func requestJSON(config transportConfig, call fantasy.Call) (map[string]any, err
 				}
 				if block != nil {
 					cache := anthropic.GetCacheControl(part.Options())
-					if cache == nil && (index == len(message.Content)-1 || message.Role == fantasy.MessageRoleTool) {
+					if cache == nil && (index == len(message.Content)-1 || message.Role == fantasy.MessageRoleTool && block["type"] == "tool_result") {
 						cache = anthropic.GetCacheControl(message.ProviderOptions)
 					}
 					if cache != nil {
@@ -76,12 +77,18 @@ func requestJSON(config transportConfig, call fantasy.Call) (map[string]any, err
 			}
 			if message.Role == fantasy.MessageRoleSystem {
 				system = append(system, blocks...)
-			} else {
-				role := string(message.Role)
-				if message.Role == fantasy.MessageRoleTool {
-					role = "user"
+			} else if message.Role == fantasy.MessageRoleTool {
+				if lastWasTool && len(messages) > 0 {
+					prior := messages[len(messages)-1].(map[string]any)
+					existing, _ := prior["content"].([]any)
+					prior["content"] = append(existing, blocks...)
+				} else {
+					messages = append(messages, map[string]any{"role": "user", "content": blocks})
+					lastWasTool = true
 				}
-				messages = append(messages, map[string]any{"role": role, "content": blocks})
+			} else {
+				lastWasTool = false
+				messages = append(messages, map[string]any{"role": string(message.Role), "content": blocks})
 			}
 		}
 		body["messages"], body["system"] = messages, system
@@ -409,6 +416,9 @@ func requestJSON(config transportConfig, call fantasy.Call) (map[string]any, err
 	}
 	if config.Kind == "anthropic" && len(wireArray(body["tools"])) > 0 && body["tool_choice"] == nil {
 		body["tool_choice"] = map[string]any{"type": "auto"}
+	}
+	if err := prepareAnthropicAPIKeyBody(config, body); err != nil {
+		return nil, err
 	}
 	return body, nil
 }

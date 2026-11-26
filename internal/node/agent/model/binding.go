@@ -48,6 +48,7 @@ type transportConfig struct {
 	JSON                       map[string]any
 	Remove                     []string
 	OAuth                      bool
+	AnthropicAPIKey            bool
 	Protection                 []protocol.Secret
 }
 
@@ -235,8 +236,14 @@ func transportBinding(binding Binding) (transportConfig, error) {
 	if err != nil {
 		return transportConfig{}, err
 	}
-	// Account authentication replaces this User-Agent with its own client identity.
-	config := transportConfig{Model: binding.Config.Model, Endpoint: u.String(), Headers: map[string]string{"User-Agent": "Sailry/" + link.ProductVersion}, Query: map[string]string{}, JSON: map[string]any{}, Remove: []string{"tool_choice"}, RemoveHeaders: []string{"Authorization", "X-Api-Key", "X-Goog-Api-Key", "Api-Key"}}
+	var headers map[string]string
+	if provider.Authentication == protocol.AuthenticationApiKey {
+		headers = providers.APIKeyHeaderDefaults(provider.Api)
+	} else {
+		// Account authentication can supply its own client identity.
+		headers = map[string]string{"User-Agent": "Sailry/" + link.ProductVersion}
+	}
+	config := transportConfig{Model: binding.Config.Model, Endpoint: u.String(), Headers: headers, Query: map[string]string{}, JSON: map[string]any{}, Remove: []string{"tool_choice"}, RemoveHeaders: []string{"Authorization", "X-Api-Key", "X-Goog-Api-Key", "Api-Key"}}
 	if binding.Secret != nil {
 		raw := binding.Secret.Expose()
 		if provider.ID == providers.CheapRouterProviderID {
@@ -324,18 +331,28 @@ func transportBinding(binding Binding) (transportConfig, error) {
 	switch api {
 	case protocol.ConversationModelApiAnthropic:
 		config.Kind = "anthropic"
+		config.AnthropicAPIKey = provider.Authentication == protocol.AuthenticationApiKey
 		if provider.Authentication == protocol.AuthenticationApiKey && binding.Session != (protocol.SessionID{}) {
 			// Compatible account pools can derive affinity from cache content.
 			// Keep that routing identity stable when tool results move cache markers.
 			config.JSON["metadata"] = claudeMetadata(provider.ID.String(), binding.Session.String(), "")
 		}
-	case protocol.ConversationModelApiResponses:
+	case protocol.ConversationModelApiResponses, protocol.ConversationModelApiChatCompletions:
 		config.Kind = "responses"
-		u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/responses")
+		operation := "/responses"
+		if api == protocol.ConversationModelApiChatCompletions {
+			config.Kind = "chat"
+			operation = "/chat/completions"
+		}
+		if provider.Authentication == protocol.AuthenticationApiKey && api == provider.Api {
+			*u = providers.OpenAIBaseURL(*u)
+		} else {
+			u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), operation)
+		}
 	case protocol.ConversationModelApiGemini:
 		config.Kind = "google"
 		u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/v1beta")
-	case protocol.ConversationModelApiChatCompletions, protocol.ConversationModelApiDeepSeek, protocol.ConversationModelApiAzureAi:
+	case protocol.ConversationModelApiDeepSeek, protocol.ConversationModelApiAzureAi:
 		config.Kind = "chat"
 		u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/chat/completions")
 	default:
@@ -397,7 +414,7 @@ func transportBinding(binding Binding) (transportConfig, error) {
 		}
 		config.RemoveHeaders = remove
 	}
-	if provider.Api == protocol.ConversationModelApiAnthropic || provider.Api == protocol.ConversationModelApiAzureAi {
+	if provider.Api == protocol.ConversationModelApiAzureAi {
 		config.Headers["anthropic-version"] = "2023-06-01"
 	}
 	// The provider's own headers replace defaults of any letter case; the

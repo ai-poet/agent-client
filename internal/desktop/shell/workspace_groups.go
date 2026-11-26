@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/ai-poet/cheaprouter-harness/internal/desktop/composer"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/icons"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/kit"
@@ -317,6 +318,19 @@ func (a *App) showTab(c *ui.Context, t headerTab) {
 // takes it and leaves the split first.
 func (a *App) tabClosable() bool {
 	return a.Page == ConversationPage && a.panes.Displayed() == nil && a.panes.Active.Kind == panes.Session
+}
+
+// HasDraft reports whether the window currently retains the given composer state.
+func (a *App) HasDraft(state *composer.State) bool {
+	if state == nil {
+		return false
+	}
+	for _, draft := range a.drafts {
+		if draft == state {
+			return true
+		}
+	}
+	return false
 }
 
 // closeShownTab is ⌘W on a session standing alone: its tab closes as its

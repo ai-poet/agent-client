@@ -198,7 +198,8 @@ func (node *Node) launchWorkspaceCommand(ctx context.Context, caller protocol.No
 	}
 	promotion, release := node.commandPromotion(operation, input.Turn)
 	defer release()
-	output, err := node.processes.ExecutePromotable(operation, launch, promotion)
+	output, timedOut, err := node.processes.ExecutePromotable(operation, launch, promotion)
+	effect.timedOut = timedOut
 	if err != nil && launch.Release != nil {
 		launch.Release()
 	}

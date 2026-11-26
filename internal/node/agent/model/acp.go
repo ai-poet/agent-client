@@ -48,16 +48,33 @@ type acpModel struct {
 	capture ACPCapture
 }
 
+const acpSystemPrefix, acpSystemSuffix = "<system>\n", "\n</system>\n\n"
+
+// SummarySystemBytes accounts for the single summary message and ACP framing
+// when the agent cannot carry system text separately. Zero means no byte cap.
+func SummarySystemBytes(languageModel fantasy.LanguageModel, request string) int {
+	if model, ok := languageModel.(*acpModel); ok {
+		overhead := len(acpSystemPrefix) + len(acpDiscipline) + len("\n\n") + len(acpSystemSuffix) + len(request)
+		return max(1, int(model.capture.Adapter.Acp.ReplayBytes)-overhead)
+	}
+	return 0
+}
+
 func NewACP(binding Binding, capture ACPCapture) (fantasy.LanguageModel, error) {
 	if !PluginBound(binding.Provider) || capture.Adapter.Acp == nil || capture.Pool == nil ||
 		(**binding.Provider.Binding).Adapter.Adapter != capture.Adapter.ID || capture.Adapter.Acp.Program != capture.Program.ID {
 		return nil, &Failure{Kind: NotConfigured, Message: "captured model adapter is unavailable"}
 	}
 	if capture.stall == 0 {
-		capture.stall = stallTimeout
+		capture.stall = acpStallTimeout
 	}
 	return &acpModel{binding: binding, capture: capture}, nil
 }
+
+// acpStallTimeout is how long an ACP agent may stay silent. The agent runs its
+// own tools inside one prompt turn, so a long command can leave the session
+// quiet longer than a model stream's stallTimeout.
+const acpStallTimeout = 600 * time.Second
 
 func (model *acpModel) Provider() string { return "sailry-plugin" }
 func (model *acpModel) Model() string    { return model.binding.Config.Model }
@@ -569,7 +586,7 @@ func (model *acpModel) stream(ctx context.Context, request protocol.PluginModelA
 		return err
 	}
 	if !agent.metaSystem && !agent.prefixed {
-		text = "<system>\n" + system + "\n</system>\n\n" + text
+		text = acpSystemPrefix + system + acpSystemSuffix + text
 	}
 	if len(text) > int(settings.ReplayBytes) {
 		return &Failure{Kind: ContextOverflow, Message: fmt.Sprintf("The conversation is larger than %s accepts in one prompt", model.capture.Program.Command)}

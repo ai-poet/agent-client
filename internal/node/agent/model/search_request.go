@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/ai-poet/cheaprouter-harness/internal/node/providers"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
@@ -26,11 +27,10 @@ func PrepareNativeSearch(ctx context.Context, binding Binding, body map[string]a
 	path := strings.TrimRight(endpoint.Path, "/")
 	switch binding.Provider.Api {
 	case protocol.ConversationModelApiResponses:
-		if !strings.HasSuffix(path, "/responses") {
-			path += "/responses"
-		}
+		endpoint = endpoint.JoinPath("responses")
 	case protocol.ConversationModelApiAnthropic:
-		path = strings.TrimSuffix(strings.TrimSuffix(path, "/v1/messages"), "/v1") + "/v1/messages"
+		base := providers.AnthropicBaseURL(*endpoint)
+		endpoint = base.JoinPath("v1", "messages")
 	case protocol.ConversationModelApiGemini:
 		name := strings.TrimPrefix(binding.Config.Model, "models/")
 		if name == "" || strings.ContainsAny(name, "/:") || strings.ContainsFunc(name, unicode.IsControl) {
@@ -39,11 +39,10 @@ func PrepareNativeSearch(ctx context.Context, binding Binding, body map[string]a
 		if !strings.HasSuffix(path, "/v1beta") && !strings.HasSuffix(path, "/v1") {
 			path += "/v1beta"
 		}
-		path += "/models/" + url.PathEscape(name) + ":generateContent"
+		endpoint.Path = path + "/models/" + url.PathEscape(name) + ":generateContent"
 	default:
 		return nil, &Failure{Kind: Unsupported, Message: "provider does not support native web search"}
 	}
-	endpoint.Path = path
 	if binding.Provider.Binding != nil && *binding.Provider.Binding != nil {
 		for _, policy := range (**binding.Provider.Binding).Policies {
 			for _, name := range policy.Models {
@@ -64,6 +63,9 @@ func PrepareNativeSearch(ctx context.Context, binding Binding, body map[string]a
 			}
 		}
 	}
+	if err := prepareAnthropicAPIKeyBody(config, body); err != nil {
+		return nil, err
+	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -76,8 +78,16 @@ func PrepareNativeSearch(ctx context.Context, binding Binding, body map[string]a
 	for key, value := range config.Headers {
 		request.Header.Set(key, value)
 	}
-	if binding.Provider.Api == protocol.ConversationModelApiAnthropic && request.Header.Get("anthropic-version") == "" {
-		request.Header.Set("anthropic-version", "2023-06-01")
+	if binding.Provider.Api == protocol.ConversationModelApiAnthropic {
+		if request.Header.Get("anthropic-version") == "" {
+			request.Header.Set("anthropic-version", "2023-06-01")
+		}
+		if !config.OAuth {
+			if beta := anthropicBetaHeader(config.Endpoint, false, config.AnthropicAPIKey, encoded, config.Headers, nil); beta != "" {
+				request.Header.Set("anthropic-beta", beta)
+				request.URL.RawQuery = "beta=true"
+			}
+		}
 	}
 	return request, nil
 }

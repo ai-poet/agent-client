@@ -36,11 +36,20 @@ func (mounted *Mounted) widgetKey(element *NativeElement) string {
 
 func (mounted *Mounted) widgetID(element *NativeElement) uint64 {
 	key := mounted.widgetKey(element)
+	if mounted.seenKeys != nil {
+		mounted.seenKeys[key] = struct{}{}
+	}
 	if identifier, exists := mounted.widgetIDs[key]; exists {
+		if mounted.seenWidgets != nil {
+			mounted.seenWidgets[identifier] = struct{}{}
+		}
 		return identifier
 	}
 	mounted.nextWidget++
 	mounted.widgetIDs[key] = mounted.nextWidget
+	if mounted.seenWidgets != nil {
+		mounted.seenWidgets[mounted.nextWidget] = struct{}{}
+	}
 	return mounted.nextWidget
 }
 

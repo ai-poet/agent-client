@@ -511,6 +511,7 @@ func TestRequestParity(t *testing.T) {
 				zero, thoughts := int64(0), true
 				call.ProviderOptions = fantasy.ProviderOptions{google.Name: &google.ProviderOptions{ThinkingConfig: &google.ThinkingConfig{ThinkingBudget: &zero, IncludeThoughts: &thoughts}}}
 			case "chat":
+				config.Endpoint = strings.TrimSuffix(config.Endpoint, "/chat/completions")
 				config.Key = "compatible-key"
 				config.JSON = map[string]any{"reasoning_effort": "high", "prompt_cache_key": "captured-session", "tools": sourceRawTools(t, "chat")}
 				config.Remove = []string{"tool_choice", "max_completion_tokens", "budget_tokens"}
@@ -1076,7 +1077,7 @@ func stallFixture(t *testing.T) {
 					return true
 				}, nil)
 				<-released
-				if len(attempts) == 0 || attempts[0].Failure == nil || attempts[0].Failure.Kind != Network || !attempts[0].Failure.Retryable() || attempts[0].Failure.Message != "Model stream sent no data for 600 seconds" {
+				if len(attempts) == 0 || attempts[0].Failure == nil || attempts[0].Failure.Kind != Network || !attempts[0].Failure.Retryable() || attempts[0].Failure.Message != "Model stream sent no data for 300 seconds" {
 					t.Fatalf("stalled attempt = %+v", attempts)
 				}
 				// A partial answer was shown, so that step is not sent again.

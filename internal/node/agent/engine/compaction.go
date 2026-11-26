@@ -34,7 +34,13 @@ func contextTokens(records []canonical.Record) uint64 {
 		message := records[i].MutableMessage()
 		if message != nil && message.Usage != nil {
 			if !compactionUsage(records[i]) && message.Usage.Total != nil {
-				return *message.Usage.Total + pendingTokens(records[i+1:])
+				used := *message.Usage.Total
+				if message.Usage.Input != nil && message.Usage.Output != nil && message.Usage.Reasoning != nil &&
+					!hasSignedReasoning(message) && *message.Usage.Reasoning <= *message.Usage.Output {
+					// Reasoning tokens that are not replayed back into the next request do not consume the next prompt window.
+					used = *message.Usage.Input + (*message.Usage.Output - *message.Usage.Reasoning)
+				}
+				return used + pendingTokens(records[i+1:])
 			}
 			// Only the latest observation can describe the current context. An
 			// incomplete report or summary usage cannot reuse an older total.
@@ -45,6 +51,23 @@ func contextTokens(records []canonical.Record) uint64 {
 	// measurements describe the pre-compaction request, but their content
 	// still belongs to the new context alongside the latest summary.
 	return pendingTokens(records)
+}
+
+func hasSignedReasoning(message *canonical.Message) bool {
+	for _, block := range message.Content {
+		switch block.Kind {
+		case "redacted_thinking":
+			return true
+		case "thinking":
+			if thinking, ok := block.Data.(*canonical.Thinking); ok && thinking.Signature != nil && *thinking.Signature != "" {
+				return true
+			}
+			if thinking, ok := block.Data.(canonical.Thinking); ok && thinking.Signature != nil && *thinking.Signature != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 func pendingTokens(records []canonical.Record) uint64 {
 	var cache output.Cache
@@ -148,12 +171,21 @@ func (r *Runtime) compact(x *execution, binding model.Binding, state store.Agent
 		return nil
 	}
 	summaryID := protocol.NewRequestID().String()
+	hideCompacting := func() {
+		if !manual {
+			r.feed.Publish(x.inv.Session.ID, protocol.ConversationChange{
+				Kind: "hidden",
+				Data: protocol.ConversationChangeHiddenPayload{ID: summaryID, Turn: x.inv.Run.Turn},
+			})
+		}
+	}
 	if !manual {
 		progress, _ := json.Marshal(map[string]any{"type": "compacting", "started_ms": r.clock.Now().UnixMilli()})
 		_ = r.feed.Delta(x.inv.Session.ID, protocol.ConversationDraft{ID: summaryID, Turn: x.inv.Run.Turn, Author: "sailry", Parts: []protocol.ConversationPart{{Kind: "resource", Data: json.RawMessage(progress)}}})
 	}
 	binding, err := r.credential(x, binding)
 	if err != nil {
+		hideCompacting()
 		return err
 	}
 	summaryBinding := model.Summary(binding)
@@ -166,6 +198,7 @@ func (r *Runtime) compact(x *execution, binding model.Binding, state store.Agent
 	// A compaction that ends without a summary leaves its billed attempts and
 	// one record saying where and why it stopped; a stopped turn is no failure.
 	failed := func(stage protocol.ConversationCompactionStage, reason protocol.ConversationCompactionReason, failure error) error {
+		hideCompacting()
 		var records []canonical.Record
 		for _, attempt := range attempts {
 			records = append(records, r.observationRecord(x, summaryBinding, canonical.PurposeCompaction, attempt))
@@ -178,26 +211,23 @@ func (r *Runtime) compact(x *execution, binding model.Binding, state store.Agent
 		}
 		return failure
 	}
-	invalidRetry := requestText + "\n\n" + handoff.RetryInvalidOutput
-	emptyRetry := requestText + "\n\n" + handoff.RetryEmptyOutput
-	system, err := handoff.Prepare(selection.Prefix, uint64(selected.Context), uint64(output), requestText, invalidRetry, emptyRetry)
-	if err != nil {
-		return failed(protocol.ConversationCompactionStageBudget, protocol.ConversationCompactionReasonNoFittingPrefix, err)
-	}
 	languageModel, err := r.model(x.ctx, summaryBinding)
 	if err != nil {
 		return failed(protocol.ConversationCompactionStageRequest, protocol.ConversationCompactionReasonRequestFailed, err)
 	}
+	invalidRetry := requestText + "\n\n" + handoff.RetryInvalidOutput
+	emptyRetry := requestText + "\n\n" + handoff.RetryEmptyOutput
+	systemBytes := model.SummarySystemBytes(languageModel, requestText)
+	system, err := handoff.Prepare(selection.Prefix, uint64(selected.Context), uint64(output), requestText, systemBytes, invalidRetry, emptyRetry)
+	if err != nil {
+		return failed(protocol.ConversationCompactionStageBudget, protocol.ConversationCompactionReasonNoFittingPrefix, err)
+	}
 	requestSummary := func(promptText string) (string, bool, canonical.Usage, error) {
 		request := canonical.NewRecord(x.inv.Run.Turn, "message", canonical.NewMessage(canonical.User, canonical.Text(0, promptText)), r.clock.Now())
-		call, err := model.BuildCall(summaryBinding, model.Request{System: system, Records: []canonical.Record{request}, MaxOutputTokens: &output, Delegated: x.inv.Session.Delegation != nil})
-		if err != nil {
-			return "", false, canonical.Usage{}, err
-		}
 		var text strings.Builder
 		limited, textBlock := false, false
 		var usage canonical.Usage
-		err = model.Run(x.ctx, languageModel, call, model.SummaryPurpose, r.clock, func(attempt model.Attempt) error {
+		observe := func(attempt model.Attempt) error {
 			x.timeline.attempt(attempt)
 			// An attempt that waits to be sent again shows as a main request's does.
 			if attempt.RetryDelay != nil {
@@ -206,7 +236,8 @@ func (r *Runtime) compact(x *execution, binding model.Binding, state store.Agent
 			usage = attempt.Usage
 			attempts = append(attempts, attempt)
 			return nil
-		}, func(part fantasy.StreamPart) bool {
+		}
+		collect := func(part fantasy.StreamPart) bool {
 			switch part.Type {
 			case fantasy.StreamPartTypeTextDelta:
 				if !textBlock && text.Len() > 0 {
@@ -223,7 +254,28 @@ func (r *Runtime) compact(x *execution, binding model.Binding, state store.Agent
 				}
 			}
 			return x.ctx.Err() == nil
-		}, nil)
+		}
+		run := func(sys string) error {
+			text.Reset()
+			limited, textBlock = false, false
+			call, err := model.BuildCall(summaryBinding, model.Request{System: sys, Records: []canonical.Record{request}, MaxOutputTokens: &output, Delegated: x.inv.Session.Delegation != nil})
+			if err != nil {
+				return err
+			}
+			return model.Run(x.ctx, languageModel, call, model.SummaryPurpose, r.clock, observe, collect, nil)
+		}
+		err := run(system)
+		const maxCompactionShrinks = 4
+		for shrink := 0; shrink < maxCompactionShrinks && err != nil && x.ctx.Err() == nil && model.Classify(err).Kind == model.ContextOverflow; shrink++ {
+			// The model's actual input limit can be much smaller than the captured
+			// window. Shrink repeatedly until it fits or reaches the minimum budget.
+			smaller, ok := handoff.PrepareSmaller(selection.Prefix, uint64(selected.Context), uint64(output), promptText, system, invalidRetry, emptyRetry)
+			if !ok || smaller == system {
+				break
+			}
+			system = smaller
+			err = run(system)
+		}
 		return text.String(), limited, usage, err
 	}
 	failRequest := func(err error) error {

@@ -25,7 +25,7 @@ func scopeReplay(binding Binding, call *fantasy.Call, origins map[int]string) (s
 	if !found || !entry.Rig.BindsContext {
 		return "", nil
 	}
-	config := transportConfig{Kind: "anthropic", Model: binding.Config.Model}
+	config := transportConfig{Kind: "anthropic", Model: binding.Config.Model, AnthropicAPIKey: binding.Provider.Authentication == protocol.AuthenticationApiKey}
 	body, err := requestJSON(config, *call)
 	if err != nil {
 		return "", err
@@ -70,7 +70,8 @@ func scopeReplay(binding Binding, call *fantasy.Call, origins map[int]string) (s
 	}
 	projected := make(fantasy.Prompt, 0, len(call.Prompt))
 	position := 0
-	for index, message := range call.Prompt {
+	for index := 0; index < len(call.Prompt); index++ {
+		message := call.Prompt[index]
 		if message.Role == fantasy.MessageRoleSystem {
 			projected = append(projected, message)
 			continue
@@ -81,6 +82,17 @@ func scopeReplay(binding Binding, call *fantasy.Call, origins map[int]string) (s
 		encoded := wire.Messages[position]
 		position++
 		replayCacheMarkers(encoded.Content)
+		if message.Role == fantasy.MessageRoleTool {
+			if err := replayFrame(prefix, "message", encoded); err != nil {
+				return "", err
+			}
+			projected = append(projected, message)
+			for index+1 < len(call.Prompt) && call.Prompt[index+1].Role == fantasy.MessageRoleTool {
+				index++
+				projected = append(projected, call.Prompt[index])
+			}
+			continue
+		}
 		if message.Role == fantasy.MessageRoleAssistant && origins[index] != hex.EncodeToString(prefix.Sum(nil)) {
 			content := slices.DeleteFunc(slices.Clone(message.Content), func(part fantasy.MessagePart) bool {
 				return part.GetType() == fantasy.ContentTypeReasoning
