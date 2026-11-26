@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -120,6 +121,17 @@ func Export(ctx context.Context, profile string, q protocol.TraceExportQuery, w 
 	if q.Session == (protocol.SessionID{}) || (q.Mode != "raw" && q.Mode != "shareable") || (q.Scope != "all" && q.Scope != "failed" && q.Scope != "turn") || ((q.Scope == "turn") != (q.Turn != (protocol.TurnID{}))) {
 		return invalid("invalid trace export selection")
 	}
+	// A system temp directory can alias an ancestor (e.g. /var on macOS).
+	// Keep the profile itself and all trace entries subject to OpenFiles' checks.
+	if !filepath.IsAbs(profile) || slices.Contains(strings.Split(filepath.ToSlash(profile), "/"), "..") {
+		return invalid("an absolute profile directory without parent components is required")
+	}
+	profile = filepath.Clean(profile)
+	parent, err := filepath.EvalSymlinks(filepath.Dir(profile))
+	if err != nil {
+		return err
+	}
+	profile = filepath.Join(parent, filepath.Base(profile))
 	release := capture.ReadLease(profile, q.Session.String())
 	defer release()
 	fs, err := core.OpenFiles(profile, core.RestrictedFiles)

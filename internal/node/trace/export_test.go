@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -166,6 +167,28 @@ func TestTraceExportLimits(t *testing.T) {
 	f.Close()
 	if err = Export(t.Context(), p, q, io.Discard); err != tooLarge {
 		t.Fatal("oversized index accepted", err)
+	}
+}
+
+func TestTraceExportThroughSymlinkedProfileParent(t *testing.T) {
+	parent := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "tmp")
+	if err := os.Symlink(parent, alias); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		t.Fatal(err)
+	}
+	q := protocol.TraceExportQuery{Session: protocol.NewSessionID(), Mode: "raw", Scope: "all"}
+	dir := filepath.Join(parent, "profile", "traces", q.Session.String())
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "trace.jsonl"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Export(t.Context(), filepath.Join(alias, "profile"), q, io.Discard); err != nil {
+		t.Fatal(err)
 	}
 }
 
