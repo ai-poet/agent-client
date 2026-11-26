@@ -60,7 +60,7 @@ func ValidateConfiguration(provider protocol.ConversationProvider) error {
 	if _, err := OAuthFields(provider); err != nil {
 		return err
 	}
-	if err := validateHeaders(provider); err != nil {
+	if err := ValidateHeaders(provider); err != nil {
 		return err
 	}
 	if provider.Api == protocol.ConversationModelApiPlugin && (provider.Binding == nil || *provider.Binding == nil || (**provider.Binding).Adapter == nil) {
