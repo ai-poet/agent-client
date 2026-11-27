@@ -745,14 +745,19 @@ waiting. Every transient failure, including rate limits and overload, uses
 exponential waits from 300 milliseconds to thirty seconds, with jitter; a
 provider that needs a slower pace says so through its wait hint. Provider
 wait hints are minimums, never shortened to fit the budget. A model response
-that sends nothing for 300 seconds fails as a retryable network error; an ACP
-agent, which runs its own tools within a turn, may stay silent for 600 seconds.
+that sends nothing for 300 seconds fails as a retryable network error. If the
+attempt produced no model output, that idle interval consumes the same wait
+budget as backoff. An ACP agent may stay silent for 600 seconds while running tools.
 Direct model requests share one connection pool that sends HTTP/2 health pings
 after 15 seconds without data and retires idle connections after 30 seconds,
 so a connection a gateway dropped silently fails fast instead of stalling.
 A transport-reported HTTP/2 stream reset uses the same request retry budget,
 regardless of its reset code. A protocol error or explicit HTTP/1.1 requirement
-can spend one retry on HTTP/1.1 without changing other requests' protocol.
+can spend a retry on HTTP/1.1. A provider throttle received on that route
+keeps the pending request on HTTP/1.1 through its normal retry. After a
+successful recovery the captured model uses HTTP/1.1 for subsequent steps. Other model bindings negotiate
+independently. The 300-second idle timer measures the wait for response
+headers and each pending read of response bytes.
 The first retry of every model request is silent: its record is numbered 0
 and the transcript shows no row for it, even when a provider wait hint requires
 five seconds or more. From the second retry, rows count up to nine retries after

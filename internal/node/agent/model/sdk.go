@@ -106,7 +106,7 @@ type responseTransport struct {
 
 // stallError ends a request whose response stayed silent. It is a network
 // timeout, so a step that has shown nothing takes the normal retry path.
-type stallError struct{}
+type stallError struct{ idle time.Duration }
 
 func (stallError) Error() string   { return "model stream stalled" }
 func (stallError) Timeout() bool   { return true }
@@ -126,7 +126,7 @@ func (body *stallBody) Read(buffer []byte) (int, error) {
 	count, err := body.ReadCloser.Read(buffer)
 	body.timer.Stop()
 	if body.stalled.Load() {
-		return 0, stallError{}
+		return 0, stallError{idle: body.limit}
 	}
 	return count, err
 }
@@ -167,7 +167,7 @@ func (transport responseTransport) RoundTrip(request *http.Request) (*http.Respo
 			response.Body.Close()
 		}
 		if !headersInTime {
-			err = stallError{}
+			err = stallError{idle: transport.stall}
 		}
 		return nil, err
 	}
