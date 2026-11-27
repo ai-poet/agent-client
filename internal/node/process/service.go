@@ -92,6 +92,9 @@ func New(options Options) (*Service, error) {
 }
 
 func (launch Launch) Validate() error {
+	if launch.ReadOnly && (launch.Access != protocol.ProcessAccessWorkspace || !SandboxSupported() || launch.Background || launch.Pty || launch.Service) {
+		return &protocol.Fault{Code: protocol.ErrorCodePermissionDenied, Message: "read-only execution requires a foreground workspace sandbox"}
+	}
 	if strings.TrimSpace(launch.Command) == "" || strings.ContainsRune(launch.Command, 0) || launch.TimeoutMs == 0 || launch.TimeoutMs > uint64((1<<63-1)/int64(time.Millisecond)) {
 		return invalid("invalid command or timeout")
 	}

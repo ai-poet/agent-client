@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -335,6 +336,22 @@ func (r *Runtime) turn(x *execution) error {
 		policy += "\n\n" + addition
 	}
 	environment := prompt.Environment(r.clock.Now(), inv.Turn.Config.Model, process.NewEnvironment(os.Environ()).Shell(), inv.Worktree.Project != nil)
+	if capturedModel(binding).Tools && slices.ContainsFunc(x.tools, func(tool Tool) bool { return isPlanRunCommand(&tool) }) {
+		var sandbox protocol.SandboxSettings
+		if err := r.db.Read(x.ctx, func(db *sql.Conn) error {
+			var err error
+			sandbox, err = store.ReadSandboxSettings(x.ctx, db)
+			return err
+		}); err != nil {
+			return err
+		}
+		enabled := sandbox.Enabled && process.SandboxSupported() && (inv.Turn.Config.Mode == protocol.WorkModePlan || inv.Turn.Config.Permission != protocol.PermissionFull)
+		if enabled {
+			environment += "\nCommand sandbox: enabled"
+		} else {
+			environment += "\nCommand sandbox: disabled"
+		}
+	}
 	personal, err := prompt.CapturePersonal(x.ctx, r.profile)
 	if err != nil {
 		return err

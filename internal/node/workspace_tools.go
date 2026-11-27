@@ -24,6 +24,8 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
+const planRunCommandDescription = "Run a foreground workspace command in an enabled, available read-only OS sandbox. No workspace writes, network, unrestricted access, background commands, services, or PTY. Otherwise use dedicated read-only tools."
+
 type workspaceToolCall struct {
 	request        protocol.Request
 	prepared       *files.Prepared
@@ -57,6 +59,10 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 		if err = json.Unmarshal(declaration.Parameters, &schema); err != nil {
 			return nil, err
 		}
+		planning := inv.Turn.Config.Mode == protocol.WorkModePlan
+		if planning && declaration.Operation == protocol.ToolOperationRunCommand {
+			declaration.Description = planRunCommandDescription
+		}
 		var mu sync.Mutex
 		calls := map[string]*workspaceToolCall{}
 		tool := engine.Tool{Definition: fantasy.FunctionTool{Name: declaration.Name, Description: declaration.Description, InputSchema: schema}, SchemaJSON: declaration.Parameters, ReadOnly: declaration.ReadOnly, Concurrent: declaration.Concurrent, Deferred: !declaration.Initial, Approval: !declaration.ReadOnly, Binding: &store.ApprovalBinding{Owner: declaration.Owner, Tool: declaration.Name, Operation: &declaration.Operation}}
@@ -69,6 +75,17 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 			tool.ObserveHistory = observed.update
 		}
 		tool.Prepare = func(ctx context.Context, call canonical.ToolRequest) error {
+			if planning {
+				// Worktree status and diffs can execute repository-configured
+				// filters in native Git, outside the command sandbox.
+				switch declaration.Operation {
+				case protocol.ToolOperationInspectGit, protocol.ToolOperationReadGitDiff, protocol.ToolOperationListGitChanges, protocol.ToolOperationReadGitChange:
+					return &protocol.Fault{Code: protocol.ErrorCodePermissionDenied, Message: "native Git worktree inspection can run external filters; use a read-only sandbox command"}
+				}
+				if !declaration.ReadOnly && declaration.Operation != protocol.ToolOperationRunCommand && declaration.Operation != protocol.ToolOperationWriteArtifact {
+					return &protocol.Fault{Code: protocol.ErrorCodePermissionDenied, Message: "planning mode permits read-only tools"}
+				}
+			}
 			args := call.Arguments
 			worktree := filepath.Clean(inv.Worktree.Path)
 			var scope externalFileScope
@@ -90,8 +107,6 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 					}
 				}
 			}
-			// Full access is the admitted turn's policy, including for children.
-			// Normalize access before approval captures the command to execute.
 			arguments, err := observed.resolve(declaration.Operation, args)
 			if err != nil {
 				return err
@@ -115,7 +130,10 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 					return err
 				}
 			}
-			command, err := operations.Command(declaration.Operation, arguments, inv.Run.Worktree, inv.Session.ID, inv.Run.Turn, inv.Worktree.Project, sandbox.Enabled && inv.Turn.Config.Permission != protocol.PermissionFull)
+			command, err := operations.Command(declaration.Operation, arguments, inv.Run.Worktree, inv.Session.ID, inv.Run.Turn, inv.Worktree.Project, planning || sandbox.Enabled && inv.Turn.Config.Permission != protocol.PermissionFull)
+			if err == nil && planning && declaration.Operation == protocol.ToolOperationRunCommand {
+				err = store.CheckPlanRunCommand(*command.Data.(*protocol.CommandRunCommandPayload), process.SandboxSupported(), sandbox.Enabled)
+			}
 			if declaration.Operation == protocol.ToolOperationApplyChanges {
 				var patch struct {
 					Input string `json:"input"`
@@ -224,7 +242,7 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 				if err != nil {
 					return workspaceToolFault(err)
 				}
-				value := node.workspaceToolValue(ctx, request, scope.result(output), false)
+				value := node.workspaceToolValue(ctx, request, scope.result(output), false, planning)
 				return engine.ToolResult{Value: value, ReturnedError: workspaceOutputFailed(output), ReturnedFailure: workspaceOutputFailure(output)}
 			}
 			if !declaration.ReadOnly {
@@ -285,7 +303,7 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 					node.agent.Committed()
 				}
 			}
-			value := node.workspaceToolValue(ctx, request, output, effect.timedOut)
+			value := node.workspaceToolValue(ctx, request, output, effect.timedOut, planning)
 			return engine.ToolResult{Value: value, ReturnedError: workspaceOutputFailed(output), ReturnedFailure: workspaceOutputFailure(output)}
 		}
 		tools = append(tools, tool)
@@ -370,7 +388,7 @@ func workspaceOutputFailure(output protocol.Output) *protocol.ToolFailure {
 	}
 	return failure
 }
-func (node *Node) workspaceToolValue(ctx context.Context, request protocol.Request, output protocol.Output, timedOut bool) any {
+func (node *Node) workspaceToolValue(ctx context.Context, request protocol.Request, output protocol.Output, timedOut, planning bool) any {
 	if value, shaped := codeToolValue(output); shaped {
 		return value
 	}
@@ -438,7 +456,11 @@ func (node *Node) workspaceToolValue(ctx context.Context, request protocol.Reque
 			for _, diagnostic := range []string{"operation not permitted", "permission denied", "sandbox", "dyld:", "dyld[", "could not resolve host", "network is unreachable"} {
 				if strings.Contains(lower, diagnostic) {
 					if data, ok := value["data"].(map[string]any); ok {
-						data["sandbox_notice"] = "This command ran in the workspace sandbox: network access is disabled, writes are limited to the worktree and temporary directories, and existing Git metadata and managed child worktrees are protected. macOS also blocks new .git paths. Git writes, including git init, git add and git commit, require access=\"unrestricted\" under the current permission policy. If sandbox restrictions caused the failure, inspect any partial changes before requesting unrestricted access to retry. Unrestricted access does not override operating-system permissions."
+						if planning {
+							data["sandbox_notice"] = "This command ran in a read-only workspace sandbox with no network. Unrestricted access is unavailable; use dedicated read-only tools instead."
+						} else {
+							data["sandbox_notice"] = "This command ran in the workspace sandbox: network access is disabled, writes are limited to the worktree and temporary directories, and existing Git metadata and managed child worktrees are protected. macOS also blocks new .git paths. Git writes, including git init, git add and git commit, require access=\"unrestricted\" under the current permission policy. If sandbox restrictions caused the failure, inspect any partial changes before requesting unrestricted access to retry. Unrestricted access does not override operating-system permissions."
+						}
 					}
 					break
 				}

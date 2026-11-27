@@ -37,10 +37,10 @@ func TestNativeCommandLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.Write(info.Session, info.ID, "fixture\n"); err != nil {
+	if _, err = service.Write(info.Session, info.ID, "fixture\n", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err = service.Wait(ctx, info.Session, info.ID, 30000, "received:fixture"); err != nil {
+	if _, err = service.Wait(ctx, info.Session, info.ID, 30000, "received:fixture"); err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err := service.Read(info.Session, info.ID)
@@ -146,6 +146,40 @@ printf ok > work.txt
 	}
 	if code, ok := result.Outcome.Data.(int32); !ok || code != 0 {
 		t.Fatalf("sandbox security check exited %v: stdout=%q stderr=%q", result.Outcome.Data, result.Stdout.Text, result.Stderr.Text)
+	}
+}
+
+func TestNativeSandboxReadOnlyDeniesWorkspaceWrites(t *testing.T) {
+	ctx := context.Background()
+	home, profile, root := t.TempDir(), t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "readme.txt"), []byte("hello-readonly"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(Options{Profile: profile, Environment: NewEnvironment([]string{"PATH=/usr/bin:/bin", "HOME=" + home}), CaptureManaged: git.New(git.Options{}).CaptureManaged})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+
+	cmd := `set -eu
+test "$(cat readme.txt)" = "hello-readonly"
+printf scratch-ok > "$TMPDIR/scratch.txt"
+test "$(cat "$TMPDIR/scratch.txt")" = "scratch-ok"
+if printf mut > mutated.txt 2>/dev/null; then exit 21; fi
+if printf mut >> readme.txt 2>/dev/null; then exit 22; fi
+`
+	result, err := service.Execute(ctx, Launch{
+		ID: protocol.NewRequestID(), Session: protocol.NewSessionID(), Turn: protocol.NewTurnID(),
+		Root: root, Command: cmd, Access: protocol.ProcessAccessWorkspace, ReadOnly: true, TimeoutMs: 10000,
+	})
+	if err != nil || result.Outcome.Kind != "exited" {
+		t.Fatalf("read-only sandbox check failed: %+v, %v", result, err)
+	}
+	if code, ok := result.Outcome.Data.(int32); !ok || code != 0 {
+		t.Fatalf("read-only sandbox check exited %v: stdout=%q stderr=%q", result.Outcome.Data, result.Stdout.Text, result.Stderr.Text)
+	}
+	if _, err := os.Stat(filepath.Join(root, "mutated.txt")); !os.IsNotExist(err) {
+		t.Fatalf("read-only sandbox allowed creating mutated.txt: %v", err)
 	}
 }
 

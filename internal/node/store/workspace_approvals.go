@@ -3,8 +3,8 @@ package store
 import (
 	"context"
 	"database/sql"
-	"runtime"
 
+	"github.com/ai-poet/cheaprouter-harness/internal/node/process"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
@@ -20,13 +20,23 @@ func ConfigureWorkspaceApproval(ctx context.Context, db *sql.Conn, turn protocol
 		// permission level writes it without a prompt, a planning turn too.
 		return storageApproval(ctx, db, value)
 	}
-	if capture.Config.Mode == protocol.WorkModePlan {
+	planning := capture.Config.Mode == protocol.WorkModePlan
+	if planning && operation != protocol.ToolOperationRunCommand {
 		return value, fault(protocol.ErrorCodePermissionDenied, "planning turns cannot authorize tools with side effects")
 	}
 	value.Changes = changes
-	supported := runtime.GOOS == "darwin" || runtime.GOOS == "linux"
+	supported := process.SandboxSupported()
 	if operation == protocol.ToolOperationRunCommand {
 		input := command.Data.(*protocol.CommandRunCommandPayload)
+		if planning {
+			sandbox, err := ReadSandboxSettings(ctx, db)
+			if err != nil {
+				return value, err
+			}
+			if err := CheckPlanRunCommand(*input, supported, sandbox.Enabled); err != nil {
+				return value, err
+			}
+		}
 		access := input.Access
 		value.Access = &access
 		if supported && access == protocol.ProcessAccessWorkspace {
@@ -34,6 +44,7 @@ func ConfigureWorkspaceApproval(ctx context.Context, db *sql.Conn, turn protocol
 			value.State = protocol.ConversationApprovalStateApproved
 			value.CanRemember = false
 			value.Prefix = nil
+			value.Choice = nil
 		} else if supported && access == protocol.ProcessAccessUnrestricted && capture.Config.Permission != protocol.PermissionFull {
 			sandbox, err := ReadSandboxSettings(ctx, db)
 			if err != nil {
@@ -112,6 +123,9 @@ func ApprovedWorkspaceRequest(ctx context.Context, db *sql.Conn, turn protocol.T
 		return fault(protocol.ErrorCodePermissionDenied, "tool operation differs from its admitted approval")
 	}
 	input, command := request.Command.Data.(*protocol.CommandRunCommandPayload)
+	if command && input.Turn != turn {
+		return fault(protocol.ErrorCodePermissionDenied, "prepared command turn differs from approval")
+	}
 	if command && (value.Access == nil || *value.Access != input.Access) {
 		return fault(protocol.ErrorCodePermissionDenied, "prepared command access differs from approval")
 	}

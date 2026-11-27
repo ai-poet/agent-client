@@ -296,6 +296,13 @@ func findTool(tools []Tool, name string) *Tool {
 	return nil
 }
 
+// Package-owned native commands reach the workspace launcher through this
+// approval binding. A tool name or a hosted script alone grants no exception.
+func isPlanRunCommand(tool *Tool) bool {
+	return tool != nil && tool.Approval && tool.ConfigureApproval != nil && tool.Prepare != nil &&
+		tool.Binding != nil && tool.Binding.Operation != nil && *tool.Binding.Operation == protocol.ToolOperationRunCommand
+}
+
 func (r *Runtime) runTools(x *execution, state store.AgentState, calls []canonical.ToolRequest) error {
 	// Discovery answers with the names this turn offers its tools under.
 	r.exposure(x, state)
@@ -325,9 +332,13 @@ func (r *Runtime) runTools(x *execution, state store.AgentState, calls []canonic
 			results[i] = ToolResult{Error: true, Value: map[string]any{"content": []any{map[string]any{"type": "text", "text": "This tool call was not handled."}}, "isError": true}}
 			continue
 		}
-		// A planning turn still writes the conversation's own artifacts.
-		if x.inv.Turn.Config.Mode == protocol.WorkModePlan && !tool.ReadOnly && !tool.Delegation && call.Name != "ask_user" &&
-			!(tool.Binding != nil && tool.Binding.Operation != nil && *tool.Binding.Operation == protocol.ToolOperationWriteArtifact) {
+		// Only a parent planning turn can delegate, ask or record an artifact.
+		child := x.inv.Session.Delegation != nil
+		planning := x.inv.Turn.Config.Mode == protocol.WorkModePlan
+		readOnlyRole := child && x.childRole != nil && x.childRole.ReadOnly
+		parentException := !child && (tool.Delegation || call.Name == "ask_user" ||
+			tool.Binding != nil && tool.Binding.Operation != nil && *tool.Binding.Operation == protocol.ToolOperationWriteArtifact)
+		if (planning || readOnlyRole) && !tool.ReadOnly && !parentException && !(planning && isPlanRunCommand(tool)) {
 			results[i] = ToolResult{Failure: &protocol.Fault{Code: protocol.ErrorCodePermissionDenied, Message: "planning mode permits read-only tools"}}
 			continue
 		}
@@ -366,6 +377,11 @@ func (r *Runtime) runTools(x *execution, state store.AgentState, calls []canonic
 			continue
 		}
 		approved, err := r.approval(x, call, tool)
+		var denied *protocol.Fault
+		if x.inv.Turn.Config.Mode == protocol.WorkModePlan && isPlanRunCommand(tool) && errors.As(err, &denied) && denied.Code == protocol.ErrorCodePermissionDenied {
+			results[i] = toolFault(err)
+			continue
+		}
 		if err != nil {
 			return err
 		}

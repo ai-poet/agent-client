@@ -141,6 +141,12 @@ func prepareSandbox(launch Launch, environment Environment, captureManaged func(
 	if err != nil {
 		return policy, cleanup, sandboxFailure(err)
 	}
+	if launch.ReadOnly && (within(root, scratch) || within(scratch, root)) {
+		if ownScratch {
+			_ = os.Remove(scratch)
+		}
+		return policy, cleanup, &protocol.Fault{Code: protocol.ErrorCodePermissionDenied, Message: "read-only workspace and writable scratch must be separate"}
+	}
 	state, err := os.MkdirTemp(scratch, "environment-")
 	if err != nil {
 		if ownScratch {
@@ -159,7 +165,7 @@ func prepareSandbox(launch Launch, environment Environment, captureManaged func(
 			cleanup()
 		}
 	}()
-	policy.paths = append(policy.paths, allowedPath{root, true}, allowedPath{scratch, true})
+	policy.paths = append(policy.paths, allowedPath{root, !launch.ReadOnly}, allowedPath{scratch, true})
 	if launch.Inputs != "" {
 		inputs, err := filepath.EvalSymlinks(launch.Inputs)
 		if err != nil {
@@ -232,6 +238,11 @@ func prepareSandbox(launch Launch, environment Environment, captureManaged func(
 	}
 	if policy.profile != "" {
 		policy.deniedReads = append(policy.deniedReads, policy.profile)
+	}
+	// CaptureManaged can prepare Git excludes on the host. With no writable
+	// worktree there is nothing to pin, and inspection must not prepare it.
+	if launch.ReadOnly {
+		return policy, cleanup, nil
 	}
 	policy.captureRepositories(root)
 	if captureManaged == nil {

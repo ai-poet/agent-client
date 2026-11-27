@@ -22,6 +22,7 @@ type Launch struct {
 	Profile        string
 	Command        string
 	Access         protocol.ProcessAccess
+	ReadOnly       bool // Foreground workspace inspection; only private scratch is writable.
 	Cwd            string
 	TimeoutMs      uint64
 	Pty            bool

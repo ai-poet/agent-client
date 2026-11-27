@@ -48,3 +48,22 @@ func TestSandboxDeniedHomeCredentials(t *testing.T) {
 		}
 	}
 }
+
+func TestReadOnlySandboxDoesNotPrepareRepository(t *testing.T) {
+	launch := Launch{Root: t.TempDir(), Profile: t.TempDir(), ReadOnly: true}
+	env := NewEnvironment([]string{"HOME=" + t.TempDir()})
+	capture := func(string) (string, error) {
+		t.Fatal("read-only launch called writable repository preparation")
+		return "", nil
+	}
+	_, release, err := prepareSandbox(launch, env, capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	launch.Scratch = launch.Root
+	if _, release, err = prepareSandbox(launch, env, capture); err == nil {
+		release()
+		t.Fatal("read-only workspace granted writable scratch")
+	}
+}

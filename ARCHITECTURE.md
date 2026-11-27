@@ -802,7 +802,7 @@ input or approval remains visible when background work is active.
 
 | Service | Implemented boundary |
 | --- | --- |
-| Commands | Workspace sandbox on macOS and Linux by default; private temporary files, read-only toolchains and no network; full permission grants the full environment |
+| Commands | Workspace sandbox on macOS and Linux by default; private temporary files, read-only toolchains and no network; Full permission grants the full environment outside Plan and read-only roles |
 | Files and Git | Captured paths, ignore rules, bounded reads and revision-checked writes; change sets stop at the first failure. Under full permission, file tools also take absolute paths outside the session worktree, running the same confined, revision-checked operation from the path's volume root with symbolic links in its ancestors resolved, without worktree locks, checkpoints or durable admission |
 | Terminals | Node owns the PTY and screen mirror; local and remote controllers attach to that mirror |
 | Web | Execution-Node reads and ordered search channels; direct reads pin public DNS on redirects and reject private addresses |
@@ -813,6 +813,23 @@ input or approval remains visible when background work is active.
 | Session documents | Immutable bounded HTML revisions, rendered in an opaque-origin sandbox |
 | Hooks | Captured worktree scripts; launched groups are not replayed after cancellation or a crash |
 | Dispatch | Durable schedules driven by Sailry's calendar on standard timers |
+
+Plan turns and read-only delegated roles can run foreground workspace commands
+only in an enabled, available OS sandbox with a read-only worktree, private
+scratch and no network. Even Full permission cannot grant unrestricted access,
+services, a PTY or background execution. The Node checks the current setting
+before approval and again at launch; these commands never promote on timeout
+or guidance. Without the sandbox, agents use dedicated read-only tools.
+Worktree status and diff tools that can invoke native Git filters are refused
+in those turns; run Git in the read-only command sandbox instead.
+
+Sandboxed commands can read ordinary host files, including offline toolchains.
+The policy masks the Node profile and named credential locations rather than
+classifying arbitrary files as secrets. The workspace, staged inputs and private
+scratch never override credential masks. On Linux, bubblewrap builds the mount
+view; on amd64 and arm64, util-linux `setpriv --seccomp-filter` also blocks socket
+creation before starting the program. A read-only mount alone does not isolate
+host Unix sockets. Unsupported filters or wrappers do not grant direct execution.
 
 Dispatch handlers, schedules and jobs expose their owning `execution_node`.
 New independent reminders and scheduled tasks offer a host choice from the

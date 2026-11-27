@@ -1346,7 +1346,7 @@
             "unrestricted",
             null
           ],
-          "description": "Workspace access is confined and has no network on macOS/Linux. Unrestricted access needs fresh approval in Ask/Project and runs automatically in Full."
+          "description": "In Plan mode and read-only roles, only foreground workspace commands in an enabled, available read-only OS sandbox are permitted, even with Full permission. Otherwise workspace access is confined and has no network on macOS/Linux; unrestricted access needs fresh approval in Ask/Project and runs automatically in Full."
         },
         "description": {
           "type": [

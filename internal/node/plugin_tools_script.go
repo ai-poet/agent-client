@@ -229,6 +229,19 @@ func (node *Node) scriptTools(ctx context.Context, invocation *store.AgentInvoca
 				continue
 			}
 			if bound, exists := native[tool.Definition.Name]; exists {
+				if *handler.Operation == protocol.ToolOperationRunCommand && invocation.Turn.Config.Mode == protocol.WorkModePlan {
+					tool.Definition.Description = bound.Definition.Description
+					// A captured package may still describe Full as unrestricted.
+					// Keep its argument contract, but report the effective access.
+					properties, _ := schema["properties"].(map[string]any)
+					if access, ok := properties["access"].(map[string]any); ok {
+						access["description"] = "Only read-only sandboxed workspace access is allowed in this turn."
+						tool.SchemaJSON, err = json.Marshal(schema)
+						if err != nil {
+							return nil, err
+						}
+					}
+				}
 				tools = append(tools, owner.bindNative(tool, bound, declaration, handler))
 				continue
 			}
