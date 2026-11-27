@@ -118,7 +118,7 @@ func (b *Binding) remember(err error) {
 		chars := []rune(next)
 		message += string(chars[:min(len(chars), max(4096-len(message), 0))])
 	}
-	b.failure = &protocol.Fault{Code: code, Message: message}
+	b.failure = &protocol.Fault{Code: code, Message: message, ReportOwned: previous != nil && current != nil && previous.ReportOwned && current.ReportOwned}
 }
 func hookMessage(err error) string {
 	var fault *protocol.Fault
@@ -141,7 +141,7 @@ func (b *Binding) execute(ctx context.Context, phase protocol.HooksPhase, ordina
 			return
 		}
 		var fault *protocol.Fault
-		if !errors.As(executionErr, &fault) || fault == nil {
+		if !errors.As(executionErr, &fault) || fault == nil || fault.ReportOwned {
 			return
 		}
 		// An uncertain claim may be a refusal to replay a prior execution.

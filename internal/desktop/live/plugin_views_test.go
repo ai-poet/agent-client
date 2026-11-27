@@ -697,6 +697,25 @@ func testPluginViewOwnership(t *testing.T) {
 // A failed metadata read or view start is reported in the shape the Node
 // records: a failure of its own phase, coded, naming the package only with
 // a version, and placed where the view was.
+func TestPluginDiagnosticReportOwnership(t *testing.T) {
+	snapshot := protocol.DefaultSnapshot()
+	snapshot.Node = protocol.NodeID{1}
+	root := pluginViewFixture(t, &pluginViewTestNode{snapshot: snapshot})
+	reports := make(chan struct{}, 2)
+	root.controller.OnDispatch(func(kind string) {
+		if kind == "report_diagnostic" {
+			reports <- struct{}{}
+		}
+	})
+	report := pluginDiagnostic(protocol.NotificationSystemSystemSourcePluginMetadata, protocol.ErrorCodeInternal, "notes", nil, "metadata_read", protocol.PluginContext{})
+	root.reportDiagnostic(&link.FaultError{Fault: protocol.Fault{Code: report.Code, ReportOwned: true}}, report)
+	root.reportDiagnostic(errors.New("malformed metadata"), report)
+	root.workers.Wait()
+	if len(reports) != 1 {
+		t.Fatalf("sent %d incidents; want only the controller's metadata failure", len(reports))
+	}
+}
+
 func testPluginDiagnostic(t *testing.T) {
 	version, session, worktree := "1.2.0", protocol.NewSessionID(), protocol.NewWorktreeID()
 	scope := protocol.PluginContext{Session: &session, Worktree: &worktree}

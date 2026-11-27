@@ -121,7 +121,12 @@ func (client *Client) Do(ctx context.Context, command protocol.Command) (protoco
 // rather than an unknown outcome, which would end it.
 func (client *Client) read(ctx context.Context, command protocol.Command) (protocol.Output, error) {
 	output, err := client.Do(ctx, command)
-	if faultCode(err) == protocol.ErrorCodeOutcomeUnknown {
+	if delivered := observerFault(err); delivered != nil && delivered.Code == protocol.ErrorCodeOutcomeUnknown {
+		if delivered.ReportOwned {
+			translated := *delivered
+			translated.Code = protocol.ErrorCodeUnavailable
+			return output, &link.FaultError{Fault: translated}
+		}
 		return output, fault(protocol.ErrorCodeUnavailable, "Link connection was lost before the reply")
 	}
 	return output, err

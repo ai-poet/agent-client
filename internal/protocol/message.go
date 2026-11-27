@@ -56,6 +56,8 @@ type Fault struct {
 	Code    ErrorCode     `json:"code"`
 	Message string        `json:"message"`
 	Details *FaultDetails `json:"details,omitempty"`
+	// ReportOwned marks a failure delivery classified by its serving Node.
+	ReportOwned bool `json:"report_owned,omitempty"`
 }
 
 func DefaultFault() Fault {

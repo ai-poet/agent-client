@@ -496,7 +496,7 @@ func (r *Runtime) readPackage(name, version string, done func(bool)) {
 						released = summary.Version
 					}
 				}
-				r.reportDiagnostic(pluginDiagnostic(protocol.NotificationSystemSystemSourcePluginMetadata, faultCode(err), name, released, "metadata_read", protocol.PluginContext{}))
+				r.reportDiagnostic(err, pluginDiagnostic(protocol.NotificationSystemSystemSourcePluginMetadata, faultCode(err), name, released, "metadata_read", protocol.PluginContext{}))
 			}
 			if done != nil {
 				done(err == nil)

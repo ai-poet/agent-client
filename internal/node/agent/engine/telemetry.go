@@ -31,7 +31,7 @@ func recordTurnFailure(run protocol.ConversationRun, cause error) {
 		return
 	}
 	fault := run.Error
-	if fault.Code == protocol.ErrorCodeCancelled || fault.Code == protocol.ErrorCodePermissionDenied {
+	if fault.ReportOwned || fault.ConfigurationReason().Expected() || fault.Code == protocol.ErrorCodeCancelled || fault.Code == protocol.ErrorCodePermissionDenied {
 		return
 	}
 	code := protocol.ErrorCodeInternal

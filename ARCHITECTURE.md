@@ -42,6 +42,10 @@ Node ── agent loop + resource services ── online models / files / Git / 
 ```
 
 Node owns execution, configuration, credentials and durable conversation history.
+When command logging classifies a failure, Node marks its delivered fault
+`report_owned` without changing the stored receipt. The marker crosses Link;
+an older host or a locally synthesized transport failure makes no ownership
+claim. Desktop may still present the failure. No incident identifier is needed.
 Desktop first sends use separate session creation and turn admission. While
 creation is uncertain, Desktop checks the original creation receipt at its
 receiving Node before it can send the captured turn. Only the entry Node's

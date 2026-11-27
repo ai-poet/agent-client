@@ -705,6 +705,9 @@ func recordToolFailure(step context.Context, tool *Tool, result ToolResult) {
 	var code protocol.ErrorCode
 	var cause string
 	if fault := result.Failure; fault != nil {
+		if fault.ReportOwned {
+			return
+		}
 		switch fault.Code {
 		case protocol.ErrorCodeInternal:
 			code = fault.Code
