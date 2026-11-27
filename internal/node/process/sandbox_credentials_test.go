@@ -16,7 +16,7 @@ var credentialFixtures = []string{
 	".ssh/key", ".gnupg/key", ".aws/credentials", ".azure/token", ".kube/config",
 	".docker/config.json", ".gitconfig", ".git-credentials", ".npmrc", ".netrc",
 	".pypirc", ".cargo/credentials", ".cargo/credentials.toml", ".config/gh/hosts.yml",
-	".config/gcloud/key", ".config/op/key",
+	".config/gcloud/key", ".config/op/key", ".config/git/credentials",
 }
 
 func TestSandboxDeniedHomeCredentials(t *testing.T) {

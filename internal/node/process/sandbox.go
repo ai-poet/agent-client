@@ -41,6 +41,7 @@ var sandboxDeniedHomeReads = []string{
 	".docker",
 	".gitconfig",
 	".git-credentials",
+	".config/git/credentials",
 	".npmrc",
 	".netrc",
 	".pypirc",
@@ -190,7 +191,12 @@ func prepareSandbox(launch Launch, environment Environment, captureManaged func(
 	// Preserve read-only references to host toolchains/caches that would
 	// otherwise default under the isolated HOME.
 	if policy.home != "" {
-		if environment.values["RUSTUP_HOME"] == "" && regular(filepath.Join(policy.home, ".rustup/settings.toml")) {
+		if err := policy.configureToolchainState(state, environment); err != nil {
+			return policy, cleanup, sandboxFailure(err)
+		}
+		if environment.unrestricted["RUSTUP_HOME"] != "" && filepath.IsAbs(environment.unrestricted["RUSTUP_HOME"]) {
+			policy.variables["RUSTUP_HOME"] = environment.unrestricted["RUSTUP_HOME"]
+		} else if regular(filepath.Join(policy.home, ".rustup/settings.toml")) {
 			policy.variables["RUSTUP_HOME"] = filepath.Join(policy.home, ".rustup")
 		}
 		if environment.values["GOMODCACHE"] == "" && environment.values["GOPATH"] == "" {
@@ -201,9 +207,18 @@ func prepareSandbox(launch Launch, environment Environment, captureManaged func(
 	}
 	// Deny reads to Sailry's own profile (excluding the command's scratch and
 	// managed workspace, which are re-granted after denies) and user secrets.
-	if policy.home != "" {
-		for _, relative := range sandboxDeniedHomeReads {
-			policy.denyRead(filepath.Join(policy.home, filepath.FromSlash(relative)))
+	for _, relative := range sandboxDeniedHomeReads {
+		if err := policy.denyRead(filepath.Join(policy.home, filepath.FromSlash(relative))); err != nil {
+			return policy, cleanup, sandboxFailure(err)
+		}
+	}
+	for _, location := range []struct{ key, relative string }{
+		{"XDG_CONFIG_HOME", "git/credentials"}, {"CARGO_HOME", "credentials"}, {"CARGO_HOME", "credentials.toml"},
+	} {
+		if base := environment.unrestricted[location.key]; filepath.IsAbs(base) {
+			if err := policy.denyRead(filepath.Join(base, location.relative)); err != nil {
+				return policy, cleanup, sandboxFailure(err)
+			}
 		}
 	}
 	// A later workspace, attachment or scratch grant must never reopen a
@@ -216,7 +231,7 @@ func prepareSandbox(launch Launch, environment Environment, captureManaged func(
 		}
 	}
 	if policy.profile != "" {
-		policy.denyRead(policy.profile)
+		policy.deniedReads = append(policy.deniedReads, policy.profile)
 	}
 	policy.captureRepositories(root)
 	if captureManaged == nil {
@@ -232,17 +247,27 @@ func prepareSandbox(launch Launch, environment Environment, captureManaged func(
 	return policy, cleanup, nil
 }
 
-func (policy *sandboxPolicy) denyRead(path string) {
-	if !filepath.IsAbs(path) {
-		return
-	}
+func (policy *sandboxPolicy) denyRead(path string) error {
 	clean := filepath.Clean(path)
 	if !slices.Contains(policy.deniedReads, clean) {
 		policy.deniedReads = append(policy.deniedReads, clean)
 	}
-	if resolved, err := filepath.EvalSymlinks(clean); err == nil && filepath.IsAbs(resolved) && resolved != clean {
-		if !slices.Contains(policy.deniedReads, resolved) {
-			policy.deniedReads = append(policy.deniedReads, resolved)
+	// Resolve existing ancestors even when the credential itself is missing.
+	// A dangling link has no stable target to protect: do not launch.
+	for prefix := clean; ; prefix = filepath.Dir(prefix) {
+		resolved, err := filepath.EvalSymlinks(prefix)
+		if err == nil {
+			resolved = filepath.Join(resolved, strings.TrimPrefix(clean, prefix))
+			if !slices.Contains(policy.deniedReads, resolved) {
+				policy.deniedReads = append(policy.deniedReads, resolved)
+			}
+			return nil
+		}
+		if !os.IsNotExist(err) {
+			return err
+		}
+		if _, statErr := os.Lstat(prefix); !os.IsNotExist(statErr) || prefix == filepath.Dir(prefix) {
+			return err
 		}
 	}
 }

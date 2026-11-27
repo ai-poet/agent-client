@@ -149,4 +149,31 @@ printf ok > work.txt
 	}
 }
 
+func TestNativeSandboxLateXDGGitCredential(t *testing.T) {
+	home, config, root := t.TempDir(), t.TempDir(), t.TempDir()
+	env := NewEnvironment([]string{"HOME=" + home, "XDG_CONFIG_HOME=" + config, "PATH=/usr/bin:/bin"})
+	path := filepath.Join(config, "git", "credentials")
+	sibling := filepath.Join(config, "tools")
+	if err := os.WriteFile(sibling, []byte("offline"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	launch := Launch{Root: root, Profile: t.TempDir(), Access: protocol.ProcessAccessWorkspace,
+		Command: fmt.Sprintf(`set -eu; test "$(cat %s)" = offline; test -z "$(cat %s 2>/dev/null || :)"`, shellQuote(sibling), shellQuote(path))}
+	cmd, release, err := prepareCommand(launch, env, root, "", git.New(git.Options{}).CaptureManaged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	// Publish the credential after the mount arguments have been captured.
+	if err := os.Mkdir(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("credential-fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("late Git credential check: %v: %s", err, output)
+	}
+}
+
 func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'" }

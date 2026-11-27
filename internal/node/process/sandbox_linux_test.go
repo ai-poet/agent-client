@@ -13,6 +13,22 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func TestSandboxMissingCredentialParentView(t *testing.T) {
+	root := t.TempDir()
+	missing := filepath.Join(root, "config", "git", "credentials")
+	sibling := filepath.Join(root, "tools")
+	if err := os.Mkdir(sibling, 0700); err != nil {
+		t.Fatal(err)
+	}
+	args, err := maskedParentViews([]string{missing, filepath.Join(root, ".netrc")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(args, []string{"--tmpfs", root, "--ro-bind", sibling, sibling, "--remount-ro", root}) {
+		t.Fatalf("unexpected parent view: %v", args)
+	}
+}
+
 func TestSandboxSocketFilter(t *testing.T) {
 	if os.Getenv("SAILRY_TEST_SOCKET_FILTER") == "1" {
 		fd, err := unix.Socket(unix.AF_UNIX, unix.SOCK_STREAM, 0)
@@ -50,7 +66,10 @@ func TestSandboxArgsLinux(t *testing.T) {
 		paths:       []allowedPath{{"/workspace/a/.git", false}, {"/workspace", true}, {"/usr", false}},
 		deniedReads: []string{secretDir, secretFile},
 	}
-	args := sandboxArgsLinux(policy, "/usr/bin/sh")
+	args, err := sandboxArgsLinux(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, required := range []string{"--die-with-parent", "--unshare-pid", "--unshare-net", "--new-session"} {
 		if !slices.Contains(args, required) {
 			t.Fatal(args)
@@ -149,7 +168,10 @@ func TestSandboxProtectedParentsLinux(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	args := sandboxArgsLinux(sandboxPolicy{paths: []allowedPath{{root, true}}, protected: protected}, "/usr/bin/sh")
+	args, err := sandboxArgsLinux(sandboxPolicy{paths: []allowedPath{{root, true}}, protected: protected})
+	if err != nil {
+		t.Fatal(err)
+	}
 	index := func(flag, path string) int {
 		for i := 0; i+2 < len(args); i++ {
 			if args[i] == flag && args[i+1] == path && args[i+2] == path {
