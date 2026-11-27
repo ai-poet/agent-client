@@ -294,6 +294,16 @@ func (node *Node) Dispatch(ctx context.Context, caller protocol.NodeID, request 
 		ctx = context.WithValue(ctx, roleCaptureLogKey{}, &record)
 	}
 	accepted, err := node.admitCommand(ctx, caller, request)
+	if err != nil {
+		var stopped admissionStopped
+		if errors.As(err, &stopped) {
+			if span != nil {
+				span.Set(slog.String("command_stage", "admission"))
+				span.Finish(logging.Cancelled, string(stopped.Code), false)
+			}
+			return accepted, stopped.Fault
+		}
+	}
 	if span == nil {
 		return accepted, err
 	}
