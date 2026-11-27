@@ -129,7 +129,7 @@ func parseMarkdownHandoff(text string) (Summary, bool) {
 	subSection := ""
 	matchedHeadings := 0
 	var stateLines, nextLines []string
-	inFence := false
+	fenceWidth := 0
 	var codeLines []string
 	appendItem := func(target *[]string, line string) {
 		item := strings.TrimSpace(line)
@@ -153,18 +153,15 @@ func parseMarkdownHandoff(text string) (Summary, bool) {
 	}
 	for _, raw := range lines {
 		trimmed := strings.TrimSpace(raw)
-		if strings.HasPrefix(trimmed, "```") {
-			if inFence {
-				inFence = false
-				flushCode()
-			} else {
-				inFence = true
-				codeLines = nil
-			}
+		if fenceWidth == 0 && strings.HasPrefix(trimmed, "```") {
+			fenceWidth = len(trimmed) - len(strings.TrimLeft(trimmed, "`"))
 			continue
 		}
-		if inFence {
-			if section == "essential" && len(summary.Files) > 0 {
+		if fenceWidth != 0 {
+			if isClosingFence(trimmed, '`', fenceWidth) {
+				fenceWidth = 0
+				flushCode()
+			} else if section == "essential" && len(summary.Files) > 0 {
 				codeLines = append(codeLines, raw)
 			}
 			continue
