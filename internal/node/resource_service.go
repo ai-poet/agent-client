@@ -210,6 +210,20 @@ func (node *Node) routeKnowledge(ctx context.Context, caller protocol.NodeID, ca
 }
 
 func (node *Node) sendResource(ctx context.Context, target protocol.NodeID, call protocol.ResourceCall, outbound bool) (link.Admission, error) {
+	original := call.Request
+	if call.Original != nil {
+		original = *call.Original
+	}
+	if original.Command.Kind == "call_host_handler" {
+		// The next peer sees this transport's principal, not the callback's.
+		// A guest may route via its own controller, never act as this one.
+		user, verified := store.UserFromContext(ctx)
+		storage, captured := store.CapturedUserFromContext(ctx)
+		if !verified || captured && storage != user.ID ||
+			outbound && !user.Local || !outbound && (user.Controller == nil || *user.Controller != target) {
+			return link.Admission{}, permissionDenied()
+		}
+	}
 	call.Local = outbound
 	if outbound {
 		if remote := node.controllerClients()[target]; remote != nil {

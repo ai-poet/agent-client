@@ -1,8 +1,10 @@
 package node
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -10,6 +12,38 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
+
+func TestScheduledHostHandlerForwardPreservesPrincipal(t *testing.T) {
+	node := &Node{}
+	target := protocol.NodeID{2}
+	local := protocol.User{ID: protocol.NewUserID(), Local: true}
+	guest := protocol.User{ID: protocol.NewUserID(), Controller: &target}
+	localCtx, guestCtx := store.WithUser(t.Context(), local), store.WithUser(t.Context(), guest)
+	request := protocol.NewRequest(target, protocol.Command{Kind: "call_host_handler"})
+	for _, test := range []struct {
+		ctx      context.Context
+		outbound bool
+		code     protocol.ErrorCode
+	}{
+		{t.Context(), true, protocol.ErrorCodePermissionDenied},
+		{guestCtx, true, protocol.ErrorCodePermissionDenied},
+		{store.WithCapturedUser(localCtx, guest.ID), true, protocol.ErrorCodePermissionDenied},
+		{store.WithCapturedUser(guestCtx, local.ID), false, protocol.ErrorCodePermissionDenied},
+		// The authorized routes reach the (offline) peer lookup.
+		{localCtx, true, protocol.ErrorCodeUnavailable},
+		{guestCtx, false, protocol.ErrorCodeUnavailable},
+	} {
+		for _, call := range []protocol.ResourceCall{
+			{Request: request}, {Request: protocol.NewRequest(target, protocol.Command{Kind: "inspect_request"}), Original: &request},
+		} {
+			_, err := node.sendResource(test.ctx, target, call, test.outbound)
+			var fault *protocol.Fault
+			if !errors.As(err, &fault) || fault.Code != test.code {
+				t.Fatalf("%s outbound=%v: %v, want %s", call.Request.Command.Kind, test.outbound, err, test.code)
+			}
+		}
+	}
+}
 
 func TestHostHandlerUsesCapturedPackageAndOriginalReceipt(t *testing.T) {
 	node := nodeFixture(t)
