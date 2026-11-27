@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"syscall"
 
@@ -52,8 +54,9 @@ func runService(ctx context.Context, args []string, cancel context.CancelFunc) (
 		_, err := fmt.Fprintln(os.Stdout, hostctl.ServiceUsage)
 		return 0, err
 	}
-	if closeLogs, err := logging.Install(options.Profile, "host"); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "sailry-host: continuing without a diagnostic log:", err)
+	closeLogs, logErr := logging.Install(options.Profile, "host")
+	if logErr != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "sailry-host: continuing without a diagnostic log:", logErr)
 	} else {
 		defer closeLogs()
 	}
@@ -65,6 +68,16 @@ func runService(ctx context.Context, args []string, cancel context.CancelFunc) (
 	})
 	if err != nil {
 		return 1, err
+	}
+	// Only the profile owner may consume or truncate its crash trace.
+	if logErr == nil {
+		crash, err := telemetry.CatchCrashes(filepath.Join(logging.Directory(), "host"))
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "Host crash traces:", err)
+		} else {
+			defer debug.SetCrashOutput(nil, debug.CrashOptions{})
+		}
+		execution.Telemetry().ReportCrash(crash)
 	}
 	result := serve(ctx, execution, options)
 	// Restore default signals so another interrupt ends a stuck shutdown.

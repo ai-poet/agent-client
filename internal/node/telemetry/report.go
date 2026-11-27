@@ -151,16 +151,19 @@ func (c *Control) eventLocked(kind string, fields logging.Fields, trace *sentry.
 	if kind == "crash" {
 		level = sentry.LevelFatal
 	}
+	if kind == "model_recovery" {
+		level = sentry.LevelWarning
+	}
 	hash := blake3.New(32, nil)
 	hash.Write([]byte(kind))
-	for _, key := range []string{"area", "code", "operation", "stage", "reason", "command_stage", "configuration_reason", "cause_code", "package", "plugin_version"} {
+	for _, key := range []string{"area", "code", "operation", "stage", "reason", "command_stage", "configuration_reason", "reason_code", "cause_code", "package", "plugin_version"} {
 		if value, found := fields[key]; found {
 			encoded, _ := json.Marshal(value)
 			hash.Write([]byte(key))
 			hash.Write(encoded)
 		}
 	}
-	if trace != nil {
+	if trace != nil && fields["reason_code"] == nil {
 		for _, frame := range trace.Frames {
 			hash.Write([]byte(frame.Module + frame.Function + frame.Filename))
 			hash.Write(binary.LittleEndian.AppendUint64(nil, uint64(frame.Lineno)))
@@ -179,13 +182,16 @@ func (c *Control) eventLocked(kind string, fields logging.Fields, trace *sentry.
 		Tags:        c.tagsLocked(),
 		Sdk:         sentry.SdkInfo{Name: "Sailry", Version: "1"},
 	}
+	if reason, ok := fields["reason_code"].(string); ok {
+		event.Tags["sailry.reason_code"] = reason
+	}
 	if len(fields) > 0 {
 		// sentry-go's event has no free "extra" object; the public fields
 		// travel as one context.
 		event.Contexts = map[string]sentry.Context{"sailry": sentry.Context(fields)}
 	}
 	if kind != "diagnostic" {
-		handled, mechanism := kind == "operation", "tracing"
+		handled, mechanism := kind == "operation" || kind == "model_recovery", "tracing"
 		if !handled {
 			mechanism = kind
 		}
@@ -208,7 +214,8 @@ func (c *Control) Record(level slog.Level, fields logging.Fields) {
 		return
 	}
 	safe := logging.Remote(fields)
-	if level < slog.LevelError {
+	recovered := safe["area"] == "agent" && safe["operation"] == "model_request" && safe["phase"] == logging.Completed && safe["retry_outcome"] == "recovered"
+	if level < slog.LevelError && !(recovered && level == slog.LevelWarn) {
 		if len(safe) > 0 {
 			c.breadcrumbs = append(c.breadcrumbs, breadcrumb{at: time.Now().UTC(), fields: safe})
 			if len(c.breadcrumbs) > keptBreadcrumbs {
@@ -218,23 +225,27 @@ func (c *Control) Record(level slog.Level, fields logging.Fields) {
 		c.mu.Unlock()
 		return
 	}
-	if phase, _ := fields["phase"].(string); phase != logging.Failed {
+	if phase, _ := fields["phase"].(string); phase != logging.Failed && !recovered {
 		c.mu.Unlock()
 		return
 	}
-	event := c.eventLocked("operation", safe, stack(sentry.NewStacktrace()))
+	kind := "operation"
+	if recovered {
+		kind = "model_recovery"
+	}
+	event := c.eventLocked(kind, safe, stack(sentry.NewStacktrace()))
 	if !c.admitLocked(event.Fingerprint[0], time.Now()) || c.inFlight >= reportsInFlight {
 		c.mu.Unlock()
 		return
 	}
 	c.inFlight++
 	c.reports.Add(1)
-	scope, epoch := c.scope, c.epoch
+	scope := c.errorScope
 	c.mu.Unlock()
 	go func() {
 		defer c.reports.Done()
 		c.mu.Lock()
-		allowed := c.errorsLocked() && c.epoch == epoch
+		allowed := c.errorsLocked() && scope.Err() == nil
 		c.mu.Unlock()
 		if allowed {
 			c.send(scope, event)
@@ -252,7 +263,7 @@ func (c *Control) Record(level slog.Level, fields logging.Fields) {
 // not gate it: only the environment's opt-outs and a missing endpoint do.
 func (c *Control) Diagnostics(ctx context.Context) error {
 	c.mu.Lock()
-	permitted, epoch, scope := c.permittedLocked() && c.dsn != "" && !c.closing, c.epoch, c.scope
+	permitted, scope := c.permittedLocked() && c.dsn != "" && !c.closing, c.identityScope
 	c.mu.Unlock()
 	if !permitted {
 		return unavailable()
@@ -266,12 +277,12 @@ func (c *Control) Diagnostics(ctx context.Context) error {
 		return unavailable()
 	}
 	c.mu.Lock()
-	event := c.eventLocked("diagnostic", nil, nil)
-	changed := c.epoch != epoch
-	c.mu.Unlock()
-	if changed {
+	if scope.Err() != nil {
+		c.mu.Unlock()
 		return unavailable()
 	}
+	event := c.eventLocked("diagnostic", nil, nil)
+	c.mu.Unlock()
 	event.Attachments = []*sentry.Attachment{{Filename: "diagnostics.jsonl", ContentType: "application/x-ndjson", Payload: tail}}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
