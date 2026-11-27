@@ -172,3 +172,78 @@ func TestHTTP524AfterFinishDoesNotReplay(t *testing.T) {
 		t.Fatalf("tail failure replayed committed output: calls=%d commits=%d resets=%d delays=%v failure=%+v", fake.calls, commits, resets, timer.delays, f)
 	}
 }
+
+func TestStreamStallMeasuresOnlyPendingIO(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		trip := pluginRoundTripper(func(req *http.Request) (*http.Response, error) {
+			reader, writer := io.Pipe()
+			// Headers arrive near the end of their own idle timeout.
+			time.Sleep(stallTimeout - time.Second)
+			go func() {
+				defer writer.Close()
+				time.Sleep(2 * time.Second)
+				_, _ = writer.Write([]byte("one"))
+				_, _ = writer.Write([]byte("two"))
+			}()
+			context.AfterFunc(req.Context(), func() { reader.CloseWithError(req.Context().Err()) })
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: reader}, nil
+		})
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://fixture.invalid", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		transport := responseTransport{base: trip, stall: stallTimeout}
+		resp, err := transport.RoundTrip(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var data [3]byte
+		for _, want := range []string{"one", "two"} {
+			if _, err := io.ReadFull(resp.Body, data[:]); err != nil || string(data[:]) != want {
+				t.Fatalf("expected %q after an active read, got %q, %v", want, data, err)
+			}
+			// The model consumer is publishing output, not waiting for bytes.
+			time.Sleep(stallTimeout + time.Second)
+		}
+	})
+}
+
+func TestSilentStreamStallSharesRetryWaitBudget(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		transport := responseTransport{stall: stallTimeout, base: pluginRoundTripper(func(req *http.Request) (*http.Response, error) {
+			defer req.Body.Close()
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		})}
+		language := &sdkModel{config: transportConfig{Kind: "responses", Model: "fixture", Endpoint: "https://fixture.invalid"}, client: &http.Client{Transport: transport}}
+		var attempts []Attempt
+		started := time.Now()
+		err := Run(t.Context(), language, requestCall(t, "responses"), Main, clock.System{}, func(a Attempt) error {
+			attempts = append(attempts, a)
+			return nil
+		}, nil, nil)
+		failure := Classify(err)
+		if failure == nil || failure.Kind != Network || !failure.WaitExhausted || failure.Exhausted || len(attempts) != 2 {
+			t.Fatalf("attempts=%d failure=%+v", len(attempts), failure)
+		}
+		if delay := attempts[0].RetryDelay; delay == nil || attempts[1].RetryDelay != nil || time.Since(started) != 2*stallTimeout+*delay {
+			t.Fatalf("silent waits=%v elapsed=%s", attempts, time.Since(started))
+		}
+	})
+}
+
+func TestStallAfterModelOutputKeepsNormalRetry(t *testing.T) {
+	t.Parallel()
+	for _, part := range []fantasy.StreamPart{textPart("partial"), {Type: fantasy.StreamPartTypeToolInputStart, ToolCallName: "read"}} {
+		t.Run(string(part.Type), func(t *testing.T) {
+			stalled := []fantasy.StreamPart{part, {Type: fantasy.StreamPartTypeError, Error: stallError{idle: stallTimeout}}}
+			model := &policyModel{responses: [][]fantasy.StreamPart{stalled, stalled, {finishPart()}}}
+			if err := Run(t.Context(), model, fantasy.Call{}, Main, &policyClock{}, nil, nil, nil); err != nil || model.calls != 3 {
+				t.Fatalf("attempts=%d error=%v", model.calls, err)
+			}
+		})
+	}
+}

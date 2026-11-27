@@ -170,13 +170,24 @@ func (node *Node) startTerminal(ctx context.Context, launch terminal.Launch) (pr
 }
 
 func (node *Node) subscribeTerminal(topic protocol.Topic) (link.Subscription, error) {
+	if node.terminals == nil {
+		return nil, unavailable()
+	}
+	id, err := terminalTopicID(topic)
+	if err != nil {
+		return nil, err
+	}
+	return node.terminals.Subscribe(id)
+}
+
+func terminalTopicID(topic protocol.Topic) (protocol.TerminalID, error) {
 	switch id := topic.Data.(type) {
 	case protocol.TerminalID:
-		return node.terminals.Subscribe(id)
+		return id, nil
 	case *protocol.TerminalID:
 		if id != nil {
-			return node.terminals.Subscribe(*id)
+			return *id, nil
 		}
 	}
-	return nil, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "terminal subscription requires a terminal"}
+	return protocol.TerminalID{}, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "terminal subscription requires a terminal"}
 }

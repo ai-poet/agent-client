@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -60,6 +61,7 @@ func (r *Runtime) execute(x *execution) {
 	cleanupErr := r.closeTools(x)
 	status := protocol.ConversationStatusCompleted
 	var failure *protocol.Fault
+	cause := err
 	if x.ctx.Err() != nil {
 		status = r.stoppedStatus()
 	} else if err != nil {
@@ -68,7 +70,7 @@ func (r *Runtime) execute(x *execution) {
 	}
 	if cleanupErr != nil {
 		status = protocol.ConversationStatusFailed
-		failure = model.Fault(cleanupErr)
+		cause, failure = cleanupErr, model.Fault(cleanupErr)
 	}
 	if status == protocol.ConversationStatusCancelled || status == protocol.ConversationStatusInterrupted {
 		r.feed.Seal(x.inv.Session.ID, x.inv.Run.Turn)
@@ -87,13 +89,13 @@ func (r *Runtime) execute(x *execution) {
 		}
 		if hookErr := x.hooks.Complete(x.ctx, hookStatus); hookErr != nil && (x.ctx.Err() == nil || !turnEndHookCancelled(hookErr)) {
 			status = protocol.ConversationStatusFailed
-			failure = model.Fault(hookErr)
+			cause, failure = hookErr, model.Fault(hookErr)
 		}
 	}
 	// The turn's phases are stored once its work has ended, before its end.
 	if phasesErr := r.save(ctx, x.inv.Session.ID, r.phasesRecord(x)); phasesErr != nil && status == protocol.ConversationStatusCompleted {
 		status = protocol.ConversationStatusFailed
-		failure = model.Fault(phasesErr)
+		cause, failure = phasesErr, model.Fault(phasesErr)
 	}
 	r.mu.Lock()
 	child := r.children[x.inv.Run.Turn]
@@ -106,10 +108,18 @@ func (r *Runtime) execute(x *execution) {
 	// the model, tools, hooks or cleanup again.
 	reported := false
 	finishUnknown := false
-	var unlock func()
+	mainTask := child == nil && x.inv.Session.Delegation == nil && x.inv.Run.Kind == protocol.ConversationRunKindTask
+	var completion TurnCompletion
+	if mainTask && r.turnCompletion != nil && r.ctx.Err() == nil {
+		completion = r.turnCompletion(r.ctx, x.inv)
+	}
+	var unlock, releaseSession func()
 	defer func() {
 		if unlock != nil {
 			unlock()
+		}
+		if releaseSession != nil {
+			releaseSession()
 		}
 	}()
 	finish := func(db *sql.Conn) error {
@@ -151,6 +161,9 @@ func (r *Runtime) execute(x *execution) {
 	}
 	for {
 		unlock = r.LockPublication()
+		if completion.Settle != nil && releaseSession == nil {
+			releaseSession = r.holdTurnSettlement(x.inv.Session.ID)
+		}
 		if finishUnknown {
 			// An uncertain commit may already have ended this turn, including
 			// its guidance and review changes. Inspect it before another write.
@@ -197,9 +210,10 @@ func (r *Runtime) execute(x *execution) {
 		// notifier reaches it. Its successor still waits on publication.
 		r.stopTurnCommands(run.Session, x)
 	}
-	r.observeTurn(run, x.inv.Turn.Config.Mode, child != nil)
+	recordTurnFailure(run, cause)
+	r.observeTurn(run, x.inv.Turn.Config.Mode, child != nil || x.inv.Session.Delegation != nil && *x.inv.Session.Delegation != nil)
 	if successor != nil {
-		next := &delegatedChild{root: child.root, parent: child.parent, session: child.session, turn: successor.Turn, sequence: successor.Sequence, ctx: child.ctx, cancel: child.cancel, released: true, commandsInherited: true}
+		next := &delegatedChild{root: child.root, parent: child.parent, session: child.session, turn: successor.Turn, sequence: successor.Sequence, ctx: child.ctx, cancel: child.cancel, released: true, commandsInherited: true, retryTools: child.retryTools}
 		r.mu.Lock()
 		child.successor = next
 		delete(r.children, child.turn)
@@ -229,11 +243,39 @@ func (r *Runtime) execute(x *execution) {
 	// its end is stored and published. A stopping Node calls none.
 	unlock()
 	unlock = nil
-	if r.afterTurn != nil && r.ctx.Err() == nil && child == nil && x.inv.Session.Delegation == nil && x.inv.Run.Kind == protocol.ConversationRunKindTask {
+	if mainTask && r.ctx.Err() == nil && (completion.Settle != nil || completion.Observe != nil || r.afterTurn != nil) {
 		x.observedMu.Lock()
 		observed := x.observed
 		x.observedMu.Unlock()
-		r.afterTurn(r.ctx, x.inv, run, observed)
+		if completion.Settle != nil {
+			completion.Settle(r.ctx, run, observed)
+			releaseSession()
+			releaseSession = nil
+			if r.ctx.Err() != nil {
+				return
+			}
+		}
+		if completion.Observe != nil {
+			completion.Observe(r.ctx, run, observed)
+		}
+		if r.afterTurn != nil {
+			r.afterTurn(r.ctx, x.inv, run, observed)
+		}
+	}
+}
+
+// holdTurnSettlement is registered under publication before finishing the
+// turn. Release must run outside publication so the callback can use Node APIs.
+func (r *Runtime) holdTurnSettlement(session protocol.SessionID) func() {
+	if r.afterTurnSessions == nil {
+		r.afterTurnSessions = make(map[protocol.SessionID]struct{})
+	}
+	r.afterTurnSessions[session] = struct{}{}
+	return func() {
+		unlock := r.LockPublication()
+		delete(r.afterTurnSessions, session)
+		unlock()
+		r.Wake()
 	}
 }
 
@@ -335,6 +377,22 @@ func (r *Runtime) turn(x *execution) error {
 		policy += "\n\n" + addition
 	}
 	environment := prompt.Environment(r.clock.Now(), inv.Turn.Config.Model, process.NewEnvironment(os.Environ()).Shell(), inv.Worktree.Project != nil)
+	if capturedModel(binding).Tools && slices.ContainsFunc(x.tools, func(tool Tool) bool { return isPlanRunCommand(&tool) }) {
+		var sandbox protocol.SandboxSettings
+		if err := r.db.Read(x.ctx, func(db *sql.Conn) error {
+			var err error
+			sandbox, err = store.ReadSandboxSettings(x.ctx, db)
+			return err
+		}); err != nil {
+			return err
+		}
+		enabled := sandbox.Enabled && process.SandboxSupported() && (inv.Turn.Config.Mode == protocol.WorkModePlan || inv.Turn.Config.Permission != protocol.PermissionFull)
+		if enabled {
+			environment += "\nCommand sandbox: enabled"
+		} else {
+			environment += "\nCommand sandbox: disabled"
+		}
+	}
 	personal, err := prompt.CapturePersonal(x.ctx, r.profile)
 	if err != nil {
 		return err
@@ -435,7 +493,8 @@ func (r *Runtime) turn(x *execution) error {
 		// Every input waiting for this turn joins here as one batch: after tool
 		// results or a finished reply, before the next model step. A failed step
 		// takes none; the turn ends and its guidance returns to the queue.
-		if failed := lastMessage(state.Records); failed == nil || failed.Error == nil {
+		childLimited := childTurnBudgetExhausted(x, state)
+		if failed := lastMessage(state.Records); !childLimited && (failed == nil || failed.Error == nil) {
 			joined, err := r.guidance(x)
 			if err != nil {
 				return err
@@ -459,7 +518,11 @@ func (r *Runtime) turn(x *execution) error {
 		if delivered {
 			continue
 		}
-		last := lastMessage(state.Records)
+		lastRecord := lastMessageRecord(state.Records)
+		var last *canonical.Message
+		if lastRecord != nil {
+			last = lastRecord.Message()
+		}
 		if last != nil && last.Error != nil {
 			if last.Error.Code != nil && *last.Error.Code == "context_overflow" && recoveries < 2 {
 				if err = r.compact(x, binding, route, state, false); err != nil {
@@ -468,6 +531,9 @@ func (r *Runtime) turn(x *execution) error {
 				recoveries++
 				compacted = true
 				continue
+			}
+			if lastRecord.ID == x.failedInferenceRecord && x.inferenceCause != nil {
+				return x.inferenceCause
 			}
 			failure := &model.Failure{Kind: model.Other, Message: last.Error.Message, Exhausted: last.Error.RetryExhausted, WaitExhausted: last.Error.RetryWaitExhausted}
 			if last.Error.Code != nil {
@@ -501,12 +567,8 @@ func (r *Runtime) turn(x *execution) error {
 		if !x.callbackPending && last != nil && last.Role == canonical.Assistant {
 			return nil
 		}
-		limited, err := r.childTurnLimit(x, state)
-		if err != nil {
-			return err
-		}
-		if limited {
-			return nil
+		if childLimited {
+			return r.recordChildTurnLimit(x)
 		}
 		observed := map[string]bool{}
 		for _, tool := range x.tools {
@@ -650,13 +712,20 @@ func (r *Runtime) guidance(x *execution) (bool, error) {
 }
 
 func lastMessage(records []canonical.Record) *canonical.Message {
+	if record := lastMessageRecord(records); record != nil {
+		return record.Message()
+	}
+	return nil
+}
+
+func lastMessageRecord(records []canonical.Record) *canonical.Record {
 	for i := len(records) - 1; i >= 0; i-- {
 		if background := records[i].Background(); background != nil && background.Initial {
 			return nil
 		}
 		if message := records[i].Message(); message != nil {
 			if records[i].Metadata.Runtime == nil || records[i].Metadata.Runtime.AgentVisible || message.Error != nil {
-				return message
+				return &records[i]
 			}
 		}
 	}

@@ -10,7 +10,6 @@ import (
 
 	myterminal "github.com/egoist/mygo/plugins/terminal"
 	"github.com/egoist/mygo/ui"
-	"github.com/ai-poet/cheaprouter-harness/internal/node/process"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
@@ -187,7 +186,12 @@ func (service *Service) Start(ctx context.Context, launch Launch) (protocol.Term
 		access = protocol.ProcessAccessUnrestricted
 	}
 	release := func() {}
-	if access == protocol.ProcessAccessWorkspace && process.SandboxSupported() {
+	if access == protocol.ProcessAccessWorkspace {
+		if launch.Sandbox == nil {
+			err := fault(protocol.ErrorCodeNotConfigured, "workspace terminal sandbox is unavailable")
+			finish(protocol.TerminalInfo{}, err)
+			return protocol.TerminalInfo{}, err
+		}
 		confined, variables, free, err := launch.Sandbox(launch.Root, command, environment)
 		if err != nil {
 			finish(protocol.TerminalInfo{}, err)
@@ -214,6 +218,7 @@ func (service *Service) Start(ctx context.Context, launch Launch) (protocol.Term
 			return
 		}
 		value.info.Title = &title
+		value.wakeStreamsLocked()
 		value.mu.Unlock()
 		value.publish()
 	}
@@ -256,6 +261,9 @@ func (service *Service) Start(ctx context.Context, launch Launch) (protocol.Term
 	go func() {
 		defer service.work.Done()
 		<-terminal.Done()
+		// The output source has ended, so it cannot release a synchronized
+		// draw itself. Let attached mirrors capture its last screen.
+		terminal.Feed([]byte("\x1b[?2026l"))
 		status := protocol.TerminalStatus{Kind: "exited", Data: protocol.TerminalStatusExitedPayload{Code: uint32(terminal.ExitCode())}}
 		switch {
 		case terminal.ExitCode() < 0:

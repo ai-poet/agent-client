@@ -42,6 +42,10 @@ Node ── agent loop + resource services ── online models / files / Git / 
 ```
 
 Node owns execution, configuration, credentials and durable conversation history.
+When command logging classifies a failure, Node marks its delivered fault
+`report_owned` without changing the stored receipt. The marker crosses Link;
+an older host or a locally synthesized transport failure makes no ownership
+claim. Desktop may still present the failure. No incident identifier is needed.
 Desktop first sends use separate session creation and turn admission. While
 creation is uncertain, Desktop checks the original creation receipt at its
 receiving Node before it can send the captured turn. Only the entry Node's
@@ -377,8 +381,15 @@ session namespace.
 Every connection uses full synchronous durability. `internal/turso` delegates SQL
 and value binding to the official SDK. Its native extension supplies connection
 ownership and interruption, which SDK 0.8.3 does not expose. Cancellation joins
-the interrupt watcher before reusing a connection. The shipped native library
+any active interrupt before reusing a connection; an uncancelled query needs no
+watcher goroutine. Reader pools allow 32 open connections with up to eight idle,
+expiring idle connections after two minutes. The shipped native library
 enables the same full-text index implementation as the Rust database.
+
+The Node samples the Go live heap to reclaim cached search results, inspected
+repository buffers and delivery-refusal diagnostics under pressure. Driver
+cooldowns and canonical data are not cache entries. Unconsumed repository
+inspections also expire after ten minutes.
 
 Canonical conversation data uses Sailry-owned records, messages and blocks.
 Binary content is stored by digest. Unknown usage counts remain unknown.
@@ -740,15 +751,45 @@ session-authorized read supplies any retained body. TTFT and elapsed
 percentiles use nearest rank up to 20,000 samples per distribution and fixed
 histogram upper bounds beyond that.
 
-Model request recovery permits up to nine retries and ten minutes of cumulative
-waiting. Network failures use exponential waits from one to thirty seconds;
-rate limits and overload use five seconds to one minute, with jitter. Provider
-wait hints are minimums, never shortened to fit the budget. Interrupted main
-requests clear the failed attempt's provisional draft before retrying the same
+Model request recovery permits up to ten retries and ten minutes of cumulative
+waiting. Every transient failure, including rate limits and overload, uses
+exponential waits from 300 milliseconds to thirty seconds, with jitter; a
+provider that needs a slower pace says so through its wait hint. Provider
+wait hints are minimums, never shortened to fit the budget. A model response
+that sends nothing for 300 seconds fails as a retryable network error. If the
+attempt produced no model output, that idle interval consumes the same wait
+budget as backoff. An ACP agent may stay silent for 600 seconds while running tools.
+Direct model requests share one connection pool that sends HTTP/2 health pings
+after 15 seconds without data and retires idle connections after 30 seconds,
+so a connection a gateway dropped silently fails fast instead of stalling.
+A transport-reported HTTP/2 stream reset uses the same request retry budget,
+regardless of its reset code. A protocol error or explicit HTTP/1.1 requirement
+can spend a retry on HTTP/1.1. A provider throttle received on that route
+keeps the pending request on HTTP/1.1 through its normal retry. After a
+successful recovery the captured model prefers HTTP/1.1. New model bindings
+reuse the origin preference for 30 minutes (at most 256 origins). Requests of
+256 KiB or more try HTTP/1.1 directly. A wire-level 426 or 505 on that route
+allows a retry on the negotiated route within the same budgets.
+The 300-second idle timer covers dispatch through headers and each pending read,
+not time between reads. A first retry is visible after a stall, an attempt
+lasting at least 15 seconds, or a scheduled wait of at least five seconds.
+Otherwise it is numbered zero and stays hidden. Subsequent rows keep that
+request's numbering; visibility does not affect the budgets.
+Persisted retry records retain their saved numbering and visibility.
+Interrupted main requests clear the failed attempt's provisional draft before retrying the same
 model step; tool calls execute only after that step completes. Consumers without
 a draft-reset boundary stop automatic retry after emitting content. Summary
-requests buffer their output. Cancellation interrupts waits. Permanent failures
-terminate the request, and completed tools are not replayed.
+requests buffer their output. Cancellation interrupts waits. Actual HTTP 4xx or
+5xx responses not covered by transient recovery get one resend of the same
+request within the same budgets, respecting Retry-After. A repeated rejection
+retains its original diagnosis, including unauthorized and context overflow.
+Permanent failures without an HTTP error response do not earn that resend;
+completed tools are not replayed.
+The Node shares throttle windows across model calls using the same upstream
+origin and credential. Replacing an API key starts a separate window; rotating
+an OAuth token on the same account does not. A throttled attempt publishes
+the provider wait before releasing its concurrency slot. Queued siblings
+recheck the window before sending, without spending another attempt.
 Responses and Anthropic streams complete at their explicit terminal event after
 final output and usage have arrived; a later HTTP disconnect does not restart
 that completed step. Other stream formats retain their required trailing usage
@@ -756,8 +797,15 @@ and termination handling.
 
 Tools come from the captured enabled declarations. Everyday file, command, Git,
 code and web tools are initially exposed; `tool_search` discovers other declared
-tools without granting permission. Approvals settle before execution. Adjacent
-read-only concurrent calls run in groups of at most eight and retain result order.
+tools without granting permission. Each approval settles before its effect. The batch queues native coding tools by
+their prepared arguments, with up to eight execution slots. Reads and writes to
+one file follow model order; a foreground command precedes later file access. File reservations include
+move destinations and order workspace effects through durable completion. Tool
+responses remain in request order. A patch matches current text against the
+conversation's observed revisions, captures a concrete preview, and executes
+guarded changes in order. Only unique, exact in-place edits can be rematched
+under Full permission; creates, replacements, moves and deletes cannot acquire
+new preconditions after preparation.
 Node owns approval and question deadlines.
 
 Standard mode (`code` on the wire) runs ordinary work. Plan is read-only with a
@@ -769,7 +817,15 @@ path. Children inherit captured scope and permission; read-only roles use Plan.
 An unavailable default role model stays in the frozen roster with its provider
 metadata (or its absence). It does not block unrelated work. Explicit references
 and delegations resolve against that same snapshot and report the unavailable
-model instead of running it with the parent's model.
+model instead of running it with the parent's model. The roster reports missing
+skills and tools against the captured model and child scope. Child tool setup
+checks the role again against its own executors.
+Children cannot schedule workers or use role/team catalog operations. Progress
+updates are excluded from their default tools but an explicit role may select
+them. A delegated turn without a role-specific limit gets 12 model steps in
+Plan or a read-only role, otherwise 20. The model sees usage from halfway
+onward and a wrap-up cue within the last two steps. Parent turns have no child
+budget.
 Team settings control child concurrency, with a default of eight per root session.
 
 `list_subagents` reads a bounded page of direct child sessions from durable
@@ -780,11 +836,17 @@ but no task input or result text. An explicit stop is recorded with the exact
 child delegation and remains available after request receipts expire.
 Listing does not resume, collect or replay work. An explicit spawn using a
 listed child session starts a new child turn with its own admission receipt;
-waiting only observes a specific execution.
+waiting only observes a specific execution. A controller can retry the latest
+failed or interrupted child task if its parent tool capture exists. The retry
+gets a new turn, with the original capture and matching tool declarations,
+and delivers its result as background work. A stop in the parent session
+cancels a claimed retry and waits for admitted work to settle.
 
 Input received during a running task is durable guidance, consumed at a model
-boundary. A delegated child that fails or is stopped holds its own queue, which
-nothing resumes, so guidance it settles without joining ends cancelled with it;
+boundary. At a child step limit, unconsumed guidance runs as a successor in
+the same child session rather than joining a turn with no inference left.
+A delegated child that fails or is stopped holds its own queue, so
+guidance it settles without joining ends cancelled with it;
 the parent sees the child's outcome and can guide it again. Node recovery
 cancels such guidance that earlier versions left queued. Stop cancels work explicitly. Partial text and reasoning use a bounded
 in-memory feed; committed output is canonical. Interrupted streams seal visible
@@ -802,8 +864,8 @@ input or approval remains visible when background work is active.
 
 | Service | Implemented boundary |
 | --- | --- |
-| Commands | Workspace sandbox on macOS and Linux by default; private temporary files, read-only toolchains and no network; full permission grants the full environment |
-| Files and Git | Captured paths, ignore rules, bounded reads and revision-checked writes; change sets stop at the first failure. Under full permission, file tools also take absolute paths outside the session worktree, running the same confined, revision-checked operation from the path's volume root with symbolic links in its ancestors resolved, without worktree locks, checkpoints or durable admission |
+| Commands | Workspace sandbox on macOS and Linux by default; private temporary files, read-only toolchains and no network; Full permission grants the full environment outside Plan and read-only roles |
+| Files and Git | Captured paths, ignore rules, bounded reads and revision-checked writes; change sets stop at the first failure. Under full permission, file tools also take absolute paths outside the session worktree, running the same confined, revision-checked operation from the path's volume root with symbolic links in its ancestors resolved, with the same file reservations for mutations. Purely external operations have no worktree checkpoints or durable admission |
 | Terminals | Node owns the PTY and screen mirror; local and remote controllers attach to that mirror |
 | Web | Execution-Node reads and ordered search channels; direct reads pin public DNS on redirects and reject private addresses |
 | Browser | Node-owned Chromium process tree and private browser profile per conversation |
@@ -813,6 +875,23 @@ input or approval remains visible when background work is active.
 | Session documents | Immutable bounded HTML revisions, rendered in an opaque-origin sandbox |
 | Hooks | Captured worktree scripts; launched groups are not replayed after cancellation or a crash |
 | Dispatch | Durable schedules driven by Sailry's calendar on standard timers |
+
+Plan turns and read-only delegated roles can run foreground workspace commands
+only in an enabled, available OS sandbox with a read-only worktree, private
+scratch and no network. Even Full permission cannot grant unrestricted access,
+services, a PTY or background execution. The Node checks the current setting
+before approval and again at launch; these commands never promote on timeout
+or guidance. Without the sandbox, agents use dedicated read-only tools.
+Worktree status and diff tools that can invoke native Git filters are refused
+in those turns; run Git in the read-only command sandbox instead.
+
+Sandboxed commands can read ordinary host files, including offline toolchains.
+The policy masks the Node profile and named credential locations rather than
+classifying arbitrary files as secrets. The workspace, staged inputs and private
+scratch never override credential masks. On Linux, bubblewrap builds the mount
+view; on amd64 and arm64, util-linux `setpriv --seccomp-filter` also blocks socket
+creation before starting the program. A read-only mount alone does not isolate
+host Unix sockets. Unsupported filters or wrappers do not grant direct execution.
 
 Dispatch handlers, schedules and jobs expose their owning `execution_node`.
 New independent reminders and scheduled tasks offer a host choice from the
@@ -1070,7 +1149,11 @@ original path cannot resolve local image references from their display names.
 Generated-image tool details retain status and parameters while the answer shows
 the image. Its preview attachment remains available to reply embeds; the output
 inventory identifies native generation by its workspace file, so publishing that
-file in the answer does not add another output.
+file in the answer does not add another output. The Node pages the asset inventory
+in whole event groups (at most 50), reserving 64 KiB of each Link frame for
+page metadata and the reply envelope. A cursor resumes before the last consumed
+event; a group too large for a page returns `invalid_request` instead of an
+unusable cursor.
 Session HTML uses a sandboxed MyGo WebView with no privileged bridge. The host
 inlines available document images as data URLs; the page receives neither a file
 base URL nor network access.

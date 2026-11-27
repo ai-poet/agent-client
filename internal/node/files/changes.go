@@ -19,13 +19,16 @@ type PreparedChange struct {
 	Before           *string
 	After            *string
 	ExpectedRevision *string
+	CreateParents    bool
 }
 type Prepared struct {
-	Command  protocol.Command
-	Access   core.FileAccess
-	Changes  []PreparedChange
-	Preview  protocol.ChangePreview
-	Rejected *protocol.FileChanges
+	patchKeys map[string]string
+	patchKey  func(string) string
+	Command   protocol.Command
+	Access    core.FileAccess
+	Changes   []PreparedChange
+	Preview   protocol.ChangePreview
+	Rejected  *protocol.FileChanges
 }
 
 func Prepare(ctx context.Context, root string, command protocol.Command, access core.FileAccess) (*Prepared, error) {
@@ -74,7 +77,7 @@ func Prepare(ctx context.Context, root string, command protocol.Command, access 
 			return nil, e
 		}
 		if revision([]byte(before)) != v.Edit.ExpectedRevision {
-			return nil, conflict("file changed before editing")
+			return nil, conflict("file changed since the expected revision; read the current content before editing")
 		}
 		p.Changes = []PreparedChange{{Operation: "edit", Kind: protocol.ChangeKindModified, Path: v.Edit.Path, Before: &before, After: &after, ExpectedRevision: &v.Edit.ExpectedRevision}}
 		p.Preview.Files = append(p.Preview.Files, preview(p.Changes[0]))
@@ -200,7 +203,7 @@ func prepareChange(ctx context.Context, f *core.Files, change protocol.FileChang
 			return p, e
 		}
 		if revision(data) != *p.ExpectedRevision {
-			return p, conflict("file changed before editing")
+			return p, conflict("file changed since the expected revision; read the current content before editing")
 		}
 		if p.Kind == protocol.ChangeKindRenamed {
 			target, e := f.Open(*p.Destination)
@@ -271,14 +274,14 @@ func Apply(ctx context.Context, root string, p *Prepared) (protocol.Output, erro
 		var err error
 		if !stopped {
 			switch entry.Operation {
-			case "create", "write":
-				written, err = f.Save(ctx, entry.Path, *entry.After, entry.ExpectedRevision)
-			case "edit":
+			case "create":
+				written, err = f.Save(ctx, entry.Path, *entry.After, nil)
+			case "write", "edit":
 				written, err = f.RestoreText(ctx, entry.Path, *entry.After, *entry.ExpectedRevision)
 			case "delete":
 				err = f.DeleteFile(ctx, entry.Path, *entry.ExpectedRevision)
 			case "move":
-				err = f.MoveFile(ctx, entry.Path, *entry.Destination, *entry.ExpectedRevision)
+				err = f.MoveFile(ctx, entry.Path, *entry.Destination, *entry.ExpectedRevision, entry.CreateParents)
 			}
 			if err != nil {
 				stopped = true

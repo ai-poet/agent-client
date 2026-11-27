@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +15,50 @@ import (
 
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
+
+func TestStopTransientKeepsServices(t *testing.T) {
+	reports := processFailureReports(t)
+	stopped := make(chan string, 2)
+	service, err := New(Options{Profile: t.TempDir(), Run: func(ctx context.Context, launch Launch, _ func(protocol.ProcessOutputOutputStream, []byte), _ <-chan []byte) (protocol.ProcessCompletion, error) {
+		<-ctx.Done()
+		stopped <- launch.Command
+		return protocol.ProcessCompletion{Outcome: protocol.ProcessOutcome{Kind: "cancelled"}}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	session := protocol.NewSessionID()
+	for _, launch := range []Launch{{Command: "tests"}, {Command: "server", Service: true}} {
+		launch.ID, launch.Session, launch.Root, launch.TimeoutMs = protocol.NewRequestID(), session, t.TempDir(), 1000
+		if _, err := service.Start(launch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := (Launch{ID: protocol.NewRequestID(), Root: t.TempDir(), Command: "server", TimeoutMs: 1000, Service: true}).Validate(); err == nil {
+		t.Fatal("a foreground service launch was accepted")
+	}
+	service.StopTransient(session)
+	if command := <-stopped; command != "tests" {
+		t.Fatalf("StopTransient stopped %s", command)
+	}
+	running := 0
+	for _, info := range service.List(session) {
+		if info.Status.Kind == "running" {
+			if info.Command != "server" {
+				t.Fatalf("%s is still running", info.Command)
+			}
+			running++
+		}
+	}
+	if running != 1 {
+		t.Fatalf("the service is not the only running command: %+v", service.List(session))
+	}
+	if err := service.Close(); err != nil {
+		t.Fatal(err)
+	}
+	checkProcessFailureReport(t, reports(), Launch{}, "", "")
+}
 
 func TestOutputBudget(t *testing.T) {
 	t.Parallel()
@@ -284,6 +329,172 @@ func TestBackgroundCompletionEvidence(t *testing.T) {
 			}
 			if _, err := service.Start(launch); err == nil {
 				t.Fatal("command identity was replayed")
+			}
+		})
+	}
+}
+
+func TestBackgroundCompletionStopsRetrying(t *testing.T) {
+	for _, row := range []struct {
+		name     string
+		code     protocol.ErrorCode
+		attempts int
+		full     bool
+	}{
+		{"refused write", protocol.ErrorCodeBusy, 3, false},
+		{"storage full", protocol.ErrorCodeBusy, 1, true},
+		{"unconfirmed write", protocol.ErrorCodeOutcomeUnknown, 1, false},
+		{"cancelled write", protocol.ErrorCodeCancelled, 1, false},
+		{"failed launch receipt", "", 1, false},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			reports := processFailureReports(t)
+			attempts := 0
+			var recovered Finished
+			retry := make(chan time.Time)
+			close(retry)
+			service, err := New(Options{Profile: t.TempDir(), After: func(delay time.Duration) <-chan time.Time {
+				if delay == time.Second {
+					return retry
+				}
+				return time.After(delay)
+			}, Run: func(_ context.Context, _ Launch, emit func(protocol.ProcessOutputOutputStream, []byte), _ <-chan []byte) (protocol.ProcessCompletion, error) {
+				emit(protocol.ProcessOutputOutputStreamStdout, []byte("retained result"))
+				return protocol.ProcessCompletion{Outcome: protocol.ProcessOutcome{Kind: "exited", Data: int32(7)}, ElapsedMs: 12}, nil
+			}, Finished: func(_ context.Context, finished Finished) error {
+				attempts++
+				if attempts > row.attempts {
+					recovered = finished
+					return nil
+				}
+				if row.code == "" {
+					return ErrCompletionNotRegistered
+				}
+				fault := &protocol.Fault{Code: row.code, Message: "fixture completion write failed"}
+				if row.full {
+					return errors.Join(fault, ErrCompletionStorageFull)
+				}
+				return fault
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = service.Close() })
+			launch := Launch{ID: protocol.NewRequestID(), Session: protocol.NewSessionID(), Turn: protocol.NewTurnID(), Root: t.TempDir(), Command: "fixture", TimeoutMs: 1000}
+			if _, err := service.Start(launch); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			if _, err := service.Wait(ctx, launch.Session, launch.ID, 30000, "missing"); err != nil {
+				t.Fatal("completion failure kept the process running", err)
+			}
+			snapshot, err := service.Read(launch.Session, launch.ID)
+			message, _ := snapshot.Info.Status.Data.(string)
+			if err != nil || snapshot.Info.Status.Kind != "failed" || !strings.Contains(message, "command completion could not be recorded") ||
+				strings.Contains(message, "fixture completion write failed") || strings.Contains(message, "free disk space") != row.full ||
+				snapshot.Stdout.Text != "retained result" || attempts != row.attempts {
+				t.Fatal("completion failure was not visible with command output", snapshot, err, attempts)
+			}
+			service.ReconcileFinished(ctx, launch.Session, launch.ID)
+			service.ReconcileFinished(ctx, launch.Session, launch.ID)
+			operation, cause := "", ""
+			if row.code == protocol.ErrorCodeOutcomeUnknown {
+				operation, cause = "record_completion", "outcome_unknown"
+			}
+			checkProcessFailureReport(t, reports(), launch, operation, cause)
+			if row.code != protocol.ErrorCodeBusy {
+				if attempts != row.attempts {
+					t.Fatal("inspection retried a non-retryable completion write")
+				}
+				return
+			}
+			snapshot, err = service.Read(launch.Session, launch.ID)
+			outcome, _ := snapshot.Info.Status.Data.(protocol.ProcessOutcome)
+			if err != nil || attempts != row.attempts+1 || snapshot.Info.Status.Kind != "finished" || outcome.Data != int32(7) ||
+				recovered.Snapshot.Stdout.Text != "retained result" || recovered.ElapsedMs == nil || *recovered.ElapsedMs != 12 {
+				t.Fatalf("inspection lost the original completion: %+v, %+v, attempts %d, error %v", snapshot, recovered, attempts, err)
+			}
+		})
+	}
+}
+
+func TestRefusedCompletionSettlesWithoutInspection(t *testing.T) {
+	for _, tc := range []struct {
+		name, cause  string
+		wantAttempts int
+	}{
+		{name: "recovers", wantAttempts: 5},
+		{name: "exhausted", cause: "busy", wantAttempts: 3 + len(reconcileDelays)},
+		{name: "later commit is uncertain", cause: "outcome_unknown", wantAttempts: 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reports := processFailureReports(t)
+			attempts := 0
+			ticks := make(chan time.Time, len(reconcileDelays))
+			retry := make(chan time.Time)
+			close(retry)
+			service, err := New(Options{Profile: t.TempDir(), After: func(delay time.Duration) <-chan time.Time {
+				if delay == time.Second {
+					return retry
+				}
+				if slices.Contains(reconcileDelays[:], delay) {
+					return ticks
+				}
+				return nil
+			}, Run: func(context.Context, Launch, func(protocol.ProcessOutputOutputStream, []byte), <-chan []byte) (protocol.ProcessCompletion, error) {
+				return protocol.ProcessCompletion{Outcome: protocol.ProcessOutcome{Kind: "exited", Data: int32(0)}}, nil
+			}, Finished: func(context.Context, Finished) error {
+				attempts++
+				switch {
+				case tc.cause == "" && attempts == tc.wantAttempts:
+					return nil
+				case tc.cause == "outcome_unknown" && attempts == tc.wantAttempts:
+					return &protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown, Message: "fixture commit is uncertain"}
+				default:
+					return &protocol.Fault{Code: protocol.ErrorCodeBusy, Message: "fixture storage is busy"}
+				}
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = service.Close() })
+			launch := Launch{ID: protocol.NewRequestID(), Session: protocol.NewSessionID(), Turn: protocol.NewTurnID(), Root: t.TempDir(), Command: "fixture", TimeoutMs: 1000}
+			if _, err := service.Start(launch); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			if wait, err := service.Wait(ctx, launch.Session, launch.ID, 5000, "missing"); err != nil || wait != protocol.ProcessWaitExited {
+				t.Fatalf("completion did not reach reconciliation: %v, %v", wait, err)
+			}
+			checkProcessFailureReport(t, reports(), launch, "", "")
+			for range reconcileDelays {
+				ticks <- time.Time{}
+			}
+			done := make(chan struct{})
+			go func() { service.workers.Wait(); close(done) }()
+			select {
+			case <-done:
+			case <-ctx.Done():
+				t.Fatal("automatic reconciliation did not stop")
+			}
+			kind := "failed"
+			if tc.cause == "" {
+				kind = "finished"
+			}
+			if snapshot, err := service.Read(launch.Session, launch.ID); err != nil || snapshot.Info.Status.Kind != kind || attempts != tc.wantAttempts {
+				t.Fatalf("completion after %d attempts: %+v, %v", attempts, snapshot, err)
+			}
+			if tc.cause == "" {
+				checkProcessFailureReport(t, reports(), launch, "", "")
+			} else {
+				checkProcessFailureReport(t, reports(), launch, "record_completion", tc.cause)
+				service.ReconcileFinished(ctx, launch.Session, launch.ID)
+				checkProcessFailureReport(t, reports(), launch, "record_completion", tc.cause)
+				if tc.cause == "outcome_unknown" && attempts != tc.wantAttempts {
+					t.Fatal("inspection replayed an uncertain completion write")
+				}
 			}
 		})
 	}

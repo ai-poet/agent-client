@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol/wire"
 	"lukechampine.com/blake3"
 )
 
@@ -425,14 +427,14 @@ func TestConversationAssetInventory(t *testing.T) {
 				return fmt.Errorf("fork resource targets lost origin scope: %+v", resource)
 			}
 			plain := canonical.NewRecord(turn, "message", ptr(canonical.NewMessage(canonical.Assistant, canonical.Block{Index: 0, Kind: "tool_response", Data: &canonical.ToolResponse{ID: "write", Result: canonical.Payload{Value: json.RawMessage(`{"kind":"file_written","data":{"path":"source.go","revision":"captured","size":1}}`)}}})), now)
-			items, err := conversationAssetItems(ctx, db, plain, session.Worktree, ptr("/project"))
+			items, _, err := conversationAssetItems(ctx, db, plain, session.Worktree, ptr("/project"))
 			if err != nil || len(items) != 0 {
 				return fmt.Errorf("ordinary write receipt became a delivery: %+v, %v", items, err)
 			}
 			review := canonical.NewRecord(turn, "message", ptr(canonical.NewMessage(canonical.Assistant, canonical.Text(0,
 				"Review [Inline](export.py#L7).\n\n- [List](stock.py)\n\n> [Quoted](test_export.py)\n\n[Top level](export.py)"))), now)
 			review.Provenance.Author = "assistant"
-			items, err = conversationAssetItems(ctx, db, review, session.Worktree, ptr("/project"))
+			items, _, err = conversationAssetItems(ctx, db, review, session.Worktree, ptr("/project"))
 			if err != nil || len(items) != 0 {
 				return fmt.Errorf("review references became published outputs: %+v, %v", items, err)
 			}
@@ -601,6 +603,182 @@ func TestConversationAssetCursorUsesStoredBytes(t *testing.T) {
 		filtered, err := ListConversationAssets(ctx, db, session.ID, protocol.ConversationAssetsQuery{Limit: 20, Kind: &kind})
 		if err != nil || len(filtered.Groups) != 0 || filtered.NextBefore == nil || *filtered.NextBefore != newest {
 			return fmt.Errorf("kind filter changed the byte-capped cursor: %+v, %v", filtered, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConversationAssetEncodedPageBudget(t *testing.T) {
+	storage, node, session, turn, now := agentHistoryFixture(t, protocol.WorkModeCode)
+	ctx := t.Context()
+	// Canonical events store small references. Two resolved targets fit in 16 MiB
+	// but not after reserving reply headroom: each '<' encodes as six JSON bytes.
+	const padding = (protocol.MAX_FRAME_BYTES - 32*1024) / (2 * len(`\u003c`))
+	large := protocol.Attachment{ID: protocol.NewAttachmentID(), Spec: protocol.AttachmentSpec{
+		Worktree: session.Worktree, Name: strings.Repeat("<", padding) + ".txt", MediaType: "text/plain", Size: 1, Revision: strings.Repeat("a", 64),
+	}}
+	note := large
+	note.ID, note.Spec.Name = protocol.NewAttachmentID(), "note.txt"
+	file := func(index uint64, id protocol.AttachmentID) canonical.Block {
+		return canonical.Block{Index: index, Kind: "file", Data: &canonical.FileContent{File: canonical.FileRef{
+			URI: "sailry-attachment://" + id.String(), Mime: &large.Spec.MediaType,
+		}}}
+	}
+	var seq [3]uint64
+	if err := storage.Node.Write(ctx, func(db *sql.Conn) error {
+		// Legacy attachment metadata can exceed today's admission bounds.
+		body, err := encode(large)
+		if err != nil {
+			return err
+		}
+		if _, err := db.ExecContext(ctx, "INSERT INTO attachments(id,worktree,caller,body) VALUES(?1,?2,?3,?4)", large.ID.String(), session.Worktree.String(), node[:], body); err != nil {
+			return err
+		}
+		if err := InsertAttachment(ctx, db, node, note); err != nil {
+			return err
+		}
+		if err := BindTurnAttachments(ctx, db, turn, []protocol.AttachmentID{large.ID, note.ID}); err != nil {
+			return err
+		}
+		for i, message := range []canonical.Message{
+			canonical.NewMessage(canonical.User, file(0, large.ID), file(1, note.ID)),
+			canonical.NewMessage(canonical.Assistant, canonical.Text(0, "![Filtered](filtered.png)")),
+			canonical.NewMessage(canonical.User, file(0, large.ID)),
+		} {
+			record := canonical.NewRecord(turn, "message", &message, now)
+			record.Provenance.Author = string(message.Role)
+			if seq[i], err = insertConversationAssetFixture(ctx, db, session.ID, record); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	kind := protocol.ConversationAssetsKindResource
+	query := protocol.ConversationAssetsQuery{Limit: 50, Kind: &kind}
+	var extra int
+	if err := storage.Node.Read(ctx, func(db *sql.Conn) error {
+		first, err := ListConversationAssets(ctx, db, session.ID, query)
+		if err != nil {
+			return err
+		}
+		if len(first.Groups) != 1 || first.Groups[0].Sequence != seq[2] || first.NextBefore == nil || *first.NextBefore != seq[1] {
+			return fmt.Errorf("expected one group and a cursor at the filtered row, got %d groups, cursor %v", len(first.Groups), first.NextBefore)
+		}
+		reply := wire.Reply{Kind: wire.ReplyCompleted, Completed: &wire.Response{Output: &protocol.Output{Kind: "conversation_assets", Data: first}}}
+		if err := wire.Write(io.Discard, reply, false); err != nil {
+			return err
+		}
+		query.Before = first.NextBefore
+		next, err := ListConversationAssets(ctx, db, session.ID, query)
+		if err != nil {
+			return err
+		}
+		if next.NextBefore != nil || next.Revision != first.Revision || len(next.Groups) != 1 || next.Groups[0].Sequence != seq[0] || len(next.Groups[0].Items) != 2 {
+			return errors.New("continuation did not deliver the deferred group intact")
+		}
+		body, err := json.Marshal(next.Groups[0])
+		if err != nil {
+			return err
+		}
+		extra = protocol.MAX_FRAME_BYTES - 64*1024 - len(body)
+		if extra < 0 {
+			return errors.New("continuation exceeded reply budget")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resize := func(suffix string) error {
+		note.Spec.Name += suffix
+		return storage.Node.Write(ctx, func(db *sql.Conn) error {
+			body, err := encode(note)
+			if err != nil {
+				return err
+			}
+			_, err = db.ExecContext(ctx, "UPDATE attachments SET body=?2 WHERE id=?1", note.ID.String(), body)
+			return err
+		})
+	}
+	if err := resize(strings.Repeat("<", extra/6) + strings.Repeat("x", extra%6)); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Node.Read(ctx, func(db *sql.Conn) error {
+		page, err := ListConversationAssets(ctx, db, session.ID, query)
+		if err != nil || page.NextBefore != nil || len(page.Groups) != 1 {
+			return fmt.Errorf("group exactly at byte limit must fit: %v", err)
+		}
+		reply := wire.Reply{Kind: wire.ReplyCompleted, Completed: &wire.Response{Output: &protocol.Output{Kind: "conversation_assets", Data: page}}}
+		return wire.Write(io.Discard, reply, false)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := resize("x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Node.Read(ctx, func(db *sql.Conn) error {
+		page, err := ListConversationAssets(ctx, db, session.ID, query)
+		if !providerFixtureFault(err, protocol.ErrorCodeInvalidRequest) || page.NextBefore != nil || len(page.Groups) != 0 {
+			return fmt.Errorf("oversized group must fail without advancing the cursor: %v", err)
+		}
+		artifact := protocol.ConversationAssetsKindArtifact
+		filtered, err := ListConversationAssets(ctx, db, session.ID, protocol.ConversationAssetsQuery{Limit: 50, Kind: &artifact})
+		if err != nil || len(filtered.Groups) != 1 || filtered.Groups[0].Sequence != seq[1] || filtered.NextBefore != nil {
+			return fmt.Errorf("kind filter did not bypass the oversized resource: %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConversationAssetPageLimitCountsGroups(t *testing.T) {
+	storage, _, session, turn, now := agentHistoryFixture(t, protocol.WorkModeCode)
+	ctx := t.Context()
+	var oldest uint64
+	if err := storage.Node.Write(ctx, func(db *sql.Conn) error {
+		for i := 0; i <= 50; i++ {
+			body := "![File](one.png)"
+			if i == 50 {
+				var links strings.Builder
+				for j := range 51 {
+					fmt.Fprintf(&links, "![File](file-%d.png)\n\n", j)
+				}
+				body = links.String()
+			}
+			record := canonical.NewRecord(turn, "message", ptr(canonical.NewMessage(canonical.Assistant, canonical.Text(0, body))), now)
+			record.Provenance.Author = "assistant"
+			seq, err := insertConversationAssetFixture(ctx, db, session.ID, record)
+			if err != nil {
+				return err
+			}
+			if i == 0 {
+				oldest = seq
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Node.Read(ctx, func(db *sql.Conn) error {
+		query := protocol.ConversationAssetsQuery{Limit: 50}
+		page, err := ListConversationAssets(ctx, db, session.ID, query)
+		if err != nil {
+			return err
+		}
+		if len(page.Groups) != 50 || len(page.Groups[0].Items) != 51 || page.NextBefore == nil || *page.NextBefore != page.Groups[49].Sequence {
+			return errors.New("50-group limit split a group or lost the continuation")
+		}
+		query.Before = page.NextBefore
+		next, err := ListConversationAssets(ctx, db, session.ID, query)
+		if err != nil {
+			return err
+		}
+		if len(next.Groups) != 1 || next.Groups[0].Sequence != oldest || next.NextBefore != nil {
+			return errors.New("expected only the oldest group after the count cutoff")
 		}
 		return nil
 	}); err != nil {

@@ -20,6 +20,40 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
+func TestWorkspaceTerminalStartsSandboxCommand(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	ended := make(chan protocol.TerminalStatus, 1)
+	service := New(ctx, protocol.NodeID{1}, func(_ context.Context, info protocol.TerminalInfo) {
+		if info.Status.Kind != "running" {
+			ended <- info.Status
+		}
+	})
+	defer service.Close()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.Start(ctx, Launch{
+		Root: t.TempDir(), Access: protocol.ProcessAccessWorkspace, Command: []string{"fixture-not-started"},
+		Viewport: protocol.TerminalViewport{Columns: 80, Rows: 24},
+		Sandbox: func(string, []string, []string) ([]string, []string, func(), error) {
+			return []string{executable, "-test.run=^$"}, nil, func() {}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case status := <-ended:
+		if status.Kind != "exited" || status.Data != (protocol.TerminalStatusExitedPayload{Code: 0}) {
+			t.Fatalf("sandbox command status = %+v", status)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}
+
 func TestTerminalMirrorIntegration(t *testing.T) {
 	if os.Getenv("SAILRY_TERMINAL_FIXTURE") == "1" {
 		fmt.Print("\x1b]133;A\x07terminal fixture 中文\r\n")
@@ -30,7 +64,8 @@ func TestTerminalMirrorIntegration(t *testing.T) {
 		text, _ := reader.ReadString('\n')
 		fmt.Printf("received %s\r\n", strings.TrimSpace(text))
 		_, _ = reader.ReadString('\n')
-		fmt.Print("final output\r\n")
+		// Exit mid-draw, before the program can release synchronized output.
+		fmt.Print("\x1b[?2026hfinal output\r\n")
 		os.Exit(0)
 	}
 	for _, encoded := range []bool{false, true} {

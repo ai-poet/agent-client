@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -99,10 +100,14 @@ const MainRetries = 10
 func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.Call, purpose Purpose, timer clock.Clock, observe func(Attempt) error, yield func(fantasy.StreamPart) bool, reset func()) error {
 	buffered := purpose == SummaryPurpose || purpose == NativePurpose
 	schedule := newRetryPolicy()
+	cooldowns, cooldownKey := cooldownFromContext(ctx)
+	var observation requestObservation
 	requestID, requestStarted := protocol.NewRequestID().String(), timer.Now()
 	sdk, _ := languageModel.(*sdkModel)
-	nextModel := languageModel
-	var releaseFallback func()
+	origin := sdk.origin()
+	tryHTTP1 := sdk != nil && (sdk.preferHTTP1.Load() || defaultHTTP1Origins.preferred(origin, requestStarted))
+	triedHTTP1 := false
+	skipHTTP1 := false
 	var secrets []protocol.Secret
 	if sdk != nil {
 		secrets = append(secrets, sdk.config.Protection...)
@@ -122,8 +127,9 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 	}
 	var failureSequence []string
 	for index := uint64(0); ; index++ {
-		if err := ctx.Err(); err != nil {
-			return Classify(err)
+		releaseSlot, waitErr := schedule.waitAttemptSlot(ctx, timer, cooldowns, cooldownKey)
+		if waitErr != nil {
+			return Classify(waitErr)
 		}
 		attempt := Attempt{RequestID: requestID, RequestStarted: requestStarted, Index: index, Started: timer.Now(), RetryLimit: MainRetries}
 		owner, cancel := context.WithCancel(ctx)
@@ -131,6 +137,15 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 		owner, capture := captureAttempt(owner, call, timer, attempt.Started)
 		if scope != nil {
 			capture.trace = scope.Begin(requestID, int(index+1), protected...)
+		}
+		owner, largeHTTP1 := withLargeHTTP1State(owner, skipHTTP1)
+		nextModel := languageModel
+		var releaseHTTP1 func()
+		if tryHTTP1 {
+			triedHTTP1, tryHTTP1 = true, false
+			if alternative, release := sdk.http1Fallback(); alternative != nil {
+				nextModel, releaseHTTP1 = alternative, release
+			}
 		}
 		stream, err := nextModel.Stream(owner, call)
 		var pending []fantasy.StreamPart
@@ -206,11 +221,14 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 			err, waitExhausted = ctx.Err(), false
 		}
 		cancel()
-		if releaseFallback != nil {
-			releaseFallback()
-			nextModel, releaseFallback = languageModel, nil
-		}
 		attempt.Finished = timer.Now()
+		if releaseHTTP1 != nil {
+			releaseHTTP1()
+			if err == nil || streamed && errors.Is(err, context.Canceled) {
+				sdk.preferHTTP1.Store(true)
+				defaultHTTP1Origins.remember(origin, attempt.Finished)
+			}
+		}
 		attempt.Timing = attempt.observedTiming()
 		capture.apply(&attempt)
 		attemptSecrets := capture.redact(secrets)
@@ -223,13 +241,36 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 				}
 				waitExhausted = attempt.Failure.Retryable()
 			}
+			usedHTTP1 := releaseHTTP1 != nil || largeHTTP1.used.Load()
+			// Only a wire response on the selected transport can reject its HTTP version.
+			http1Rejected := usedHTTP1 && http1ProtocolRejected(attempt.Status)
+			if usedHTTP1 {
+				if http1Rejected || attempt.Failure.Kind == Network || attempt.Failure.Kind == Unavailable && !attempt.Failure.overloaded {
+					// Disable both the explicit probe and the automatic large-body route.
+					tryHTTP1, skipHTTP1 = false, true
+					if sdk != nil {
+						sdk.preferHTTP1.Store(false)
+						defaultHTTP1Origins.forget(origin)
+					}
+				} else if releaseHTTP1 != nil {
+					// A provider rejection reached its destination on HTTP/1.1.
+					tryHTTP1 = true
+				}
+			}
 			if attempt.Failure.status != nil {
 				attempt.Status = attempt.Failure.status
 			}
 			committed := finished && !buffered && yield != nil
 			canReplay := !released && !committed && (!escaped || reset != nil)
-			if !waitExhausted && canReplay && attempt.Failure.Retryable() && ctx.Err() == nil {
-				attempt.RetryLimit = schedule.limit(purpose, attempt, streamed)
+			sharedRetry := attempt.Failure.Retryable()
+			// A protocol rejection can switch routes once even if an earlier HTTP
+			// error used the ordinary resend. It still shares the attempt and wait budgets.
+			protocolRetry := http1Rejected && attempt.Failure.Kind != Cancelled && index < MainRetries
+			if !waitExhausted && canReplay && ctx.Err() == nil && (sharedRetry || schedule.takeHTTPRetry(attempt) || protocolRetry) {
+				attempt.RetryLimit = index + 1
+				if sharedRetry {
+					attempt.RetryLimit = schedule.limit(purpose, attempt, streamed)
+				}
 				if index >= attempt.RetryLimit {
 					exhausted = true
 				} else if delay, allowed := schedule.next(ctx, attempt, timer.Now()); allowed {
@@ -238,7 +279,18 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 					waitExhausted = true
 				}
 			}
+			if cooldowns != nil && cooldownKey != "" && (attempt.Failure.Kind == RateLimited || attempt.Failure.Kind == Unavailable && attempt.Failure.overloaded) {
+				var retryDelay time.Duration
+				if attempt.RetryDelay != nil {
+					retryDelay = *attempt.RetryDelay
+				}
+				cooldowns.ObserveThrottle(cooldownKey, attempt.Failure, timer.Now(), retryDelay)
+			}
+		} else if cooldowns != nil && cooldownKey != "" {
+			cooldowns.ObserveSuccess(cooldownKey, timer.Now())
 		}
+		// Publish a throttle before a queued sibling can acquire this slot.
+		releaseSlot()
 		if attempt.Failure != nil {
 			entry := string(attempt.Failure.Kind)
 			if attempt.Status != nil {
@@ -247,6 +299,7 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 			failureSequence = append(failureSequence, entry)
 		}
 		attempt.finishTransport(err, attemptSecrets, capture, failureSequence)
+		observation.record(attempt)
 		if observe != nil {
 			if observationErr := observe(attempt); observationErr != nil {
 				return observationErr
@@ -268,6 +321,7 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 					}
 				}
 			}
+			observation.finish(ctx, false)
 			return nil
 		}
 		if attempt.RetryDelay != nil {
@@ -277,22 +331,18 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 			}
 			waitExhausted = !ready
 		}
-		if exhausted || waitExhausted {
+		if exhausted || waitExhausted || attempt.RetryDelay == nil {
 			// Observations retain the provider failure. Only the terminal
 			// result names the exhausted recovery for the turn's final fault.
 			failure := *attempt.Failure
-			failure.Exhausted, failure.WaitExhausted = exhausted, waitExhausted
+			if attempt.Failure.Retryable() && (exhausted || waitExhausted) {
+				failure.Exhausted, failure.WaitExhausted = exhausted, waitExhausted
+			}
+			failure.requestObserved = observation.finish(ctx, true)
 			return &failure
 		}
-		if attempt.RetryDelay == nil {
-			return attempt.Failure
-		}
-		if sdk != nil && attempt.Failure.Kind == Network && http2ProtocolFailure(err) {
-			// Spend one admitted retry on HTTP/1.1 without pinning an HTTP/2-only origin to it.
-			if fallback, release := sdk.http1Fallback(); fallback != nil {
-				nextModel, releaseFallback = fallback, release
-			}
-			sdk = nil
+		if sdk != nil && !triedHTTP1 && !skipHTTP1 && attempt.Failure.Kind == Network && http2ProtocolFailure(err) {
+			tryHTTP1 = true
 		}
 	}
 }

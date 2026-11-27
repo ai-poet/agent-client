@@ -17,6 +17,28 @@ import (
 // Over 1 s only beside the package's other parallel tests: each opens its own synced store.
 func TestDispatchContracts(test *testing.T) {
 	test.Parallel()
+	test.Run("removed package schedules remain dormant", func(t *testing.T) {
+		f := newDispatchFixture(t, "weekday")
+		f.write(t, func(ctx context.Context, db *sql.Conn) error {
+			schedule, err := f.weekly(ctx, db, 100)
+			if err != nil {
+				return err
+			}
+			if _, err := db.ExecContext(ctx, "UPDATE plugin_user_installations SET installed=0 WHERE name=?1", f.reference.Name); err != nil {
+				return err
+			}
+			if next, err := nextDispatchSchedule(ctx, db, 100); err != nil || next != nil {
+				return fmt.Errorf("removed package has a scheduled wake: %v, %v", next, err)
+			}
+			if changed, err := dueDispatchSchedules(ctx, db, *schedule.NextMs); err != nil || len(changed) != 0 {
+				return fmt.Errorf("removed package fired: %v, %v", changed, err)
+			}
+			if jobs, _, err := publishDispatch(ctx, db, f.event(), *schedule.NextMs); err != nil || len(jobs) != 0 {
+				return fmt.Errorf("removed handler admitted jobs: %v, %v", jobs, err)
+			}
+			return nil
+		})
+	})
 	test.Run("settlement preserves an already committed outcome", func(test *testing.T) {
 		fixture := newDispatchFixture(test, "settlement")
 		failure := &protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "fixture callback failure"}

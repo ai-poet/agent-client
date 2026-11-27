@@ -154,6 +154,9 @@ func TestToolSelectionAndNames(t *testing.T) {
 			packageTool("files", "read_file", protocol.ToolOperationReadFile, false, done),
 			packageTool("files", "delete_file", protocol.ToolOperationDeleteFile, false, done),
 			packageTool("memory", "search_memory", "", true, done),
+			packageTool("progress", "update_plan", "", true, done),
+			packageTool("roles", "inspect", protocol.ToolOperationListRoles, true, done),
+			objectTool("apply_team", false, false, done),
 		}
 		capture := func(role *protocol.RoleProfile) (visible, deferred []string, err error) {
 			x.childRole = role
@@ -189,7 +192,15 @@ func TestToolSelectionAndNames(t *testing.T) {
 		if !slices.Equal(visible, []string{"list_sessions", "read_tool_output", operations.Alias("files", "delete_file")}) || len(deferred) != 0 {
 			t.Fatalf("listed child visible=%v deferred=%v", visible, deferred)
 		}
-		for _, name := range []string{"ask_user", "set_session_title", "list_subagents"} {
+		plan := []protocol.PluginConversationTool{selection("package", &protocol.PluginConversationToolPackagePayload{Package: "progress", Name: "update_plan"})}
+		if visible, _, err := capture(&protocol.RoleProfile{Tools: &plan}); err != nil || !slices.Contains(visible, operations.Alias("progress", "update_plan")) {
+			t.Fatalf("explicit plan tool missing: %v, %v", visible, err)
+		}
+		catalog := []protocol.PluginConversationTool{selection("package", &protocol.PluginConversationToolPackagePayload{Package: "roles", Name: "inspect"})}
+		if _, _, err := capture(&protocol.RoleProfile{Tools: &catalog}); err == nil {
+			t.Fatal("role admitted a package catalog operation")
+		}
+		for _, name := range []string{"ask_user", "set_session_title", "list_subagents", "apply_team"} {
 			parentOnly := []protocol.PluginConversationTool{selection("builtin", &protocol.PluginConversationToolBuiltinPayload{Name: name})}
 			_, _, err = capture(&protocol.RoleProfile{Tools: &parentOnly})
 			var failure *protocol.Fault

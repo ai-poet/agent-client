@@ -68,8 +68,19 @@ func (owner *pluginScriptTurn) evaluate(ctx context.Context, handler, tool, call
 	return result, err
 }
 
-func (node *Node) scriptTools(ctx context.Context, invocation *store.AgentInvocation, info protocol.PluginInfo, native map[string]engine.Tool) ([]engine.Tool, error) {
+type pluginToolBinding struct {
+	owner     protocol.PluginReference
+	alias     string
+	operation protocol.ToolOperation
+}
+
+func (node *Node) scriptTools(ctx context.Context, invocation *store.AgentInvocation, info protocol.PluginInfo, native map[pluginToolBinding]engine.Tool) ([]engine.Tool, error) {
 	host := info.Extension.Host
+	packageRef := plugins.PackageReference(info)
+	boundTool := func(name string, operation protocol.ToolOperation) (engine.Tool, bool) {
+		v, ok := native[pluginToolBinding{packageRef, plugins.ToolAlias(packageRef.Name, name), operation}]
+		return v, ok
+	}
 	declarations := []protocol.ToolDeclaration{}
 	names := []string{}
 	for _, declaration := range info.Extension.Tools {
@@ -86,8 +97,9 @@ func (node *Node) scriptTools(ctx context.Context, invocation *store.AgentInvoca
 				if _, media := mediaOperationKind(*operation); media {
 					continue
 				}
-				if *operation == protocol.ToolOperationReadExternalBrowser || *operation == protocol.ToolOperationControlExternalBrowser || *operation == browserReadOperation || *operation == browserControlOperation {
-					if _, bound := native[plugins.ToolAlias(info.Summary.Name, declaration.Name)]; !bound {
+				switch *operation {
+				case protocol.ToolOperationReadExternalBrowser, protocol.ToolOperationControlExternalBrowser, browserReadOperation, browserControlOperation, protocol.ToolOperationRunCommand, protocol.ToolOperationStopCommand, protocol.ToolOperationWriteCommand:
+					if _, bound := boundTool(declaration.Name, *operation); !bound {
 						continue
 					}
 				}
@@ -99,12 +111,12 @@ func (node *Node) scriptTools(ctx context.Context, invocation *store.AgentInvoca
 	if len(declarations) == 0 {
 		return nil, nil
 	}
-	files, err := node.plugins.manager.ReadBundle(ctx, plugins.PackageReference(info), host.Entry, host.Resources)
+	files, err := node.plugins.manager.ReadBundle(ctx, packageRef, host.Entry, host.Resources)
 	if err != nil {
 		return nil, err
 	}
 	owner := &pluginScriptTurn{node: node, invocation: invocation, info: info, bundle: plugins.ScriptBundle{Entry: host.Entry, Files: files},
-		scope: protocol.PluginContext{Turn: &invocation.Run.Turn, Package: plugins.PackageReference(info), Worktree: &invocation.Run.Worktree,
+		scope: protocol.PluginContext{Turn: &invocation.Run.Turn, Package: packageRef, Worktree: &invocation.Run.Worktree,
 			Session: &invocation.Session.ID, Surface: protocol.PluginDesktopSurface{Kind: "workspace"}}, state: json.RawMessage("null")}
 	instruction := ""
 	if info.Extension.Instructions != nil {
@@ -228,7 +240,20 @@ func (node *Node) scriptTools(ctx context.Context, invocation *store.AgentInvoca
 				tools = append(tools, tool)
 				continue
 			}
-			if bound, exists := native[tool.Definition.Name]; exists {
+			if bound, exists := boundTool(declaration.Name, *handler.Operation); exists {
+				if *handler.Operation == protocol.ToolOperationRunCommand && invocation.Turn.Config.Mode == protocol.WorkModePlan {
+					tool.Definition.Description = bound.Definition.Description
+					// A captured package may still describe Full as unrestricted.
+					// Keep its argument contract, but report the effective access.
+					properties, _ := schema["properties"].(map[string]any)
+					if access, ok := properties["access"].(map[string]any); ok {
+						access["description"] = "Only read-only sandboxed workspace access is allowed in this turn."
+						tool.SchemaJSON, err = json.Marshal(schema)
+						if err != nil {
+							return nil, err
+						}
+					}
+				}
 				tools = append(tools, owner.bindNative(tool, bound, declaration, handler))
 				continue
 			}

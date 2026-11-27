@@ -36,6 +36,11 @@ func TestSystemPromptByteStable(t *testing.T) {
 			t.Fatal("Full permission policy does not explain file tools for out-of-worktree targets")
 		}
 	}
+	for _, child := range []bool{false, true} {
+		if policy := Policy(protocol.WorkModePlan, protocol.PermissionFull, child); !strings.Contains(policy, "foreground read-only workspace commands") {
+			t.Fatalf("Plan command guidance missing for child=%v: %s", child, policy)
+		}
+	}
 	parentInstruction, childInstruction := Instruction(false), Instruction(true)
 	if !strings.HasPrefix(parentInstruction, "You are CheapRouter Harness,") || !strings.Contains(parentInstruction, "Responses\n") || strings.Contains(childInstruction, "Responses\n") {
 		t.Fatal("recipient instructions changed")
@@ -264,5 +269,12 @@ func TestInstructionPrecedenceIsExplicit(t *testing.T) {
 	}
 	if parent := Instruction(false); !strings.Contains(parent, "Name a file outside the worktree by its absolute path") || strings.Contains(parent, "at the start of the task") {
 		t.Error("parent prompt lost the outside-worktree reference rule or still front-loads questions")
+	}
+}
+
+func TestParentOptionalPlanClose(t *testing.T) {
+	parent := Instruction(false)
+	if !strings.Contains(parent, "After inspecting the final check") || !strings.Contains(parent, "no extra round is required") || strings.Contains(Instruction(true), "close an existing plan separately") {
+		t.Fatal("optional verified plan completion belongs to the parent")
 	}
 }

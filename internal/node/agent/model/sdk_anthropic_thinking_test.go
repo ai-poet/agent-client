@@ -91,6 +91,35 @@ func TestAnthropicInitialThinkingSurvivesReplay(t *testing.T) {
 	}
 }
 
+func TestAnthropicHistoryDropsUnsignedThinking(t *testing.T) {
+	t.Parallel()
+	binding := replayFixtureBinding()
+	binding.Provider.Authentication = protocol.AuthenticationApiKey
+	binding.Config.Model = "claude-fixture"
+	scope := Scope(binding)
+	answer := canonical.NewMessage(canonical.Assistant,
+		canonical.Block{Index: 0, Kind: "thinking", Data: &canonical.Thinking{Text: "No signature"}},
+		canonical.Block{Index: 1, Kind: "thinking", Data: &canonical.Thinking{Text: "Empty signature", Signature: new("")}},
+		canonical.Text(2, "Partial answer"),
+	)
+	record := canonical.NewRecord(protocol.NewTurnID(), "message", answer, time.Time{})
+	record.Metadata.Execution = &canonical.Execution{Source: &scope}
+	next := canonical.NewRecord(protocol.NewTurnID(), "message", canonical.NewMessage(canonical.User, canonical.Text(0, "Continue")), time.Time{})
+	call, err := BuildCall(binding, Request{Records: []canonical.Record{record, next}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := requestJSON(transportConfig{Kind: "anthropic", Model: binding.Config.Model}, call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkValue(t, body, "messages.0.content.0.text", "Partial answer")
+	checkValue(t, body, "messages.1.content.0.text", "Continue")
+	if len(call.Prompt[0].Content) != 1 {
+		t.Fatal("unsigned thinking remained in the follow-up request")
+	}
+}
+
 func TestAnthropicAPIKeyBetaHeaders(t *testing.T) {
 	manualWithTools := []byte(`{"thinking":{"type":"enabled","budget_tokens":4096},"tools":[{"name":"read"}]}`)
 	adaptiveWithTools := []byte(`{"thinking":{"type":"adaptive"},"tools":[{"name":"read"}]}`)

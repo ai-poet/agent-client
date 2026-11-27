@@ -18,6 +18,7 @@ type AgentInstruction struct {
 	AnyTools []string `json:"any_tools"`
 }
 type AgentInvocation struct {
+	RetryTools           []byte // Captured parent tool declarations on a controller retry.
 	User                 protocol.User
 	StorageUser          protocol.UserID
 	Hooks                protocol.HooksSettings

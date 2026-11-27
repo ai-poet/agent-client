@@ -121,13 +121,16 @@ func (r *Runtime) selectedAgent(x *execution, state store.AgentState) (bool, err
 		}
 	}
 	role := slices.IndexFunc(x.inv.Turn.Roles.Profiles, func(role protocol.RoleProfile) bool {
-		return role.ID == selected.ID && role.Revision == selected.Revision && r.usableRole(x, role)
+		return role.ID == selected.ID && role.Revision == selected.Revision
 	})
 	if role < 0 {
 		return false, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "selected role is absent from the frozen roster"}
 	}
 	if err := store.CapturedRoleAvailability(x.inv.Turn.Roles, x.inv.Turn.Roles.Profiles[role]); err != nil {
 		return false, err
+	}
+	if reason := r.missingRoleRequirements(x, x.inv.Turn.Roles.Profiles[role]).reason(); reason != "" {
+		return false, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "selected role unavailable: " + reason}
 	}
 	task := x.inv.Message.Text
 	if strings.TrimSpace(task) == "" {
@@ -139,24 +142,11 @@ func (r *Runtime) selectedAgent(x *execution, state store.AgentState) (bool, err
 	return true, r.save(x.ctx, x.inv.Session.ID, record)
 }
 
-func (r *Runtime) usableRole(x *execution, role protocol.RoleProfile) bool {
-	if x.resources == nil {
-		return len(role.Skills) == 0
-	}
-	skills := x.resources.Skills()
-	for _, key := range role.Skills {
-		if _, ok := skills[key]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
 func (r *Runtime) delegationContext(x *execution, state store.AgentState) string {
 	text := r.delegationRoster(x, state)
 	// Catalog changes never rebase the captured turn; application names the
 	// exact conversation revision it replaces.
-	if findTool(x.tools, "apply_agents") != nil || findTool(x.tools, "apply_team") != nil {
+	if x.inv.Session.Delegation == nil && (findTool(x.tools, "apply_agents") != nil || findTool(x.tools, "apply_team") != nil) {
 		if text != "" {
 			text += "\n"
 		}
@@ -165,13 +155,14 @@ func (r *Runtime) delegationContext(x *execution, state store.AgentState) string
 	return text
 }
 
-func (r *Runtime) delegationRoster(x *execution, state store.AgentState) string {
-	if !delegationAvailable(x) {
-		return ""
-	}
-	var roster []string
+func (r *Runtime) roleRoster(x *execution) string {
+	var roster, unavailable []string
 	for _, role := range x.inv.Turn.Roles.Profiles {
-		if r.usableRole(x, role) && store.CapturedRoleAvailability(x.inv.Turn.Roles, role) == nil {
+		if err := store.CapturedRoleAvailability(x.inv.Turn.Roles, role); err != nil {
+			unavailable = append(unavailable, role.Key+": "+err.Error())
+		} else if reason := r.missingRoleRequirements(x, role).reason(); reason != "" {
+			unavailable = append(unavailable, role.Key+": "+reason)
+		} else {
 			line := role.Key + " (" + role.Name + ")"
 			if role.ReadOnly {
 				line += " [read only]"
@@ -182,10 +173,24 @@ func (r *Runtime) delegationRoster(x *execution, state store.AgentState) string 
 			roster = append(roster, line)
 		}
 	}
-	text := "No delegation roles are configured"
+	text := "No usable roles for a new child."
 	if len(roster) > 0 {
-		text = "Configured delegation roles:\n" + strings.Join(roster, "\n")
+		text = "Usable role keys and responsibilities:\n" + strings.Join(roster, "\n")
 	}
+	if len(unavailable) != 0 {
+		text += "\nUnavailable:\n" + strings.Join(unavailable, "\n")
+	}
+	if x.inv.Turn.Roles.Team != nil || strings.TrimSpace(x.inv.Turn.Roles.Instructions) != "" {
+		text += "\nOmit the role only when the team permits an unnamed worker."
+	}
+	return text
+}
+
+func (r *Runtime) delegationRoster(x *execution, state store.AgentState) string {
+	if !delegationAvailable(x) {
+		return ""
+	}
+	text := r.roleRoster(x)
 	if list := findTool(x.tools, "list_subagents"); list != nil {
 		text += "\nBefore reusing earlier delegated work, inspect list_subagents for exact IDs and status. Only continue a child when the user is continuing the same unfinished task and prior calls, receipts or other reliable evidence match its original scope. A title alone is not evidence. Reuse matching completed results as recorded; if needed, collect the result with wait_agent using the exact session and turn. Do not reopen running, queued or stopping work. Never resume a cancelled or separately stopped child without an explicit request to resume that child. Require the same request if an interruption could have been a deliberate stop; a missing stop reason is not proof otherwise."
 		if list.Deferred && !slices.Contains(state.LoadedTools, "list_subagents") {
@@ -212,8 +217,14 @@ func (r *Runtime) spawnChild(x *execution, call canonical.ToolRequest, arguments
 	if json.Unmarshal(arguments, &args) != nil {
 		return invalidTool("invalid delegation arguments")
 	}
-	if args.Role != nil && !slices.ContainsFunc(x.inv.Turn.Roles.Profiles, func(role protocol.RoleProfile) bool { return role.Key == *args.Role && r.usableRole(x, role) }) {
-		return invalidTool("role is not listed in this turn's roster")
+	if args.Role != nil {
+		i := slices.IndexFunc(x.inv.Turn.Roles.Profiles, func(role protocol.RoleProfile) bool { return role.Key == *args.Role })
+		if i < 0 {
+			return invalidTool("unknown role: " + *args.Role + ". " + r.roleRoster(x))
+		}
+		if reason := r.missingRoleRequirements(x, x.inv.Turn.Roles.Profiles[i]).reason(); reason != "" {
+			return invalidTool("role unavailable: " + reason)
+		}
 	}
 	var selected *protocol.ConversationInput
 	if call.ID == "sailry-selected-"+x.inv.Run.Turn.String() {
@@ -283,7 +294,12 @@ func (r *Runtime) waitChild(x *execution, call canonical.ToolRequest) ToolResult
 			return toolFault(err)
 		}
 		if !childPending(state.Run) {
-			return ToolResult{Value: map[string]any{"session": state.Run.Session, "turn": state.Run.Turn, "status": state.Run.Status, "response": state.Response, "error": state.Run.Error}, Collect: &collectedChild{session: args.Session, turn: state.Run.Turn}}
+			var meta *map[string]json.RawMessage
+			if len(state.FileRevisions) > 0 {
+				raw, _ := json.Marshal(state.FileRevisions)
+				meta = &map[string]json.RawMessage{canonical.FileChangesKey(state.Run.Worktree): raw}
+			}
+			return ToolResult{Meta: meta, Value: map[string]any{"session": state.Run.Session, "turn": state.Run.Turn, "status": state.Run.Status, "response": state.Response, "error": state.Run.Error}, Collect: &collectedChild{session: args.Session, turn: state.Run.Turn}}
 		}
 		value := map[string]any{"session": state.Run.Session, "turn": state.Run.Turn, "status": state.Run.Status}
 		if state.Paused && state.Run.Status == protocol.ConversationStatusQueued {

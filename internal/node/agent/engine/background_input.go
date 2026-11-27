@@ -41,7 +41,7 @@ func (r *Runtime) deliverForeground(x *execution, state store.ChildState) error 
 		result.Notice.Outcome = protocol.ConversationBackgroundOutcomeFailed
 		if child.Error != nil {
 			result.Notice.Summary = callbackPreview(&child.Error.Message, 512)
-			result.ErrorCode = &child.Error.Code
+			result.ApplyFault(child.Error)
 		}
 	}
 	_, err := r.commitCallback(x, func(db *sql.Conn) (*protocol.ConversationEntry, []protocol.Event, error) {
@@ -58,6 +58,9 @@ func (r *Runtime) deliverForeground(x *execution, state store.ChildState) error 
 		record := canonical.NewRecord(turn, "background", &canonical.Background{Results: []canonical.BackgroundResult{result}}, r.clock.Now())
 		record.Provenance.Author = "system"
 		record.Metadata.Runtime = &canonical.Runtime{AgentVisible: true}
+		if len(state.FileRevisions) > 0 {
+			record.Metadata.Runtime.FileChanges = map[string]map[string]string{child.Worktree.String(): state.FileRevisions}
+		}
 		entry, events, err := store.AppendCanonical(x.ctx, db, x.inv.Session.ID, record)
 		if err != nil {
 			return nil, nil, err

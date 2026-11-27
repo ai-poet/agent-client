@@ -180,7 +180,7 @@
         "expected_revision": {
           "type": "string",
           "pattern": "^[a-fA-F0-9]{64}$",
-          "description": "Optional; defaults to the revision last seen in this conversation"
+          "description": "Optional; omit to use the current revision observed in this conversation"
         }
       },
       "required": [
@@ -240,7 +240,7 @@
         "expected_revision": {
           "type": "string",
           "pattern": "^[a-fA-F0-9]{64}$",
-          "description": "Optional; defaults to the revision last seen in this conversation"
+          "description": "Optional; omit to use the current revision observed in this conversation"
         }
       },
       "required": [
@@ -266,7 +266,7 @@
         "expected_revision": {
           "type": "string",
           "pattern": "^[a-fA-F0-9]{64}$",
-          "description": "Optional; defaults to the revision last seen in this conversation"
+          "description": "Optional; omit to use the current revision observed in this conversation"
         }
       },
       "required": [
@@ -280,7 +280,7 @@
   },
   {
     "operation": "files.apply",
-    "description": "Apply a patch in the *** Begin Patch format that adds, updates, moves or deletes up to 16 related files with one approval (with Full permission, absolute paths may reach outside the worktree on the same volume). Context lines match the current file exactly, and updated, moved or deleted files must have been read in this session. If a file changed since you read it, read it again. Every file is validated first; any failure rejects the whole patch without writing. Files are then written in order; a later failure stops without rollback and each file reports its status",
+    "description": "Apply a *** Begin Patch text patch to up to 16 related file changes with one approval. Read existing targets first. Context lines locate edits; add and move can replace a previously read destination. Changes run in patch order and stop on failure without rollback.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -354,13 +354,14 @@
   },
   {
     "operation": "files.search",
-    "description": "Search UTF-8 files within path using embedded ripgrep matching, respecting .gitignore and never following symlinks. Matching paths are the default; select content rows or line counts when needed. type uses ripgrep language names; context adds neighboring lines; multiline permits newline-spanning matches. Use next_offset for complete-scan pagination; narrow path if partial",
+    "description": "Search UTF-8 files within path, respecting .gitignore and skipping symlinks. Matching paths are the default; select content rows or line counts when needed. type uses ripgrep language names; context adds neighboring lines; multiline permits newline-spanning matches. Use next_offset for complete-scan pagination; narrow path if partial",
     "parameters": {
       "type": "object",
       "properties": {
         "query": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Literal text by default. For alternatives such as foo|bar or other regular expressions, set regex to true."
         },
         "regex": {
           "type": "boolean",
@@ -469,7 +470,7 @@
         },
         "expected_revision": {
           "type": "string",
-          "description": "Optional; defaults to the revision last seen in this conversation"
+          "description": "Optional; omit to use the current revision observed in this conversation"
         },
         "edits": {
           "description": "Indices refer to the notebook before this batch is applied.",
@@ -1346,7 +1347,7 @@
             "unrestricted",
             null
           ],
-          "description": "Workspace access is confined and has no network on macOS/Linux. Unrestricted access needs fresh approval in Ask/Project and runs automatically in Full."
+          "description": "In Plan mode and read-only roles, only foreground workspace commands in an enabled, available read-only OS sandbox are permitted, even with Full permission. Otherwise workspace access is confined and has no network on macOS/Linux; unrestricted access needs fresh approval in Ask/Project and runs automatically in Full."
         },
         "description": {
           "type": [

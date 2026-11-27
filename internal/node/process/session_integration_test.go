@@ -37,7 +37,7 @@ func startedGroup(t *testing.T, service *Service, launch Launch) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := service.Wait(context.Background(), info.Session, info.ID, 30000, "\n"); err != nil {
+	if _, err := service.Wait(context.Background(), info.Session, info.ID, 30000, "\n"); err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err := service.Read(info.Session, info.ID)
@@ -113,10 +113,10 @@ func TestNativeOutcomes(t *testing.T) {
 		if err != nil || output.Kind != "command_started" {
 			t.Fatal(output, err)
 		}
-		if err := service.Wait(context.Background(), launch.Session, launch.ID, 30000, "finished"); err != nil {
+		if _, err := service.Wait(context.Background(), launch.Session, launch.ID, 30000, "finished"); err != nil {
 			t.Fatal(err)
 		}
-		if err := service.Wait(context.Background(), launch.Session, launch.ID, 30000, "missing"); err != nil {
+		if _, err := service.Wait(context.Background(), launch.Session, launch.ID, 30000, "missing"); err != nil {
 			t.Fatal(err)
 		}
 		snapshot, err := service.Read(launch.Session, launch.ID)
@@ -160,7 +160,7 @@ func TestNativeOutcomes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := service.Wait(context.Background(), info.Session, info.ID, 30000, "end"); err != nil {
+		if _, err := service.Wait(context.Background(), info.Session, info.ID, 30000, "end"); err != nil {
 			t.Fatal(err)
 		}
 		snapshot, err := service.Read(info.Session, info.ID)
@@ -236,10 +236,10 @@ func TestCrashedNodeGroups(t *testing.T) {
 		if len(found) != 1 || filepath.Base(found[0]) != groupPrefix+launch.ID.String() {
 			t.Fatal("running command has no group record", found)
 		}
-		if _, err := service.Stop(launch.Session, launch.ID); err != nil {
+		if _, err := service.Stop(launch.Session, launch.ID, nil); err != nil {
 			t.Fatal(err)
 		}
-		if err := service.Wait(context.Background(), launch.Session, launch.ID, 30000, "missing"); err != nil {
+		if _, err := service.Wait(context.Background(), launch.Session, launch.ID, 30000, "missing"); err != nil {
 			t.Fatal(err)
 		}
 		groupGone(t, group)

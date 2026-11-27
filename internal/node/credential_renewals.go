@@ -12,7 +12,9 @@ import (
 
 // RuntimeCredentialsChanged wakes model steps only after their replacement
 // credentials have committed. It also recalculates controller renewal timers.
-func (node *Node) RuntimeCredentialsChanged() { node.authChanged() }
+func (node *Node) RuntimeCredentialsChanged() {
+	node.authChanged()
+}
 
 func (node *Node) startCredentialRenewals() {
 	node.work.Add(1)
@@ -50,11 +52,13 @@ func (node *Node) serveCredentialRenewals(ctx context.Context, clock clockwork.C
 			retry := clock.Now().Add(time.Minute)
 			next = &retry
 		} else {
+			seen := make(map[string]bool, len(candidates))
 			for _, candidate := range candidates {
 				key := candidate.User.ID.String() + ":provider:" + candidate.Credential.ID.String()
 				if candidate.Connection != nil {
 					key = candidate.User.ID.String() + ":connector:" + candidate.Connection.ID.String() + ":" + strconv.FormatUint(candidate.Connection.AuthRevision, 10)
 				}
+				seen[key] = true
 				due := time.UnixMilli(int64(candidate.DueMs))
 				if previous, ok := attempted[key]; ok && previous.due == candidate.DueMs && previous.after.After(due) {
 					due = previous.after
@@ -73,6 +77,11 @@ func (node *Node) serveCredentialRenewals(ctx context.Context, clock clockwork.C
 				}
 				attempted[key] = attempt{due: candidate.DueMs, after: clock.Now().Add(time.Minute)}
 				pending = true
+			}
+			for key := range attempted {
+				if !seen[key] {
+					delete(attempted, key)
+				}
 			}
 		}
 		if pending {

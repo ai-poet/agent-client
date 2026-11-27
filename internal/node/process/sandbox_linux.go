@@ -3,9 +3,12 @@
 package process
 
 import (
+	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
 func sandboxCommand(policy sandboxPolicy, program string, args []string, _ string) (string, []string, error) {
@@ -13,15 +16,67 @@ func sandboxCommand(policy sandboxPolicy, program string, args []string, _ strin
 	if err != nil {
 		return "", nil, err
 	}
-	return wrapper, append(append(sandboxArgsLinux(policy, program), "--", program), args...), nil
+	guard, err := trustedWrapper("/usr/bin/setpriv", "/bin/setpriv")
+	if err != nil {
+		return "", nil, err
+	}
+	filter, err := socketFilter(policy.variables["HOME"])
+	if err != nil {
+		return "", nil, sandboxFailure(err)
+	}
+	mounts, err := sandboxArgsLinux(policy)
+	if err != nil {
+		return "", nil, sandboxFailure(err)
+	}
+	return wrapper, append(append(mounts, "--", guard, "--no-new-privs", "--seccomp-filter", filter, "--", program), args...), nil
 }
 
-func sandboxArgsLinux(policy sandboxPolicy, program string) []string {
-	args := []string{"--die-with-parent", "--unshare-pid", "--unshare-net", "--new-session"}
+func sandboxArgsLinux(policy sandboxPolicy) ([]string, error) {
+	// Expose the host filesystem read-only so installed toolchains and caches
+	// work without guesswork, then mask sensitive credentials and bind only
+	// the workspace and scratch writable.
+	args := []string{"--die-with-parent", "--unshare-pid", "--unshare-net", "--unshare-ipc", "--new-session", "--ro-bind", "/", "/", "--proc", "/proc", "--dev", "/dev"}
+	denied := slices.Clone(policy.deniedReads)
+	slices.SortFunc(denied, func(a, b string) int {
+		x, y := len(strings.Split(a, string(filepath.Separator))), len(strings.Split(b, string(filepath.Separator)))
+		if x != y {
+			return x - y
+		}
+		return strings.Compare(a, b)
+	})
+	var missing, masks []string
+	for _, path := range slices.Compact(denied) {
+		info, err := os.Stat(path)
+		if os.IsNotExist(err) {
+			missing = append(missing, path)
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if info.IsDir() {
+			masks = append(masks, "--tmpfs", path)
+		} else if info.Mode().IsRegular() {
+			masks = append(masks, "--ro-bind", "/dev/null", path)
+		} else {
+			return nil, fmt.Errorf("unsupported credential file type at %s", path)
+		}
+	}
+	views, err := maskedParentViews(missing)
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, views...)
+	args = append(args, masks...)
 	protected := map[string]bool{}
 	boundaries := slices.Clone(policy.paths)
 	for _, path := range policy.protected {
 		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			// External metadata already resides on a read-only mount.
+			// Rebinding it from the host could undo a credential mask.
+			if write, _ := effectivePath(policy.paths, resolved, false); !write {
+				continue
+			}
 			protected[resolved] = true
 			boundaries = append(boundaries, allowedPath{resolved, false})
 		}
@@ -40,18 +95,62 @@ func sandboxArgsLinux(policy sandboxPolicy, program string) []string {
 		}
 		args = append(args, flag, entry.path, entry.path)
 	}
-	args = append(args, "--proc", "/proc", "--dev", "/dev")
-	for _, alias := range []string{"/bin", "/sbin", "/lib", "/lib64"} {
-		if target, err := filepath.EvalSymlinks(alias); err == nil && target != alias {
-			args = append(args, "--ro-bind", target, alias)
-		}
-	}
-	policy.linkAliases(program)
-	for _, path := range slices.Sorted(maps.Keys(policy.links)) {
-		args = append(args, "--symlink", policy.links[path], path)
-	}
 	for _, path := range slices.Sorted(maps.Keys(protected)) {
 		args = append(args, "--ro-bind", path, path)
 	}
-	return args
+	return args, nil
+}
+
+// A read-only bind is a live view: a credential that did not exist at launch
+// can appear later. For each first missing component, project its parent's
+// existing siblings into a private directory rather than modifying the host.
+func maskedParentViews(missing []string) ([]string, error) {
+	parents := map[string]map[string]bool{}
+	for _, path := range missing {
+		for child := path; ; child = filepath.Dir(child) {
+			parent := filepath.Dir(child)
+			if _, err := os.Stat(parent); os.IsNotExist(err) {
+				continue
+			} else if err != nil {
+				return nil, err
+			}
+			parent, err := filepath.EvalSymlinks(parent)
+			if err != nil {
+				return nil, err
+			}
+			if parent == "/" || within("/proc", parent) || within("/dev", parent) {
+				return nil, fmt.Errorf("cannot project credential parent %s over a system mount", parent)
+			}
+			if parents[parent] == nil {
+				parents[parent] = map[string]bool{}
+			}
+			parents[parent][filepath.Base(child)] = true
+			break
+		}
+	}
+	var args []string
+	for _, parent := range slices.Sorted(maps.Keys(parents)) {
+		entries, err := os.ReadDir(parent)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, "--tmpfs", parent)
+		for _, entry := range entries {
+			if parents[parent][entry.Name()] {
+				continue
+			}
+			path := filepath.Join(parent, entry.Name())
+			if entry.Type()&os.ModeSymlink != 0 {
+				target, err := os.Readlink(path)
+				if err != nil {
+					return nil, err
+				}
+				args = append(args, "--symlink", target, path)
+			} else {
+				args = append(args, "--ro-bind", path, path)
+			}
+		}
+		args = append(args, "--remount-ro", parent)
+	}
+	return args, nil
 }

@@ -3,11 +3,13 @@ package hooks
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 
+	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
@@ -116,7 +118,7 @@ func (b *Binding) remember(err error) {
 		chars := []rune(next)
 		message += string(chars[:min(len(chars), max(4096-len(message), 0))])
 	}
-	b.failure = &protocol.Fault{Code: code, Message: message}
+	b.failure = &protocol.Fault{Code: code, Message: message, ReportOwned: previous != nil && current != nil && previous.ReportOwned && current.ReportOwned}
 }
 func hookMessage(err error) string {
 	var fault *protocol.Fault
@@ -126,10 +128,27 @@ func hookMessage(err error) string {
 	return err.Error()
 }
 func (b *Binding) execute(ctx context.Context, phase protocol.HooksPhase, ordinal uint64, tool, status string) (executionErr error) {
+	claimed := false
 	// The hook boundary retains the source's uncertain outcome after unwinding.
 	defer func() {
-		if recover() != nil {
+		panicked := recover() != nil
+		if panicked {
 			executionErr = &protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown, Message: "hook execution failed; side effects were not replayed"}
+		}
+		// After Tool and Turn End failures settle with the turn; Before Tool
+		// failures only become tool results and do not necessarily fail the turn.
+		if phase != protocol.HooksPhaseBeforeTool {
+			return
+		}
+		var fault *protocol.Fault
+		if !errors.As(executionErr, &fault) || fault == nil || fault.ReportOwned {
+			return
+		}
+		// An uncertain claim may be a refusal to replay a prior execution.
+		if fault.Code == protocol.ErrorCodeInternal || fault.Code == protocol.ErrorCodeOutcomeUnknown && (claimed || panicked) {
+			logging.Emit(slog.LevelError, slog.String("area", "hooks"), slog.String("operation", string(phase)),
+				slog.String("phase", logging.Failed), slog.String("code", string(fault.Code)),
+				slog.String("session", b.captured.Session.String()), slog.String("turn", b.captured.Turn.String()))
 		}
 	}()
 	scripts := Scripts(b.captured.Settings, phase)
@@ -142,6 +161,7 @@ func (b *Binding) execute(ctx context.Context, phase protocol.HooksPhase, ordina
 	if err := b.captured.Claim(ctx, b.captured.Turn, phase, ordinal); err != nil {
 		return err
 	}
+	claimed = true
 	metadata := map[string]string{
 		"SAILRY_HOOK_EVENT": string(phase), "SAILRY_HOOK_NODE": b.captured.Node.String(),
 		"SAILRY_HOOK_WORKTREE": b.captured.Worktree.String(), "SAILRY_HOOK_SESSION": b.captured.Session.String(), "SAILRY_HOOK_TURN": b.captured.Turn.String(),

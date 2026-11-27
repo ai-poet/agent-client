@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	pathpkg "path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -24,12 +23,15 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
+const planRunCommandDescription = "Run a foreground workspace command in an enabled, available read-only OS sandbox. No workspace writes, network, unrestricted access, background commands, services, or PTY. Otherwise use dedicated read-only tools."
+
 type workspaceToolCall struct {
-	request        protocol.Request
-	prepared       *files.Prepared
-	approval       protocol.ApprovalID
-	commandControl *process.ControlTarget
-	fileScope      externalFileScope
+	request               protocol.Request
+	prepared              *files.Prepared
+	approval              protocol.ApprovalID
+	commandControl        *process.ControlTarget
+	fileScope             externalFileScope
+	patchInput, patchRoot string
 }
 
 func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation) ([]engine.Tool, error) {
@@ -57,18 +59,46 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 		if err = json.Unmarshal(declaration.Parameters, &schema); err != nil {
 			return nil, err
 		}
+		planning := inv.Turn.Config.Mode == protocol.WorkModePlan
+		if planning && declaration.Operation == protocol.ToolOperationRunCommand {
+			declaration.Description = planRunCommandDescription
+		}
 		var mu sync.Mutex
 		calls := map[string]*workspaceToolCall{}
 		tool := engine.Tool{Definition: fantasy.FunctionTool{Name: declaration.Name, Description: declaration.Description, InputSchema: schema}, SchemaJSON: declaration.Parameters, ReadOnly: declaration.ReadOnly, Concurrent: declaration.Concurrent, Deferred: !declaration.Initial, Approval: !declaration.ReadOnly, Binding: &store.ApprovalBinding{Owner: declaration.Owner, Tool: declaration.Name, Operation: &declaration.Operation}}
-		var observed workspaceRevisions
-		fullFiles := inv.Turn.Config.Permission == protocol.PermissionFull && externalFileOperation(declaration.Operation)
-		if fullFiles {
-			observed.worktree = inv.Worktree.Path
+
+		tool.ReleasePrepared = func(call canonical.ToolRequest) { mu.Lock(); delete(calls, call.ID); mu.Unlock() }
+		switch declaration.Operation {
+		case protocol.ToolOperationReadFile, protocol.ToolOperationReadFileLines, protocol.ToolOperationReadNotebook, protocol.ToolOperationWriteFile, protocol.ToolOperationEditFile, protocol.ToolOperationApplyChanges,
+			protocol.ToolOperationDeleteFile, protocol.ToolOperationMoveFile, protocol.ToolOperationEditNotebook:
+			tool.NativeQueue = true
+			tool.FilePaths = func(call canonical.ToolRequest) []string {
+				paths := collectFileArgPaths(declaration.Operation, call.Arguments)
+				for i, path := range paths {
+					paths[i] = workspaceFileKey(inv.Worktree.Path, path)
+				}
+				return paths
+			}
+		case protocol.ToolOperationFindFiles, protocol.ToolOperationListDirectory, protocol.ToolOperationSearchFiles, protocol.ToolOperationRunCommand:
+			tool.NativeQueue = true
 		}
+		observed := workspaceRevisions{worktreeID: inv.Run.Worktree, worktree: inv.Worktree.Path}
+		fullFiles := inv.Turn.Config.Permission == protocol.PermissionFull && externalFileOperation(declaration.Operation)
 		if observesRevisions(declaration.Operation) {
 			tool.ObserveHistory = observed.update
 		}
 		tool.Prepare = func(ctx context.Context, call canonical.ToolRequest) error {
+			if planning {
+				// Worktree status and diffs can execute repository-configured
+				// filters in native Git, outside the command sandbox.
+				switch declaration.Operation {
+				case protocol.ToolOperationInspectGit, protocol.ToolOperationReadGitDiff, protocol.ToolOperationListGitChanges, protocol.ToolOperationReadGitChange:
+					return &protocol.Fault{Code: protocol.ErrorCodePermissionDenied, Message: "native Git worktree inspection can run external filters; use a read-only sandbox command"}
+				}
+				if !declaration.ReadOnly && declaration.Operation != protocol.ToolOperationRunCommand && declaration.Operation != protocol.ToolOperationWriteArtifact {
+					return &protocol.Fault{Code: protocol.ErrorCodePermissionDenied, Message: "planning mode permits read-only tools"}
+				}
+			}
 			args := call.Arguments
 			worktree := filepath.Clean(inv.Worktree.Path)
 			var scope externalFileScope
@@ -90,8 +120,6 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 					}
 				}
 			}
-			// Full access is the admitted turn's policy, including for children.
-			// Normalize access before approval captures the command to execute.
 			arguments, err := observed.resolve(declaration.Operation, args)
 			if err != nil {
 				return err
@@ -115,7 +143,17 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 					return err
 				}
 			}
-			command, err := operations.Command(declaration.Operation, arguments, inv.Run.Worktree, inv.Session.ID, inv.Run.Turn, inv.Worktree.Project, sandbox.Enabled && inv.Turn.Config.Permission != protocol.PermissionFull)
+			command, err := operations.Command(declaration.Operation, arguments, inv.Run.Worktree, inv.Session.ID, inv.Run.Turn, inv.Worktree.Project, planning || sandbox.Enabled && inv.Turn.Config.Permission != protocol.PermissionFull)
+			if err == nil && planning && declaration.Operation == protocol.ToolOperationRunCommand {
+				err = store.CheckPlanRunCommand(*command.Data.(*protocol.CommandRunCommandPayload), process.SandboxSupported(), sandbox.Enabled)
+			}
+			var patchChanges *files.Prepared
+			var patchInput string
+			if !declaration.ReadOnly && tool.FilePaths != nil {
+				if err := node.locks.waitFiles(ctx, tool.FilePaths(call)); err != nil {
+					return err
+				}
+			}
 			if declaration.Operation == protocol.ToolOperationApplyChanges {
 				var patch struct {
 					Input string `json:"input"`
@@ -123,16 +161,13 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 				if err = json.Unmarshal(arguments, &patch); err != nil {
 					return err
 				}
-				revisions := observed.paths
-				if scope.root != "" {
-					revisions = rootRevisions(worktree, root, revisions)
+				patchInput = patch.Input
+				revisions := rootRevisions(root, collectFileArgPaths(declaration.Operation, arguments), observed.paths)
+				patchChanges, err = files.PreparePatch(ctx, root, patch.Input, inv.Run.Worktree, core.RestrictedFiles, func(path string) string { return workspaceFileKey(root, path) }, revisions)
+				if err != nil {
+					return err
 				}
-				changes, e := files.ResolvePatchWithRevisions(ctx, root, patch.Input, revisions, core.RestrictedFiles)
-				if e != nil {
-					return e
-				}
-				command = protocol.Command{Kind: "apply_changes", Data: &protocol.CommandApplyChangesPayload{Worktree: inv.Run.Worktree, Changes: changes}}
-				err = nil
+				command = patchChanges.Command
 			}
 			if err != nil {
 				return err
@@ -158,8 +193,8 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 			}
 			request := protocol.NewRequest(node.ID(), command)
 			request.Plugin = &protocol.PluginContext{Turn: &inv.Run.Turn, Package: declaration.Owner, Worktree: &inv.Run.Worktree, Session: &inv.Session.ID, Surface: protocol.PluginDesktopSurface{Kind: "workspace"}}
-			current := &workspaceToolCall{request: request, fileScope: scope}
-			if fileTextMutation(command.Kind) {
+			current := &workspaceToolCall{request: request, fileScope: scope, prepared: patchChanges, patchInput: patchInput, patchRoot: root}
+			if current.prepared == nil && fileTextMutation(command.Kind) {
 				current.prepared, err = files.Prepare(ctx, root, command, core.RestrictedFiles)
 				if err != nil {
 					return err
@@ -217,6 +252,23 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 			if current == nil {
 				return workspaceToolFault(errors.New("native tool was not prepared"))
 			}
+			if current.patchInput != "" && inv.Turn.Config.Permission == protocol.PermissionFull && current.prepared != nil && current.prepared.Rejected == nil {
+				if err := node.locks.waitFiles(ctx, preparedFileKeys(current.patchRoot, current.prepared)); err != nil {
+					return workspaceToolFault(err)
+				}
+				fresh, err := files.RepreparePatch(ctx, current.patchRoot, current.patchInput, current.prepared)
+				if err != nil {
+					return workspaceToolFault(err)
+				}
+				target := current.patchRoot
+				if current.fileScope.worktree != "" {
+					target = inv.Worktree.Path
+				}
+				if err := node.protectWorkspaceMutation(target, target, fresh.Command, fresh, current.fileScope); err != nil {
+					return workspaceToolFault(err)
+				}
+				current.prepared, current.request.Command = fresh, fresh.Command
+			}
 			request := current.request
 			scope := current.fileScope
 			if scope.root != "" && scope.worktree == "" {
@@ -224,7 +276,7 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 				if err != nil {
 					return workspaceToolFault(err)
 				}
-				value := node.workspaceToolValue(ctx, request, scope.result(output), false)
+				value := node.workspaceToolValue(ctx, request, scope.result(output), false, planning)
 				return engine.ToolResult{Value: value, ReturnedError: workspaceOutputFailed(output), ReturnedFailure: workspaceOutputFailure(output)}
 			}
 			if !declaration.ReadOnly {
@@ -285,8 +337,13 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 					node.agent.Committed()
 				}
 			}
-			value := node.workspaceToolValue(ctx, request, output, effect.timedOut)
-			return engine.ToolResult{Value: value, ReturnedError: workspaceOutputFailed(output), ReturnedFailure: workspaceOutputFailure(output)}
+			value := node.workspaceToolValue(ctx, request, output, effect.timedOut, planning)
+			var readMeta *map[string]json.RawMessage
+			if page, ok := output.Data.(protocol.FileLines); ok && len(page.Lines) > 0 && page.Revision != "" {
+				raw, _ := json.Marshal(map[string]string{page.Path: page.Revision})
+				readMeta = &map[string]json.RawMessage{canonical.FileReadsKey(inv.Run.Worktree): raw}
+			}
+			return engine.ToolResult{Value: value, Meta: readMeta, ReturnedError: workspaceOutputFailed(output), ReturnedFailure: workspaceOutputFailure(output)}
 		}
 		tools = append(tools, tool)
 	}
@@ -370,7 +427,7 @@ func workspaceOutputFailure(output protocol.Output) *protocol.ToolFailure {
 	}
 	return failure
 }
-func (node *Node) workspaceToolValue(ctx context.Context, request protocol.Request, output protocol.Output, timedOut bool) any {
+func (node *Node) workspaceToolValue(ctx context.Context, request protocol.Request, output protocol.Output, timedOut, planning bool) any {
 	if value, shaped := codeToolValue(output); shaped {
 		return value
 	}
@@ -438,7 +495,11 @@ func (node *Node) workspaceToolValue(ctx context.Context, request protocol.Reque
 			for _, diagnostic := range []string{"operation not permitted", "permission denied", "sandbox", "dyld:", "dyld[", "could not resolve host", "network is unreachable"} {
 				if strings.Contains(lower, diagnostic) {
 					if data, ok := value["data"].(map[string]any); ok {
-						data["sandbox_notice"] = "This command ran in the workspace sandbox: network access is disabled, writes are limited to the worktree and temporary directories, and existing Git metadata and managed child worktrees are protected. macOS also blocks new .git paths. Git writes, including git init, git add and git commit, require access=\"unrestricted\" under the current permission policy. If sandbox restrictions caused the failure, inspect any partial changes before requesting unrestricted access to retry. Unrestricted access does not override operating-system permissions."
+						if planning {
+							data["sandbox_notice"] = "This command ran in a read-only workspace sandbox with no network. Unrestricted access is unavailable; use dedicated read-only tools instead."
+						} else {
+							data["sandbox_notice"] = "This command ran in the workspace sandbox: network access is disabled, writes are limited to the worktree and temporary directories, and existing Git metadata and managed child worktrees are protected. macOS also blocks new .git paths. Git writes, including git init, git add and git commit, require access=\"unrestricted\" under the current permission policy. If sandbox restrictions caused the failure, inspect any partial changes before requesting unrestricted access to retry. Unrestricted access does not override operating-system permissions."
+						}
 					}
 					break
 				}
@@ -451,18 +512,29 @@ func (node *Node) workspaceToolValue(ctx context.Context, request protocol.Reque
 // workspaceRevisions follows the canonical history visible to this turn. Receipts
 // from a successful write are observations of its new revision, like reads.
 type workspaceRevisions struct {
-	paths    map[string]string
-	count    int
-	last     string
-	worktree string
+	worktreeID  protocol.WorktreeID
+	invalidated map[string]struct{}
+	paths       map[string]string
+	count       int
+	last        string
+	worktree    string
 }
 
 func (r *workspaceRevisions) update(records []canonical.Record) {
 	if r.paths == nil || r.count > len(records) || r.count > 0 && records[r.count-1].ID != r.last {
 		r.paths = map[string]string{}
+		r.invalidated = nil
 		r.count = 0
 	}
 	for _, record := range records[r.count:] {
+		if record.Kind == "background" {
+			if rt := record.Metadata.Runtime; rt != nil && rt.FileChanges != nil {
+				if changes := rt.FileChanges[r.worktreeID.String()]; len(changes) != 0 {
+					r.observeChildChanges(changes, r.pathKey, combinesChildChanges(record.Background()))
+				}
+			}
+			continue
+		}
 		message := record.Message()
 		if message == nil || record.Provenance.Author != "tool" {
 			continue
@@ -476,7 +548,7 @@ func (r *workspaceRevisions) update(records []canonical.Record) {
 					continue
 				}
 			}
-			r.observe(response)
+			r.observe(response, r.pathKey)
 		}
 	}
 	r.count = len(records)
@@ -485,7 +557,87 @@ func (r *workspaceRevisions) update(records []canonical.Record) {
 	}
 }
 
-func (r *workspaceRevisions) observe(response *canonical.ToolResponse) {
+// Batched background delivery flattens child receipts into one path map. A
+// value can already have overwritten a different revision for the same path.
+func combinesChildChanges(background *canonical.Background) bool {
+	if background == nil {
+		return false
+	}
+	seenChild := false
+	for _, result := range background.Results {
+		if result.Notice.Kind.Kind == "agent" {
+			if seenChild {
+				return true
+			}
+			seenChild = true
+		}
+	}
+	return false
+}
+
+func (r *workspaceRevisions) observeChildChanges(files map[string]string, key func(string) string, combined bool) {
+	for path, rev := range files {
+		k := key(path)
+		if k == "" {
+			continue
+		}
+		if rev == "" {
+			r.invalidateTree(k)
+			continue
+		}
+		if combined {
+			r.invalidate(k)
+			continue
+		}
+		// Delivery order is not write order. Conflicting evidence invalidates
+		// the observation; a duplicate cannot revive it without a direct read
+		// or write. This also handles differently spelled aliases in old maps.
+		if known, ok := r.paths[k]; ok {
+			if known != rev {
+				r.invalidate(k)
+			}
+			continue
+		}
+		if !r.isInvalidated(k) {
+			r.paths[k] = rev
+		}
+	}
+}
+
+func (r *workspaceRevisions) isInvalidated(path string) bool {
+	if len(r.invalidated) == 0 {
+		return false
+	}
+	for {
+		if _, ok := r.invalidated[path]; ok {
+			return true
+		}
+		i := strings.LastIndexByte(path, '/')
+		if i <= 0 {
+			return false
+		}
+		path = path[:i]
+	}
+}
+
+func (r *workspaceRevisions) observe(response *canonical.ToolResponse, key func(string) string) {
+	if response.Status == canonical.ToolSuccess && response.Meta != nil {
+		if raw := (*response.Meta)[canonical.FileReadsKey(r.worktreeID)]; raw != nil {
+			var reads map[string]string
+			if json.Unmarshal(raw, &reads) == nil {
+				for path, revision := range reads {
+					r.observeRevision(key(path), revision)
+				}
+			}
+		}
+		if raw := (*response.Meta)[canonical.FileChangesKey(r.worktreeID)]; raw != nil {
+			var files map[string]string
+			if json.Unmarshal(raw, &files) == nil {
+				r.observeChildChanges(files, key, false)
+			}
+		}
+	}
+
 	var value struct {
 		Kind string
 		Data struct {
@@ -503,23 +655,19 @@ func (r *workspaceRevisions) observe(response *canonical.ToolResponse) {
 	data := value.Data
 	if value.Kind == "file_changes" {
 		for _, file := range data.Files {
-			file.Path, file.Destination = r.pathKey(file.Path), r.pathKey(file.Destination)
+			file.Path, file.Destination = key(file.Path), key(file.Destination)
 			switch file.Status {
 			case protocol.ChangeStatusUnknown:
-				delete(r.paths, file.Path)
-				delete(r.paths, file.Destination)
+				r.invalidate(file.Path)
+				r.invalidate(file.Destination)
 			case protocol.ChangeStatusApplied:
 				switch file.Kind {
 				case protocol.ChangeKindDeleted:
-					delete(r.paths, file.Path)
+					r.invalidate(file.Path)
 				case protocol.ChangeKindRenamed:
 					r.move(file.Path, file.Destination)
 				default:
-					if file.Revision != "" {
-						r.paths[file.Path] = file.Revision
-					} else {
-						delete(r.paths, file.Path)
-					}
+					r.observeRevision(file.Path, file.Revision)
 				}
 			}
 		}
@@ -531,14 +679,14 @@ func (r *workspaceRevisions) observe(response *canonical.ToolResponse) {
 	switch value.Kind {
 	case "file_content", "file_lines", "file_written", "notebook_page":
 		if data.Revision != "" {
-			r.paths[r.pathKey(data.Path)] = data.Revision
+			r.observeRevision(key(data.Path), data.Revision)
 		}
 	case "entry_trashed":
-		r.invalidateTree(r.pathKey(data.Path))
+		r.invalidateTree(key(data.Path))
 	case "entry_moved":
 		// Generic entry operations may move directories across roots.
-		r.invalidateTree(r.pathKey(data.From))
-		r.invalidateTree(r.pathKey(data.To))
+		r.invalidateTree(key(data.From))
+		r.invalidateTree(key(data.To))
 	}
 }
 
@@ -573,48 +721,67 @@ func (r *workspaceRevisions) resolve(operation protocol.ToolOperation, arguments
 	if json.Unmarshal(values["path"], &path) != nil {
 		return arguments, nil
 	}
-	revision, ok := r.paths[path]
-	if !ok && path != "" {
-		revision, ok = r.paths[r.pathKey(path)]
-	}
+	revision, ok := r.paths[r.pathKey(path)]
 	switch {
 	case operation == protocol.ToolOperationWriteFile:
 		values["expected_revision"] = json.RawMessage("null")
-	case ok:
+	case ok && revision != "":
 		values["expected_revision"], _ = json.Marshal(revision)
 	default:
-		return nil, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: path + " has not been read in this conversation; read it first or pass expected_revision"}
+		return nil, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: path + " has no current observed revision; read it or pass expected_revision"}
 	}
 	return json.Marshal(values)
 }
 
 func (r *workspaceRevisions) pathKey(path string) string {
-	if filepath.IsAbs(path) {
-		path = filepath.Clean(path)
-		if r.worktree != "" {
-			path = localPath(r.worktree, path)
-		}
-		return filepath.ToSlash(path)
-	}
 	if path == "" {
 		return ""
 	}
-	return pathpkg.Clean(filepath.ToSlash(path))
+	if r.worktree == "" && !filepath.IsAbs(path) {
+		return filepath.ToSlash(filepath.Clean(path))
+	}
+	return workspaceFileKey(r.worktree, path)
+}
+
+func (r *workspaceRevisions) observeRevision(path, revision string) {
+	if path == "" {
+		return
+	}
+	if revision == "" {
+		r.invalidate(path)
+		return
+	}
+	r.paths[path] = revision
+	delete(r.invalidated, path)
+}
+
+func (r *workspaceRevisions) invalidate(path string) {
+	if path == "" {
+		return
+	}
+	delete(r.paths, path)
+	if r.invalidated == nil {
+		r.invalidated = map[string]struct{}{}
+	}
+	r.invalidated[path] = struct{}{}
 }
 
 func (r *workspaceRevisions) invalidateTree(path string) {
+	if path == "" {
+		return
+	}
+	r.invalidate(path)
+	prefix := path + "/"
 	for known := range r.paths {
-		if known == path || strings.HasPrefix(known, path+"/") {
+		if strings.HasPrefix(known, prefix) {
 			delete(r.paths, known)
 		}
 	}
 }
 
 func (r *workspaceRevisions) move(from, to string) {
-	revision, ok := r.paths[from]
-	delete(r.paths, from)
-	delete(r.paths, to)
-	if ok {
-		r.paths[to] = revision
+	if from != to {
+		r.observeRevision(to, r.paths[from])
+		r.invalidate(from)
 	}
 }

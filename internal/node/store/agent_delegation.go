@@ -327,6 +327,11 @@ func delegateAgent(ctx context.Context, db *sql.Conn, node protocol.NodeID, pare
 			return empty, nil, e
 		}
 	}
+	// Reusing a child takes its current session configuration (or the
+	// guided turn's capture), but never drops its founding role's restriction.
+	if capture.Config.Mode == protocol.WorkModePlan || role != nil && role.ReadOnly {
+		turn.Config.Mode = protocol.WorkModePlan
+	}
 	seq, err := NextCounter(ctx, db, CounterTurns)
 	if err != nil {
 		return empty, nil, err

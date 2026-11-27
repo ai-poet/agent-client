@@ -82,7 +82,7 @@ func (r *Runtime) recoveredTurn(x *execution) (err error) {
 	defer func() {
 		if value := recover(); value != nil {
 			logPanic(x, "turn", "", value)
-			err = &protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown, Message: "turn failed unexpectedly; calls were not replayed"}
+			err = &observedTurnPanic{&protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown, Message: "turn failed unexpectedly; calls were not replayed"}}
 		}
 		if err != nil || x.ctx.Err() != nil {
 			r.stopChildren(x)
@@ -104,22 +104,46 @@ func usedChildTurns(x *execution, state store.AgentState) uint32 {
 	return count
 }
 
-func (r *Runtime) childTurnLimit(x *execution, state store.AgentState) (bool, error) {
-	if x.childRole == nil || x.childRole.MaxTurns == nil || usedChildTurns(x, state) < *x.childRole.MaxTurns {
-		return false, nil
+const (
+	defaultChildMaxTurns         uint32 = 20
+	defaultReadOnlyChildMaxTurns uint32 = 12
+)
+
+func effectiveChildMaxTurns(x *execution) (uint32, bool) {
+	if x.childRole != nil && x.childRole.MaxTurns != nil {
+		return *x.childRole.MaxTurns, true
 	}
+	if x.inv.Session.Delegation == nil || *x.inv.Session.Delegation == nil {
+		return 0, false
+	}
+	if x.inv.Turn.Config.Mode == protocol.WorkModePlan || x.childRole != nil && x.childRole.ReadOnly {
+		return defaultReadOnlyChildMaxTurns, true
+	}
+	return defaultChildMaxTurns, true
+}
+
+func childTurnBudgetExhausted(x *execution, state store.AgentState) bool {
+	limit, bounded := effectiveChildMaxTurns(x)
+	return bounded && usedChildTurns(x, state) >= limit
+}
+
+func (r *Runtime) recordChildTurnLimit(x *execution) error {
 	record := canonical.NewRecord(x.inv.Run.Turn, "message", canonical.NewMessage(canonical.Assistant, canonical.Text(0, "I've reached the maximum number of actions I can do without user input. Would you like me to continue?")), r.clock.Now())
 	record.Provenance.Author = "assistant"
-	return true, r.save(x.ctx, x.inv.Session.ID, record)
+	return r.save(x.ctx, x.inv.Session.ID, record)
 }
 
 func childBudgetContext(x *execution, state store.AgentState) string {
-	if x.childRole == nil || x.childRole.MaxTurns == nil {
+	limit, bounded := effectiveChildMaxTurns(x)
+	if !bounded || limit == 0 {
 		return ""
 	}
-	used, limit := usedChildTurns(x, state), *x.childRole.MaxTurns
-	if limit == 0 || uint64(used)*2 < uint64(limit) {
+	used := usedChildTurns(x, state)
+	if uint64(used)*2 < uint64(limit) {
 		return ""
+	}
+	if uint64(used)+2 >= uint64(limit) {
+		return fmt.Sprintf("<turn-budget>%d/%d used; wrap up with your findings now.</turn-budget>", used, limit)
 	}
 	return fmt.Sprintf("<turn-budget>%d/%d used</turn-budget>", used, limit)
 }

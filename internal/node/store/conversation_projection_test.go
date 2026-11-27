@@ -183,3 +183,37 @@ func TestStoredProjectionKeepsResourcePositionsAfterLegacyDiagnostic(t *testing.
 		t.Fatal(err)
 	}
 }
+
+func TestConversationSearchUnicodeSnippet(t *testing.T) {
+	storage, _, session, turn, now := agentHistoryFixture(t, protocol.WorkModeCode)
+	ctx := t.Context()
+	const hit = "中K🙂"
+	body := strings.Repeat("前", 120) + hit + strings.Repeat("尾", 110)
+	message := canonical.NewMessage(canonical.Assistant, canonical.Text(0, body))
+	record := canonical.NewRecord(turn, "message", &message, now)
+	record.Provenance.Author = "assistant"
+	if err := storage.Node.Write(ctx, func(db *sql.Conn) error {
+		_, _, err := AppendCanonical(ctx, db, session.ID, record)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Node.Read(ctx, func(db *sql.Conn) error {
+		page, err := searchAgentConversation(ctx, db, session.ID, protocol.ConversationSearchQuery{Text: "中k🙂", Limit: 1})
+		if err != nil {
+			return err
+		}
+		if len(page.Matches) != 1 {
+			t.Fatalf("got %d matches, want one", len(page.Matches))
+		}
+		match := page.Matches[0]
+		want := strings.Repeat("前", 96) + hit + strings.Repeat("尾", 96)
+		start := uint64(len(strings.Repeat("前", 96)))
+		if match.Entry != record.ID || match.Snippet != want || match.Highlight != (protocol.Range[uint64]{Start: start, End: start + uint64(len(hit))}) {
+			t.Fatalf("wrong bounded snippet or UTF-8 byte range: %+v", match)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

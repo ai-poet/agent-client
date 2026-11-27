@@ -466,7 +466,7 @@ func (model *sdkModel) streamChat(ctx context.Context, raw []byte, call fantasy.
 	}
 	if err := stream.Err(); err != nil {
 		// Connection loss after all choices finished loses only the trailer.
-		if ctx.Err() != nil || int64(len(finished)) != want || !http2ConnectionLost(err) {
+		if ctx.Err() != nil || int64(len(finished)) != want || !http2Interrupted(err) {
 			emitter.fail(err)
 			return
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"maps"
 	"os"
 	"slices"
 
@@ -27,6 +28,7 @@ type delegatedChild struct {
 	successor *delegatedChild
 	// A queued successor owns its predecessor's commands even before it starts.
 	commandsInherited bool
+	retryTools        []byte
 }
 
 type collectedChild struct {
@@ -70,6 +72,15 @@ func (r *Runtime) admitChild(x *execution, arguments json.RawMessage, background
 			inv, events, err = admit(ctx, db)
 			if err != nil {
 				return err
+			}
+			if inv != nil {
+				encodedTools, encErr := encodeDelegatedTools(x.tools)
+				if encErr != nil {
+					return encErr
+				}
+				if err = store.SaveDelegatedTools(ctx, db, inv.Session.ID, encodedTools); err != nil {
+					return err
+				}
 			}
 			_, err = store.RecordEvents(ctx, db, r.node, events)
 			return err
@@ -128,7 +139,7 @@ func (r *Runtime) admitChild(x *execution, arguments json.RawMessage, background
 // the same execute/turn pipeline after Store grants its FIFO concurrency slot.
 // Ended owners are released by the caller only after the writer commits.
 func (r *Runtime) claimInvocation(ctx context.Context, db *sql.Conn) (*store.AgentInvocation, []protocol.Event, []*delegatedChild, error) {
-	inv, events, err := store.ClaimNext(ctx, db, r.clock.Now())
+	inv, events, err := store.ClaimNext(ctx, db, r.clock.Now(), slices.Collect(maps.Keys(r.afterTurnSessions))...)
 	if err != nil || inv != nil {
 		return inv, events, nil, err
 	}
@@ -188,7 +199,35 @@ func (r *Runtime) claimInvocation(ctx context.Context, db *sql.Conn) (*store.Age
 			return claimed, events, ended, nil
 		}
 	}
-	return nil, events, ended, nil
+	retried, changed, err := store.ClaimRetriedChild(ctx, db, r.clock.Now())
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	events = append(events, changed...)
+	return retried, events, ended, nil
+}
+
+// startClaimedChild runs after the claim commits, under publication ownership.
+// A controller retry does not belong to an old turn's lifetime, but a Stop in
+// its parent session must still cancel it and wait for its settlement.
+func (r *Runtime) startClaimedChild(inv *store.AgentInvocation) context.Context {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if child := r.children[inv.Run.Turn]; child != nil {
+		child.started = true
+		inv.RetryTools = child.retryTools
+		return child.ctx
+	}
+	if inv.Session.Delegation == nil || *inv.Session.Delegation == nil {
+		return r.ctx
+	}
+	origin := *inv.Session.Delegation
+	ctx, cancel := context.WithCancel(r.ctx)
+	r.children[inv.Run.Turn] = &delegatedChild{
+		root: origin.Session, parent: origin.Turn, session: inv.Session.ID, turn: inv.Run.Turn, sequence: inv.Run.Sequence,
+		ctx: ctx, cancel: cancel, started: true, released: true, retryTools: inv.RetryTools,
+	}
+	return ctx
 }
 
 // preflightChildWorkspace checks the worktree the child will run in before it

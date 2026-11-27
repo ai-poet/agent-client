@@ -16,6 +16,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/ai-poet/cheaprouter-harness/internal/core"
 	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/memory"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/node/admission"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/engine"
@@ -45,6 +46,7 @@ import (
 
 // Node owns one profile, admitted operations and their committed event feed.
 type Node struct {
+	stopMemory       func()
 	accessMu         sync.Mutex
 	accessObservers  map[*accessObservation]struct{}
 	pluginStatus     *pluginStatusService
@@ -95,6 +97,7 @@ type Node struct {
 	abandoned         atomic.Bool   // shutdown released the profile at its deadline: no collection starts
 	grace             time.Duration // replaces shutdownGrace in tests
 	agent             *engine.Runtime
+	cooldowns         *model.Cooldowns
 	modelFactory      func(context.Context, model.Binding) (fantasy.LanguageModel, error)
 	forward           func(context.Context, protocol.Request) (link.Admission, error) // sends an import to its paired target
 	forwards          atomic.Int32
@@ -244,10 +247,11 @@ func StartWithOptions(ctx context.Context, path string, options Options) (*Node,
 	value.networkDirectory = &networkDirectory{listing: protocol.DefaultNetworkListing()}
 	value.networkProbes = &networkProbes{permits: make(chan struct{}, 4), now: time.Now}
 	value.initHost()
+	value.cooldowns = model.NewCooldowns()
 	value.modelFactory = options.Model
 	value.mediaPoll = model.MediaVideoPoll
 	value.telemetry = newTelemetry(options.Telemetry)
-	value.agent = engine.New(profile.Store.Node, value.ID(), profile.Ownership.Path, value.feed, value.publish, engine.Options{StopCommands: func(session protocol.SessionID) { value.processes.StopAll(session) }, StopTransient: func(session protocol.SessionID) { value.processes.StopTransient(session) }, Telemetry: value.telemetry, Working: value.power.Hold, Python: value.plugins.python, Model: value.newModel, AuthorizeProvider: value.authorizeTurnProvider, Attachment: value.capturedAttachment, AttachmentBytes: value.transfers.AttachmentBytes, ToolsForTurn: value.workspaceTools, HooksForTurn: value.turnHooks, AfterTurn: value.afterTurn, PluginAvailability: value.checkPluginAvailability})
+	value.agent = engine.New(profile.Store.Node, value.ID(), profile.Ownership.Path, value.feed, value.publish, engine.Options{Cooldowns: value.cooldowns, RequestObserver: recordModelRequest, StopCommands: func(session protocol.SessionID) { value.processes.StopAll(session) }, StopTransient: func(session protocol.SessionID) { value.processes.StopTransient(session) }, Telemetry: value.telemetry, Working: value.power.Hold, Python: value.plugins.python, Model: value.newModel, AuthorizeProvider: value.authorizeTurnProvider, Attachment: value.capturedAttachment, AttachmentBytes: value.transfers.AttachmentBytes, ToolsForTurn: value.workspaceTools, HooksForTurn: value.turnHooks, TurnCompletion: value.turnCompletion, PluginAvailability: value.checkPluginAvailability})
 	if err := value.agent.Recover(ctx); err != nil {
 		cancel()
 		value.closeAuth()
@@ -274,6 +278,21 @@ func StartWithOptions(ctx context.Context, path string, options Options) (*Node,
 		return nil, err
 	}
 	value.agent.Start()
+	// Register only after startup succeeds; this Node owns both caches.
+	governor := memory.Default()
+	unregister := governor.Register("node.caches", func(level memory.Level) {
+		if level != memory.Pressure {
+			return
+		}
+		value.plugins.manager.ClearRepositories()
+		value.web.mu.Lock()
+		for _, searcher := range value.web.search {
+			searcher.ClearResults()
+		}
+		value.web.mu.Unlock()
+	})
+	stop := governor.Start()
+	value.stopMemory = func() { unregister(); stop(); value.plugins.manager.ClearRepositories() }
 	for index := range value.lanes {
 		go value.run(&value.lanes[index])
 	}
@@ -377,6 +396,12 @@ func (node *Node) shutdown(grace time.Duration) {
 		{"external browsers", quiet(node.externalBrowser.Shutdown)},
 		{"plugins and MCP servers", node.closePlugins},
 		{"requests in flight", quiet(node.work.Wait)},
+		{"resource projections", quiet(node.clearResourceProjections)},
+		{"memory governor", quiet(func() {
+			if node.stopMemory != nil {
+				node.stopMemory()
+			}
+		})},
 		// No request holds a package version or a settings revision any more.
 		{"plugin collection", quiet(func() { node.collectPlugins(context.Background()) })},
 		{"telemetry", quiet(func() {
@@ -428,7 +453,7 @@ func (node *Node) begin() error {
 	node.mu.Lock()
 	defer node.mu.Unlock()
 	if node.stopped {
-		return unavailable()
+		return admissionStopped{unavailable()}
 	}
 	node.work.Add(1)
 	return nil
@@ -445,6 +470,11 @@ func (node *Node) Snapshot(ctx context.Context) (protocol.Snapshot, error) {
 }
 
 func (node *Node) admitCommand(ctx context.Context, caller protocol.NodeID, request protocol.Request) (link.Admission, error) {
+	select {
+	case <-node.closed:
+		return link.Admission{}, admissionStopped{unavailable()}
+	default:
+	}
 	if request.Command.Kind == "call_host_handler" {
 		return node.admitHostHandler(ctx, caller, request)
 	}
@@ -554,7 +584,7 @@ func (node *Node) admitCommand(ctx context.Context, caller protocol.NodeID, requ
 	node.mu.Unlock()
 	if stopped {
 		node.admitting.Unlock()
-		return link.Admission{}, unavailable()
+		return link.Admission{}, admissionStopped{unavailable()}
 	}
 	if err := ctx.Err(); err != nil {
 		node.admitting.Unlock()
@@ -642,7 +672,7 @@ func externalCommand(command protocol.Command) bool {
 		// Applying a manifest updates plugin lifecycles after its transaction.
 		// Those owners may admit work and must run outside the admission lock.
 		return true
-	case "submit_turn", "submit_task", "continue_turn", "compact_context", "start_queued_turn", "send_queued_turn", "replace_turn":
+	case "submit_turn", "submit_task", "continue_turn", "compact_context", "start_queued_turn", "retry_child_turn", "send_queued_turn", "replace_turn":
 		return true
 	case "create_project", "register_project", "update_project", "remove_project", "register_worktree":
 		return true
@@ -1101,7 +1131,11 @@ func (node *Node) publish() {
 	}
 }
 
-func unavailable() error {
+type admissionStopped struct{ *protocol.Fault }
+
+func (err admissionStopped) Unwrap() error { return err.Fault }
+
+func unavailable() *protocol.Fault {
 	return &protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "Node service is unavailable"}
 }
 

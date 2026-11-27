@@ -77,6 +77,9 @@ func (metadata UsageMetadata) scalar() fantasy.Usage {
 type sdkModel struct {
 	config transportConfig
 	client *http.Client
+	// Prefer HTTP/1.1 only after it completed a stream that this captured
+	// model's HTTP/2 route reset.
+	preferHTTP1 atomic.Bool
 }
 type responseFacts struct {
 	// A short-lived token is not known when Run captures the static secrets.
@@ -93,17 +96,18 @@ type factsKey struct{}
 const maxFailureBody = 1024 * 1024
 
 // stallTimeout is how long a model response may send nothing, counted from
-// the request and again from each read.
+// dispatch until headers arrive and during each pending body read.
 const stallTimeout = 300 * time.Second
 
 type responseTransport struct {
 	base  http.RoundTripper
+	http1 http.RoundTripper
 	stall time.Duration
 }
 
 // stallError ends a request whose response stayed silent. It is a network
 // timeout, so a step that has shown nothing takes the normal retry path.
-type stallError struct{}
+type stallError struct{ idle time.Duration }
 
 func (stallError) Error() string   { return "model stream stalled" }
 func (stallError) Timeout() bool   { return true }
@@ -119,12 +123,11 @@ type stallBody struct {
 }
 
 func (body *stallBody) Read(buffer []byte) (int, error) {
+	body.timer.Reset(body.limit)
 	count, err := body.ReadCloser.Read(buffer)
+	body.timer.Stop()
 	if body.stalled.Load() {
-		return 0, stallError{}
-	}
-	if count > 0 {
-		body.timer.Reset(body.limit)
+		return 0, stallError{idle: body.limit}
 	}
 	return count, err
 }
@@ -136,6 +139,7 @@ func (body *stallBody) Close() error {
 }
 
 func (transport responseTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	bodySize := request.ContentLength
 	if request.GetBody != nil {
 		body, err := request.GetBody()
 		if err != nil {
@@ -150,20 +154,28 @@ func (transport responseTransport) RoundTrip(request *http.Request) (*http.Respo
 			request = capture.trace.GatewayRequest(request)
 			capture.trace.Request(request.Header, raw)
 		}
+		bodySize = int64(len(raw))
 	}
 	owner, cancel := context.WithCancel(request.Context())
 	stalled := &atomic.Bool{}
 	timer := time.AfterFunc(transport.stall, func() { stalled.Store(true); cancel() })
+	wire := transport.base
+	if transport.http1 != nil && bodySize >= largeHTTP1BodyBytes && !largeHTTP1Skipped(owner) {
+		wire = transport.http1
+		markLargeHTTP1Used(owner)
+	}
 	captureDispatch(owner)
-	response, err := transport.base.RoundTrip(request.WithContext(owner))
-	if err != nil || response == nil {
-		timer.Stop()
+	response, err := wire.RoundTrip(request.WithContext(owner))
+	// Receiving headers ends the dispatch wait. Time spent by the consumer
+	// between reads is local work and does not indicate a silent peer.
+	headersInTime := timer.Stop()
+	if !headersInTime || err != nil || response == nil {
 		cancel()
 		if response != nil && response.Body != nil {
 			response.Body.Close()
 		}
-		if stalled.Load() {
-			err = stallError{}
+		if !headersInTime {
+			err = stallError{idle: transport.stall}
 		}
 		return nil, err
 	}
@@ -197,6 +209,7 @@ func (transport responseTransport) RoundTrip(request *http.Request) (*http.Respo
 var modelTransport = sync.OnceValue(func() *http.Transport {
 	transport := netproxy.Transport().Clone()
 	transport.IdleConnTimeout = 30 * time.Second
+	transport.MaxIdleConnsPerHost = 16
 	transport.HTTP2 = &http.HTTP2Config{SendPingTimeout: 15 * time.Second, PingTimeout: 10 * time.Second}
 	return transport
 })
@@ -207,7 +220,7 @@ func newSDK(_ context.Context, config transportConfig) (fantasy.LanguageModel, e
 	if config.Kind == "google" && config.Key == "" {
 		return nil, &Failure{Kind: NotConfigured, Message: "Gemini requires an explicitly configured API key"}
 	}
-	var transport http.RoundTripper = responseTransport{base: modelTransport(), stall: stallTimeout}
+	var transport http.RoundTripper = responseTransport{base: modelTransport(), http1: modelHTTP1Transport(), stall: stallTimeout}
 	if config.Kind == "anthropic" && config.OAuth {
 		transport = claudeTransport{base: transport}
 	}

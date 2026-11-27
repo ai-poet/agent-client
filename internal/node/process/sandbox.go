@@ -25,9 +25,31 @@ type allowedPath struct {
 type sandboxPolicy struct {
 	paths         []allowedPath
 	variables     map[string]string
-	links         map[string]string
+	deniedReads   []string
 	protected     []string
 	home, profile string
+}
+
+// sandboxDeniedHomeReads are sensitive credential paths under the user's real
+// home directory that sandboxed commands must never read.
+var sandboxDeniedHomeReads = []string{
+	".ssh",
+	".gnupg",
+	".aws",
+	".azure",
+	".kube",
+	".docker",
+	".gitconfig",
+	".git-credentials",
+	".config/git/credentials",
+	".npmrc",
+	".netrc",
+	".pypirc",
+	".cargo/credentials",
+	".cargo/credentials.toml",
+	".config/gh",
+	".config/gcloud",
+	".config/op",
 }
 
 func prepareCommand(launch Launch, environment Environment, directory, device string, captureManaged func(string) (string, error)) (*exec.Cmd, func(), error) {
@@ -56,10 +78,6 @@ func prepareCommand(launch Launch, environment Environment, directory, device st
 			return nil, cleanup, err
 		}
 		cleanup = release
-		// Explicit runtime additions can change PATH; grant only the selected safe toolchain.
-		if values["PATH"] != environment.values["PATH"] {
-			policy.configurePaths(values["PATH"])
-		}
 		program, args, err = sandboxCommand(policy, program, args, device)
 		if err != nil {
 			cleanup()
@@ -79,7 +97,7 @@ func prepareCommand(launch Launch, environment Environment, directory, device st
 
 func prepareSandbox(launch Launch, environment Environment, captureManaged func(string) (string, error)) (_ sandboxPolicy, cleanup func(), failure error) {
 	cleanup = func() {}
-	policy := sandboxPolicy{variables: map[string]string{}, links: map[string]string{}}
+	policy := sandboxPolicy{variables: map[string]string{}}
 	root, err := filepath.EvalSymlinks(launch.Root)
 	if err != nil {
 		return policy, cleanup, sandboxFailure(err)
@@ -88,7 +106,13 @@ func prepareSandbox(launch Launch, environment Environment, captureManaged func(
 	if home == "" {
 		home = environment.values["USERPROFILE"]
 	}
-	policy.home, _ = filepath.EvalSymlinks(home)
+	if !filepath.IsAbs(home) {
+		return policy, cleanup, unavailable("command sandbox requires an absolute home directory")
+	}
+	policy.home, err = filepath.EvalSymlinks(home)
+	if err != nil {
+		return policy, cleanup, sandboxFailure(err)
+	}
 	if launch.Profile != "" {
 		policy.profile, err = filepath.EvalSymlinks(launch.Profile)
 		if err != nil {
@@ -117,6 +141,12 @@ func prepareSandbox(launch Launch, environment Environment, captureManaged func(
 	if err != nil {
 		return policy, cleanup, sandboxFailure(err)
 	}
+	if launch.ReadOnly && (within(root, scratch) || within(scratch, root)) {
+		if ownScratch {
+			_ = os.Remove(scratch)
+		}
+		return policy, cleanup, &protocol.Fault{Code: protocol.ErrorCodePermissionDenied, Message: "read-only workspace and writable scratch must be separate"}
+	}
 	state, err := os.MkdirTemp(scratch, "environment-")
 	if err != nil {
 		if ownScratch {
@@ -135,7 +165,7 @@ func prepareSandbox(launch Launch, environment Environment, captureManaged func(
 			cleanup()
 		}
 	}()
-	policy.paths = append(policy.paths, allowedPath{root, true}, allowedPath{scratch, true})
+	policy.paths = append(policy.paths, allowedPath{root, !launch.ReadOnly}, allowedPath{scratch, true})
 	if launch.Inputs != "" {
 		inputs, err := filepath.EvalSymlinks(launch.Inputs)
 		if err != nil {
@@ -164,46 +194,55 @@ func prepareSandbox(launch Launch, environment Environment, captureManaged func(
 	if runtime.GOOS == "darwin" {
 		policy.variables["xcrun_db"] = filepath.Join(state, "xcrun_db")
 	}
+	// Preserve read-only references to host toolchains/caches that would
+	// otherwise default under the isolated HOME.
 	if policy.home != "" {
-		for _, relative := range []string{".cargo/bin", ".rustup/toolchains", ".rustup/settings.toml"} {
-			policy.read(filepath.Join(policy.home, relative))
+		if err := policy.configureToolchainState(state, environment); err != nil {
+			return policy, cleanup, sandboxFailure(err)
 		}
-		if regular(filepath.Join(policy.home, ".rustup/settings.toml")) {
+		if environment.unrestricted["RUSTUP_HOME"] != "" && filepath.IsAbs(environment.unrestricted["RUSTUP_HOME"]) {
+			policy.variables["RUSTUP_HOME"] = environment.unrestricted["RUSTUP_HOME"]
+		} else if regular(filepath.Join(policy.home, ".rustup/settings.toml")) {
 			policy.variables["RUSTUP_HOME"] = filepath.Join(policy.home, ".rustup")
 		}
-		for _, pair := range [][2]string{{".cargo/registry/src", "cargo/registry/src"}, {".cargo/registry/cache", "cargo/registry/cache"}, {".cargo/registry/index", "cargo/registry/index"}, {".cargo/git/checkouts", "cargo/git/checkouts"}, {".cargo/git/db", "cargo/git/db"}, {".npm/_cacache/content-v2", "npm/_cacache/content-v2"}, {".npm/_cacache/index-v5", "npm/_cacache/index-v5"}} {
-			if source := policy.read(filepath.Join(policy.home, pair[0])); source != "" {
-				if err := stateLink(state, source, pair[1]); err != nil {
-					return policy, cleanup, sandboxFailure(err)
-				}
+		if environment.values["GOMODCACHE"] == "" && environment.values["GOPATH"] == "" {
+			if info, err := os.Stat(filepath.Join(policy.home, "go/pkg/mod")); err == nil && info.IsDir() {
+				policy.variables["GOMODCACHE"] = filepath.Join(policy.home, "go/pkg/mod")
 			}
 		}
 	}
-	policy.configurePaths(environment.values["PATH"])
-	if err := policy.configureManagers(state); err != nil {
-		return policy, cleanup, sandboxFailure(err)
-	}
-	if launch.Inputs != "" {
-		policy.executable(launch.Inputs, environment.values["PATH"], map[string]bool{})
-	}
-	if runtime.GOOS == "darwin" {
-		selected := environment.values["DEVELOPER_DIR"]
-		if selected == "" {
-			selected = "/Applications/Xcode.app/Contents/Developer"
+	// Deny reads to Sailry's own profile (excluding the command's scratch and
+	// managed workspace, which are re-granted after denies) and user secrets.
+	for _, relative := range sandboxDeniedHomeReads {
+		if err := policy.denyRead(filepath.Join(policy.home, filepath.FromSlash(relative))); err != nil {
+			return policy, cleanup, sandboxFailure(err)
 		}
-		if developer := policy.read(selected); developer != "" && filepath.Base(developer) == "Developer" {
-			for _, relative := range []string{"SharedFrameworks", "OtherFrameworks", "Frameworks", "SystemFrameworks"} {
-				policy.read(filepath.Join(filepath.Dir(developer), relative))
+	}
+	for _, location := range []struct{ key, relative string }{
+		{"XDG_CONFIG_HOME", "git/credentials"}, {"CARGO_HOME", "credentials"}, {"CARGO_HOME", "credentials.toml"},
+	} {
+		if base := environment.unrestricted[location.key]; filepath.IsAbs(base) {
+			if err := policy.denyRead(filepath.Join(base, location.relative)); err != nil {
+				return policy, cleanup, sandboxFailure(err)
 			}
 		}
-		policy.read("/Library/Developer/CommandLineTools")
-		if policy.home != "" {
-			policy.read(filepath.Join(policy.home, "Library/Developer/Toolchains"))
+	}
+	// A later workspace, attachment or scratch grant must never reopen a
+	// credential mask. Only the profile has intentional scoped grants.
+	for _, denied := range policy.deniedReads {
+		for _, grant := range policy.paths {
+			if within(denied, grant.path) || within(grant.path, denied) {
+				return policy, cleanup, &protocol.Fault{Code: protocol.ErrorCodePermissionDenied, Message: "command sandbox grant overlaps protected credentials"}
+			}
 		}
-	} else {
-		for _, path := range []string{"/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc/ld.so.cache", "/etc/localtime", "/etc/passwd", "/etc/group"} {
-			policy.read(path)
-		}
+	}
+	if policy.profile != "" {
+		policy.deniedReads = append(policy.deniedReads, policy.profile)
+	}
+	// CaptureManaged can prepare Git excludes on the host. With no writable
+	// worktree there is nothing to pin, and inspection must not prepare it.
+	if launch.ReadOnly {
+		return policy, cleanup, nil
 	}
 	policy.captureRepositories(root)
 	if captureManaged == nil {
@@ -219,34 +258,29 @@ func prepareSandbox(launch Launch, environment Environment, captureManaged func(
 	return policy, cleanup, nil
 }
 
-func (policy *sandboxPolicy) readable(path string) string {
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil || !filepath.IsAbs(resolved) || filepath.Dir(resolved) == resolved || policy.home != "" && within(resolved, policy.home) || policy.profile != "" && (within(policy.profile, resolved) || within(resolved, policy.profile)) {
-		return ""
+func (policy *sandboxPolicy) denyRead(path string) error {
+	clean := filepath.Clean(path)
+	if !slices.Contains(policy.deniedReads, clean) {
+		policy.deniedReads = append(policy.deniedReads, clean)
 	}
-	if policy.home != "" && resolved != filepath.Join(policy.home, ".config/mise/config.toml") {
-		for _, relative := range []string{".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".config", ".gitconfig", ".git-credentials", ".npmrc", ".netrc", ".pypirc", ".cargo/credentials", ".cargo/credentials.toml"} {
-			if within(filepath.Join(policy.home, relative), resolved) {
-				return ""
+	// Resolve existing ancestors even when the credential itself is missing.
+	// A dangling link has no stable target to protect: do not launch.
+	for prefix := clean; ; prefix = filepath.Dir(prefix) {
+		resolved, err := filepath.EvalSymlinks(prefix)
+		if err == nil {
+			resolved = filepath.Join(resolved, strings.TrimPrefix(clean, prefix))
+			if !slices.Contains(policy.deniedReads, resolved) {
+				policy.deniedReads = append(policy.deniedReads, resolved)
 			}
+			return nil
+		}
+		if !os.IsNotExist(err) {
+			return err
+		}
+		if _, statErr := os.Lstat(prefix); !os.IsNotExist(statErr) || prefix == filepath.Dir(prefix) {
+			return err
 		}
 	}
-	return resolved
-}
-
-func (policy *sandboxPolicy) read(path string) string {
-	resolved := policy.readable(path)
-	if resolved == "" {
-		return ""
-	}
-	policy.linkAliases(path)
-	for _, entry := range policy.paths {
-		if within(entry.path, resolved) {
-			return resolved
-		}
-	}
-	policy.paths = append(policy.paths, allowedPath{resolved, false})
-	return resolved
 }
 
 func trustedWrapper(candidates ...string) (string, error) {
@@ -296,13 +330,6 @@ func privateDirectories(root, relative string) error {
 		anchor = child
 	}
 	return nil
-}
-
-func stateLink(state, source, target string) error {
-	if err := privateDirectories(state, filepath.Dir(target)); err != nil {
-		return err
-	}
-	return os.Symlink(source, filepath.Join(state, target))
 }
 
 func regular(path string) bool {

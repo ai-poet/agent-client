@@ -10,8 +10,8 @@ import (
 	"testing/synctest"
 	"time"
 
-	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type mcpCallOutcome struct {
@@ -34,6 +34,7 @@ type mcpCallFixture struct {
 	t       *testing.T
 	pool    *Pool
 	version string
+	sending sdk.Middleware
 	pending sync.Map
 	opened  atomic.Int32
 	active  atomic.Int32
@@ -117,6 +118,9 @@ func (fixture *mcpCallFixture) open(ctx context.Context, _ Launch, elicit func(c
 	fixture.servers = append(fixture.servers, session)
 	fixture.mu.Unlock()
 	client := sdk.NewClient(&sdk.Implementation{Name: "concurrency-client", Version: "1"}, &sdk.ClientOptions{ElicitationHandler: elicit})
+	if fixture.sending != nil {
+		client.AddSendingMiddleware(fixture.sending)
+	}
 	return client.Connect(ctx, clientWire, &sdk.ClientSessionOptions{ProtocolVersion: fixture.version})
 }
 
@@ -360,6 +364,100 @@ func TestMCPWriteCancellationRetiresWithoutReplay(t *testing.T) {
 		synctest.Wait()
 		if writer.entered.Load() != 1 {
 			t.Fatalf("uncertain write was replayed %d times", writer.entered.Load())
+		}
+	})
+}
+
+func TestMCPExclusiveLockHeldUntilCancelledWriteCompletes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newMCPCallFixture(t, "2026-07-28")
+		transportDone := make(chan struct{})
+		var finishTransport sync.Once
+		release := func() { finishTransport.Do(func() { close(transportDone) }) }
+		defer release()
+		fixture.sending = func(next sdk.MethodHandler) sdk.MethodHandler {
+			return func(ctx context.Context, method string, req sdk.Request) (sdk.Result, error) {
+				result, err := next(ctx, method, req)
+				if method == "tools/call" && ctx.Err() != nil {
+					<-transportDone
+				}
+				return result, err
+			}
+		}
+		config := fixture.config()
+		config.Options.Reuse, config.Options.Exclusive = false, true
+		first, second := fixture.acquire(config), fixture.acquire(config)
+		if first.connection == second.connection {
+			t.Fatal("nonreusable leases shared a connection")
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		firstCall := fixture.start(ctx, first, "exclusive-cancelled", false)
+		fixture.entered(firstCall, true)
+
+		// While the first exclusive write is active, a second lease on a
+		// distinct connection must wait on the shared exclusive lock.
+		secondCall := fixture.start(t.Context(), second, "exclusive-next", false)
+		synctest.Wait()
+		fixture.entered(secondCall, false)
+		if fixture.peak.Load() != 1 {
+			t.Fatalf("exclusive writes overlapped while first call held lock: peak=%d", fixture.peak.Load())
+		}
+
+		// Cancelling the first write retires its connection and unblocks the
+		// second write once the first CallTool goroutine exits and releases
+		// the exclusive lock cleanly without leaking it.
+		cancel()
+		fixture.fault(firstCall, protocol.ErrorCodeOutcomeUnknown)
+		fixture.entered(secondCall, false)
+		release()
+		fixture.entered(secondCall, true)
+		secondCall.finish()
+		fixture.success(secondCall)
+	})
+}
+
+// Hold the caller inside error classification after the SDK has returned.
+type heldWriteFailure struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (*heldWriteFailure) Error() string { return "fixture transport error" }
+
+func (failure *heldWriteFailure) Unwrap() error {
+	close(failure.entered)
+	<-failure.release
+	return nil
+}
+
+func TestMCPExclusiveWriteWaitsForFailureClassification(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newMCPCallFixture(t, "2026-07-28")
+		failure := &heldWriteFailure{entered: make(chan struct{}), release: make(chan struct{})}
+		var calls atomic.Int32
+		fixture.sending = func(next sdk.MethodHandler) sdk.MethodHandler {
+			return func(ctx context.Context, method string, req sdk.Request) (sdk.Result, error) {
+				if method == "tools/call" && calls.Add(1) == 1 {
+					return nil, failure
+				}
+				return next(ctx, method, req)
+			}
+		}
+		config := fixture.config()
+		config.Options.Exclusive = true
+		lease := fixture.acquire(config)
+		first := fixture.start(t.Context(), lease, "uncertain", false)
+		<-failure.entered
+		second := fixture.start(t.Context(), lease, "queued", false)
+		synctest.Wait()
+		// Release both calls even when checking a broken implementation.
+		second.finish()
+		close(failure.release)
+		fixture.fault(first, protocol.ErrorCodeOutcomeUnknown)
+		fixture.fault(second, protocol.ErrorCodeUnavailable)
+		if got := calls.Load(); got != 1 {
+			t.Fatalf("%d writes dispatched before retirement, want 1", got)
 		}
 	})
 }

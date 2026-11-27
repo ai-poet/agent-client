@@ -5,9 +5,11 @@ import (
 	"io"
 )
 
+const boundedReadChunkSize = 64 << 10
+
 func readBounded(ctx context.Context, reader io.Reader, limit int) ([]byte, error) {
 	var data []byte
-	buffer := make([]byte, 64*1024)
+	buffer := make([]byte, boundedReadChunkSize)
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
