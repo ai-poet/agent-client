@@ -10,10 +10,6 @@ import (
 )
 
 func CaptureCatalog(ctx context.Context, profile string, references []protocol.PluginReference) (*Catalog, error) {
-	bundled, err := Bundled()
-	if err != nil {
-		return nil, err
-	}
 	specifications, err := operationPolicies()
 	if err != nil {
 		return nil, err
@@ -21,17 +17,6 @@ func CaptureCatalog(ctx context.Context, profile string, references []protocol.P
 	manager := plugins.NewManager(profile)
 	result := &Catalog{References: slices.Clone(references)}
 	for _, reference := range references {
-		if slices.ContainsFunc(bundled.References, func(candidate protocol.PluginReference) bool {
-			return candidate.Name == reference.Name && candidate.Digest == reference.Digest
-		}) {
-			for _, declaration := range bundled.Tools {
-				if declaration.Owner.Name == reference.Name {
-					declaration.Owner = reference
-					result.Tools = append(result.Tools, declaration)
-				}
-			}
-			continue
-		}
 		info, err := manager.CapturedInfo(ctx, reference)
 		if err != nil {
 			return nil, err

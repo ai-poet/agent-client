@@ -15,7 +15,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/ai-poet/cheaprouter-harness/internal/core"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/python"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
@@ -39,7 +38,6 @@ type Package struct {
 }
 
 type Resources struct {
-	profile  string
 	packages []Package
 }
 
@@ -47,40 +45,27 @@ type SkillText struct{ Content, Directory string }
 
 // CaptureResources resolves only the exact package versions admitted by a turn.
 func CaptureResources(ctx context.Context, profile string, references []protocol.PluginReference) (*Resources, error) {
-	catalog, err := Bundled()
-	if err != nil {
-		return nil, err
-	}
-	value := &Resources{profile: profile}
+	value := &Resources{}
+	manager := plugins.NewManager(profile)
 	for _, reference := range references {
-		index := slices.IndexFunc(catalog.Packages, func(p Package) bool {
-			return p.Reference.Name == reference.Name && p.Reference.Digest == reference.Digest
-		})
-		if index < 0 {
-			manager := plugins.NewManager(profile)
-			info, err := manager.CapturedInfo(ctx, reference)
-			if err != nil {
-				return nil, err
-			}
-			directory, err := manager.PackageRoot(reference)
-			if err != nil {
-				return nil, err
-			}
-			captured := Package{Reference: reference, Skills: info.Skills, directory: directory, standalone: info.Skill != nil}
-			captured.read = func(ctx context.Context, name string, limit int) ([]byte, error) {
-				return manager.ReadResource(ctx, reference, name, limit)
-			}
-			if info.Extension != nil {
-				captured.Scope, captured.Modes = info.Extension.Scope, info.Extension.ConversationModes
-				if info.Extension.ConversationOptions != nil {
-					captured.Options = *info.Extension.ConversationOptions
-				}
-			}
-			value.packages = append(value.packages, captured)
-			continue
+		info, err := manager.CapturedInfo(ctx, reference)
+		if err != nil {
+			return nil, err
 		}
-		captured := catalog.Packages[index]
-		captured.Reference = reference
+		directory, err := manager.PackageRoot(reference)
+		if err != nil {
+			return nil, err
+		}
+		captured := Package{Reference: reference, Skills: info.Skills, directory: directory, standalone: info.Skill != nil}
+		captured.read = func(ctx context.Context, name string, limit int) ([]byte, error) {
+			return manager.ReadResource(ctx, reference, name, limit)
+		}
+		if info.Extension != nil {
+			captured.Scope, captured.Modes = info.Extension.Scope, info.Extension.ConversationModes
+			if info.Extension.ConversationOptions != nil {
+				captured.Options = *info.Extension.ConversationOptions
+			}
+		}
 		value.packages = append(value.packages, captured)
 	}
 	builtins, err := builtinPackages()
@@ -199,10 +184,7 @@ func (r *Resources) Read(ctx context.Context, key, relative string) (SkillText, 
 		}
 		return SkillText{Content: string(expected)}, nil
 	}
-	directory, err := r.materialize(ctx, p)
-	if err != nil {
-		return SkillText{}, err
-	}
+	directory := p.directory
 	root, err := os.OpenRoot(directory)
 	if err != nil {
 		return SkillText{}, err
@@ -230,51 +212,6 @@ func (r *Resources) Read(ctx context.Context, key, relative string) (SkillText, 
 		return SkillText{}, err
 	}
 	return SkillText{Content: string(data), Directory: filepath.Join(directory, "skills", name)}, nil
-}
-
-func (r *Resources) materialize(ctx context.Context, p Package) (string, error) {
-	if p.directory != "" {
-		return p.directory, nil
-	}
-	if err := core.PrivateDirectory(r.profile); err != nil {
-		return "", err
-	}
-	profile, err := filepath.Abs(r.profile)
-	if err != nil {
-		return "", err
-	}
-	parent := profile
-	for _, name := range []string{"plugins", "packages"} {
-		parent = filepath.Join(parent, name)
-		info, err := os.Lstat(parent)
-		if errors.Is(err, os.ErrNotExist) {
-			break
-		}
-		if err != nil {
-			return "", err
-		}
-		if !info.IsDir() {
-			return "", resourceFault(protocol.ErrorCodeUnavailable, "plugin resource directory changed")
-		}
-	}
-	manager := plugins.NewManager(profile)
-	directory, err := manager.PackageRoot(p.Reference)
-	if err == nil {
-		_, err = manager.CapturedInfo(ctx, p.Reference)
-		return directory, err
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
-	// Publish missing bundled content without changing the user's installation record.
-	info, err := manager.InstallBundled(ctx, p.Reference.Name)
-	if err != nil {
-		return "", err
-	}
-	if info.Summary.Digest != p.Reference.Digest {
-		return "", resourceFault(protocol.ErrorCodeUnavailable, "bundled plugin differs from the admitted package")
-	}
-	return manager.PackageRoot(p.Reference)
 }
 
 func discoverSkills(tree fs.FS) []protocol.PluginSkill {

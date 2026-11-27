@@ -14,14 +14,10 @@ import (
 )
 
 // captureTurnPlugins names the packages a new turn freezes: the enabled
-// compatible inventory, or the bundled packages before the first inventory.
+// compatible inventory. Uninstalled defaults do not grant package authority.
 // An assistant resolves its current owner here; the turn then retains it.
 func captureTurnPlugins(ctx context.Context, db *sql.Conn, assistant *protocol.PluginConversationBinding) ([]protocol.PluginReference, error) {
-	catalog, err := operations.Bundled()
-	if err != nil {
-		return nil, err
-	}
-	references := append([]protocol.PluginReference(nil), catalog.References...)
+	var references []protocol.PluginReference
 	var initialized bool
 	if err := db.QueryRowContext(ctx, "SELECT plugin_defaults FROM node WHERE singleton=1").Scan(&initialized); err != nil {
 		return nil, err
