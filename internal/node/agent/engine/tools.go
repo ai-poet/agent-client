@@ -92,7 +92,17 @@ type ToolResult struct {
 	Context         *canonical.Context
 	// Attachments are stored assets shown with the result and never sent to
 	// the model.
-	Attachments []canonical.Attachment
+	Attachments  []canonical.Attachment
+	modelFailure model.FailureKind
+}
+
+// WithModelFailure retains the classification of a direct model request for
+// tool diagnostics, without changing the tool response kept in history.
+func (result ToolResult) WithModelFailure(failure *model.Failure) ToolResult {
+	if failure != nil && !failure.RequestObserved() {
+		result.modelFailure = failure.Kind
+	}
+	return result
 }
 
 // A retry reconstructs executors from its own turn; only declarations with the
@@ -230,11 +240,13 @@ func (r *Runtime) closeTools(x *execution) error {
 	cleanup := x.toolCleanup
 	x.toolCleanup = nil
 	var failures []error
+	panicked := false
 	for _, close := range cleanup {
 		failures = append(failures, func() (err error) {
 			defer func() {
 				if value := recover(); value != nil {
-					logPanic(x, "tool cleanup", "", value)
+					panicked = true
+					logPanic(x, "tool_cleanup", "", value)
 					err = &protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown, Message: "tool resource cleanup failed unexpectedly"}
 				}
 			}()
@@ -242,7 +254,11 @@ func (r *Runtime) closeTools(x *execution) error {
 		}())
 	}
 	if errors.Join(failures...) != nil {
-		return &protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown, Message: "tool resource cleanup could not be confirmed"}
+		fault := &protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown, Message: "tool resource cleanup could not be confirmed"}
+		if panicked {
+			return &observedTurnPanic{fault}
+		}
+		return fault
 	}
 	return nil
 }
@@ -617,6 +633,9 @@ func (r *Runtime) runTools(x *execution, state store.AgentState, calls []canonic
 	blocks := make([]canonical.Block, 0, len(calls))
 	var contextDelta canonical.Context
 	for i, call := range calls {
+		if startedCalls[i] && (results[i].Failure != nil || results[i].ReturnedFailure != nil) {
+			recordToolFailure(x.ctx, findTool(x.tools, call.Name), results[i])
+		}
 		if (executable[i] || batchErr != nil || x.ctx.Err() != nil) && results[i].Value == nil && results[i].Failure == nil && (!results[i].Error || x.ctx.Err() != nil) {
 			results[i] = interruptedTool(startedCalls[i])
 		}
@@ -676,6 +695,38 @@ func (r *Runtime) runTools(x *execution, state store.AgentState, calls []canonic
 	}
 	return batchErr
 }
+
+// Report only evidence from an executed native tool. Preparation and hook
+// refusals, interrupted calls, and package or MCP results are not that evidence.
+func recordToolFailure(step context.Context, tool *Tool, result ToolResult) {
+	if step.Err() != nil || tool == nil || tool.Binding != nil && tool.Binding.Owner.Name != "" || tool.MCPAuthority != ([32]byte{}) {
+		return
+	}
+	var code protocol.ErrorCode
+	var cause string
+	if fault := result.Failure; fault != nil {
+		switch fault.Code {
+		case protocol.ErrorCodeInternal:
+			code = fault.Code
+		case protocol.ErrorCodeUnavailable:
+			switch result.modelFailure {
+			case model.Network, model.Unavailable, model.InvalidResponse:
+				code, cause = fault.Code, "model_"+string(result.modelFailure)
+			}
+		}
+	} else if failure := result.ReturnedFailure; result.ReturnedError && failure != nil && failure.Origin == protocol.ToolFailureOriginRuntime &&
+		failure.Code != nil && *failure.Code == protocol.ErrorCodeOutcomeUnknown && tool.Binding != nil && tool.Binding.Operation != nil &&
+		*tool.Binding.Operation == protocol.ToolOperationRunCommand {
+		// run_command returns this outcome only for a foreground completion.
+		// read_command and stop_command can replay a background snapshot.
+		code, cause = *failure.Code, "foreground_command"
+	}
+	if code != "" {
+		logging.Emit(slog.LevelError, slog.String("area", "agent"), slog.String("operation", "tool_execution"),
+			slog.String("phase", logging.Failed), slog.String("code", string(code)), slog.String("cause_code", cause))
+	}
+}
+
 func (r *Runtime) executableRecord(x *execution, call canonical.ToolRequest, allowed bool) canonical.Record {
 	patch, _ := json.Marshal(map[string]bool{canonical.ExecutableKey: allowed})
 	record := canonical.NewRecord(x.inv.Run.Turn, "operation", canonical.Operation{Kind: "tool_meta", Data: &canonical.ToolMeta{Call: call.ID, Patch: patch}}, r.clock.Now())

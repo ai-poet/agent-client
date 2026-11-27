@@ -3,9 +3,12 @@ package hooks
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"path/filepath"
 	"reflect"
 	"testing"
 
+	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
@@ -57,6 +60,104 @@ func TestUncertainHookClaimNeverLaunches(t *testing.T) {
 	var fault *protocol.Fault
 	if err := binding.Before(context.Background(), "write_file"); !errors.As(err, &fault) || fault.Code != protocol.ErrorCodeOutcomeUnknown || launched {
 		t.Fatal(err, launched)
+	}
+}
+
+func TestHookReportsOnlyUnexpectedTerminalFailures(t *testing.T) {
+	closeLog, err := logging.Install(filepath.Join(t.TempDir(), "profile"), "host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeLog()
+	var reports []logging.Fields
+	logging.SetReport(func(level slog.Level, fields logging.Fields) {
+		if level == slog.LevelError && fields["area"] == "hooks" {
+			reports = append(reports, fields)
+		}
+	})
+	defer logging.SetReport(nil)
+	unknown := protocol.ErrorCodeOutcomeUnknown
+	for _, test := range []struct {
+		name     string
+		phase    protocol.HooksPhase
+		panics   bool
+		claimed  error
+		finished error
+		outcome  protocol.ProcessOutcome
+		launch   error
+		code     protocol.ErrorCode
+		report   bool
+	}{
+		{name: "before tool panic", panics: true, code: unknown, report: true},
+		{name: "after tool panic is returned to turn settlement", phase: protocol.HooksPhaseAfterTool, panics: true, code: unknown},
+		{name: "turn end receipt failure is returned to turn settlement", phase: protocol.HooksPhaseTurnEnd, finished: errors.New("private receipt detail"), code: unknown},
+		{name: "unknown process outcome", outcome: protocol.ProcessOutcome{Kind: "unknown", Data: "private process detail"}, code: unknown, report: true},
+		{name: "completion could not be recorded", finished: errors.New("private receipt detail"), code: unknown, report: true},
+		{name: "duplicate claim is not replayed", claimed: &protocol.Fault{Code: unknown, Message: "already admitted"}, code: unknown},
+		{name: "script veto", outcome: protocol.ProcessOutcome{Kind: "exited", Data: int32(1)}, code: protocol.ErrorCodePermissionDenied},
+		{name: "active cancellation", outcome: protocol.ProcessOutcome{Kind: "cancelled"}, code: protocol.ErrorCodePermissionDenied},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reports = nil
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			script := &protocol.HooksScript{Command: "fixture", Enabled: true, TimeoutMs: 100}
+			settings := protocol.HooksSettings{Enabled: true}
+			switch test.phase {
+			case protocol.HooksPhaseAfterTool:
+				settings.AfterTool = script
+			case protocol.HooksPhaseTurnEnd:
+				settings.TurnEnd = script
+			default:
+				settings.BeforeTool = script
+			}
+			turn := protocol.NewTurnID()
+			binding := New(Capture{Turn: turn, Settings: settings, Admitted: true,
+				Claim: func(context.Context, protocol.TurnID, protocol.HooksPhase, uint64) error { return test.claimed },
+				Finish: func(ctx context.Context, _ protocol.TurnID, _ protocol.HooksPhase, _ uint64, _ protocol.ProcessOutcome, _ error) error {
+					if ctx.Err() != nil {
+						t.Fatal("hook receipt must settle independently of cancellation")
+					}
+					return test.finished
+				},
+				Launch: func(context.Context, string, uint64, map[string]string) (protocol.ProcessCompletion, error) {
+					if test.panics {
+						panic("private panic detail")
+					}
+					outcome := test.outcome
+					if outcome.Kind == "" {
+						outcome = protocol.ProcessOutcome{Kind: "exited", Data: int32(0)}
+					} else if outcome.Kind == "cancelled" {
+						cancel()
+					}
+					return protocol.ProcessCompletion{Outcome: outcome}, test.launch
+				},
+			})
+			var err error
+			switch test.phase {
+			case protocol.HooksPhaseAfterTool:
+				binding.After(ctx, "read_file", true)
+				err = binding.Complete(ctx, "completed")
+			case protocol.HooksPhaseTurnEnd:
+				err = binding.Complete(ctx, "completed")
+			default:
+				err = binding.Before(ctx, "read_file")
+			}
+			var fault *protocol.Fault
+			if !errors.As(err, &fault) || fault.Code != test.code {
+				t.Fatalf("hook fault = %v, want %s", err, test.code)
+			}
+			if !test.report {
+				if len(reports) != 0 {
+					t.Fatalf("unexpected terminal report: %v", reports)
+				}
+				return
+			}
+			if len(reports) != 1 || reports[0]["operation"] != string(protocol.HooksPhaseBeforeTool) || reports[0]["turn"] != turn.String() ||
+				reports[0]["phase"] != logging.Failed || reports[0]["code"] != string(test.code) || reports[0]["exception"] != nil || reports[0]["detail"] != nil {
+				t.Fatalf("terminal reports = %v", reports)
+			}
+		})
 	}
 }
 

@@ -61,6 +61,7 @@ func (r *Runtime) execute(x *execution) {
 	cleanupErr := r.closeTools(x)
 	status := protocol.ConversationStatusCompleted
 	var failure *protocol.Fault
+	cause := err
 	if x.ctx.Err() != nil {
 		status = r.stoppedStatus()
 	} else if err != nil {
@@ -69,7 +70,7 @@ func (r *Runtime) execute(x *execution) {
 	}
 	if cleanupErr != nil {
 		status = protocol.ConversationStatusFailed
-		failure = model.Fault(cleanupErr)
+		cause, failure = cleanupErr, model.Fault(cleanupErr)
 	}
 	if status == protocol.ConversationStatusCancelled || status == protocol.ConversationStatusInterrupted {
 		r.feed.Seal(x.inv.Session.ID, x.inv.Run.Turn)
@@ -88,13 +89,13 @@ func (r *Runtime) execute(x *execution) {
 		}
 		if hookErr := x.hooks.Complete(x.ctx, hookStatus); hookErr != nil && (x.ctx.Err() == nil || !turnEndHookCancelled(hookErr)) {
 			status = protocol.ConversationStatusFailed
-			failure = model.Fault(hookErr)
+			cause, failure = hookErr, model.Fault(hookErr)
 		}
 	}
 	// The turn's phases are stored once its work has ended, before its end.
 	if phasesErr := r.save(ctx, x.inv.Session.ID, r.phasesRecord(x)); phasesErr != nil && status == protocol.ConversationStatusCompleted {
 		status = protocol.ConversationStatusFailed
-		failure = model.Fault(phasesErr)
+		cause, failure = phasesErr, model.Fault(phasesErr)
 	}
 	r.mu.Lock()
 	child := r.children[x.inv.Run.Turn]
@@ -209,6 +210,7 @@ func (r *Runtime) execute(x *execution) {
 		// notifier reaches it. Its successor still waits on publication.
 		r.stopTurnCommands(run.Session, x)
 	}
+	recordTurnFailure(run, cause)
 	r.observeTurn(run, x.inv.Turn.Config.Mode, child != nil || x.inv.Session.Delegation != nil && *x.inv.Session.Delegation != nil)
 	if successor != nil {
 		next := &delegatedChild{root: child.root, parent: child.parent, session: child.session, turn: successor.Turn, sequence: successor.Sequence, ctx: child.ctx, cancel: child.cancel, released: true, commandsInherited: true, retryTools: child.retryTools}
@@ -516,7 +518,11 @@ func (r *Runtime) turn(x *execution) error {
 		if delivered {
 			continue
 		}
-		last := lastMessage(state.Records)
+		lastRecord := lastMessageRecord(state.Records)
+		var last *canonical.Message
+		if lastRecord != nil {
+			last = lastRecord.Message()
+		}
 		if last != nil && last.Error != nil {
 			if last.Error.Code != nil && *last.Error.Code == "context_overflow" && recoveries < 2 {
 				if err = r.compact(x, binding, route, state, false); err != nil {
@@ -525,6 +531,9 @@ func (r *Runtime) turn(x *execution) error {
 				recoveries++
 				compacted = true
 				continue
+			}
+			if lastRecord.ID == x.failedInferenceRecord && x.inferenceCause != nil {
+				return x.inferenceCause
 			}
 			failure := &model.Failure{Kind: model.Other, Message: last.Error.Message, Exhausted: last.Error.RetryExhausted, WaitExhausted: last.Error.RetryWaitExhausted}
 			if last.Error.Code != nil {
@@ -703,13 +712,20 @@ func (r *Runtime) guidance(x *execution) (bool, error) {
 }
 
 func lastMessage(records []canonical.Record) *canonical.Message {
+	if record := lastMessageRecord(records); record != nil {
+		return record.Message()
+	}
+	return nil
+}
+
+func lastMessageRecord(records []canonical.Record) *canonical.Record {
 	for i := len(records) - 1; i >= 0; i-- {
 		if background := records[i].Background(); background != nil && background.Initial {
 			return nil
 		}
 		if message := records[i].Message(); message != nil {
 			if records[i].Metadata.Runtime == nil || records[i].Metadata.Runtime.AgentVisible || message.Error != nil {
-				return message
+				return &records[i]
 			}
 		}
 	}

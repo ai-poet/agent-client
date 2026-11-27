@@ -499,7 +499,7 @@ func (node *Node) inspectMedia(ctx context.Context, inv *store.AgentInvocation, 
 	stream, err := languageModel.Stream(operation, call)
 	if err != nil {
 		node.cooldowns.ObserveFailure(cooldownKey, model.Classify(err), time.Now())
-		return engine.ToolResult{}, model.Fault(err)
+		return visionStreamFault(err, ctx.Err() == nil && operation.Err() != nil), nil
 	}
 	var text strings.Builder
 	var usage canonical.Usage
@@ -514,7 +514,7 @@ func (node *Node) inspectMedia(ctx context.Context, inv *store.AgentInvocation, 
 			text.WriteString(part.Delta)
 		case fantasy.StreamPartTypeError:
 			node.cooldowns.ObserveFailure(cooldownKey, model.Classify(part.Error), time.Now())
-			return engine.ToolResult{}, model.Fault(part.Error)
+			return visionStreamFault(part.Error, false), nil
 		case fantasy.StreamPartTypeFinish:
 			finished = true
 		}
@@ -529,15 +529,35 @@ func (node *Node) inspectMedia(ctx context.Context, inv *store.AgentInvocation, 
 		return engine.ToolResult{}, mediaFault(protocol.ErrorCodeCancelled, "media request was cancelled")
 	}
 	if operation.Err() != nil {
-		return engine.ToolResult{}, mediaFault(protocol.ErrorCodeUnavailable, "vision model request timed out")
+		result := workspaceToolFault(mediaFault(protocol.ErrorCodeUnavailable, "vision model request timed out"))
+		return result.WithModelFailure(&model.Failure{Kind: model.Network}), nil
 	}
 	if !finished || strings.TrimSpace(text.String()) == "" {
-		return engine.ToolResult{}, mediaFault(protocol.ErrorCodeUnavailable, "vision model returned no text")
+		err := mediaFault(protocol.ErrorCodeUnavailable, "vision model returned no text")
+		if !finished {
+			return workspaceToolFault(err).WithModelFailure(&model.Failure{Kind: model.InvalidResponse}), nil
+		}
+		return engine.ToolResult{}, err
 	}
 	if err := node.recordMediaUsage(ctx, inv, binding, protocol.MediaKindVision, usage); err != nil {
 		return engine.ToolResult{}, err
 	}
 	return engine.ToolResult{Value: map[string]any{"text": text.String(), "provider": binding.Provider.Name, "model": binding.Config.Model}}, nil
+}
+
+func visionStreamFault(err error, timedOut bool) engine.ToolResult {
+	if err == nil {
+		return engine.ToolResult{}
+	}
+	if fault, ok := errors.AsType[*protocol.Fault](err); ok {
+		return engine.ToolResult{Failure: model.Fault(fault)}
+	}
+	failure := model.Classify(err)
+	result := engine.ToolResult{Failure: model.Fault(failure)}
+	if timedOut && failure.Kind == model.Cancelled {
+		failure.Kind = model.Network
+	}
+	return result.WithModelFailure(failure)
 }
 
 // recordMediaUsage counts the call under the provider and model that ran it.

@@ -41,6 +41,7 @@ type Options struct {
 	TurnCompletion     func(context.Context, *store.AgentInvocation) TurnCompletion
 	AfterTurn          func(context.Context, *store.AgentInvocation, protocol.ConversationRun, TurnObservation)
 	Telemetry          *telemetry.Control
+	RequestObserver    func(model.RequestObservation)
 	// Working, when set, brackets every running turn.
 	Working func() func()
 	// StopCommands, when set, stops a session's background commands. The
@@ -126,28 +127,30 @@ type execution struct {
 	renewedSecret     protocol.Secret
 	// sessionRoute: the model keeps the session's history and receives only
 	// new messages, so rewriting earlier ones would replay all of it.
-	sessionRoute    bool
-	childBudget     uint64
-	finishing       bool
-	commandsStopped bool // guarded by Runtime.publication
-	operations      uint64
-	operationsDone  chan struct{}
-	attachments     map[protocol.AttachmentID]*attachmentMaterial
-	hooks           *hooks.Binding
-	timeline        *timeline
-	inv             *store.AgentInvocation
-	ctx             context.Context
-	cancel          context.CancelFunc
-	done            chan struct{}
-	wake            chan struct{}
-	guidance        chan struct{}
-	tools           []Tool
-	names           *exposure
-	deferredContext *string
-	toolCleanup     []func() error
-	inputMu         sync.Mutex
-	inputWake       chan struct{}
-	output          output.Cache
+	sessionRoute          bool
+	childBudget           uint64
+	finishing             bool
+	commandsStopped       bool // guarded by Runtime.publication
+	operations            uint64
+	operationsDone        chan struct{}
+	attachments           map[protocol.AttachmentID]*attachmentMaterial
+	hooks                 *hooks.Binding
+	timeline              *timeline
+	inv                   *store.AgentInvocation
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	done                  chan struct{}
+	wake                  chan struct{}
+	guidance              chan struct{}
+	tools                 []Tool
+	names                 *exposure
+	deferredContext       *string
+	toolCleanup           []func() error
+	inputMu               sync.Mutex
+	inputWake             chan struct{}
+	output                output.Cache
+	failedInferenceRecord string
+	inferenceCause        error
 }
 
 func New(db *store.Handle, node protocol.NodeID, profile string, frames *feed.Hub, publish func(), options Options) *Runtime {
@@ -160,7 +163,7 @@ func New(db *store.Handle, node protocol.NodeID, profile string, frames *feed.Hu
 	if options.Model == nil {
 		options.Model = model.New
 	}
-	ctx, cancel := context.WithCancel(store.WithPluginAvailability(context.Background(), options.PluginAvailability))
+	ctx, cancel := context.WithCancel(model.WithRequestObserver(store.WithPluginAvailability(context.Background(), options.PluginAvailability), options.RequestObserver))
 	return &Runtime{telemetry: options.Telemetry, working: options.Working, stopCommands: options.StopCommands, stopTransient: options.StopTransient, python: options.Python, validateWorktree: options.ValidateWorktree, attachment: options.Attachment, attachmentBytes: options.AttachmentBytes, db: db, node: node, profile: profile, feed: frames, publish: publish, clock: options.Clock, model: options.Model, cooldowns: options.Cooldowns, authorizeProvider: options.AuthorizeProvider, tools: options.Tools, toolsForTurn: options.ToolsForTurn, hooksForTurn: options.HooksForTurn, afterTurn: options.AfterTurn, turnCompletion: options.TurnCompletion, ctx: ctx, cancel: cancel, done: make(chan struct{}), wake: make(chan struct{}, 1), active: map[protocol.TurnID]*execution{}, children: map[protocol.TurnID]*delegatedChild{}, activity: make(chan struct{}), statistics: map[protocol.SessionID]bool{}}
 }
 
