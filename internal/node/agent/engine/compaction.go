@@ -416,6 +416,22 @@ func (r *Runtime) summarize(x *execution, binding model.Binding, route model.Rou
 			promptText = retryPrompt
 			continue
 		}
+		if reason == protocol.ConversationCompactionReasonUnexpectedOutput {
+			logging.Emit(slog.LevelWarn,
+				slog.String("area", "agent"),
+				slog.String("operation", "compaction_summary"),
+				slog.String("phase", logging.Failed),
+				slog.String("session", x.inv.Session.ID.String()),
+				slog.String("turn", x.inv.Run.Turn.String()),
+				slog.String("provider", summaryBinding.Provider.ID.String()),
+				slog.String("model", summaryBinding.Config.Model),
+				slog.Int("output_bytes", len(rawText)),
+				slog.Int("output_lines", strings.Count(rawText, "\n")+1),
+				slog.Bool("has_fence", strings.Contains(rawText, "```")),
+				slog.Bool("has_brace", strings.Contains(rawText, "{")),
+				slog.Bool("has_heading", strings.Contains(rawText, "## ")),
+			)
+		}
 		return failed(protocol.ConversationCompactionStageSummary, reason, compactionSummaryFault(reason))
 	}
 	return r.saveCompaction(x, binding, route, state, plan, summaryID, summary.Render(), compactedFiles(summary), plan.carry, usage, attempts)

@@ -103,7 +103,170 @@ func Parse(text string, limit uint64) (Summary, error) {
 		}
 		return summary, nil
 	}
+	// Analysis may contain examples rather than the final handoff.
+	if cut := strings.LastIndex(text, "</analysis>"); cut >= 0 {
+		text = text[cut+len("</analysis>"):]
+	}
+	if !strings.HasPrefix(strings.TrimSpace(text), "<analysis>") {
+		if summary, ok := parseMarkdownHandoff(text); ok {
+			summary.Bound(limit)
+			if !summary.empty() && tokens.Text(summary.Render()) <= limit {
+				return summary, nil
+			}
+		}
+	}
 	return Summary{}, fmt.Errorf("compaction summary was not a structured handoff")
+}
+
+// parseMarkdownHandoff recovers a structured handoff when a model continues the
+// rendered Markdown "# Handoff Summary" format of an earlier compaction instead
+// of emitting JSON. At least two recognized handoff section headings are required
+// so ordinary prose replies are still rejected.
+func parseMarkdownHandoff(text string) (Summary, bool) {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	summary := Summary{Files: []File{}}
+	section := ""
+	subSection := ""
+	matchedHeadings := 0
+	var stateLines, nextLines []string
+	inFence := false
+	var codeLines []string
+	appendItem := func(target *[]string, line string) {
+		item := strings.TrimSpace(line)
+		item = strings.TrimPrefix(item, "- ")
+		item = strings.TrimPrefix(item, "* ")
+		item = strings.TrimSpace(item)
+		if item != "" {
+			*target = append(*target, item)
+		}
+	}
+	flushCode := func() {
+		if len(codeLines) == 0 || len(summary.Files) == 0 {
+			codeLines = nil
+			return
+		}
+		code := strings.Join(codeLines, "\n")
+		if strings.TrimSpace(code) != "" {
+			summary.Files[len(summary.Files)-1].KeyCode = &code
+		}
+		codeLines = nil
+	}
+	for _, raw := range lines {
+		trimmed := strings.TrimSpace(raw)
+		if strings.HasPrefix(trimmed, "```") {
+			if inFence {
+				inFence = false
+				flushCode()
+			} else {
+				inFence = true
+				codeLines = nil
+			}
+			continue
+		}
+		if inFence {
+			if section == "essential" && len(summary.Files) > 0 {
+				codeLines = append(codeLines, raw)
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "## ") || strings.HasPrefix(trimmed, "### ") {
+			heading := strings.ToLower(strings.TrimSpace(strings.TrimLeft(trimmed, "#")))
+			subSection = ""
+			switch heading {
+			case "goal", "goals", "user intent":
+				section = "goal"
+				matchedHeadings++
+				continue
+			case "open tasks", "pending tasks":
+				section = "pending"
+				matchedHeadings++
+				continue
+			case "constraints", "user messages", "requirements":
+				section = "constraints"
+				matchedHeadings++
+				continue
+			case "state", "current work", "current state":
+				section = "state"
+				matchedHeadings++
+				continue
+			case "decisions", "problem solving":
+				section = "decisions"
+				matchedHeadings++
+				continue
+			case "next steps", "next step":
+				section = "next"
+				matchedHeadings++
+				continue
+			case "essential context", "files", "key files", "context":
+				section = "essential"
+				matchedHeadings++
+				continue
+			case "errors and fixes", "errors":
+				section = "errors"
+				matchedHeadings++
+				continue
+			default:
+				if strings.HasPrefix(trimmed, "## ") {
+					section = ""
+				}
+				continue
+			}
+		}
+		if section == "" || trimmed == "" || strings.HasPrefix(trimmed, "# ") {
+			continue
+		}
+		switch section {
+		case "goal":
+			if strings.EqualFold(trimmed, "open tasks:") || strings.EqualFold(trimmed, "pending tasks:") {
+				subSection = "pending"
+				continue
+			}
+			if subSection == "pending" {
+				appendItem(&summary.PendingTasks, trimmed)
+			} else {
+				appendItem(&summary.UserIntent, trimmed)
+			}
+		case "pending":
+			appendItem(&summary.PendingTasks, trimmed)
+		case "constraints":
+			appendItem(&summary.UserMessages, trimmed)
+		case "state":
+			stateLines = append(stateLines, trimmed)
+		case "decisions":
+			appendItem(&summary.ProblemSolving, trimmed)
+		case "next":
+			nextLines = append(nextLines, trimmed)
+		case "errors":
+			appendItem(&summary.ErrorsAndFixes, trimmed)
+		case "essential":
+			item := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(trimmed, "- "), "* "))
+			if strings.HasPrefix(item, "`") {
+				if end := strings.IndexByte(item[1:], '`'); end > 0 {
+					path := strings.TrimSpace(item[1 : 1+end])
+					rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(item[2+end:]), ":"))
+					if path != "" {
+						summary.Files = append(summary.Files, File{Path: path, Summary: rest})
+						continue
+					}
+				}
+			}
+			if item != "" {
+				summary.TechnicalConcepts = append(summary.TechnicalConcepts, item)
+			}
+		}
+	}
+	if len(stateLines) > 0 {
+		joined := strings.Join(stateLines, "\n")
+		summary.CurrentWork = &joined
+	}
+	if len(nextLines) > 0 {
+		joined := strings.Join(nextLines, "\n")
+		summary.NextStep = &joined
+	}
+	if matchedHeadings < 2 || summary.empty() {
+		return Summary{}, false
+	}
+	return summary, true
 }
 
 func extractCandidates(text string) []string {

@@ -223,7 +223,8 @@ func TestParseStructuredAndLenientOutputs(t *testing.T) {
 			input string
 		}{
 			{"plain paragraph", "We worked on fixing the compaction parser and need to run tests next."},
-			{"markdown sections only", "## Goal\n- Fix compaction\n\n## Next Steps\n- Run tests"},
+			{"single section", "## Goal\n- Fix compaction"},
+			{"unfinished markdown analysis", "<analysis>\n## Goal\nPrivate draft\n## Next Steps\nPrivate plan"},
 			{"empty text", "   \n\t  "},
 			{"inline prose example", `A quoted example {"user_intent":["Wrong"]} is not a handoff`},
 			{"array document", "```json\n[\n{\"user_intent\":[\"Wrong\"]}\n]\n```"},
@@ -238,4 +239,31 @@ func TestParseStructuredAndLenientOutputs(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestParseRenderedMarkdownHandoff(t *testing.T) {
+	work := "Implemented compaction fix and verified locally."
+	next := "Review unpushed commits across sailry-go and sailry-code."
+	keyCode := "func Parse(text string, limit uint64) (Summary, error)"
+	orig := Summary{
+		UserIntent:        []string{"Review recent unpushed changes"},
+		PendingTasks:      []string{"Verify cross-repo compatibility"},
+		UserMessages:      []string{"Never push without asking"},
+		CurrentWork:       &work,
+		ProblemSolving:    []string{"Kept sdk/desktop minimal by adding sdk/desktop/harness"},
+		NextStep:          &next,
+		Files:             []File{{Path: "internal/node/agent/compact/summary.go", Summary: "Hardened handoff parser", KeyCode: &keyCode}},
+		TechnicalConcepts: []string{"commit 59ff234a6"},
+	}
+	rendered := orig.Render()
+	parsed, err := Parse(rendered, 4000)
+	if err != nil {
+		t.Fatalf("Parse(rendered markdown) failed: %v\nrendered:\n%s", err, rendered)
+	}
+	if len(parsed.UserIntent) != 1 || len(parsed.PendingTasks) != 1 || len(parsed.UserMessages) != 1 ||
+		parsed.CurrentWork == nil || len(parsed.ProblemSolving) != 1 || parsed.NextStep == nil ||
+		len(parsed.Files) != 1 || parsed.Files[0].Path != "internal/node/agent/compact/summary.go" ||
+		parsed.Files[0].KeyCode == nil || *parsed.Files[0].KeyCode != keyCode {
+		t.Fatalf("markdown round-trip lost fields: %+v", parsed)
+	}
 }
