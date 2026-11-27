@@ -33,9 +33,11 @@ type Tool struct {
 	MCPAuthority [32]byte
 	ReadOnly     bool
 	Concurrent   bool
-	Deferred     bool
-	Delegation   bool
-	Approval     bool
+	// FilePaths names the targets of the native executor, never of a script that rewrites its arguments.
+	FilePaths  func(canonical.ToolRequest) []string
+	Deferred   bool
+	Delegation bool
+	Approval   bool
 	// Confirm reports whether one prepared call of a tool without Approval
 	// asks first: a read-only tool with an optional project write.
 	Confirm           func(canonical.ToolRequest) bool
@@ -360,182 +362,177 @@ func (r *Runtime) runTools(x *execution, state store.AgentState, calls []canonic
 		x.observed.Tools[call.Name]++
 	}
 	x.observedMu.Unlock()
-	// Prepare later file operations only after preceding shell commands have
-	// settled. Keep one ordered response record for the original model batch.
-	runGroup := func(first, last int) error {
-		marks = marks[:0]
-		// Mark every allowed call before requesting the first approval.
-		for i := first; i < last; i++ {
-			call := calls[i]
-			tool := findTool(x.tools, call.Name)
-			if call.Error != nil {
-				results[i] = ToolResult{Failure: &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: call.Error.Message}}
+	// Mark every allowed call before requesting the first approval.
+	for i, call := range calls {
+		tool := findTool(x.tools, call.Name)
+		if call.Error != nil {
+			results[i] = ToolResult{Failure: &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: call.Error.Message}}
+			continue
+		}
+		// A captured deferred tool called by name runs under its own approval:
+		// the saved request already loaded it, as in the Rust catalog.
+		if tool == nil {
+			results[i] = ToolResult{Error: true, Value: map[string]any{"content": []any{map[string]any{"type": "text", "text": "This tool call was not handled."}}, "isError": true}}
+			continue
+		}
+		// Only a parent planning turn can delegate, ask or record an artifact.
+		child := x.inv.Session.Delegation != nil
+		planning := x.inv.Turn.Config.Mode == protocol.WorkModePlan
+		readOnlyRole := child && x.childRole != nil && x.childRole.ReadOnly
+		parentException := !child && (tool.Delegation || call.Name == "ask_user" ||
+			tool.Binding != nil && tool.Binding.Operation != nil && *tool.Binding.Operation == protocol.ToolOperationWriteArtifact)
+		if (planning || readOnlyRole) && !tool.ReadOnly && !parentException && !(planning && isPlanRunCommand(tool)) {
+			results[i] = ToolResult{Failure: &protocol.Fault{Code: protocol.ErrorCodePermissionDenied, Message: "planning mode permits read-only tools"}}
+			continue
+		}
+		var arguments any
+		if err := json.Unmarshal(call.Arguments, &arguments); err != nil {
+			results[i] = invalidTool("invalid tool arguments")
+			continue
+		}
+		if err := tool.schema.Validate(arguments); err != nil {
+			if validation, ok := errors.AsType[*jsonschema.ValidationError](err); ok {
+				orderValidationErrors(validation)
+			}
+			results[i] = invalidTool(fmt.Sprintf("invalid tool arguments: %s", err))
+			continue
+		}
+		if tool.Approval && (tool.FilePaths != nil || tool.ObserveHistory != nil) {
+			asks[i] = true
+			continue
+		}
+		if tool.ObserveHistory != nil {
+			tool.ObserveHistory(state.Records)
+		}
+		if tool.Prepare != nil {
+			if err := tool.Prepare(x.ctx, call); err != nil {
+				results[i] = toolFault(err)
 				continue
 			}
-			// A captured deferred tool called by name runs under its own approval:
-			// the saved request already loaded it, as in the Rust catalog.
-			if tool == nil {
-				results[i] = ToolResult{Error: true, Value: map[string]any{"content": []any{map[string]any{"type": "text", "text": "This tool call was not handled."}}, "isError": true}}
-				continue
-			}
-			// Only a parent planning turn can delegate, ask or record an artifact.
-			child := x.inv.Session.Delegation != nil
-			planning := x.inv.Turn.Config.Mode == protocol.WorkModePlan
-			readOnlyRole := child && x.childRole != nil && x.childRole.ReadOnly
-			parentException := !child && (tool.Delegation || call.Name == "ask_user" ||
-				tool.Binding != nil && tool.Binding.Operation != nil && *tool.Binding.Operation == protocol.ToolOperationWriteArtifact)
-			if (planning || readOnlyRole) && !tool.ReadOnly && !parentException && !(planning && isPlanRunCommand(tool)) {
-				results[i] = ToolResult{Failure: &protocol.Fault{Code: protocol.ErrorCodePermissionDenied, Message: "planning mode permits read-only tools"}}
-				continue
-			}
-			var arguments any
-			if err := json.Unmarshal(call.Arguments, &arguments); err != nil {
-				results[i] = invalidTool("invalid tool arguments")
-				continue
-			}
-			if err := tool.schema.Validate(arguments); err != nil {
-				if validation, ok := errors.AsType[*jsonschema.ValidationError](err); ok {
-					orderValidationErrors(validation)
-				}
-				results[i] = invalidTool(fmt.Sprintf("invalid tool arguments: %s", err))
-				continue
-			}
+		}
+		if asks[i] = tool.Approval || tool.Confirm != nil && tool.Confirm(call); !asks[i] {
+			executable[i] = true
+			marks = append(marks, r.executableRecord(x, call, true))
+		}
+	}
+	if err := r.save(x.ctx, x.inv.Session.ID, marks...); err != nil {
+		return err
+	}
+	admit := func(i int, history []canonical.Record) error {
+		call := calls[i]
+		tool := findTool(x.tools, call.Name)
+		if !asks[i] || results[i].Value != nil || results[i].Failure != nil {
+			return nil
+		}
+		if tool.Approval && (tool.FilePaths != nil || tool.ObserveHistory != nil) {
 			if tool.ObserveHistory != nil {
-				tool.ObserveHistory(state.Records)
+				tool.ObserveHistory(history)
 			}
 			if tool.Prepare != nil {
 				if err := tool.Prepare(x.ctx, call); err != nil {
 					results[i] = toolFault(err)
-					continue
+					return nil
 				}
 			}
-			if asks[i] = tool.Approval || tool.Confirm != nil && tool.Confirm(call); !asks[i] {
-				executable[i] = true
-				marks = append(marks, r.executableRecord(x, call, true))
-			}
 		}
-		if err := r.save(x.ctx, x.inv.Session.ID, marks...); err != nil {
+		approved, err := r.approval(x, call, tool)
+		var denied *protocol.Fault
+		if x.inv.Turn.Config.Mode == protocol.WorkModePlan && isPlanRunCommand(tool) && errors.As(err, &denied) && denied.Code == protocol.ErrorCodePermissionDenied {
+			results[i] = toolFault(err)
+			return nil
+		}
+		if err != nil {
 			return err
 		}
-		for i := first; i < last; i++ {
-			call := calls[i]
-			tool := findTool(x.tools, call.Name)
-			if !asks[i] || results[i].Value != nil || results[i].Failure != nil {
-				continue
-			}
-			approved, err := r.approval(x, call, tool)
-			var denied *protocol.Fault
-			if x.inv.Turn.Config.Mode == protocol.WorkModePlan && isPlanRunCommand(tool) && errors.As(err, &denied) && denied.Code == protocol.ErrorCodePermissionDenied {
-				results[i] = toolFault(err)
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			executable[i] = approved
-			if !approved {
-				results[i] = ToolResult{Failure: &protocol.Fault{Code: protocol.ErrorCodePermissionDenied, Message: "Tool call was denied"}}
-			}
-			if err = r.save(x.ctx, x.inv.Session.ID, r.executableRecord(x, call, approved)); err != nil {
-				return err
-			}
+		executable[i] = approved
+		if !approved {
+			results[i] = ToolResult{Failure: &protocol.Fault{Code: protocol.ErrorCodePermissionDenied, Message: "Tool call was denied"}}
 		}
-		concurrent := func(i int) bool {
-			tool := findTool(x.tools, calls[i].Name)
-			return !executable[i] || tool != nil && tool.ReadOnly && tool.Concurrent && !asks[i] && !x.hooks.WrapsTools()
-		}
-		for start := first; start < last; {
-			if x.ctx.Err() != nil {
-				break
-			}
-			end := start + 1
-			if concurrent(start) {
-				for end < last && concurrent(end) {
-					end++
-				}
-			}
-			// At most eight calls of a run execute at once; a finished call frees
-			// its slot for the next one.
-			slots := make(chan struct{}, 8)
-			var workers sync.WaitGroup
-			for i := start; i < end; i++ {
-				if !executable[i] {
-					continue
-				}
-				slots <- struct{}{}
-				// Cancellation may arrive while a worker slot is occupied.
-				if x.ctx.Err() != nil {
-					<-slots
-					break
-				}
-				workers.Add(1)
-				go func(i int) {
-					defer workers.Done()
-					defer func() { <-slots }()
-					metric, started := r.telemetry.Capture(), time.Now()
-					defer func() { observeTool(metric, x.ctx, x.tools, calls[i].Name, results[i], started) }()
-					// A panicking tool fails its own call; the turn and the Node continue.
-					defer func() {
-						if value := recover(); value != nil {
-							logPanic(x, "tool", calls[i].ID, value)
-							results[i] = ToolResult{Failure: &protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown, Message: "Tool call failed unexpectedly"}}
-						}
-					}()
-					if err := x.hooks.Before(x.ctx, calls[i].Name); err != nil {
-						results[i] = toolFault(err)
-						return
-					}
-					if x.ctx.Err() != nil {
-						return
-					}
-					tool := findTool(x.tools, calls[i].Name)
-					finished := x.timeline.tool(calls[i], tool.Delegation)
-					startedCalls[i] = true
-					results[i] = tool.Execute(x.ctx, calls[i])
-					finished()
-					x.hooks.After(x.ctx, calls[i].Name, results[i].Failure == nil && !results[i].Error && !results[i].ReturnedError)
-				}(i)
-			}
-			workers.Wait()
-			start = end
+		if err = r.save(x.ctx, x.inv.Session.ID, r.executableRecord(x, call, approved)); err != nil {
+			return err
 		}
 		return nil
 	}
-	first := 0
-	precedingCommand := false
-	for i, call := range calls {
-		tool := findTool(x.tools, call.Name)
-		if tool == nil || tool.Binding == nil || tool.Binding.Operation == nil {
-			continue
+	execute := func(i int) {
+		if !executable[i] {
+			return
 		}
-		op := *tool.Binding.Operation
-		if precedingCommand && strings.HasPrefix(string(op), "files.") {
-			if err := runGroup(first, i); err != nil {
-				return err
+		metric, started := r.telemetry.Capture(), time.Now()
+		defer func() { observeTool(metric, x.ctx, x.tools, calls[i].Name, results[i], started) }()
+		// A panicking tool fails its own call; the turn and the Node continue.
+		defer func() {
+			if value := recover(); value != nil {
+				logPanic(x, "tool", calls[i].ID, value)
+				results[i] = ToolResult{Failure: &protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown, Message: "Tool call failed unexpectedly"}}
 			}
-			first = i
-			if x.ctx.Err() != nil {
+		}()
+		if err := x.hooks.Before(x.ctx, calls[i].Name); err != nil {
+			results[i] = toolFault(err)
+			return
+		}
+		if x.ctx.Err() != nil {
+			return
+		}
+		tool := findTool(x.tools, calls[i].Name)
+		finished := x.timeline.tool(calls[i], tool.Delegation)
+		startedCalls[i] = true
+		results[i] = tool.Execute(x.ctx, calls[i])
+		finished()
+		x.hooks.After(x.ctx, calls[i].Name, results[i].Failure == nil && !results[i].Error && !results[i].ReturnedError)
+	}
+	concurrent := func(i int) bool {
+		tool := findTool(x.tools, calls[i].Name)
+		return !asks[i] && (!executable[i] || tool != nil && tool.ReadOnly && tool.Concurrent && !x.hooks.WrapsTools())
+	}
+	writePaths := func(i int) []string {
+		tool := findTool(x.tools, calls[i].Name)
+		if !asks[i] || tool.FilePaths == nil || x.hooks.WrapsTools() {
+			return nil
+		}
+		return tool.FilePaths(calls[i])
+	}
+	history := state.Records[:len(state.Records):len(state.Records)]
+	var batchErr error
+	for start := 0; start < len(calls) && x.ctx.Err() == nil && batchErr == nil; {
+		end := start + 1
+		if concurrent(start) {
+			for end < len(calls) && end-start < 8 && concurrent(end) {
+				end++
+			}
+		} else {
+			paths := writePaths(start)
+			for len(paths) > 0 && end < len(calls) && end-start < 8 {
+				next := writePaths(end)
+				if len(next) == 0 || slices.ContainsFunc(next, func(p string) bool { return slices.Contains(paths, p) }) {
+					break
+				}
+				paths = append(paths, next...)
+				end++
+			}
+		}
+		var workers sync.WaitGroup
+		for i := start; i < end && x.ctx.Err() == nil; i++ {
+			if batchErr = admit(i, history); batchErr != nil {
 				break
 			}
-			precedingCommand = false
+			workers.Go(func() { execute(i) })
 		}
-		if op == protocol.ToolOperationRunCommand {
-			precedingCommand = true
+		workers.Wait()
+		for i := start; i < end; i++ {
+			if results[i].Value == nil && results[i].Failure == nil {
+				continue
+			}
+			rec := canonical.NewRecord(x.inv.Run.Turn, "message", canonical.NewMessage(canonical.User, responseBlock(uint64(i), calls[i], results[i])), r.clock.Now())
+			rec.ID = "batch:" + calls[i].ID
+			rec.Provenance.Author = "tool"
+			history = append(history, rec)
 		}
-	}
-	if x.ctx.Err() == nil {
-		if err := runGroup(first, len(calls)); err != nil {
-			return err
-		}
-	} else {
-		for i := first; i < len(calls); i++ {
-			results[i] = interruptedTool(false)
-		}
+		start = end
 	}
 	blocks := make([]canonical.Block, 0, len(calls))
 	var contextDelta canonical.Context
 	for i, call := range calls {
-		if executable[i] && results[i].Value == nil && results[i].Failure == nil {
+		if (executable[i] || batchErr != nil || x.ctx.Err() != nil) && results[i].Value == nil && results[i].Failure == nil {
 			results[i] = interruptedTool(startedCalls[i])
 		}
 		blocks = append(blocks, responseBlock(uint64(i), call, results[i]))
@@ -592,7 +589,7 @@ func (r *Runtime) runTools(x *execution, state store.AgentState, calls []canonic
 			}
 		}
 	}
-	return nil
+	return batchErr
 }
 func (r *Runtime) executableRecord(x *execution, call canonical.ToolRequest, allowed bool) canonical.Record {
 	patch, _ := json.Marshal(map[string]bool{canonical.ExecutableKey: allowed})

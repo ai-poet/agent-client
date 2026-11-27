@@ -244,3 +244,13 @@ func TestSparseFilePreviewKeepsUnreadGaps(t *testing.T) {
 		t.Fatal("selected lines were projected as a complete range")
 	}
 }
+
+func TestRepeatedFileContextSpanningEarlierPages(t *testing.T) {
+	var reads []fileRange
+	for _, page := range []fileRange{{first: 3, last: 4}, {first: 8, last: 10}, {first: 5, last: 7}, {first: 2, last: 2}} {
+		reads = rememberRange(reads, page)
+	}
+	if len(reads) != 1 || reads[0] != (fileRange{first: 2, last: 10}) {
+		t.Fatalf("shown ranges = %v", reads)
+	}
+}

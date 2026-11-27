@@ -786,8 +786,10 @@ and termination handling.
 
 Tools come from the captured enabled declarations. Everyday file, command, Git,
 code and web tools are initially exposed; `tool_search` discovers other declared
-tools without granting permission. Approvals settle before execution. Adjacent
-read-only concurrent calls run in groups of at most eight and retain result order.
+tools without granting permission. Each approval settles before its effect. Adjacent independent native file writes
+and concurrent reads can use up to eight execution slots. File reservations include
+move destinations and order workspace effects through durable completion. Tool
+responses remain in request order.
 Node owns approval and question deadlines.
 
 Standard mode (`code` on the wire) runs ordinary work. Plan is read-only with a

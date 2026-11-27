@@ -77,9 +77,24 @@ func filePreview(original map[string]any, source map[string]any, reads *fileRead
 		if *reads == nil {
 			*reads = fileReads{}
 		}
-		(*reads)[key] = append((*reads)[key], *shown)
+		(*reads)[key] = rememberRange((*reads)[key], *shown)
 	}
 	return projected, true
+}
+
+// Keep the union of ranges actually shown at this revision. A later read
+// spanning two earlier pages need not send their contents a second time.
+func rememberRange(ranges []fileRange, shown fileRange) []fileRange {
+	retained := ranges[:0]
+	for _, prior := range ranges {
+		if prior.last < shown.first && shown.first-prior.last > 1 || shown.last < prior.first && prior.first-shown.last > 1 {
+			retained = append(retained, prior)
+			continue
+		}
+		shown.first = min(shown.first, prior.first)
+		shown.last = max(shown.last, prior.last)
+	}
+	return append(retained, shown)
 }
 func fileRow(line protocol.FileLine, truncated bool) (string, bool) {
 	content, ending := line.Text, " [no trailing newline]\n"
