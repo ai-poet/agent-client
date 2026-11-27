@@ -2645,6 +2645,7 @@ git_diff_inline: Встроенно
 git_diff_needs_width: Для режима «Рядом» недостаточно ширины
 workspace_action_failed: Не удалось выполнить действие в рабочей области
 workspace_read_permission_failed: Чтение рабочей области отклонено; проверьте права доступа к файлам
+git_extension_unsupported: "Этот репозиторий использует расширение Git, которое Sailry не может прочитать"
 workspace_changed: Рабочая область изменилась; обновите и повторите
 workspace_action_unknown: Результат неизвестен; проверьте перед повтором
 workspace_saved: Сохранено

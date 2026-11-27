@@ -36,6 +36,7 @@ func TestWorkspaceReadFailureClassification(t *testing.T) {
 		{"file/main.go", fault(protocol.ErrorCodeUnavailable, "Link connection was lost"), "workspace_action_failed"},
 		{"git-status", fault(protocol.ErrorCodeInvalidRequest, "bad repo"), "workspace_action_failed"},
 		{"git-status", fault(protocol.ErrorCodeNotConfigured, "git missing"), "workspace_action_failed"},
+		{"git-status", fault(protocol.ErrorCodeInvalidRequest, git.UnsupportedExtension), "git_extension_unsupported"},
 	}
 	for _, tc := range cases {
 		got := workspaceReadFailureKey(tc.key, tc.err)

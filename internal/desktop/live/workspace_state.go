@@ -11,6 +11,7 @@ import (
 
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/git"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/egoist/mygo/ui"
 )
@@ -330,6 +331,10 @@ func workspaceReadFailureKey(key string, err error) string {
 		return "live_read_busy"
 	case protocol.ErrorCodePermissionDenied:
 		return "workspace_read_permission_failed"
+	case protocol.ErrorCodeInvalidRequest:
+		if faultMessage(err) == git.UnsupportedExtension {
+			return "git_extension_unsupported"
+		}
 	case protocol.ErrorCodeUnavailable:
 		if faultMessage(err) == "resource host is offline" {
 			return "resource_offline_action"

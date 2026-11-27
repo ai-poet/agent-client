@@ -2645,6 +2645,7 @@ git_diff_inline: En línea
 git_diff_needs_width: La vista en paralelo necesita más ancho
 workspace_action_failed: La acción del espacio de trabajo falló
 workspace_read_permission_failed: Se rechazó la lectura del espacio de trabajo; revisa los permisos de archivo
+git_extension_unsupported: "Este repositorio usa una extensión de Git que Sailry no puede leer"
 workspace_changed: El espacio de trabajo cambió; recarga antes de reintentar
 workspace_action_unknown: Resultado incierto; revisa antes de reintentar
 workspace_saved: Guardado
