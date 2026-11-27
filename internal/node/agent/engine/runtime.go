@@ -32,6 +32,7 @@ type Options struct {
 	AttachmentBytes    func(context.Context, protocol.Attachment) ([]byte, error)
 	Clock              clock.Clock
 	Model              func(context.Context, model.Binding) (fantasy.LanguageModel, error)
+	Cooldowns          *model.Cooldowns
 	AuthorizeProvider  func(context.Context, *store.AgentInvocation) error
 	Tools              []Tool
 	ToolsForTurn       func(context.Context, *store.AgentInvocation) ([]Tool, error)
@@ -71,6 +72,7 @@ type Runtime struct {
 	publish           func()
 	clock             clock.Clock
 	model             func(context.Context, model.Binding) (fantasy.LanguageModel, error)
+	cooldowns         *model.Cooldowns
 	authorizeProvider func(context.Context, *store.AgentInvocation) error
 	tools             []Tool
 	ctx               context.Context
@@ -144,11 +146,14 @@ func New(db *store.Handle, node protocol.NodeID, profile string, frames *feed.Hu
 	if options.Clock == nil {
 		options.Clock = clock.System{}
 	}
+	if options.Cooldowns == nil {
+		options.Cooldowns = model.NewCooldowns()
+	}
 	if options.Model == nil {
 		options.Model = model.New
 	}
 	ctx, cancel := context.WithCancel(store.WithPluginAvailability(context.Background(), options.PluginAvailability))
-	return &Runtime{telemetry: options.Telemetry, working: options.Working, stopCommands: options.StopCommands, stopTransient: options.StopTransient, python: options.Python, validateWorktree: options.ValidateWorktree, attachment: options.Attachment, attachmentBytes: options.AttachmentBytes, db: db, node: node, profile: profile, feed: frames, publish: publish, clock: options.Clock, model: options.Model, authorizeProvider: options.AuthorizeProvider, tools: options.Tools, toolsForTurn: options.ToolsForTurn, hooksForTurn: options.HooksForTurn, afterTurn: options.AfterTurn, ctx: ctx, cancel: cancel, done: make(chan struct{}), wake: make(chan struct{}, 1), active: map[protocol.TurnID]*execution{}, children: map[protocol.TurnID]*delegatedChild{}, activity: make(chan struct{}), statistics: map[protocol.SessionID]bool{}}
+	return &Runtime{telemetry: options.Telemetry, working: options.Working, stopCommands: options.StopCommands, stopTransient: options.StopTransient, python: options.Python, validateWorktree: options.ValidateWorktree, attachment: options.Attachment, attachmentBytes: options.AttachmentBytes, db: db, node: node, profile: profile, feed: frames, publish: publish, clock: options.Clock, model: options.Model, cooldowns: options.Cooldowns, authorizeProvider: options.AuthorizeProvider, tools: options.Tools, toolsForTurn: options.ToolsForTurn, hooksForTurn: options.HooksForTurn, afterTurn: options.AfterTurn, ctx: ctx, cancel: cancel, done: make(chan struct{}), wake: make(chan struct{}, 1), active: map[protocol.TurnID]*execution{}, children: map[protocol.TurnID]*delegatedChild{}, activity: make(chan struct{}), statistics: map[protocol.SessionID]bool{}}
 }
 
 // Recover closes interrupted owners and holds every surviving queue. It never

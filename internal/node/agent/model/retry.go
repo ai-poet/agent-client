@@ -100,6 +100,7 @@ const MainRetries = 10
 func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.Call, purpose Purpose, timer clock.Clock, observe func(Attempt) error, yield func(fantasy.StreamPart) bool, reset func()) error {
 	buffered := purpose == SummaryPurpose || purpose == NativePurpose
 	schedule := newRetryPolicy()
+	cooldowns, cooldownKey := cooldownFromContext(ctx)
 	requestID, requestStarted := protocol.NewRequestID().String(), timer.Now()
 	sdk, _ := languageModel.(*sdkModel)
 	origin := sdk.origin()
@@ -127,6 +128,16 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 	for index := uint64(0); ; index++ {
 		if err := ctx.Err(); err != nil {
 			return Classify(err)
+		}
+		if cooldowns != nil && cooldownKey != "" {
+			ready, waitErr := schedule.waitCooldown(ctx, timer, cooldowns, cooldownKey)
+			if waitErr != nil {
+				return Classify(waitErr)
+			}
+			if !ready {
+				failure := &Failure{Kind: RateLimited, Message: "Rate limit cooldown exceeds remaining retry wait budget", WaitExhausted: true}
+				return failure
+			}
 		}
 		attempt := Attempt{RequestID: requestID, RequestStarted: requestStarted, Index: index, Started: timer.Now(), RetryLimit: MainRetries}
 		owner, cancel := context.WithCancel(ctx)
@@ -274,6 +285,16 @@ func Run(ctx context.Context, languageModel fantasy.LanguageModel, call fantasy.
 					attempt.RetryDelay = &delay
 				} else {
 					waitExhausted = true
+				}
+			}
+			if cooldowns != nil && cooldownKey != "" && attempt.Failure.Kind == RateLimited {
+				now := timer.Now()
+				delay := retryHint(attempt.Failure, now)
+				if attempt.RetryDelay != nil && *attempt.RetryDelay > delay {
+					delay = *attempt.RetryDelay
+				}
+				if delay > 0 && delay <= retryWaitBudget {
+					cooldowns.Observe(cooldownKey, now.Add(delay), now)
 				}
 			}
 		}

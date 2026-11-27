@@ -156,7 +156,7 @@ func (r *Runtime) infer(x *execution, captured model.Binding, languageModel fant
 		var attempts []model.Attempt
 		metric := r.telemetry.Capture()
 		visibleRetryStart := false
-		err = model.Run(x.ctx, languageModel, call, model.Main, r.clock, func(attempt model.Attempt) error {
+		err = model.Run(model.WithCooldown(x.ctx, r.cooldowns, model.CredentialCooldownKey(binding)), languageModel, call, model.Main, r.clock, func(attempt model.Attempt) error {
 			r.observeModel(metric, binding, attempt)
 			x.timeline.attempt(attempt)
 			if attempt.RetryDelay != nil {
@@ -480,7 +480,9 @@ func (r *Runtime) retryRecord(x *execution, binding model.Binding, purpose canon
 func (r *Runtime) observationRecord(x *execution, binding model.Binding, purpose canonical.Purpose, attempt model.Attempt) canonical.Record {
 	message := canonical.NewMessage(canonical.Assistant)
 	message.Model = &binding.Config.Model
-	message.Usage = &attempt.Usage
+	if usageReported(attempt.Usage) {
+		message.Usage = &attempt.Usage
+	}
 	record := canonical.NewRecord(x.inv.Run.Turn, "message", message, attempt.Finished)
 	record.Provenance.Author = "assistant"
 	timing := attempt.Timing

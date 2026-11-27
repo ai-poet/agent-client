@@ -488,12 +488,17 @@ func (node *Node) inspectMedia(ctx context.Context, inv *store.AgentInvocation, 
 	if err != nil {
 		return engine.ToolResult{}, err
 	}
+	cooldownKey := model.CredentialCooldownKey(binding)
+	if err := node.cooldowns.Wait(ctx, nil, cooldownKey); err != nil {
+		return engine.ToolResult{}, model.Fault(err)
+	}
 	operation, cancel := context.WithCancel(ctx)
 	defer cancel()
 	timer := time.AfterFunc(mediaInspectIdle, cancel)
 	defer timer.Stop()
 	stream, err := languageModel.Stream(operation, call)
 	if err != nil {
+		node.cooldowns.ObserveFailure(cooldownKey, model.Classify(err), time.Now())
 		return engine.ToolResult{}, model.Fault(err)
 	}
 	var text strings.Builder
@@ -508,6 +513,7 @@ func (node *Node) inspectMedia(ctx context.Context, inv *store.AgentInvocation, 
 		case fantasy.StreamPartTypeTextDelta:
 			text.WriteString(part.Delta)
 		case fantasy.StreamPartTypeError:
+			node.cooldowns.ObserveFailure(cooldownKey, model.Classify(part.Error), time.Now())
 			return engine.ToolResult{}, model.Fault(part.Error)
 		case fantasy.StreamPartTypeFinish:
 			finished = true

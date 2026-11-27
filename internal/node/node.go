@@ -95,6 +95,7 @@ type Node struct {
 	abandoned         atomic.Bool   // shutdown released the profile at its deadline: no collection starts
 	grace             time.Duration // replaces shutdownGrace in tests
 	agent             *engine.Runtime
+	cooldowns         *model.Cooldowns
 	modelFactory      func(context.Context, model.Binding) (fantasy.LanguageModel, error)
 	forward           func(context.Context, protocol.Request) (link.Admission, error) // sends an import to its paired target
 	forwards          atomic.Int32
@@ -244,10 +245,11 @@ func StartWithOptions(ctx context.Context, path string, options Options) (*Node,
 	value.networkDirectory = &networkDirectory{listing: protocol.DefaultNetworkListing()}
 	value.networkProbes = &networkProbes{permits: make(chan struct{}, 4), now: time.Now}
 	value.initHost()
+	value.cooldowns = model.NewCooldowns()
 	value.modelFactory = options.Model
 	value.mediaPoll = model.MediaVideoPoll
 	value.telemetry = newTelemetry(options.Telemetry)
-	value.agent = engine.New(profile.Store.Node, value.ID(), profile.Ownership.Path, value.feed, value.publish, engine.Options{StopCommands: func(session protocol.SessionID) { value.processes.StopAll(session) }, StopTransient: func(session protocol.SessionID) { value.processes.StopTransient(session) }, Telemetry: value.telemetry, Working: value.power.Hold, Python: value.plugins.python, Model: value.newModel, AuthorizeProvider: value.authorizeTurnProvider, Attachment: value.capturedAttachment, AttachmentBytes: value.transfers.AttachmentBytes, ToolsForTurn: value.workspaceTools, HooksForTurn: value.turnHooks, AfterTurn: value.afterTurn, PluginAvailability: value.checkPluginAvailability})
+	value.agent = engine.New(profile.Store.Node, value.ID(), profile.Ownership.Path, value.feed, value.publish, engine.Options{Cooldowns: value.cooldowns, StopCommands: func(session protocol.SessionID) { value.processes.StopAll(session) }, StopTransient: func(session protocol.SessionID) { value.processes.StopTransient(session) }, Telemetry: value.telemetry, Working: value.power.Hold, Python: value.plugins.python, Model: value.newModel, AuthorizeProvider: value.authorizeTurnProvider, Attachment: value.capturedAttachment, AttachmentBytes: value.transfers.AttachmentBytes, ToolsForTurn: value.workspaceTools, HooksForTurn: value.turnHooks, AfterTurn: value.afterTurn, PluginAvailability: value.checkPluginAvailability})
 	if err := value.agent.Recover(ctx); err != nil {
 		cancel()
 		value.closeAuth()
