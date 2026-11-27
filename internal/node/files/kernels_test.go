@@ -12,7 +12,7 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
-func filesFixture(t *testing.T) (string, *core.Files) {
+func filesFixture(t testing.TB) (string, *core.Files) {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -123,5 +123,52 @@ func TestNotebookPreparation(t *testing.T) {
 	}
 	if _, err = parseNotebook(strings.Replace(draft, `["old\n"]`, `null`, 1)); err == nil {
 		t.Fatal("null notebook source was accepted")
+	}
+}
+
+func TestRepreparePatchKeepsOriginalTargets(t *testing.T) {
+	for _, tc := range []struct{ name, patch, before, current, want string }{
+		{"exact edit", "*** Update File: a\n@@\n-old\n+new", "old\n", "extra\nold\ntail", "extra\nnew\ntail"},
+		{"ambiguous edit", "*** Update File: a\n@@\n-old\n+new", "old\n", "old\nold\n", ""},
+		{"append", "*** Update File: a\n@@\n+new", "old\n", "extra\n", ""},
+		{"delete", "*** Delete File: a", "old\n", "new\n", ""},
+		{"create", "*** Add File: a\n+new", "", "appeared\n", ""},
+		{"move destination", "*** Update File: a\n*** Move to: b", "old\n", "old\n", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			root, _ := filesFixture(t)
+			write := func(path, data string) {
+				if err := os.WriteFile(filepath.Join(root, path), []byte(data), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.before != "" {
+				write("a", tc.before)
+			}
+			patch := "*** Begin Patch\n" + tc.patch + "\n*** End Patch"
+			changes, err := ResolvePatchWithRevisions(ctx, root, patch, map[string]string{"a": revision([]byte(tc.before))}, core.RestrictedFiles)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, err := Prepare(ctx, root, protocol.Command{Kind: "apply_changes", Data: &protocol.CommandApplyChangesPayload{Changes: changes}}, core.RestrictedFiles)
+			if err != nil || p.Rejected != nil {
+				t.Fatalf("prepare: %+v %v", p, err)
+			}
+			write("a", tc.current)
+			if tc.name == "move destination" {
+				write("b", "occupied")
+			}
+			fresh, err := RepreparePatch(ctx, root, patch, p)
+			if tc.want == "" {
+				if err == nil {
+					t.Fatal("changed precondition accepted")
+				}
+				return
+			}
+			if err != nil || *fresh.Changes[0].After != tc.want {
+				t.Fatalf("reprepare: %+v %v", fresh, err)
+			}
+		})
 	}
 }

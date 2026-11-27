@@ -27,11 +27,12 @@ import (
 const planRunCommandDescription = "Run a foreground workspace command in an enabled, available read-only OS sandbox. No workspace writes, network, unrestricted access, background commands, services, or PTY. Otherwise use dedicated read-only tools."
 
 type workspaceToolCall struct {
-	request        protocol.Request
-	prepared       *files.Prepared
-	approval       protocol.ApprovalID
-	commandControl *process.ControlTarget
-	fileScope      externalFileScope
+	request               protocol.Request
+	prepared              *files.Prepared
+	approval              protocol.ApprovalID
+	commandControl        *process.ControlTarget
+	patchInput, patchRoot string
+	fileScope             externalFileScope
 }
 
 func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation) ([]engine.Tool, error) {
@@ -88,6 +89,7 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 			}
 			args := call.Arguments
 			worktree := filepath.Clean(inv.Worktree.Path)
+			var patchInput string
 			var scope externalFileScope
 			if fullFiles {
 				worktree = resolvedPath(worktree)
@@ -141,6 +143,7 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 				if err = json.Unmarshal(arguments, &patch); err != nil {
 					return err
 				}
+				patchInput = patch.Input
 				revisions := observed.paths
 				if scope.root != "" {
 					revisions = rootRevisions(worktree, root, revisions)
@@ -176,7 +179,7 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 			}
 			request := protocol.NewRequest(node.ID(), command)
 			request.Plugin = &protocol.PluginContext{Turn: &inv.Run.Turn, Package: declaration.Owner, Worktree: &inv.Run.Worktree, Session: &inv.Session.ID, Surface: protocol.PluginDesktopSurface{Kind: "workspace"}}
-			current := &workspaceToolCall{request: request, fileScope: scope}
+			current := &workspaceToolCall{request: request, fileScope: scope, patchInput: patchInput, patchRoot: root}
 			if fileTextMutation(command.Kind) {
 				current.prepared, err = files.Prepare(ctx, root, command, core.RestrictedFiles)
 				if err != nil {
@@ -234,6 +237,24 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 			mu.Unlock()
 			if current == nil {
 				return workspaceToolFault(errors.New("native tool was not prepared"))
+			}
+			if current.patchInput != "" && inv.Turn.Config.Permission == protocol.PermissionFull && current.prepared.Rejected == nil {
+				// This fork serializes workspace effects at the root. Check the complete
+				// prepared set before admission; Apply checks each precondition again.
+				release := node.locks.roots(current.patchRoot, inv.Worktree.Path)
+				fresh, err := files.RepreparePatch(ctx, current.patchRoot, current.patchInput, current.prepared)
+				release()
+				if err != nil {
+					return workspaceToolFault(err)
+				}
+				target := current.patchRoot
+				if current.fileScope.worktree != "" {
+					target = inv.Worktree.Path
+				}
+				if err := node.protectWorkspaceMutation(target, target, fresh.Command, fresh, current.fileScope); err != nil {
+					return workspaceToolFault(err)
+				}
+				current.prepared, current.request.Command = fresh, fresh.Command
 			}
 			request := current.request
 			scope := current.fileScope
@@ -473,15 +494,17 @@ func (node *Node) workspaceToolValue(ctx context.Context, request protocol.Reque
 // workspaceRevisions follows the canonical history visible to this turn. Receipts
 // from a successful write are observations of its new revision, like reads.
 type workspaceRevisions struct {
-	paths    map[string]string
-	count    int
-	last     string
-	worktree string
+	invalidated map[string]struct{}
+	paths       map[string]string
+	count       int
+	last        string
+	worktree    string
 }
 
 func (r *workspaceRevisions) update(records []canonical.Record) {
 	if r.paths == nil || r.count > len(records) || r.count > 0 && records[r.count-1].ID != r.last {
 		r.paths = map[string]string{}
+		r.invalidated = nil
 		r.count = 0
 	}
 	for _, record := range records[r.count:] {
@@ -507,7 +530,53 @@ func (r *workspaceRevisions) update(records []canonical.Record) {
 	}
 }
 
+func (r *workspaceRevisions) observeChildChanges(files map[string]string, key func(string) string, combined bool) {
+	for path, rev := range files {
+		k := key(path)
+		if k == "" {
+			continue
+		}
+		if rev == "" {
+			r.invalidateTree(k)
+			continue
+		}
+		if combined {
+			r.invalidate(k)
+			continue
+		}
+		// Delivery order is not write order. Conflicting evidence invalidates
+		// the observation; a duplicate cannot revive it without a direct read
+		// or write. This also handles differently spelled aliases in old maps.
+		if known, ok := r.paths[k]; ok {
+			if known != rev {
+				r.invalidate(k)
+			}
+			continue
+		}
+		if !r.isInvalidated(k) {
+			r.paths[k] = rev
+		}
+	}
+}
+
+func (r *workspaceRevisions) isInvalidated(path string) bool {
+	if len(r.invalidated) == 0 {
+		return false
+	}
+	for {
+		if _, ok := r.invalidated[path]; ok {
+			return true
+		}
+		i := strings.LastIndexByte(path, '/')
+		if i <= 0 {
+			return false
+		}
+		path = path[:i]
+	}
+}
+
 func (r *workspaceRevisions) observe(response *canonical.ToolResponse) {
+	key := r.pathKey
 	var value struct {
 		Kind string
 		Data struct {
@@ -525,23 +594,19 @@ func (r *workspaceRevisions) observe(response *canonical.ToolResponse) {
 	data := value.Data
 	if value.Kind == "file_changes" {
 		for _, file := range data.Files {
-			file.Path, file.Destination = r.pathKey(file.Path), r.pathKey(file.Destination)
+			file.Path, file.Destination = key(file.Path), key(file.Destination)
 			switch file.Status {
 			case protocol.ChangeStatusUnknown:
-				delete(r.paths, file.Path)
-				delete(r.paths, file.Destination)
+				r.invalidate(file.Path)
+				r.invalidate(file.Destination)
 			case protocol.ChangeStatusApplied:
 				switch file.Kind {
 				case protocol.ChangeKindDeleted:
-					delete(r.paths, file.Path)
+					r.invalidate(file.Path)
 				case protocol.ChangeKindRenamed:
 					r.move(file.Path, file.Destination)
 				default:
-					if file.Revision != "" {
-						r.paths[file.Path] = file.Revision
-					} else {
-						delete(r.paths, file.Path)
-					}
+					r.observeRevision(file.Path, file.Revision)
 				}
 			}
 		}
@@ -553,14 +618,14 @@ func (r *workspaceRevisions) observe(response *canonical.ToolResponse) {
 	switch value.Kind {
 	case "file_content", "file_lines", "file_written", "notebook_page":
 		if data.Revision != "" {
-			r.paths[r.pathKey(data.Path)] = data.Revision
+			r.observeRevision(key(data.Path), data.Revision)
 		}
 	case "entry_trashed":
-		r.invalidateTree(r.pathKey(data.Path))
+		r.invalidateTree(key(data.Path))
 	case "entry_moved":
 		// Generic entry operations may move directories across roots.
-		r.invalidateTree(r.pathKey(data.From))
-		r.invalidateTree(r.pathKey(data.To))
+		r.invalidateTree(key(data.From))
+		r.invalidateTree(key(data.To))
 	}
 }
 
@@ -602,10 +667,10 @@ func (r *workspaceRevisions) resolve(operation protocol.ToolOperation, arguments
 	switch {
 	case operation == protocol.ToolOperationWriteFile:
 		values["expected_revision"] = json.RawMessage("null")
-	case ok:
+	case ok && revision != "":
 		values["expected_revision"], _ = json.Marshal(revision)
 	default:
-		return nil, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: path + " has not been read in this conversation; read it first or pass expected_revision"}
+		return nil, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: path + " has no current observed revision; read it or pass expected_revision"}
 	}
 	return json.Marshal(values)
 }
@@ -624,19 +689,45 @@ func (r *workspaceRevisions) pathKey(path string) string {
 	return pathpkg.Clean(filepath.ToSlash(path))
 }
 
+func (r *workspaceRevisions) observeRevision(path, revision string) {
+	if path == "" {
+		return
+	}
+	if revision == "" {
+		r.invalidate(path)
+		return
+	}
+	r.paths[path] = revision
+	delete(r.invalidated, path)
+}
+
+func (r *workspaceRevisions) invalidate(path string) {
+	if path == "" {
+		return
+	}
+	delete(r.paths, path)
+	if r.invalidated == nil {
+		r.invalidated = map[string]struct{}{}
+	}
+	r.invalidated[path] = struct{}{}
+}
+
 func (r *workspaceRevisions) invalidateTree(path string) {
+	if path == "" {
+		return
+	}
+	r.invalidate(path)
+	prefix := path + "/"
 	for known := range r.paths {
-		if known == path || strings.HasPrefix(known, path+"/") {
+		if strings.HasPrefix(known, prefix) {
 			delete(r.paths, known)
 		}
 	}
 }
 
 func (r *workspaceRevisions) move(from, to string) {
-	revision, ok := r.paths[from]
-	delete(r.paths, from)
-	delete(r.paths, to)
-	if ok {
-		r.paths[to] = revision
+	if from != to {
+		r.observeRevision(to, r.paths[from])
+		r.invalidate(from)
 	}
 }

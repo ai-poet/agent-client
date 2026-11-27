@@ -189,6 +189,9 @@ func patchLines(text string) ([]patchLine, string) {
 	return lines, ending
 }
 func ApplyPatchChunks(before string, chunks []PatchChunk) (string, error) {
+	return applyPatchChunks(before, chunks, false)
+}
+func applyPatchChunks(before string, chunks []PatchChunk, strict bool) (string, error) {
 	lines, ending := patchLines(before)
 	type replacement struct {
 		start, count int
@@ -221,12 +224,19 @@ func ApplyPatchChunks(before string, chunks []PatchChunk) (string, error) {
 			}
 			return -1
 		}
+		found := -1
 		for at := start; at+len(pattern) <= len(lines); at++ {
 			if matches(pattern, at) {
-				return at
+				if !strict {
+					return at
+				}
+				if found >= 0 {
+					return -1
+				}
+				found = at
 			}
 		}
-		return -1
+		return found
 	}
 	for index, chunk := range chunks {
 		previous := cursor
@@ -240,6 +250,9 @@ func ApplyPatchChunks(before string, chunks []PatchChunk) (string, error) {
 		}
 		old, new := chunk.Old, chunk.New
 		if len(old) == 0 {
+			if strict {
+				return "", invalid("appended lines have no matching context")
+			}
 			at := len(lines)
 			if anchor >= 0 && !chunk.EndOfFile {
 				at = cursor
@@ -253,7 +266,7 @@ func ApplyPatchChunks(before string, chunks []PatchChunk) (string, error) {
 			continue
 		}
 		at := seek(old, cursor, chunk.EndOfFile)
-		if at < 0 && len(old) > 0 && old[len(old)-1] == "" {
+		if at < 0 && !strict && len(old) > 0 && old[len(old)-1] == "" {
 			old = old[:len(old)-1]
 			if len(new) > 0 && new[len(new)-1] == "" {
 				new = new[:len(new)-1]
@@ -275,7 +288,7 @@ func ApplyPatchChunks(before string, chunks []PatchChunk) (string, error) {
 		}
 		for i, text := range new {
 			style := ending
-			if original, ok := kept[i]; ok && original < len(old) && lines[at+original].ending != "" {
+			if original, ok := kept[i]; ok && original < len(old) && (lines[at+original].ending != "" || strict && at+original == len(lines)-1 && i == len(new)-1) {
 				style = lines[at+original].ending
 			}
 			inserted = append(inserted, patchLine{text, style})
@@ -306,7 +319,7 @@ func ApplyPatchChunks(before string, chunks []PatchChunk) (string, error) {
 	position := 0
 	appendLine := func(line patchLine) {
 		out.WriteString(line.text)
-		if line.ending == "" {
+		if line.ending == "" && !strict {
 			out.WriteString(ending)
 		} else {
 			out.WriteString(line.ending)
@@ -416,4 +429,66 @@ func ResolvePatchWithRevisions(ctx context.Context, root, input string, observed
 		}
 	}
 	return changes, nil
+}
+
+// RepreparePatch retains the original concrete operations. Only an in-place
+// update may change its revision, and only with unique, exact old and new context.
+func RepreparePatch(ctx context.Context, root, input string, original *Prepared) (*Prepared, error) {
+	if original == nil || original.Command.Kind != "apply_changes" || original.Rejected != nil {
+		return nil, invalid("patch was not prepared")
+	}
+	hunks, err := ParsePatch(input)
+	if err != nil {
+		return nil, err
+	}
+	f, err := core.OpenFiles(root, original.Access)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	cmd := *original.Command.Data.(*protocol.CommandApplyChangesPayload)
+	cmd.Changes = slices.Clone(cmd.Changes)
+	edits := map[string][]PatchChunk{}
+	for _, h := range hunks {
+		if h.Kind == "update" && h.Destination == nil {
+			edits[h.Path] = h.Chunks
+		}
+	}
+	stale := func(path string) error {
+		return conflict(path + ": patch preconditions changed; read the current files before applying a new patch")
+	}
+	for i, entry := range original.Changes {
+		chunks := edits[entry.Path]
+		if len(chunks) == 0 || entry.Before == nil || entry.Operation != "edit" && entry.Operation != "write" {
+			continue
+		}
+		current, err := f.CompleteText(ctx, entry.Path)
+		if err != nil {
+			return nil, err
+		}
+		if current == *entry.Before {
+			continue
+		}
+		if _, err := applyPatchChunks(*entry.Before, chunks, true); err != nil {
+			return nil, stale(entry.Path)
+		}
+		after, err := applyPatchChunks(current, chunks, true)
+		if err != nil || after == current || current == "" {
+			return nil, stale(entry.Path)
+		}
+		cmd.Changes[i] = protocol.FileChange{Kind: "edit", Data: protocol.FileChangeEditPayload{Path: entry.Path, ExpectedRevision: revision([]byte(current)), Edits: []protocol.FileEdit{{OldText: current, NewText: after}}}}
+	}
+	fresh, err := Prepare(ctx, root, protocol.Command{Kind: "apply_changes", Data: &cmd}, original.Access)
+	if err != nil {
+		return nil, err
+	}
+	if fresh.Rejected != nil {
+		for _, entry := range fresh.Rejected.Files {
+			if entry.Error != nil {
+				return nil, stale(entry.Path)
+			}
+		}
+		return nil, stale("patch")
+	}
+	return fresh, nil
 }
