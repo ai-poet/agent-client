@@ -104,13 +104,14 @@ func usedChildTurns(x *execution, state store.AgentState) uint32 {
 	return count
 }
 
-func (r *Runtime) childTurnLimit(x *execution, state store.AgentState) (bool, error) {
-	if x.childRole == nil || x.childRole.MaxTurns == nil || usedChildTurns(x, state) < *x.childRole.MaxTurns {
-		return false, nil
-	}
+func childTurnBudgetExhausted(x *execution, state store.AgentState) bool {
+	return x.childRole != nil && x.childRole.MaxTurns != nil && usedChildTurns(x, state) >= *x.childRole.MaxTurns
+}
+
+func (r *Runtime) recordChildTurnLimit(x *execution) error {
 	record := canonical.NewRecord(x.inv.Run.Turn, "message", canonical.NewMessage(canonical.Assistant, canonical.Text(0, "I've reached the maximum number of actions I can do without user input. Would you like me to continue?")), r.clock.Now())
 	record.Provenance.Author = "assistant"
-	return true, r.save(x.ctx, x.inv.Session.ID, record)
+	return r.save(x.ctx, x.inv.Session.ID, record)
 }
 
 func childBudgetContext(x *execution, state store.AgentState) string {

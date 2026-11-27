@@ -813,7 +813,9 @@ path. Children inherit captured scope and permission; read-only roles use Plan.
 An unavailable default role model stays in the frozen roster with its provider
 metadata (or its absence). It does not block unrelated work. Explicit references
 and delegations resolve against that same snapshot and report the unavailable
-model instead of running it with the parent's model.
+model instead of running it with the parent's model. The roster reports missing
+skills and tools against the captured model and child scope. Child tool setup
+checks the role again against its own executors.
 Team settings control child concurrency, with a default of eight per root session.
 
 `list_subagents` reads a bounded page of direct child sessions from durable
@@ -831,7 +833,9 @@ and delivers its result as background work. A stop in the parent session
 cancels a claimed retry and waits for admitted work to settle.
 
 Input received during a running task is durable guidance, consumed at a model
-boundary. A delegated child that fails or is stopped holds its own queue, so
+boundary. At a child step limit, unconsumed guidance runs as a successor in
+the same child session rather than joining a turn with no inference left.
+A delegated child that fails or is stopped holds its own queue, so
 guidance it settles without joining ends cancelled with it;
 the parent sees the child's outcome and can guide it again. Node recovery
 cancels such guidance that earlier versions left queued. Stop cancels work explicitly. Partial text and reasoning use a bounded

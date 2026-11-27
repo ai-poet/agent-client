@@ -105,10 +105,17 @@ func delegatedToolDigest(tool Tool) ([32]byte, error) {
 	return blake3.Sum256(body), nil
 }
 
+func inheritableChildTool(tool Tool) bool {
+	if tool.Delegation || tool.BindDelegation != nil {
+		return false
+	}
+	return tool.Binding != nil || !slices.Contains([]string{"tool_search", "ask_user", "set_session_title", "list_subagents"}, tool.Definition.Name)
+}
+
 func encodeDelegatedTools(tools []Tool) ([]byte, error) {
 	allowed := make(map[string][32]byte, len(tools))
 	for _, tool := range tools {
-		if tool.Delegation || tool.BindDelegation != nil || tool.Definition.Name == "tool_search" {
+		if !inheritableChildTool(tool) {
 			continue
 		}
 		name := tool.Definition.Name
@@ -172,10 +179,8 @@ func (r *Runtime) captureTools(x *execution) error {
 			})
 		}
 		if x.childRole != nil && x.childRole.Tools != nil {
-			for _, selection := range *x.childRole.Tools {
-				if !slices.ContainsFunc(x.tools, func(tool Tool) bool { return roleToolMatches(selection, tool) }) {
-					return &protocol.Fault{Code: protocol.ErrorCodeNotConfigured, Message: "role references an unavailable tool"}
-				}
+			if len(missingRoleTools(*x.childRole, x.inv.Turn.Config.Mode, modelSupportsTools(x.inv.Provider, x.inv.Turn.Config.Model), x.tools)) != 0 {
+				return &protocol.Fault{Code: protocol.ErrorCodeNotConfigured, Message: "role references an unavailable tool"}
 			}
 		}
 		x.tools = slices.DeleteFunc(x.tools, func(tool Tool) bool { return !roleAllowsTool(x.childRole, tool) })
@@ -185,6 +190,9 @@ func (r *Runtime) captureTools(x *execution) error {
 	}
 	if err := r.applyAssistant(x); err != nil {
 		return err
+	}
+	if spawn := findTool(x.tools, "spawn_agent"); spawn != nil {
+		spawn.Definition.Description += "\n" + r.roleRoster(x)
 	}
 	if search := r.builtinSearch(x); search != nil {
 		x.tools = append(x.tools, *search)

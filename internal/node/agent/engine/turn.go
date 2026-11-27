@@ -452,7 +452,8 @@ func (r *Runtime) turn(x *execution) error {
 		// Every input waiting for this turn joins here as one batch: after tool
 		// results or a finished reply, before the next model step. A failed step
 		// takes none; the turn ends and its guidance returns to the queue.
-		if failed := lastMessage(state.Records); failed == nil || failed.Error == nil {
+		childLimited := childTurnBudgetExhausted(x, state)
+		if failed := lastMessage(state.Records); !childLimited && (failed == nil || failed.Error == nil) {
 			joined, err := r.guidance(x)
 			if err != nil {
 				return err
@@ -518,12 +519,8 @@ func (r *Runtime) turn(x *execution) error {
 		if !x.callbackPending && last != nil && last.Role == canonical.Assistant {
 			return nil
 		}
-		limited, err := r.childTurnLimit(x, state)
-		if err != nil {
-			return err
-		}
-		if limited {
-			return nil
+		if childLimited {
+			return r.recordChildTurnLimit(x)
 		}
 		observed := map[string]bool{}
 		for _, tool := range x.tools {

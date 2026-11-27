@@ -271,3 +271,10 @@ func TestInstructionPrecedenceIsExplicit(t *testing.T) {
 		t.Error("parent prompt lost the outside-worktree reference rule or still front-loads questions")
 	}
 }
+
+func TestParentOptionalPlanClose(t *testing.T) {
+	parent := Instruction(false)
+	if !strings.Contains(parent, "After inspecting the final check") || !strings.Contains(parent, "no extra round is required") || strings.Contains(Instruction(true), "close an existing plan separately") {
+		t.Fatal("optional verified plan completion belongs to the parent")
+	}
+}
