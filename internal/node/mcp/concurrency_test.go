@@ -416,3 +416,48 @@ func TestMCPExclusiveLockHeldUntilCancelledWriteCompletes(t *testing.T) {
 		fixture.success(secondCall)
 	})
 }
+
+// Hold the caller inside error classification after the SDK has returned.
+type heldWriteFailure struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (*heldWriteFailure) Error() string { return "fixture transport error" }
+
+func (failure *heldWriteFailure) Unwrap() error {
+	close(failure.entered)
+	<-failure.release
+	return nil
+}
+
+func TestMCPExclusiveWriteWaitsForFailureClassification(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newMCPCallFixture(t, "2026-07-28")
+		failure := &heldWriteFailure{entered: make(chan struct{}), release: make(chan struct{})}
+		var calls atomic.Int32
+		fixture.sending = func(next sdk.MethodHandler) sdk.MethodHandler {
+			return func(ctx context.Context, method string, req sdk.Request) (sdk.Result, error) {
+				if method == "tools/call" && calls.Add(1) == 1 {
+					return nil, failure
+				}
+				return next(ctx, method, req)
+			}
+		}
+		config := fixture.config()
+		config.Options.Exclusive = true
+		lease := fixture.acquire(config)
+		first := fixture.start(t.Context(), lease, "uncertain", false)
+		<-failure.entered
+		second := fixture.start(t.Context(), lease, "queued", false)
+		synctest.Wait()
+		// Release both calls even when checking a broken implementation.
+		second.finish()
+		close(failure.release)
+		fixture.fault(first, protocol.ErrorCodeOutcomeUnknown)
+		fixture.fault(second, protocol.ErrorCodeUnavailable)
+		if got := calls.Load(); got != 1 {
+			t.Fatalf("%d writes dispatched before retirement, want 1", got)
+		}
+	})
+}

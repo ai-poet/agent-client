@@ -144,11 +144,16 @@ func (lease *Lease) Call(ctx context.Context, name string, arguments map[string]
 		err   error
 	}
 	completed := make(chan response, 1)
+	// The transport can stop before the caller poisons an uncertain session;
+	// on cancellation the caller can also return before the transport stops.
+	classified := make(chan struct{})
+	defer close(classified)
 	dispatched = true
 	go func() {
 		defer release()
 		value, err := connection.session.CallTool(operation, &sdk.CallToolParams{Name: name, Arguments: arguments})
 		completed <- response{value, err}
+		<-classified
 	}()
 	timer := lease.pool.clock.NewTimer(120 * time.Second)
 	defer timer.Stop()
