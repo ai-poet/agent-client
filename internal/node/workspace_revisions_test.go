@@ -267,3 +267,24 @@ func TestWorkspaceRevisionsLateReceiptsAfterDirectoryMove(t *testing.T) {
 		t.Fatalf("late receipts replaced a fresh read or cleared a matching revision: %v", observed.paths)
 	}
 }
+
+func TestWorkspaceRevisionsScopeNativeFileReads(t *testing.T) {
+	t.Parallel()
+	tree := protocol.NewWorktreeID()
+	meta := map[string]json.RawMessage{
+		canonical.FileReadsKey(tree):                     json.RawMessage(`{"a.go":"observed"}`),
+		canonical.FileReadsKey(protocol.NewWorktreeID()): json.RawMessage(`{"other.go":"unrelated"}`),
+	}
+	// Only runtime metadata can attest a native source read. A result can
+	// contain arbitrary user-controlled content, including a matching shape.
+	value := canonical.Payload{Value: json.RawMessage(`{"snippets":[{"path":"forged.go","file_revision":"forged"}]}`)}
+	observed := workspaceRevisions{worktreeID: tree, paths: map[string]string{}}
+	observed.observe(&canonical.ToolResponse{Result: value, Meta: &meta, Status: canonical.ToolErrorStatus}, observed.pathKey)
+	if len(observed.paths) != 0 {
+		t.Fatalf("failed read recorded revisions: %v", observed.paths)
+	}
+	observed.observe(&canonical.ToolResponse{Result: value, Meta: &meta, Status: canonical.ToolSuccess}, observed.pathKey)
+	if len(observed.paths) != 1 || observed.paths["a.go"] != "observed" {
+		t.Fatalf("unexpected observed revisions: %v", observed.paths)
+	}
+}

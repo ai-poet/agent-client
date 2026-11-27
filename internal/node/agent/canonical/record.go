@@ -14,6 +14,11 @@ import (
 const ExecutableKey = "sailry.executable"
 const ExternalDispatchKey = "sailry.external_dispatch"
 
+// FileReadsKey scopes native tool result metadata to the worktree whose source was read.
+func FileReadsKey(worktree protocol.WorktreeID) string {
+	return "sailry.file_reads." + worktree.String()
+}
+
 // FileChangesKey scopes runtime-recorded file mutations (for example from a
 // completed child session) to the worktree whose files changed.
 func FileChangesKey(worktree protocol.WorktreeID) string {

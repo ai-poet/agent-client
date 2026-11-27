@@ -325,7 +325,12 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 				}
 			}
 			value := node.workspaceToolValue(ctx, request, output, effect.timedOut, planning)
-			return engine.ToolResult{Value: value, ReturnedError: workspaceOutputFailed(output), ReturnedFailure: workspaceOutputFailure(output)}
+			var readMeta *map[string]json.RawMessage
+			if page, ok := output.Data.(protocol.FileLines); ok && len(page.Lines) > 0 && page.Revision != "" {
+				raw, _ := json.Marshal(map[string]string{page.Path: page.Revision})
+				readMeta = &map[string]json.RawMessage{canonical.FileReadsKey(inv.Run.Worktree): raw}
+			}
+			return engine.ToolResult{Value: value, Meta: readMeta, ReturnedError: workspaceOutputFailed(output), ReturnedFailure: workspaceOutputFailure(output)}
 		}
 		tools = append(tools, tool)
 	}
@@ -604,6 +609,14 @@ func (r *workspaceRevisions) isInvalidated(path string) bool {
 
 func (r *workspaceRevisions) observe(response *canonical.ToolResponse, key func(string) string) {
 	if response.Status == canonical.ToolSuccess && response.Meta != nil {
+		if raw := (*response.Meta)[canonical.FileReadsKey(r.worktreeID)]; raw != nil {
+			var reads map[string]string
+			if json.Unmarshal(raw, &reads) == nil {
+				for path, revision := range reads {
+					r.observeRevision(key(path), revision)
+				}
+			}
+		}
 		if raw := (*response.Meta)[canonical.FileChangesKey(r.worktreeID)]; raw != nil {
 			var files map[string]string
 			if json.Unmarshal(raw, &files) == nil {
