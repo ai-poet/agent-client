@@ -1745,6 +1745,7 @@ files_download_conflict: La destination a changé; choisissez à nouveau où enr
 chat_attachment_remove_failed: La suppression a échoué
 workspace_action_failed: Échec de l’action sur l’espace de travail
 workspace_read_permission_failed: Lecture de l’espace de travail refusée ; vérifiez les autorisations des fichiers
+git_extension_unsupported: Ce dépôt utilise une extension Git que Sailry ne peut pas lire
 workspace_changed: Espace de travail modifié ; rechargez avant de réessayer
 workspace_action_unknown: Résultat incertain ; vérifiez avant de réessayer
 workspace_saved: Enregistré

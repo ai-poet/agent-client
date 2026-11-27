@@ -1745,6 +1745,7 @@ files_download_conflict: 目标文件已变更，请重新选择保存位置
 chat_attachment_remove_failed: 移除失败
 workspace_action_failed: 工作区操作失败
 workspace_read_permission_failed: 工作区读取被拒绝，请检查文件权限
+git_extension_unsupported: 该仓库使用了 Sailry 无法读取的 Git 扩展
 workspace_changed: 工作区已变更，请刷新后重试
 workspace_action_unknown: 结果尚不确定，请检查后再重试
 workspace_saved: 已保存
