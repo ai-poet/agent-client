@@ -109,6 +109,18 @@ func inheritableChildTool(tool Tool) bool {
 	if tool.Delegation || tool.BindDelegation != nil {
 		return false
 	}
+	if tool.Binding == nil && slices.Contains(catalogToolNames, tool.Definition.Name) {
+		return false
+	}
+	if slices.ContainsFunc(declaredOperations(tool), func(op protocol.ToolOperation) bool {
+		switch op {
+		case protocol.ToolOperationListRoles, protocol.ToolOperationSaveRole, protocol.ToolOperationRemoveRole, protocol.ToolOperationApplyRoles:
+			return true
+		}
+		return false
+	}) {
+		return false
+	}
 	return tool.Binding != nil || !slices.Contains([]string{"tool_search", "ask_user", "set_session_title", "list_subagents"}, tool.Definition.Name)
 }
 
@@ -183,7 +195,7 @@ func (r *Runtime) captureTools(x *execution) error {
 				return &protocol.Fault{Code: protocol.ErrorCodeNotConfigured, Message: "role references an unavailable tool"}
 			}
 		}
-		x.tools = slices.DeleteFunc(x.tools, func(tool Tool) bool { return !roleAllowsTool(x.childRole, tool) })
+		x.tools = slices.DeleteFunc(x.tools, func(tool Tool) bool { return !inheritableChildTool(tool) || !roleAllowsTool(x.childRole, tool) })
 	}
 	if err := r.deferTools(x); err != nil {
 		return err

@@ -816,6 +816,12 @@ and delegations resolve against that same snapshot and report the unavailable
 model instead of running it with the parent's model. The roster reports missing
 skills and tools against the captured model and child scope. Child tool setup
 checks the role again against its own executors.
+Children cannot schedule workers or use role/team catalog operations. Progress
+updates are excluded from their default tools but an explicit role may select
+them. A delegated turn without a role-specific limit gets 12 model steps in
+Plan or a read-only role, otherwise 20. The model sees usage from halfway
+onward and a wrap-up cue within the last two steps. Parent turns have no child
+budget.
 Team settings control child concurrency, with a default of eight per root session.
 
 `list_subagents` reads a bounded page of direct child sessions from durable

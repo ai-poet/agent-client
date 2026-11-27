@@ -146,7 +146,7 @@ func (r *Runtime) delegationContext(x *execution, state store.AgentState) string
 	text := r.delegationRoster(x, state)
 	// Catalog changes never rebase the captured turn; application names the
 	// exact conversation revision it replaces.
-	if findTool(x.tools, "apply_agents") != nil || findTool(x.tools, "apply_team") != nil {
+	if x.inv.Session.Delegation == nil && (findTool(x.tools, "apply_agents") != nil || findTool(x.tools, "apply_team") != nil) {
 		if text != "" {
 			text += "\n"
 		}

@@ -1034,3 +1034,43 @@ func TestReadOnlyChildRefusesRunCommandWithoutSandboxApproval(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultChildTurnBudgetsAndWrapUpCue(t *testing.T) {
+	t.Parallel()
+	f, x := delegationFixture(t)
+	if limit, bounded := effectiveChildMaxTurns(x); bounded || limit != 0 {
+		t.Fatalf("parent turn should not have a child turn limit: %d, %t", limit, bounded)
+	}
+	delegation := &protocol.Delegation{Session: protocol.NewSessionID(), Turn: protocol.NewTurnID(), Entry: "call-1"}
+	x.inv.Session.Delegation = &delegation
+
+	if limit, bounded := effectiveChildMaxTurns(x); !bounded || limit != defaultChildMaxTurns {
+		t.Fatalf("roleless write child limit = %d (%t), want %d", limit, bounded, defaultChildMaxTurns)
+	}
+	x.inv.Turn.Config.Mode = protocol.WorkModePlan
+	if limit, bounded := effectiveChildMaxTurns(x); !bounded || limit != defaultReadOnlyChildMaxTurns {
+		t.Fatalf("read-only child limit = %d (%t), want %d", limit, bounded, defaultReadOnlyChildMaxTurns)
+	}
+	explicit := uint32(6)
+	x.childRole = &protocol.RoleProfile{Key: "custom", MaxTurns: &explicit}
+	if limit, bounded := effectiveChildMaxTurns(x); !bounded || limit != 6 {
+		t.Fatalf("explicit role limit = %d (%t), want 6", limit, bounded)
+	}
+
+	makeState := func(steps int) store.AgentState {
+		records := make([]canonical.Record, 0, steps)
+		for range steps {
+			records = append(records, canonical.NewRecord(x.inv.Run.Turn, "message", canonical.NewMessage(canonical.Assistant, canonical.Text(0, "step")), f.r.clock.Now()))
+		}
+		return store.AgentState{Records: records}
+	}
+	if got := childBudgetContext(x, makeState(2)); got != "" {
+		t.Fatalf("early child step emitted budget: %q", got)
+	}
+	if got := childBudgetContext(x, makeState(3)); got != "<turn-budget>3/6 used</turn-budget>" {
+		t.Fatalf("mid child step budget = %q", got)
+	}
+	if got := childBudgetContext(x, makeState(4)); !strings.Contains(got, "4/6 used") || !strings.Contains(got, "wrap up") {
+		t.Fatalf("near-limit child step missing wrap-up cue: %q", got)
+	}
+}
