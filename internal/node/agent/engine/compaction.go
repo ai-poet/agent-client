@@ -271,10 +271,14 @@ func (r *Runtime) summarize(x *execution, binding model.Binding, route model.Rou
 		}
 		return failed(protocol.ConversationCompactionStageRequest, reason, err)
 	}
+	var visibleRetryStart bool
 	observeAttempt := func(source model.Binding, attempt model.Attempt) error {
 		x.timeline.attempt(attempt)
 		if attempt.RetryDelay != nil {
-			observationErr = r.save(context.WithoutCancel(x.ctx), x.inv.Session.ID, r.retryRecord(x, source, canonical.PurposeCompaction, attempt))
+			if attempt.Index == 0 {
+				visibleRetryStart = showFirstRetry(attempt)
+			}
+			observationErr = r.save(context.WithoutCancel(x.ctx), x.inv.Session.ID, r.retryRecord(x, source, canonical.PurposeCompaction, attempt, visibleRetryStart))
 			return observationErr
 		}
 		attempts = append(attempts, attempt)

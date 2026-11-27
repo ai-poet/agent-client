@@ -59,7 +59,8 @@ type Failure struct {
 	forbidden bool
 }
 
-func (f *Failure) Error() string { return f.Message }
+func (f *Failure) Error() string       { return f.Message }
+func (f *Failure) StreamStalled() bool { return f != nil && f.streamIdle > 0 }
 func (f *Failure) Retryable() bool {
 	return f.Kind == RateLimited || f.Kind == Network || f.Kind == Unavailable || f.truncated || f.Kind == Authentication && f.forbidden
 }

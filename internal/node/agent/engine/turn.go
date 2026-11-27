@@ -198,7 +198,7 @@ func (r *Runtime) execute(x *execution) {
 		// notifier reaches it. Its successor still waits on publication.
 		r.stopTurnCommands(run.Session, x)
 	}
-	r.observeTurn(run, x.inv.Turn.Config.Mode, child != nil)
+	r.observeTurn(run, x.inv.Turn.Config.Mode, child != nil || x.inv.Session.Delegation != nil && *x.inv.Session.Delegation != nil)
 	if successor != nil {
 		next := &delegatedChild{root: child.root, parent: child.parent, session: child.session, turn: successor.Turn, sequence: successor.Sequence, ctx: child.ctx, cancel: child.cancel, released: true, commandsInherited: true}
 		r.mu.Lock()

@@ -755,13 +755,15 @@ A transport-reported HTTP/2 stream reset uses the same request retry budget,
 regardless of its reset code. A protocol error or explicit HTTP/1.1 requirement
 can spend a retry on HTTP/1.1. A provider throttle received on that route
 keeps the pending request on HTTP/1.1 through its normal retry. After a
-successful recovery the captured model uses HTTP/1.1 for subsequent steps. Other model bindings negotiate
-independently. The 300-second idle timer measures the wait for response
-headers and each pending read of response bytes.
-The first retry of every model request is silent: its record is numbered 0
-and the transcript shows no row for it, even when a provider wait hint requires
-five seconds or more. From the second retry, rows count up to nine retries after
-the silent resend. Waiting and attempt budgets do not depend on visibility.
+successful recovery the captured model prefers HTTP/1.1. New model bindings
+reuse the origin preference for 30 minutes (at most 256 origins). Requests of
+256 KiB or more try HTTP/1.1 directly. A wire-level 426 or 505 on that route
+allows a retry on the negotiated route within the same budgets.
+The 300-second idle timer covers dispatch through headers and each pending read,
+not time between reads. A first retry is visible after a stall, an attempt
+lasting at least 15 seconds, or a scheduled wait of at least five seconds.
+Otherwise it is numbered zero and stays hidden. Subsequent rows keep that
+request's numbering; visibility does not affect the budgets.
 Persisted retry records retain their saved numbering and visibility.
 Interrupted main requests clear the failed attempt's provisional draft before retrying the same
 model step; tool calls execute only after that step completes. Consumers without
