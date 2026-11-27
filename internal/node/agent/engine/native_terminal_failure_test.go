@@ -16,9 +16,9 @@ func TestNativeCompactionStopsWithoutTranscript(t *testing.T) {
 		kind   model.FailureKind
 		calls  int
 	}{
-		{"quota", 402, `{"error":{"code":"insufficient_balance","message":"Insufficient balance"}}`, model.Quota, 1},
-		{"invalid key", 401, `{"error":{"type":"authentication_error","message":"Invalid key"}}`, model.Authentication, 1},
-		{"unknown key is not an unknown feature", 400, `{"error":{"type":"invalid_api_key","message":"Unknown API key"}}`, model.Authentication, 1},
+		{"quota", 402, `{"error":{"code":"insufficient_balance","message":"Insufficient balance"}}`, model.Quota, 2},
+		{"invalid key", 401, `{"error":{"type":"authentication_error","message":"Invalid key"}}`, model.Authentication, 2},
+		{"unknown key is not an unknown feature", 400, `{"error":{"type":"invalid_api_key","message":"Unknown API key"}}`, model.Authentication, 2},
 		{"rate limit", 429, `{"error":{"type":"rate_limit_error","message":"Rate limited"}}`, model.RateLimited, model.MainRetries + 1},
 		{"overload", 529, `{"error":{"type":"overloaded_error","message":"Overloaded"}}`, model.Unavailable, model.MainRetries + 1},
 		{"forbidden", 403, `{"error":{"type":"permission_error","message":"Forbidden"}}`, model.Authentication, model.MainRetries + 1},
@@ -46,7 +46,7 @@ func TestNativeCompactionStopsWithoutTranscript(t *testing.T) {
 			}()
 			err := compactNow(t, f, x, binding)
 			failure := model.Classify(err)
-			if failure == nil || failure.Kind != tc.kind || failure.Exhausted != (tc.calls > 1) {
+			if failure == nil || failure.Kind != tc.kind || failure.Exhausted != (tc.calls == model.MainRetries+1) {
 				t.Fatalf("native failure = %+v; want %s after %d attempts", failure, tc.kind, tc.calls)
 			}
 			if calls := len(provider.all(compacting)); calls != tc.calls {
