@@ -251,7 +251,7 @@ func StartWithOptions(ctx context.Context, path string, options Options) (*Node,
 	value.modelFactory = options.Model
 	value.mediaPoll = model.MediaVideoPoll
 	value.telemetry = newTelemetry(options.Telemetry)
-	value.agent = engine.New(profile.Store.Node, value.ID(), profile.Ownership.Path, value.feed, value.publish, engine.Options{Cooldowns: value.cooldowns, StopCommands: func(session protocol.SessionID) { value.processes.StopAll(session) }, StopTransient: func(session protocol.SessionID) { value.processes.StopTransient(session) }, Telemetry: value.telemetry, Working: value.power.Hold, Python: value.plugins.python, Model: value.newModel, AuthorizeProvider: value.authorizeTurnProvider, Attachment: value.capturedAttachment, AttachmentBytes: value.transfers.AttachmentBytes, ToolsForTurn: value.workspaceTools, HooksForTurn: value.turnHooks, AfterTurn: value.afterTurn, PluginAvailability: value.checkPluginAvailability})
+	value.agent = engine.New(profile.Store.Node, value.ID(), profile.Ownership.Path, value.feed, value.publish, engine.Options{Cooldowns: value.cooldowns, StopCommands: func(session protocol.SessionID) { value.processes.StopAll(session) }, StopTransient: func(session protocol.SessionID) { value.processes.StopTransient(session) }, Telemetry: value.telemetry, Working: value.power.Hold, Python: value.plugins.python, Model: value.newModel, AuthorizeProvider: value.authorizeTurnProvider, Attachment: value.capturedAttachment, AttachmentBytes: value.transfers.AttachmentBytes, ToolsForTurn: value.workspaceTools, HooksForTurn: value.turnHooks, TurnCompletion: value.turnCompletion, PluginAvailability: value.checkPluginAvailability})
 	if err := value.agent.Recover(ctx); err != nil {
 		cancel()
 		value.closeAuth()

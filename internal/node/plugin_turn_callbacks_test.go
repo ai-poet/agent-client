@@ -171,3 +171,19 @@ export async function completed(args){
 		t.Fatalf("model requests = %d", requests)
 	}
 }
+
+func TestContinuationSettlementUsesPackageDeclarations(t *testing.T) {
+	handler := "reconcile"
+	ext := &protocol.PluginExtension{Host: &protocol.PluginHostManifest{Turn: &protocol.PluginHostTurn{AfterTurn: &handler}},
+		ContinuationMarkers: map[string]protocol.PluginDesktopNavigation{"next": {Label: "Next"}},
+		Actions:             []protocol.PluginAction{protocol.PluginActionControlConversation},
+	}
+	info := protocol.PluginInfo{Summary: protocol.PluginSummary{Name: "independent-workflow"}, Extension: ext}
+	if !declaresContinuationSettlement(info) {
+		t.Fatal("a continuation-producing callback must settle before its successor")
+	}
+	ext.Actions = nil
+	if declaresContinuationSettlement(info) {
+		t.Fatal("an observer without conversation control must not block its successor")
+	}
+}

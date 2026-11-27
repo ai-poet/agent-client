@@ -38,10 +38,9 @@ type Options struct {
 	ToolsForTurn       func(context.Context, *store.AgentInvocation) ([]Tool, error)
 	HooksForTurn       func(context.Context, *store.AgentInvocation) *hooks.Binding
 	PluginAvailability func(protocol.PluginReference) error
-	// AfterTurn, when set, runs after a main task turn's end is stored. It
-	// receives the settled run and what the execution observed.
-	AfterTurn func(context.Context, *store.AgentInvocation, protocol.ConversationRun, TurnObservation)
-	Telemetry *telemetry.Control
+	TurnCompletion     func(context.Context, *store.AgentInvocation) TurnCompletion
+	AfterTurn          func(context.Context, *store.AgentInvocation, protocol.ConversationRun, TurnObservation)
+	Telemetry          *telemetry.Control
 	// Working, when set, brackets every running turn.
 	Working func() func()
 	// StopCommands, when set, stops a session's background commands. The
@@ -61,6 +60,7 @@ type Runtime struct {
 	toolsForTurn      func(context.Context, *store.AgentInvocation) ([]Tool, error)
 	hooksForTurn      func(context.Context, *store.AgentInvocation) *hooks.Binding
 	afterTurn         func(context.Context, *store.AgentInvocation, protocol.ConversationRun, TurnObservation)
+	turnCompletion    func(context.Context, *store.AgentInvocation) TurnCompletion
 	telemetry         *telemetry.Control
 	working           func() func()
 	stopCommands      func(protocol.SessionID)
@@ -86,10 +86,18 @@ type Runtime struct {
 	workers           sync.WaitGroup
 	decisions         sync.Mutex
 	publication       sync.Mutex
+	afterTurnSessions map[protocol.SessionID]struct{} // guarded by publication
 	statisticsMu      sync.Mutex
 	statistics        map[protocol.SessionID]bool
 	statisticsOwners  sync.WaitGroup
 	statisticsStopped bool
+}
+
+// TurnCompletion splits a captured workflow's ordered settlement from normal
+// observers. Only Settle holds its session, and it runs after the end is durable.
+type TurnCompletion struct {
+	Settle  func(context.Context, protocol.ConversationRun, TurnObservation)
+	Observe func(context.Context, protocol.ConversationRun, TurnObservation)
 }
 
 // TurnObservation is what one execution saw that storage does not keep apart:
@@ -153,7 +161,7 @@ func New(db *store.Handle, node protocol.NodeID, profile string, frames *feed.Hu
 		options.Model = model.New
 	}
 	ctx, cancel := context.WithCancel(store.WithPluginAvailability(context.Background(), options.PluginAvailability))
-	return &Runtime{telemetry: options.Telemetry, working: options.Working, stopCommands: options.StopCommands, stopTransient: options.StopTransient, python: options.Python, validateWorktree: options.ValidateWorktree, attachment: options.Attachment, attachmentBytes: options.AttachmentBytes, db: db, node: node, profile: profile, feed: frames, publish: publish, clock: options.Clock, model: options.Model, cooldowns: options.Cooldowns, authorizeProvider: options.AuthorizeProvider, tools: options.Tools, toolsForTurn: options.ToolsForTurn, hooksForTurn: options.HooksForTurn, afterTurn: options.AfterTurn, ctx: ctx, cancel: cancel, done: make(chan struct{}), wake: make(chan struct{}, 1), active: map[protocol.TurnID]*execution{}, children: map[protocol.TurnID]*delegatedChild{}, activity: make(chan struct{}), statistics: map[protocol.SessionID]bool{}}
+	return &Runtime{telemetry: options.Telemetry, working: options.Working, stopCommands: options.StopCommands, stopTransient: options.StopTransient, python: options.Python, validateWorktree: options.ValidateWorktree, attachment: options.Attachment, attachmentBytes: options.AttachmentBytes, db: db, node: node, profile: profile, feed: frames, publish: publish, clock: options.Clock, model: options.Model, cooldowns: options.Cooldowns, authorizeProvider: options.AuthorizeProvider, tools: options.Tools, toolsForTurn: options.ToolsForTurn, hooksForTurn: options.HooksForTurn, afterTurn: options.AfterTurn, turnCompletion: options.TurnCompletion, ctx: ctx, cancel: cancel, done: make(chan struct{}), wake: make(chan struct{}, 1), active: map[protocol.TurnID]*execution{}, children: map[protocol.TurnID]*delegatedChild{}, activity: make(chan struct{}), statistics: map[protocol.SessionID]bool{}}
 }
 
 // Recover closes interrupted owners and holds every surviving queue. It never
