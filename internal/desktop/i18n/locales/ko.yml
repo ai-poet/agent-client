@@ -1745,6 +1745,7 @@ files_download_conflict: 대상이 변경되었습니다. 저장할 위치를 �
 chat_attachment_remove_failed: 제거 실패
 workspace_action_failed: 작업 공간 작업 실패
 workspace_read_permission_failed: 작업 공간 읽기가 거부되었습니다. 파일 권한을 확인하세요
+git_extension_unsupported: 이 저장소는 Sailry가 읽을 수 없는 Git 확장을 사용합니다
 workspace_changed: 작업 공간이 변경되었습니다. 새로 고친 후 다시 시도하세요
 workspace_action_unknown: 결과가 확인되지 않았습니다. 확인 후 다시 시도하세요
 workspace_saved: 저장됨

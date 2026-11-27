@@ -1745,6 +1745,7 @@ files_download_conflict: 目的地が変更されました。保存先を再選�
 chat_attachment_remove_failed: 削除に失敗
 workspace_action_failed: ワークスペースの操作に失敗しました
 workspace_read_permission_failed: ワークスペースの読み取りが拒否されました。ファイルの権限を確認してください
+git_extension_unsupported: このリポジトリは Sailry が読み取れない Git 拡張機能を使用しています
 workspace_changed: ワークスペースが変更されました。再読み込みしてからやり直してください
 workspace_action_unknown: 結果が不明です。確認してからやり直してください
 workspace_saved: 保存しました

@@ -98,13 +98,13 @@ func TestNativeCompactionRetryBudget(t *testing.T) {
 	}{
 		{"a provider error is resent once", [][]fantasy.StreamPart{gateway, gateway, gateway}, 2, Unavailable},
 		{"a provider error after overload is still resent once", [][]fantasy.StreamPart{overloaded, gateway, gateway, gateway}, 3, Unavailable},
-		{"a spent balance stops immediately", [][]fantasy.StreamPart{balance}, 1, Quota},
+		{"a spent balance retains its diagnosis after the HTTP resend", [][]fantasy.StreamPart{balance, balance}, 2, Quota},
 		{"a refused account waits as other requests do", repeat(forbidden, MainRetries+1), MainRetries + 1, Authentication},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			fake := &policyModel{responses: row.responses}
 			err := Run(t.Context(), fake, fantasy.Call{}, NativePurpose, &policyClock{}, nil, nil, nil)
-			if failure := Classify(err); fake.calls != row.calls || failure.Kind != row.kind || failure.Exhausted != (row.calls > 1) {
+			if failure := Classify(err); fake.calls != row.calls || failure.Kind != row.kind || failure.Exhausted != (row.kind != Quota) {
 				t.Fatalf("calls=%d failure=%+v", fake.calls, failure)
 			}
 		})

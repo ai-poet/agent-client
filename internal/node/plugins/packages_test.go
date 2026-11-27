@@ -578,6 +578,11 @@ func TestPackageSchemasAndSkills(t *testing.T) {
 		if _, err := manager.InspectRepository(t.Context(), protocol.PluginSkillsSource{Repository: source, Path: &pack}); err != nil || len(manager.repositories) != 1 {
 			t.Fatalf("inspections retained: %d %v", len(manager.repositories), err)
 		}
+		manager.ClearRepositories()
+		if len(manager.repositories) != 0 || manager.repositoryTimer != nil {
+			t.Fatal("trim retained repository inspection")
+		}
+		// A reclaimed inspection is reacquired at its captured commit.
 		if info, err := manager.InstallRepository(t.Context(), selection); err != nil || info.Summary.Name != "repository-fixture" || len(manager.repositories) != 0 {
 			t.Fatalf("repository install: %#v %d %v", info.Summary, len(manager.repositories), err)
 		}

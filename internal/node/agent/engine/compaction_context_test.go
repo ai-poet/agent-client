@@ -1,10 +1,14 @@
 package engine
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/tokens"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
@@ -48,5 +52,114 @@ func TestContextTokensOfAReplyThatTookSeveralRequests(t *testing.T) {
 	single.Metadata.Execution = &canonical.Execution{ContextTokens: &total}
 	if got := contextTokens([]canonical.Record{single}); got != total {
 		t.Fatalf("single request context = %d, want %d", got, total)
+	}
+}
+
+func TestContextTokensIgnoresInterruptedSteerAndEmptyUsage(t *testing.T) {
+	t.Parallel()
+	turn := protocol.NewTurnID()
+	binding := model.Binding{
+		Provider: protocol.ConversationProvider{
+			ID:             protocol.NewProviderID(),
+			Name:           "Fixture",
+			Api:            protocol.ConversationModelApiChatCompletions,
+			Authentication: protocol.AuthenticationApiKey,
+		},
+		Config: protocol.SessionConfig{Model: "fixture-model"},
+	}
+	scope, mainPurpose, compactPurpose := model.Scope(binding), canonical.PurposeMain, canonical.PurposeCompaction
+
+	// Seed a large history whose un-folded token estimate far exceeds the
+	// last measured context usage (reproducing the 201.8k vs 276.7k jump).
+	bulky := canonical.NewRecord(turn, "message", canonical.NewMessage(canonical.User, canonical.Text(0, strings.Repeat("history evidence token ", 15000))), manualNow())
+	measuredTotal, cacheRead := uint64(201842), uint64(199040)
+	measured := canonical.NewRecord(turn, "message", canonical.NewMessage(canonical.Assistant, canonical.Text(0, "Checked")), manualNow())
+	measured.Message().Usage = &canonical.Usage{Total: &measuredTotal, CacheRead: &cacheRead}
+	measured.Metadata.Execution = &canonical.Execution{Source: &scope, Purpose: &mainPurpose}
+	steer := canonical.NewRecord(turn, "message", canonical.NewMessage(canonical.User, canonical.Text(0, "Continue with the small fix")), manualNow())
+	steer.Metadata.Runtime = &canonical.Runtime{UserVisible: true, AgentVisible: true, Steer: true}
+
+	baseline := contextTokens([]canonical.Record{bulky, measured, steer})
+	wantBaseline := measuredTotal + pendingTokens([]canonical.Record{steer})
+	if baseline != wantBaseline {
+		t.Fatalf("baseline contextTokens = %d, want %d", baseline, wantBaseline)
+	}
+
+	// Case A: legacy persisted hidden cancelled observation with empty "usage":{}
+	hiddenCancelled := canonical.NewRecord(turn, "message", canonical.NewMessage(canonical.Assistant), manualNow())
+	hiddenCancelled.Message().Usage = &canonical.Usage{}
+	hiddenCancelled.Metadata.Runtime = &canonical.Runtime{UserVisible: false, AgentVisible: false}
+	obsReq := protocol.DefaultConversationObservationRequest()
+	obsReq.ID = protocol.NewRequestID().String()
+	obsReq.Turn = turn
+	obsReq.Model = binding.Config.Model
+	obsAtt := protocol.DefaultConversationObservationAttempt()
+	obsAtt.Index = 1
+	obsAtt.Outcome = protocol.ConversationObservationOutcomeCancelled
+	obsReq.Attempts = []protocol.ConversationObservationAttempt{obsAtt}
+	hiddenCancelled.Metadata.Execution = &canonical.Execution{
+		Source:      &scope,
+		Purpose:     &mainPurpose,
+		Observation: &obsReq,
+	}
+	rawHidden, err := json.Marshal(hiddenCancelled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reloadedHidden canonical.Record
+	if err := json.Unmarshal(rawHidden, &reloadedHidden); err != nil {
+		t.Fatal(err)
+	}
+	if got := contextTokens([]canonical.Record{bulky, measured, reloadedHidden, steer}); got != wantBaseline {
+		t.Fatalf("hidden cancelled empty usage jumped contextTokens to %d, want %d", got, wantBaseline)
+	}
+
+	// Case B: visible interrupted assistant reply with empty usage or partial Input only
+	interruptedFinish := canonical.Interrupted
+	partialInput := uint64(201850)
+	for _, usage := range []*canonical.Usage{{}, {Input: &partialInput}} {
+		interrupted := canonical.NewRecord(turn, "message", canonical.NewMessage(canonical.Assistant, canonical.Text(0, "Partial")), manualNow())
+		interrupted.Message().Finish = &interruptedFinish
+		interrupted.Message().Usage = usage
+		interrupted.Metadata.Runtime = &canonical.Runtime{UserVisible: true, AgentVisible: true}
+		interrupted.Metadata.Execution = &canonical.Execution{Source: &scope, Purpose: &mainPurpose}
+		want := measuredTotal + pendingTokens([]canonical.Record{interrupted, steer})
+		if got := contextTokens([]canonical.Record{bulky, measured, interrupted, steer}); got != want {
+			t.Fatalf("interrupted reply (usage=%+v) jumped contextTokens to %d, want %d", usage, got, want)
+		}
+	}
+
+	// Case C: failed compaction observation record should not discard main context baseline
+	failedCompaction := canonical.NewRecord(turn, "message", canonical.NewMessage(canonical.Assistant), manualNow())
+	compactionTotal := uint64(1000)
+	failedCompaction.Message().Usage = &canonical.Usage{Total: &compactionTotal}
+	failedCompaction.Metadata.Runtime = &canonical.Runtime{UserVisible: false, AgentVisible: false}
+	failedCompaction.Metadata.Execution = &canonical.Execution{Source: &scope, Purpose: &compactPurpose}
+	if got := contextTokens([]canonical.Record{bulky, measured, failedCompaction, steer}); got != wantBaseline {
+		t.Fatalf("failed compaction usage jumped contextTokens to %d, want %d", got, wantBaseline)
+	}
+}
+
+func TestSteeringAfterInterruptedRequestDoesNotTriggerCompaction(t *testing.T) {
+	t.Parallel()
+	turn := protocol.NewTurnID()
+	binding := model.Binding{Config: protocol.SessionConfig{Model: "fixture"}, Provider: protocol.ConversationProvider{Models: []protocol.ConversationModel{{ID: "fixture", Context: 32000, Output: 8000}}}}
+	history := canonical.NewRecord(turn, "message", canonical.NewMessage(canonical.User, canonical.Text(0, strings.Repeat("historical content block ", 10000))), manualNow())
+	answer := canonical.NewRecord(turn, "message", canonical.NewMessage(canonical.Assistant, canonical.Text(0, "Earlier answer")), manualNow())
+	measured := uint64(10000)
+	answer.Message().Usage = &canonical.Usage{Total: &measured}
+	x := &execution{inv: &store.AgentInvocation{}}
+	x.inv.Run.Turn = turn
+	cancelled := (&Runtime{}).observationRecord(x, binding, canonical.PurposeMain, model.Attempt{RequestID: protocol.NewRequestID().String(), Started: manualNow(), Finished: manualNow(), Failure: &model.Failure{Kind: model.Cancelled}})
+	if cancelled.Message().Usage != nil {
+		t.Fatal("cancelled request persisted empty usage")
+	}
+	steer := canonical.NewRecord(turn, "message", canonical.NewMessage(canonical.User, canonical.Text(0, "Just fix the typo")), manualNow())
+	steer.Metadata.Runtime = &canonical.Runtime{UserVisible: true, AgentVisible: true, Steer: true}
+	if !shouldCompact(binding, store.AgentState{Records: []canonical.Record{history, steer}}, 80) {
+		t.Fatal("fixture must exceed the budget without a measurement")
+	}
+	if shouldCompact(binding, store.AgentState{Records: []canonical.Record{history, answer, cancelled, steer}}, 80) {
+		t.Fatal("steering discarded the last completed context measurement")
 	}
 }

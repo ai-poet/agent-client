@@ -11,6 +11,7 @@ import (
 
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/i18n"
 	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/git"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/egoist/mygo/ui"
 )
@@ -36,6 +37,7 @@ func TestWorkspaceReadFailureClassification(t *testing.T) {
 		{"file/main.go", fault(protocol.ErrorCodeUnavailable, "Link connection was lost"), "workspace_action_failed"},
 		{"git-status", fault(protocol.ErrorCodeInvalidRequest, "bad repo"), "workspace_action_failed"},
 		{"git-status", fault(protocol.ErrorCodeNotConfigured, "git missing"), "workspace_action_failed"},
+		{"git-status", fault(protocol.ErrorCodeInvalidRequest, git.UnsupportedExtension), "git_extension_unsupported"},
 	}
 	for _, tc := range cases {
 		got := workspaceReadFailureKey(tc.key, tc.err)
@@ -215,6 +217,58 @@ func TestWorkspaceReadBackoffToastAndLogging(t *testing.T) {
 			}
 			if p.failedReads["git-status"] || !p.failedAt["git-status"].IsZero() {
 				t.Fatalf("successful read did not clear failure state: failedReads=%v failedAt=%v", p.failedReads, p.failedAt)
+			}
+		})
+	})
+
+	t.Run("a persistent failure is reported once across watch retries", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			shouldFail := true
+			p, source, run, toasts := newHarness(t, func(request protocol.Request) link.Response {
+				if shouldFail {
+					return link.Response{Fault: &protocol.Fault{Code: protocol.ErrorCodeInternal, Message: "boom"}}
+				}
+				return link.Response{Output: protocol.Output{Kind: "git_status", Data: protocol.GitStatus{Kind: protocol.RepositoryKindDirectory}}}
+			})
+			failed := i18n.In("en", "workspace_action_failed")
+			run(func(*ui.Context) { p.readGit() })
+			if got := toasts(); len(got) != 1 || got[0].Title != failed {
+				t.Fatalf("first failure toasts = %+v", got)
+			}
+			// The toast has expired and the backoff has elapsed: a watch refresh
+			// retries the read, and the unchanged cause stays quiet.
+			expire := func() {
+				time.Sleep(workspaceReadBackoff + 10*time.Second)
+				run(func(*ui.Context) {})
+				if got := toasts(); len(got) != 0 {
+					t.Fatalf("toast did not expire: %+v", got)
+				}
+			}
+			for retry := range 3 {
+				expire()
+				run(func(*ui.Context) { p.readGit() })
+				if got := len(source.sent("inspect_git")); got != retry+2 {
+					t.Fatalf("watch refresh %d sent inspect_git %d times", retry+1, got)
+				}
+				if got := toasts(); len(got) != 0 {
+					t.Fatalf("watch refresh %d repeated the toast: %+v", retry+1, got)
+				}
+			}
+			// An explicit refresh reports the failure again.
+			expire()
+			run(func(*ui.Context) { p.refresh() })
+			if got := toasts(); len(got) != 1 || got[0].Title != failed {
+				t.Fatalf("explicit refresh toasts = %+v", got)
+			}
+			// A success ends the streak; the next failure is new.
+			expire()
+			shouldFail = false
+			run(func(*ui.Context) { p.readGit() })
+			shouldFail = true
+			expire()
+			run(func(*ui.Context) { p.readGit() })
+			if got := toasts(); len(got) != 1 || got[0].Title != failed {
+				t.Fatalf("failure after success toasts = %+v", got)
 			}
 		})
 	})

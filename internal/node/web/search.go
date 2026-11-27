@@ -53,6 +53,13 @@ func NewSearcher(options SearchOptions) *Searcher {
 	return searcher
 }
 
+// ClearResults drops cached pages without resetting driver cooldowns.
+func (searcher *Searcher) ClearResults() {
+	searcher.mu.Lock()
+	searcher.cache = nil
+	searcher.mu.Unlock()
+}
+
 func (searcher *Searcher) Configure(settings protocol.SearchSettings) {
 	encoded, err := json.Marshal(settings)
 	if err != nil {
@@ -336,6 +343,16 @@ type searchFailure struct {
 
 func (failure *searchFailure) Error() string { return failure.fault.Error() }
 func (failure *searchFailure) Unwrap() error { return failure.fault }
+
+// RateLimitRetryAt reports the upstream retry deadline when err is a rate-limit
+// search failure.
+func RateLimitRetryAt(err error) (time.Time, bool) {
+	var failure *searchFailure
+	if !errors.As(err, &failure) || failure.retryAt == nil {
+		return time.Time{}, false
+	}
+	return *failure.retryAt, true
+}
 func searchFailureOf(err error) *searchFailure {
 	var failure *searchFailure
 	if errors.As(err, &failure) {

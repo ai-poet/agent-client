@@ -800,7 +800,7 @@ func (r *Runtime) execute(command protocol.Command, finished func(*ui.Context, p
 func (r *Runtime) executeScoped(scope string, command protocol.Command, finished func(*ui.Context, protocol.Output, error)) protocol.RequestID {
 	if r.parent != nil && !r.controller.Connected() {
 		r.enqueue(func(c *ui.Context) {
-			finished(c, protocol.Output{}, &protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "resource host is offline"})
+			finished(c, protocol.Output{}, &protocol.Fault{Code: protocol.ErrorCodeUnavailable, Message: "resource host is offline", Details: &protocol.FaultDetails{Kind: "network"}})
 		})
 		return protocol.RequestID{}
 	}

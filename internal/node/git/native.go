@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -79,13 +80,28 @@ const stopGrace = 2 * time.Second
 // errStalled reports a network operation stopped after its silence limit.
 var errStalled = errors.New("Git produced no output within the limit")
 
+// safeDirectory is the safe.directory value that exempts root from Git's
+// ownership check, which refuses a repository another account owns: a
+// project on another drive, a copied or restored disk, or one an
+// administrator created. Registering the worktree is the user's trust in it,
+// and its commands already run there; any other path keeps the check. Git
+// compares the value with the canonical path it computes: resolved, with
+// forward slashes and the file system's case, so a configured backslash or
+// lowercase drive letter does not match.
+func safeDirectory(root string) string {
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	return filepath.ToSlash(root)
+}
+
 func nativeRunner(environment []string) Runner {
 	if environment == nil {
 		environment = os.Environ()
 	}
 	environment = append([]string(nil), environment...)
 	return func(ctx context.Context, root string, args []string, input []byte) (CommandResult, error) {
-		cmd, err := nativeGitCommand(append([]string{"--no-pager"}, args...)...)
+		cmd, err := nativeGitCommand(append([]string{"--no-pager", "-c", "safe.directory=" + safeDirectory(root)}, args...)...)
 		if err != nil {
 			return CommandResult{}, err
 		}

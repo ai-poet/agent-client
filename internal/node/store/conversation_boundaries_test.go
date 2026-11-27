@@ -14,6 +14,51 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
+func TestHistoryFirstVisibleAcrossTurnBatches(t *testing.T) {
+	storage, node, session, recipient, now := agentHistoryFixture(t, protocol.WorkModeCode)
+	ctx := t.Context()
+	if err := storage.Node.Write(ctx, func(db *sql.Conn) error {
+		// One logical turn with 200 joined guidance runs needs two lookup
+		// batches even though the requested history limit is only one.
+		var missing []protocol.TurnID
+		for i := range 200 {
+			output, err := queueFixtureCommand(ctx, db, storage, node, "guide_turn", &protocol.CommandGuideTurnPayload{
+				Recipient: recipient, ExpectedRevision: session.Revision, Message: protocol.ConversationInput{Text: "Guidance"},
+			}, now)
+			if err != nil {
+				return err
+			}
+			if _, _, err := TakeGuidance(ctx, db, recipient); err != nil {
+				return err
+			}
+			if i == 0 || i == 199 {
+				guide := output.Data.(protocol.QueuedTurn).ID
+				if err := queueFixtureInput(ctx, db, session.ID, guide, now); err != nil {
+					return err
+				}
+				missing = append(missing, guide)
+			}
+		}
+		// Only the recipient's entries fit. The other guidance runs have
+		// no visible sequence, which is distinct from a missing entry.
+		for range 100 {
+			if err := queueFixtureInput(ctx, db, session.ID, recipient, now); err != nil {
+				return err
+			}
+		}
+		history, err := ReadConversation(ctx, db, session.ID, nil, 1)
+		if err != nil {
+			return err
+		}
+		if len(history.Page.Runs) != 201 || len(history.Page.Entries) != 100 || !slices.Equal(history.Missing, missing) {
+			return fmt.Errorf("batched history: runs=%d entries=%d missing=%v, want %v", len(history.Page.Runs), len(history.Page.Entries), history.Missing, missing)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestHistoryBoundariesFollowExecutionAndGuidance(t *testing.T) {
 	t.Parallel()
 	for _, operation := range []string{"fork recipient", "fork reordered", "rewind recipient", "rewind reordered", "edit recipient", "edit reordered", "reject consumed guidance edit"} {

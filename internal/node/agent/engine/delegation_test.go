@@ -989,3 +989,88 @@ func TestChildWorkspacePreflight(t *testing.T) {
 		}
 	})
 }
+
+func TestReadOnlyChildRefusesRunCommandWithoutSandboxApproval(t *testing.T) {
+	t.Parallel()
+	f, x := delegationFixture(t)
+	op := protocol.ToolOperationRunCommand
+	cmdTool := objectTool("run_command", false, false, func(_ context.Context, call canonical.ToolRequest) ToolResult {
+		t.Errorf("command %s ran without its sandbox approval", call.ID)
+		return ToolResult{}
+	})
+	cmdTool.Binding = &store.ApprovalBinding{Tool: "run_command", Operation: &op}
+	f.r.tools = append(f.r.tools, cmdTool)
+	if err := f.r.captureTools(x); err != nil {
+		t.Fatal(err)
+	}
+	delegation := &protocol.Delegation{
+		Session: protocol.NewSessionID(),
+		Turn:    protocol.NewTurnID(),
+		Entry:   "call-1",
+	}
+	x.inv.Session.Delegation = &delegation
+	x.inv.Turn.Config.Mode = protocol.WorkModePlan
+	x.childRole = &protocol.RoleProfile{Key: "review", Name: "Code review", ReadOnly: true}
+	calls := []canonical.ToolRequest{
+		{ID: "ro-git", Name: "run_command", Arguments: json.RawMessage(`{"command":"git --no-pager diff --stat"}`)},
+		{ID: "mut-cmd", Name: "run_command", Arguments: json.RawMessage(`{"command":"git commit -m nope"}`)},
+	}
+	if err := f.r.runTools(x, store.AgentState{}, calls); err != nil {
+		t.Fatal(err)
+	}
+	responses := map[string]*canonical.ToolResponse{}
+	for _, rec := range f.state().Records {
+		if msg := rec.Message(); msg != nil {
+			for _, block := range msg.Content {
+				if resp, ok := block.Data.(*canonical.ToolResponse); ok {
+					responses[resp.ID] = resp
+				}
+			}
+		}
+	}
+	for _, call := range calls {
+		if got := responses[call.ID]; got == nil || got.Status != canonical.ToolErrorStatus || !strings.Contains(string(got.Result.Value), string(protocol.ErrorCodePermissionDenied)) {
+			t.Fatalf("command %s without sandbox approval was not refused: %+v", call.ID, got)
+		}
+	}
+}
+
+func TestDefaultChildTurnBudgetsAndWrapUpCue(t *testing.T) {
+	t.Parallel()
+	f, x := delegationFixture(t)
+	if limit, bounded := effectiveChildMaxTurns(x); bounded || limit != 0 {
+		t.Fatalf("parent turn should not have a child turn limit: %d, %t", limit, bounded)
+	}
+	delegation := &protocol.Delegation{Session: protocol.NewSessionID(), Turn: protocol.NewTurnID(), Entry: "call-1"}
+	x.inv.Session.Delegation = &delegation
+
+	if limit, bounded := effectiveChildMaxTurns(x); !bounded || limit != defaultChildMaxTurns {
+		t.Fatalf("roleless write child limit = %d (%t), want %d", limit, bounded, defaultChildMaxTurns)
+	}
+	x.inv.Turn.Config.Mode = protocol.WorkModePlan
+	if limit, bounded := effectiveChildMaxTurns(x); !bounded || limit != defaultReadOnlyChildMaxTurns {
+		t.Fatalf("read-only child limit = %d (%t), want %d", limit, bounded, defaultReadOnlyChildMaxTurns)
+	}
+	explicit := uint32(6)
+	x.childRole = &protocol.RoleProfile{Key: "custom", MaxTurns: &explicit}
+	if limit, bounded := effectiveChildMaxTurns(x); !bounded || limit != 6 {
+		t.Fatalf("explicit role limit = %d (%t), want 6", limit, bounded)
+	}
+
+	makeState := func(steps int) store.AgentState {
+		records := make([]canonical.Record, 0, steps)
+		for range steps {
+			records = append(records, canonical.NewRecord(x.inv.Run.Turn, "message", canonical.NewMessage(canonical.Assistant, canonical.Text(0, "step")), f.r.clock.Now()))
+		}
+		return store.AgentState{Records: records}
+	}
+	if got := childBudgetContext(x, makeState(2)); got != "" {
+		t.Fatalf("early child step emitted budget: %q", got)
+	}
+	if got := childBudgetContext(x, makeState(3)); got != "<turn-budget>3/6 used</turn-budget>" {
+		t.Fatalf("mid child step budget = %q", got)
+	}
+	if got := childBudgetContext(x, makeState(4)); !strings.Contains(got, "4/6 used") || !strings.Contains(got, "wrap up") {
+		t.Fatalf("near-limit child step missing wrap-up cue: %q", got)
+	}
+}

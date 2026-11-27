@@ -1,11 +1,11 @@
 package node
 
 import (
-	"log/slog"
-	"runtime/debug"
 	"context"
 	"database/sql"
 	"io"
+	"log/slog"
+	"runtime/debug"
 	"slices"
 	"time"
 
@@ -94,6 +94,7 @@ func (node *Node) dispatchPlugins(ctx context.Context, caller protocol.NodeID, r
 	}
 	work := func(owner context.Context, report installations.Report) (result link.Response) {
 		defer node.work.Done()
+		defer close(completion)
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				slog.Error("plugin operation panicked", "request", request.ID, "panic", recovered, "stack", string(debug.Stack()))
@@ -104,7 +105,6 @@ func (node *Node) dispatchPlugins(ctx context.Context, caller protocol.NodeID, r
 				node.authCommitted(caller, request, result.Fault)
 			}
 			completion <- result
-			close(completion)
 		}()
 		operation := ctx
 		if accepted.Receipt.Durable {

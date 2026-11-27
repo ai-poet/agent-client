@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,9 +38,10 @@ const (
 )
 
 type Failure struct {
-	Kind    FailureKind
-	Message string
-	status  *uint16
+	Kind            FailureKind
+	Message         string
+	status          *uint16
+	requestObserved bool
 	// Exhausted marks only Run's terminal recovery outcome. Kind still names
 	// the provider failure, including when a summary records why it failed.
 	Exhausted bool
@@ -49,16 +51,21 @@ type Failure struct {
 	retryAfterMs   *uint64
 	overloaded     bool
 	tcpDialTimeout bool
+	streamIdle     time.Duration
 	// A transport EOF can recover; other invalid responses remain permanent.
 	truncated bool
 	// forbidden marks an Authentication failure the provider refused with
 	// HTTP 403 rather than a rejected key. Relay gateways that pool upstream
-	// accounts answer 403 while they rotate to another account, so it is
-	// retried; a 401 or an invalid key never recovers by resending.
-	forbidden bool
+	// accounts answer 403 while they rotate to another account, so it uses
+	// the shared retry policy; a rejected key only gets the HTTP resend.
+	forbidden          bool
+	concurrencyLimited bool
 }
 
-func (f *Failure) Error() string { return f.Message }
+func (f *Failure) Error() string            { return f.Message }
+func (f *Failure) StreamStalled() bool      { return f != nil && f.streamIdle > 0 }
+func (f *Failure) ConcurrencyLimited() bool { return f != nil && f.concurrencyLimited }
+func (f *Failure) RequestObserved() bool    { return f.requestObserved }
 func (f *Failure) Retryable() bool {
 	return f.Kind == RateLimited || f.Kind == Network || f.Kind == Unavailable || f.truncated || f.Kind == Authentication && f.forbidden
 }
@@ -79,9 +86,10 @@ func (f *Failure) nativeFallback() bool {
 // failures. Keeping the cause preserves SDK error inspection without retaining
 // unrelated response headers in a Failure.
 type httpResponseFailure struct {
-	cause      error
-	status     *uint16
-	retryAfter []string
+	cause        error
+	status       *uint16
+	retryAfter   []string
+	retryAfterMs *uint64
 }
 
 func (f *httpResponseFailure) Error() string { return f.cause.Error() }
@@ -95,7 +103,7 @@ func withResponseHints(err error, status int, headers http.Header) error {
 	if errors.As(err, &retained) {
 		return err
 	}
-	failure := &httpResponseFailure{cause: err, retryAfter: retryAfterValues(headers)}
+	failure := &httpResponseFailure{cause: err, retryAfter: retryAfterValues(headers), retryAfterMs: retryAfterMsValue(headers)}
 	if status > 0 && status <= 65535 {
 		value := uint16(status)
 		failure.status = &value
@@ -118,11 +126,42 @@ func retryAfterValues(headers http.Header) []string {
 	return values
 }
 
+func retryAfterMsValue(headers http.Header) *uint64 {
+	var best *uint64
+	for name, values := range headers {
+		if !strings.EqualFold(name, "Retry-After-Ms") {
+			continue
+		}
+		for _, raw := range values {
+			value := strings.TrimSpace(raw)
+			millis, err := strconv.ParseUint(value, 10, 64)
+			if err != nil {
+				if errors.Is(err, strconv.ErrRange) {
+					maxVal := ^uint64(0)
+					best = &maxVal
+				}
+				continue
+			}
+			if best == nil || millis > *best {
+				v := millis
+				best = &v
+			}
+		}
+	}
+	return best
+}
+
 func (f *Failure) retainResponseHints(err error) {
 	var response *httpResponseFailure
 	if errors.As(err, &response) {
 		f.status = response.status
 		f.retryAfter = slices.Clone(response.retryAfter)
+		if response.retryAfterMs != nil {
+			v := *response.retryAfterMs
+			if f.retryAfterMs == nil || v > *f.retryAfterMs {
+				f.retryAfterMs = &v
+			}
+		}
 	}
 	if f.status != nil || len(f.retryAfter) > 0 || f.retryAfterMs != nil {
 		f.tcpDialTimeout = false
@@ -161,11 +200,12 @@ func Classify(err error, secrets ...protocol.Secret) *Failure {
 		status := provider.StatusCode
 		headers := http.Header{}
 		for name, value := range provider.ResponseHeaders {
-			if strings.EqualFold(name, "Retry-After") {
+			if strings.EqualFold(name, "Retry-After") || strings.EqualFold(name, "Retry-After-Ms") {
 				headers[name] = []string{value}
 			}
 		}
 		f.retryAfter = retryAfterValues(headers)
+		f.retryAfterMs = retryAfterMsValue(headers)
 		if status > 0 && status <= 65535 {
 			v := uint16(status)
 			f.status = &v
@@ -182,7 +222,7 @@ func Classify(err error, secrets ...protocol.Secret) *Failure {
 		codes := []string{provider.ErrorType}
 		foundCode := false
 		for _, path := range [][]string{{"error", "code"}, {"error", "type"}, {"response", "error", "code"}, {"response", "error", "type"}, {"code"}, {"type"}} {
-			if value := jsonString(body, path...); value != "" {
+			if value := jsonCode(body, path...); value != "" {
 				overloaded = overloaded || overloadedCode(value)
 				overflow = overflow || contextOverflowCode(value)
 				usageMissing = usageMissing || containsCode(value, "upstream_usage_missing")
@@ -222,6 +262,8 @@ func Classify(err error, secrets ...protocol.Secret) *Failure {
 			f.Message += ": " + cause
 		}
 		lower := strings.ToLower(string(provider.ResponseBody))
+		concurrencyLimit := anyCode(codes, concurrencyLimitCodes...) ||
+			concurrencyLimitMessage(message) || concurrencyLimitMessage(string(provider.ResponseBody))
 		switch {
 		case status >= 300 && status <= 399:
 			f.Kind = InvalidRequest
@@ -236,11 +278,11 @@ func Classify(err error, secrets ...protocol.Secret) *Failure {
 			f.Kind = Quota
 		case status == 401 || status == 403 || provider.AuthError || invalidKey || anyCode(codes, "authentication_error", "unauthorized", "permission_denied"):
 			f.Kind = Authentication
-			// A 403 that names a credential failure is not an account
-			// rotation and does not recover by resending.
+			// A 403 that names a credential failure is not an account rotation.
 			f.forbidden = status == 403 && !invalidKey && !anyCode(codes, "authentication_error", "unauthorized", "AccessDeniedException")
-		case status == 429 || anyCode(codes, rateLimitCodes...):
+		case status == 429 || anyCode(codes, rateLimitCodes...) || concurrencyLimit:
 			f.Kind = RateLimited
+			f.concurrencyLimited = concurrencyLimit
 		// Bedrock reports stream exceptions by type after a 200 response.
 		case status == 408 || status >= 500 && status <= 599 || overloaded || usageMissing || anyCode(codes, "upstream_bad_gateway", "upstream_unavailable", "upstream_timeout", "server_error", "internal_error", "internal_server_error", "bad_gateway", "gateway_timeout", "service_unavailable", "service_unavailable_error",
 			"serviceUnavailableException", "internalServerException", "modelStreamErrorException", "modelTimeoutException"):
@@ -253,7 +295,7 @@ func Classify(err error, secrets ...protocol.Secret) *Failure {
 			f.Kind = Unavailable
 		case errors.Is(provider.Cause, io.ErrUnexpectedEOF) || errors.As(provider.Cause, &malformed):
 			f.Kind = InvalidResponse
-		case http2ProtocolFailure(err) || http2ConnectionLost(err) || errors.As(provider.Cause, &network) || errors.Is(provider.Cause, context.DeadlineExceeded):
+		case http2Interrupted(err) || errors.As(provider.Cause, &network) || errors.Is(provider.Cause, context.DeadlineExceeded):
 			f.Kind = Network
 		default:
 			f.Kind = InvalidResponse
@@ -261,7 +303,7 @@ func Classify(err error, secrets ...protocol.Secret) *Failure {
 		f.overloaded = overloaded
 	case errors.Is(err, io.ErrUnexpectedEOF) || errors.As(err, &malformed):
 		f.Kind = InvalidResponse
-	case http2ProtocolFailure(err) || http2ConnectionLost(err) || errors.As(err, &network) || errors.Is(err, context.DeadlineExceeded):
+	case http2Interrupted(err) || errors.As(err, &network) || errors.Is(err, context.DeadlineExceeded):
 		f.Kind = Network
 	}
 	if f.Kind == Network && (provider == nil || provider.StatusCode == 0 && len(provider.ResponseBody) == 0 && len(provider.ResponseHeaders) == 0) {
@@ -271,8 +313,9 @@ func Classify(err error, secrets ...protocol.Secret) *Failure {
 		f.truncated = true
 		f.Message = "Model stream ended before a completion event"
 	}
-	if errors.Is(err, stallError{}) {
-		f.Kind, f.Message = Network, fmt.Sprintf("Model stream sent no data for %d seconds", int(stallTimeout/time.Second))
+	if stall, ok := errors.AsType[stallError](err); ok {
+		f.streamIdle = stall.idle
+		f.Kind, f.Message = Network, fmt.Sprintf("Model stream sent no data for %g seconds", stall.idle.Seconds())
 	}
 	f.retainResponseHints(err)
 	f.Message = safeDiagnostic(f.Message, secrets)
@@ -280,9 +323,44 @@ func Classify(err error, secrets ...protocol.Secret) *Failure {
 }
 
 var (
-	rateLimitCodes  = []string{"rate_limit_exceeded", "rate_limit_error", "too_many_requests", "throttlingException"}
+	concurrencyLimitCodes = []string{
+		"concurrency_limit_exceeded",
+		"concurrent_limit_exceeded",
+		"too_many_concurrent_requests",
+		"concurrent_requests_limit_exceeded",
+		"concurrency_limit",
+		"1302",
+	}
+	rateLimitCodes = []string{
+		"rate_limit_exceeded",
+		"rate_limit_error",
+		"too_many_requests",
+		"throttlingException",
+		"resource_exhausted",
+		"concurrency_limit_exceeded",
+		"concurrent_limit_exceeded",
+		"too_many_concurrent_requests",
+		"concurrent_requests_limit_exceeded",
+		"concurrency_limit",
+		"1302",
+	}
 	invalidKeyCodes = []string{"invalid_api_key", "invalid_authentication"}
 )
+
+func concurrencyLimitMessage(text string) bool {
+	if text == "" {
+		return false
+	}
+	lower := strings.ToLower(text)
+	if strings.Contains(lower, "concurrency limit") || strings.Contains(lower, "concurrent limit") ||
+		strings.Contains(lower, "too many concurrent") || strings.Contains(lower, "max concurrency") {
+		return true
+	}
+	if strings.Contains(lower, "concurrent request") && (strings.Contains(lower, "limit") || strings.Contains(lower, "exceeded") || strings.Contains(lower, "too many")) {
+		return true
+	}
+	return strings.Contains(text, "并发") && (strings.Contains(text, "限制") || strings.Contains(text, "超限") || strings.Contains(text, "上限"))
+}
 
 // anyCode reports whether any of the response's codes is one of codes.
 func anyCode(values []string, codes ...string) bool {
@@ -349,6 +427,28 @@ func jsonString(body map[string]any, path ...string) string {
 	}
 	result, _ := value.(string)
 	return result
+}
+
+func jsonCode(body map[string]any, path ...string) string {
+	var value any = body
+	for _, part := range path {
+		object, ok := value.(map[string]any)
+		if !ok {
+			return ""
+		}
+		value = object[part]
+	}
+	switch v := value.(type) {
+	case string:
+		return v
+	case float64:
+		if v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+	case json.Number:
+		return v.String()
+	}
+	return ""
 }
 func safeDiagnostic(message string, secrets []protocol.Secret) string {
 	values := make([]string, 0, len(secrets))

@@ -104,6 +104,7 @@ func (node *Node) connectMCPTools(ctx context.Context, invocation *store.AgentIn
 		if err != nil {
 			return nil, errors.Join(err, close())
 		}
+		tool.MCPAuthority = lease.AuthorityDigest()
 		tool.Close = close
 		tools = append(tools, tool)
 	}

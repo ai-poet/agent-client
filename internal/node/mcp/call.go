@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -91,23 +91,32 @@ func (lease *Lease) Call(ctx context.Context, name string, arguments map[string]
 	if poisoned {
 		return nil, unavailable()
 	}
-	if lease.config.Options.Exclusive && !readOnly {
+	exclusive := lease.config.Options.Exclusive && !readOnly
+	if exclusive {
 		if err := connection.lock(ctx, connection.exclusive.lock, 1); err != nil {
 			return nil, err
 		}
-		defer connection.exclusive.lock.Release(1)
 	}
 	weight := int64(maxCalls)
 	if readOnly {
 		weight = 1
 	}
 	if err := connection.lock(ctx, connection.calls, weight); err != nil {
+		if exclusive {
+			connection.exclusive.lock.Release(1)
+		}
 		return nil, err
 	}
-	released := false
+	release := func() {
+		connection.calls.Release(weight)
+		if exclusive {
+			connection.exclusive.lock.Release(1)
+		}
+	}
+	dispatched := false
 	defer func() {
-		if !released {
-			connection.calls.Release(weight)
+		if !dispatched {
+			release()
 		}
 	}()
 	if ctx.Err() != nil || lease.pool.ctx.Err() != nil {
@@ -135,11 +144,16 @@ func (lease *Lease) Call(ctx context.Context, name string, arguments map[string]
 		err   error
 	}
 	completed := make(chan response, 1)
-	released = true
+	// The transport can stop before the caller poisons an uncertain session;
+	// on cancellation the caller can also return before the transport stops.
+	classified := make(chan struct{})
+	defer close(classified)
+	dispatched = true
 	go func() {
-		defer connection.calls.Release(weight)
+		defer release()
 		value, err := connection.session.CallTool(operation, &sdk.CallToolParams{Name: name, Arguments: arguments})
 		completed <- response{value, err}
+		<-classified
 	}()
 	timer := lease.pool.clock.NewTimer(120 * time.Second)
 	defer timer.Stop()

@@ -21,7 +21,7 @@ func TestCountedTools(t *testing.T) {
 	}
 
 	t.Run("every registered built-in is counted or excluded with a reason", func(t *testing.T) {
-		r, x := builtinsFixture(t, catalog)
+		r, x := builtinsFixture(t)
 		registered := r.builtins(x)
 		// Discovery joins the catalog after the deferral pass.
 		if search := r.builtinSearch(x); search != nil {
@@ -101,12 +101,12 @@ func TestCountedTools(t *testing.T) {
 
 // builtinsFixture is a turn in which every conditional group of built-in
 // tools applies: delegation, skills and deferred-tool discovery.
-func builtinsFixture(t *testing.T, catalog *operations.Catalog) (*Runtime, *execution) {
+func builtinsFixture(t *testing.T) (*Runtime, *execution) {
 	t.Helper()
 	f, x := delegationFixture(t)
 	x.inv.Session.Delegation, x.inv.Turn.Config.Resource = nil, nil
 	x.inv.Turn.Roles.Execution = protocol.ConversationExecutionTeam
-	resources, err := operations.CaptureResources(x.ctx, f.r.profile, catalog.References)
+	resources, err := operations.CaptureResources(x.ctx, f.r.profile, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

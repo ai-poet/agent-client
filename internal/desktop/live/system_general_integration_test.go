@@ -20,14 +20,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/ui"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/settings"
 	"github.com/ai-poet/cheaprouter-harness/internal/node"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/operations"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/telemetry"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
 )
 
 // systemReports stands in for the error-report endpoint.
@@ -658,7 +658,7 @@ func TestSystemGeneralUI(t *testing.T) {
 		t.Fatalf("the diagnostics event %s with attachment %s", lines[2], lines[3])
 	}
 	public := map[string]bool{"level": true, "timestamp": true, "area": true, "phase": true, "operation": true, "code": true, "cause_code": true,
-		"duration_us": true, "count": true, "elapsed_us": true, "app_version": true, "package": true}
+		"duration_us": true, "count": true, "elapsed_us": true, "app_version": true, "package": true, "command_stage": true}
 	records, failures := 0, 0
 	var failed []string
 	for _, entry := range lines[4:] {
@@ -811,6 +811,9 @@ func TestSystemGeneralUI(t *testing.T) {
 		tables[batch.Table]++
 		for _, row := range batch.Data {
 			for key := range row {
+				if key == "feature" && batch.Table == "feature_uses" && protocol.FeatureUse(fmt.Sprint(row[key])).Listed() {
+					continue
+				}
 				if !rows[key] {
 					t.Fatalf("a %s row carries %q: %s", batch.Table, key, body)
 				}

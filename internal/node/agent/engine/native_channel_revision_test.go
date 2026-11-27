@@ -20,6 +20,7 @@ func TestNativeCompactionAfterChannelRevision(t *testing.T) {
 			writeJSON(w, http.StatusNotFound, `{"error":{"type":"invalid_request_error","message":"Not found"}}`)
 		}
 	})
+	advanceRetryWaits(t, f)
 	if err := compactNow(t, f, x, binding); err != nil {
 		t.Fatal(err)
 	}
@@ -28,8 +29,8 @@ func TestNativeCompactionAfterChannelRevision(t *testing.T) {
 	if err := compactNow(t, f, x, binding); err != nil {
 		t.Fatal(err)
 	}
-	if calls := len(provider.all(compacting)); calls != 1 {
-		t.Fatalf("before edit: %d native requests, want one rejection", calls)
+	if calls := len(provider.all(compacting)); calls != 2 {
+		t.Fatalf("before edit: %d native requests, want one rejection and one resend", calls)
 	}
 	binding.Provider.Revision++
 	addExchange(t, f, "Edited revision")
@@ -37,7 +38,7 @@ func TestNativeCompactionAfterChannelRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, checkpoint := latestCheckpoint(t, f)
-	if calls := len(provider.all(compacting)); calls != 2 || checkpoint.Native == nil {
+	if calls := len(provider.all(compacting)); calls != 3 || checkpoint.Native == nil {
 		t.Fatalf("after edit: %d native requests, native checkpoint = %v", calls, checkpoint.Native != nil)
 	}
 }

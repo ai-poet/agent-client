@@ -3,18 +3,73 @@ package process
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"golang.org/x/sys/unix"
 )
+
+func TestSandboxMissingCredentialParentView(t *testing.T) {
+	root := t.TempDir()
+	missing := filepath.Join(root, "config", "git", "credentials")
+	sibling := filepath.Join(root, "tools")
+	if err := os.Mkdir(sibling, 0700); err != nil {
+		t.Fatal(err)
+	}
+	args, err := maskedParentViews([]string{missing, filepath.Join(root, ".netrc")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(args, []string{"--tmpfs", root, "--ro-bind", sibling, sibling, "--remount-ro", root}) {
+		t.Fatalf("unexpected parent view: %v", args)
+	}
+}
+
+func TestSandboxSocketFilter(t *testing.T) {
+	if os.Getenv("SAILRY_TEST_SOCKET_FILTER") == "1" {
+		fd, err := unix.Socket(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+		if err == nil {
+			unix.Close(fd)
+		}
+		if !errors.Is(err, unix.EPERM) {
+			t.Fatalf("host socket access was not denied: %v", err)
+		}
+		return
+	}
+	guard, err := trustedWrapper("/usr/bin/setpriv", "/bin/setpriv")
+	if err != nil {
+		t.Skip(err)
+	}
+	path, err := socketFilter(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(guard, "--no-new-privs", "--seccomp-filter", path, "--", os.Args[0], "-test.run=^TestSandboxSocketFilter$")
+	cmd.Env = append(os.Environ(), "SAILRY_TEST_SOCKET_FILTER=1")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("socket filter: %s: %v", output, err)
+	}
+}
 
 // The terminal subtest sets a process variable, so this test is not parallel.
 func TestSandboxArgsLinux(t *testing.T) {
-	policy := sandboxPolicy{paths: []allowedPath{{"/workspace/a/.git", false}, {"/workspace", true}, {"/usr", false}}, links: map[string]string{}}
-	args := sandboxArgsLinux(policy, "/usr/bin/sh")
+	secretDir := t.TempDir()
+	secretFile := filepath.Join(t.TempDir(), ".npmrc")
+	if err := os.WriteFile(secretFile, []byte("token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	policy := sandboxPolicy{
+		paths:       []allowedPath{{"/workspace/a/.git", false}, {"/workspace", true}, {"/usr", false}},
+		deniedReads: []string{secretDir, secretFile},
+	}
+	args, err := sandboxArgsLinux(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, required := range []string{"--die-with-parent", "--unshare-pid", "--unshare-net", "--new-session"} {
 		if !slices.Contains(args, required) {
 			t.Fatal(args)
@@ -27,6 +82,22 @@ func TestSandboxArgsLinux(t *testing.T) {
 			}
 		}
 		return -1
+	}
+	if index("--ro-bind", "/") < 0 {
+		t.Fatal("missing root read-only bind", args)
+	}
+	if tmpfs := slices.Index(args, secretDir); tmpfs < 1 || args[tmpfs-1] != "--tmpfs" {
+		t.Fatal("denied secret directory not masked with tmpfs", args)
+	}
+	maskedFile := false
+	for i := 0; i+2 < len(args); i++ {
+		if args[i] == "--ro-bind" && args[i+1] == "/dev/null" && args[i+2] == secretFile {
+			maskedFile = true
+			break
+		}
+	}
+	if !maskedFile {
+		t.Fatal("denied secret file not masked with /dev/null", args)
 	}
 	root, parent, metadata := index("--bind", "/workspace"), index("--bind", "/workspace/a"), index("--ro-bind", "/workspace/a/.git")
 	if root < 0 || parent < root || metadata < parent {
@@ -51,8 +122,7 @@ func TestSandboxArgsLinux(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		separator := slices.Index(command, "--")
-		if separator < 0 || !slices.Equal(command[separator+1:], []string{"/bin/sh", "-l"}) || filepath.Base(command[0]) != "bwrap" || !slices.Contains(command, "--unshare-net") {
+		if !slices.Equal(command[len(command)-3:], []string{"--", "/bin/sh", "-l"}) || filepath.Base(command[0]) != "bwrap" || !slices.Contains(command, "--unshare-net") || !slices.Contains(command, "--seccomp-filter") {
 			t.Fatalf("terminal command %v", command)
 		}
 		resolved, _ := filepath.EvalSymlinks(workspace)
@@ -98,7 +168,10 @@ func TestSandboxProtectedParentsLinux(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	args := sandboxArgsLinux(sandboxPolicy{paths: []allowedPath{{root, true}}, protected: protected, links: map[string]string{}}, "/usr/bin/sh")
+	args, err := sandboxArgsLinux(sandboxPolicy{paths: []allowedPath{{root, true}}, protected: protected})
+	if err != nil {
+		t.Fatal(err)
+	}
 	index := func(flag, path string) int {
 		for i := 0; i+2 < len(args); i++ {
 			if args[i] == flag && args[i+1] == path && args[i+2] == path {
@@ -118,5 +191,34 @@ func TestSandboxProtectedParentsLinux(t *testing.T) {
 				t.Fatalf("protected parent is not pinned before its child: %s, %v", parent, args)
 			}
 		}
+	}
+}
+
+func TestSandboxArgsLinuxReadOnly(t *testing.T) {
+	t.Parallel()
+	root, scratch := t.TempDir(), t.TempDir()
+	args, err := sandboxArgsLinux(sandboxPolicy{
+		paths:     []allowedPath{{root, false}, {scratch, true}},
+		protected: []string{filepath.Join(root, ".git")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := func(flag, path string) int {
+		for i := 0; i+2 < len(args); i++ {
+			if args[i] == flag && args[i+1] == path && args[i+2] == path {
+				return i
+			}
+		}
+		return -1
+	}
+	if index("--bind", root) >= 0 {
+		t.Fatalf("read-only sandbox mounted workspace writable: %v", args)
+	}
+	if index("--ro-bind", root) < 0 {
+		t.Fatalf("read-only sandbox did not mount workspace read-only: %v", args)
+	}
+	if index("--bind", scratch) < 0 {
+		t.Fatalf("read-only sandbox did not mount scratch writable: %v", args)
 	}
 }

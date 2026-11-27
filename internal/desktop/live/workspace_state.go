@@ -11,6 +11,7 @@ import (
 
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/panel"
 	"github.com/ai-poet/cheaprouter-harness/internal/desktop/viewmodel"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/git"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/egoist/mygo/ui"
 )
@@ -72,7 +73,11 @@ type workspaceProject struct {
 	loading                  map[string]bool
 	failedReads              map[string]bool
 	failedAt                 map[string]time.Time
-	missingEntries           map[string]bool
+	// reportedReads holds the toast already shown for a read that keeps
+	// failing. Watch refreshes retry it; the same cause is reported once until
+	// a read succeeds or the user refreshes the workspace.
+	reportedReads  map[string]string
+	missingEntries map[string]bool
 	staleReads               map[string]bool
 	trashing                 map[string]bool
 	diffs                    map[string]bool
@@ -291,7 +296,7 @@ func (r *Runtime) closeWorkspace() {
 }
 func (p *workspaceProject) actions() *panel.Actions {
 	return &panel.Actions{
-		ReadDirectory: func(path string) { p.readDirectory(path, false) }, NextDirectory: p.nextDirectory, RefreshDirectory: func(path string) { p.readDirectory(path, true) },
+		ReadDirectory: func(path string) { p.readDirectory(path, false) }, NextDirectory: p.nextDirectory, RefreshDirectory: func(path string) { p.retryRead("directory/" + path); p.readDirectory(path, true) },
 		ReadFile: p.readFile, OpenFile: p.openFileKind, ReadNotebook: p.readEditorNotebook, SaveFile: p.saveFile, File: p.fileAction, Git: p.gitAction, ReadDiff: p.readDiff, ReadCommit: p.openGitCommit, ReadDocument: p.readDocument, Hunk: p.hunk, Restore: p.restore, Refresh: p.refresh,
 		DocumentMarkdown: p.documentMarkdown,
 		Search:           p.searchFiles, CancelSearch: p.cancelFileSearch, OpenFileAt: p.openFileAt, Pending: p.pendingWorkspaceOperations,
@@ -307,6 +312,12 @@ func (p *workspaceProject) readBackedOff(key string) bool {
 	at, failed := p.failedAt[key]
 	return failed && time.Since(at) < workspaceReadBackoff
 }
+// retryRead is the user's explicit request of a read: it runs again and a
+// failure is reported again. Watch refreshes clear only failedReads.
+func (p *workspaceProject) retryRead(key string) {
+	delete(p.failedReads, key)
+	delete(p.reportedReads, key)
+}
 func (p *workspaceProject) readBlocked(key string) bool {
 	return p.loading[key] || p.failedReads[key] || p.readBackedOff(key) || p.trashBlocksRead(key)
 }
@@ -320,6 +331,10 @@ func workspaceReadFailureKey(key string, err error) string {
 		return "live_read_busy"
 	case protocol.ErrorCodePermissionDenied:
 		return "workspace_read_permission_failed"
+	case protocol.ErrorCodeInvalidRequest:
+		if faultMessage(err) == git.UnsupportedExtension {
+			return "git_extension_unsupported"
+		}
 	case protocol.ErrorCodeUnavailable:
 		if faultMessage(err) == "resource host is offline" {
 			return "resource_offline_action"
@@ -374,7 +389,13 @@ func (p *workspaceProject) read(key string, command protocol.Command, done func(
 			}
 			slog.Warn("workspace read failed", "key", key, "command", command.Kind, "code", faultCode(err))
 			if failedKey := workspaceReadFailureKey(key, err); failedKey != "" {
-				p.runtime.reportKeys(c, err, failedKey, "workspace_changed", "workspace_action_unknown")
+				if cause := failedKey + "\x00" + string(faultCode(err)); p.reportedReads[key] != cause {
+					if p.reportedReads == nil {
+						p.reportedReads = map[string]string{}
+					}
+					p.reportedReads[key] = cause
+					p.runtime.reportKeys(c, err, failedKey, "workspace_changed", "workspace_action_unknown")
+				}
 			}
 			for _, failure := range failures {
 				failure(c, err)
@@ -383,6 +404,7 @@ func (p *workspaceProject) read(key string, command protocol.Command, done func(
 		}
 		delete(p.failedReads, key)
 		delete(p.failedAt, key)
+		delete(p.reportedReads, key)
 		done(c, out)
 	})
 }
@@ -395,6 +417,7 @@ func (p *workspaceProject) refresh() {
 	p.reviewTurns = map[string]protocol.TurnID{}
 	p.failedReads = map[string]bool{}
 	p.failedAt = map[string]time.Time{}
+	p.reportedReads = nil
 	p.missingEntries = nil
 	p.documents = map[string]uint32{}
 	p.diffs = map[string]bool{}
@@ -417,7 +440,7 @@ func (p *workspaceProject) nextDirectory(directory string) {
 	if page.Next == nil {
 		return
 	}
-	delete(p.failedReads, "directory/"+directory)
+	p.retryRead("directory/" + directory)
 	p.requestDirectory(directory, page.Next, append([]protocol.FileEntry(nil), p.directoryEntries[directory]...), 0, p.directoryStates[directory].Partial)
 }
 func (p *workspaceProject) directoryState(directory string, state panel.DirectoryState) {

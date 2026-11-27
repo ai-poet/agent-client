@@ -33,7 +33,9 @@ func TestFramePlain(t *testing.T) {
 			{"subscribed", `{"kind":"subscribed"}`, "", func() any { return new(Reply) }},
 			{"receipt", `{"kind":"receipt","data":{"id":"01890f00-1234-7000-8000-000000000001","durable":true}}`, "", func() any { return new(Reply) }},
 			{"rejected", `{"kind":"rejected","data":{"code":"permission_denied","message":"fixture denied"}}`, "", func() any { return new(Reply) }},
+			{"rejected with report ownership", `{"kind":"rejected","data":{"code":"permission_denied","message":"fixture denied","report_owned":true}}`, "", func() any { return new(Reply) }},
 			{"completed failure", `{"kind":"completed","data":{"Err":{"code":"permission_denied","message":"fixture denied"}}}`, "", func() any { return new(Reply) }},
+			{"completed failure with report ownership", `{"kind":"completed","data":{"Err":{"code":"permission_denied","message":"fixture denied","report_owned":true}}}`, "", func() any { return new(Reply) }},
 			{"completed success", `{"kind":"completed","data":{"Ok":{"kind":"notifications_updated"}}}`, "", func() any { return new(Reply) }},
 			{"unrecorded outcome", `{"kind":"completed","data":{"Ok":{"kind":"request_outcome","data":{"id":"01890f00-1234-7000-8000-000000000001","outcome":{"kind":"unrecorded"}}}}}`, "", func() any { return new(Reply) }},
 			{"replayable outcome", `{"kind":"completed","data":{"Ok":{"kind":"request_outcome","data":{"id":"01890f00-1234-7000-8000-000000000001","outcome":{"kind":"replayable","data":{"code":"outcome_unknown","message":"send the original request"}}}}}}`, "", func() any { return new(Reply) }},
@@ -116,6 +118,33 @@ func TestFramePlain(t *testing.T) {
 			if err := reader.Read(&stream, &got); err != nil || got != want {
 				t.Fatalf("read = %q, %v", got, err)
 			}
+		}
+	})
+
+	t.Run("shrinks oversized payload buffer", func(t *testing.T) {
+		var largeStream bytes.Buffer
+		large := strings.Repeat("x", maxRetainedPayload+4096)
+		if err := Write(&largeStream, large, false); err != nil {
+			t.Fatal(err)
+		}
+		reader := NewReader(false)
+		var gotLarge string
+		if err := reader.Read(&largeStream, &gotLarge); err != nil || gotLarge != large {
+			t.Fatalf("read large = %v", err)
+		}
+		if reader.payload != nil || cap(reader.payload) != 0 {
+			t.Fatalf("retained oversized payload capacity %d > 0", cap(reader.payload))
+		}
+		var smallStream bytes.Buffer
+		if err := Write(&smallStream, "small", false); err != nil {
+			t.Fatal(err)
+		}
+		var gotSmall string
+		if err := reader.Read(&smallStream, &gotSmall); err != nil || gotSmall != "small" {
+			t.Fatalf("read small after shrink = %q, %v", gotSmall, err)
+		}
+		if cap(reader.payload) > maxRetainedPayload {
+			t.Fatalf("small read reallocated oversized buffer %d", cap(reader.payload))
 		}
 	})
 

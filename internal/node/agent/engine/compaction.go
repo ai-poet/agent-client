@@ -36,30 +36,65 @@ func contextTokens(records []canonical.Record) uint64 {
 	}
 	for i := len(records) - 1; i >= start; i-- {
 		message := records[i].MutableMessage()
-		if message != nil && message.Usage != nil {
-			if !compactionUsage(records[i]) && message.Usage.Total != nil {
-				used := *message.Usage.Total
-				if message.Usage.Input != nil && message.Usage.Output != nil && message.Usage.Reasoning != nil &&
-					!hasSignedReasoning(message) && *message.Usage.Reasoning <= *message.Usage.Output {
-					// Reasoning tokens that are not replayed back into the next request do not consume the next prompt window.
-					used = *message.Usage.Input + (*message.Usage.Output - *message.Usage.Reasoning)
-				}
-				// A reply that took several requests sums their usage; its
-				// window is what the last one occupied.
-				if execution := records[i].Metadata.Execution; execution != nil && execution.ContextTokens != nil && *execution.ContextTokens < used {
-					used = *execution.ContextTokens
-				}
-				return used + pendingTokens(records[i+1:])
-			}
-			// Only the latest observation can describe the current context. An
-			// incomplete report or summary usage cannot reuse an older total.
-			break
+		if message == nil || message.Usage == nil || !usageReported(*message.Usage) {
+			continue
 		}
+		if compactionUsage(records[i]) {
+			if records[i].Kind == "compaction" {
+				break
+			}
+			continue
+		}
+		// An interrupted, cancelled, or failed attempt (or a hidden non-visible
+		// observation) did not establish a new context baseline; keep scanning
+		// for the last completed measured step.
+		if !completedUsageRecord(records[i], message) {
+			continue
+		}
+		if message.Usage.Total != nil {
+			used := *message.Usage.Total
+			if message.Usage.Input != nil && message.Usage.Output != nil && message.Usage.Reasoning != nil &&
+				!hasSignedReasoning(message) && *message.Usage.Reasoning <= *message.Usage.Output {
+				// Reasoning tokens that are not replayed back into the next request do not consume the next prompt window.
+				used = *message.Usage.Input + (*message.Usage.Output - *message.Usage.Reasoning)
+			}
+			// A reply that took several requests sums their usage; its
+			// window is what the last one occupied.
+			if execution := records[i].Metadata.Execution; execution != nil && execution.ContextTokens != nil && *execution.ContextTokens < used {
+				used = *execution.ContextTokens
+			}
+			return used + pendingTokens(records[i+1:])
+		}
+		// Only the latest completed observation can describe the current context. An
+		// incomplete report or summary usage cannot reuse an older total.
+		break
 	}
 	// Retained messages can precede the checkpoint in storage. Their old
 	// measurements describe the pre-compaction request, but their content
 	// still belongs to the new context alongside the latest summary.
 	return pendingTokens(records)
+}
+
+func usageReported(usage canonical.Usage) bool {
+	return usage.Input != nil || usage.Output != nil || usage.Total != nil ||
+		usage.CacheRead != nil || usage.CacheWrite != nil || usage.Reasoning != nil ||
+		usage.Cost != nil || len(usage.Provider) > 0
+}
+
+func completedUsageRecord(record canonical.Record, message *canonical.Message) bool {
+	if message.Finish != nil && *message.Finish != canonical.Completed {
+		return false
+	}
+	if runtime := record.Metadata.Runtime; runtime != nil && !runtime.AgentVisible {
+		return false
+	}
+	if execution := record.Metadata.Execution; execution != nil && execution.Observation != nil && len(execution.Observation.Attempts) > 0 {
+		last := execution.Observation.Attempts[len(execution.Observation.Attempts)-1]
+		if last.Outcome != "" && last.Outcome != protocol.ConversationObservationOutcomeSucceeded {
+			return false
+		}
+	}
+	return true
 }
 
 func hasSignedReasoning(message *canonical.Message) bool {
@@ -271,10 +306,14 @@ func (r *Runtime) summarize(x *execution, binding model.Binding, route model.Rou
 		}
 		return failed(protocol.ConversationCompactionStageRequest, reason, err)
 	}
+	var visibleRetryStart bool
 	observeAttempt := func(source model.Binding, attempt model.Attempt) error {
 		x.timeline.attempt(attempt)
 		if attempt.RetryDelay != nil {
-			observationErr = r.save(context.WithoutCancel(x.ctx), x.inv.Session.ID, r.retryRecord(x, source, canonical.PurposeCompaction, attempt))
+			if attempt.Index == 0 {
+				visibleRetryStart = showFirstRetry(attempt)
+			}
+			observationErr = r.save(context.WithoutCancel(x.ctx), x.inv.Session.ID, r.retryRecord(x, source, canonical.PurposeCompaction, attempt, visibleRetryStart))
 			return observationErr
 		}
 		attempts = append(attempts, attempt)
@@ -360,7 +399,7 @@ func (r *Runtime) summarize(x *execution, binding model.Binding, route model.Rou
 				return err
 			}
 			r.scopeTrace(&call, languageModel, x, summaryBinding, canonical.PurposeCompaction)
-			return model.Run(x.ctx, languageModel, call, model.SummaryPurpose, r.clock, observe, collect, nil)
+			return model.Run(model.WithCooldown(x.ctx, r.cooldowns, model.CredentialCooldownKey(summaryBinding)), languageModel, call, model.SummaryPurpose, r.clock, observe, collect, nil)
 		}
 		err := run(system)
 		const maxCompactionShrinks = 4
@@ -411,6 +450,22 @@ func (r *Runtime) summarize(x *execution, binding model.Binding, route model.Rou
 		if round == 0 {
 			promptText = retryPrompt
 			continue
+		}
+		if reason == protocol.ConversationCompactionReasonUnexpectedOutput {
+			logging.Emit(slog.LevelWarn,
+				slog.String("area", "agent"),
+				slog.String("operation", "compaction_summary"),
+				slog.String("phase", logging.Failed),
+				slog.String("session", x.inv.Session.ID.String()),
+				slog.String("turn", x.inv.Run.Turn.String()),
+				slog.String("provider", summaryBinding.Provider.ID.String()),
+				slog.String("model", summaryBinding.Config.Model),
+				slog.Int("output_bytes", len(rawText)),
+				slog.Int("output_lines", strings.Count(rawText, "\n")+1),
+				slog.Bool("has_fence", strings.Contains(rawText, "```")),
+				slog.Bool("has_brace", strings.Contains(rawText, "{")),
+				slog.Bool("has_heading", strings.Contains(rawText, "## ")),
+			)
 		}
 		return failed(protocol.ConversationCompactionStageSummary, reason, compactionSummaryFault(reason))
 	}
@@ -560,7 +615,7 @@ func (r *Runtime) nativeCompaction(x *execution, binding model.Binding, route mo
 			return model.Compacted{}, err
 		}
 		r.scopeTrace(&call, languageModel, x, binding, canonical.PurposeCompaction)
-		return model.CompactNative(x.ctx, languageModel, binding, call, r.clock, observe)
+		return model.CompactNative(model.WithCooldown(x.ctx, r.cooldowns, model.CredentialCooldownKey(binding)), languageModel, binding, call, r.clock, observe)
 	}
 	compacted, err := try()
 	switch {

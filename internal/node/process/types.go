@@ -13,6 +13,9 @@ import (
 // before it can be attempted again.
 var ErrCompletionStorageFull = errors.New("command completion storage is full")
 
+// ErrCompletionNotRegistered means the completion has no admitted record.
+var ErrCompletionNotRegistered = errors.New("background command was not registered before execution")
+
 type Launch struct {
 	ID             protocol.RequestID
 	Session        protocol.SessionID
@@ -22,6 +25,7 @@ type Launch struct {
 	Profile        string
 	Command        string
 	Access         protocol.ProcessAccess
+	ReadOnly       bool // Foreground workspace inspection; only private scratch is writable.
 	Cwd            string
 	TimeoutMs      uint64
 	Pty            bool

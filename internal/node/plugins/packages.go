@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	sailry "github.com/ai-poet/cheaprouter-harness"
@@ -28,7 +29,10 @@ const MaxPackageEntries = 1024
 const MaxPackageBytes = 128 * 1024 * 1024
 const MaxPackageDepth = 32
 
+const repositoryInspectionTTL = 10 * time.Minute
+
 type Manager struct {
+	repositoryTimer    *time.Timer
 	profile            string
 	Client             *http.Client
 	OfficialURL        string
@@ -55,6 +59,16 @@ func NewManager(profile string) *Manager {
 		profile = resolved
 	}
 	return &Manager{profile: profile, repositories: map[string][]packageEntry{}, skillPages: map[string]cachedSkillCatalog{}}
+}
+
+func (manager *Manager) ClearRepositories() {
+	manager.repositoryMu.Lock()
+	if manager.repositoryTimer != nil {
+		manager.repositoryTimer.Stop()
+		manager.repositoryTimer = nil
+	}
+	clear(manager.repositories)
+	manager.repositoryMu.Unlock()
 }
 
 func (manager *Manager) source(directory, workingDirectory string) (string, error) {

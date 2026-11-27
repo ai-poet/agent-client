@@ -163,10 +163,13 @@ func roleAllowsTool(role *protocol.RoleProfile, tool Tool) bool {
 	if tool.Binding == nil {
 		return slices.Contains([]string{"list_sessions", "read_session", "search_session", "load_skill", "read_skill_resource"}, tool.Definition.Name)
 	}
+	declared := declaredOperations(tool)
+	if tool.Definition.Name == operations.Alias("progress", "update_plan") || slices.Contains(declared, protocol.ToolOperationProgress) {
+		return false
+	}
 	if tool.Hosted {
 		return tool.ReadOnly
 	}
-	declared := declaredOperations(tool)
 	return len(declared) != 0 && !slices.ContainsFunc(declared, func(operation protocol.ToolOperation) bool { return !standardOperation(operation) })
 }
 
@@ -174,7 +177,7 @@ func roleAllowsTool(role *protocol.RoleProfile, tool Tool) bool {
 // operation.
 func standardOperation(operation protocol.ToolOperation) bool {
 	switch operation {
-	case protocol.ToolOperationReadFile, protocol.ToolOperationReadFileLines, protocol.ToolOperationListDirectory, protocol.ToolOperationFindFiles, protocol.ToolOperationSearchFiles, protocol.ToolOperationWriteFile, protocol.ToolOperationEditFile, protocol.ToolOperationApplyChanges, protocol.ToolOperationSearchCode, protocol.ToolOperationOutlineCode, protocol.ToolOperationGraphCode, protocol.ToolOperationInspectGit, protocol.ToolOperationReadGitDiff, protocol.ToolOperationRunCommand, protocol.ToolOperationReadCommand, protocol.ToolOperationStopCommand, protocol.ToolOperationFetchWeb, protocol.ToolOperationSearchWeb, protocol.ToolOperationDeleteFile, protocol.ToolOperationMoveFile, protocol.ToolOperationCreateDirectory, protocol.ToolOperationReadNotebook, protocol.ToolOperationEditNotebook, protocol.ToolOperationReadArtifact, protocol.ToolOperationListArtifacts, protocol.ToolOperationListArtifactRevisions, protocol.ToolOperationReadGitLog, protocol.ToolOperationReadGitShow, protocol.ToolOperationReadGitBlame, protocol.ToolOperationListGitChanges, protocol.ToolOperationReadGitChange, protocol.ToolOperationListWorktrees, protocol.ToolOperationProgress, protocol.ToolOperationListRoles:
+	case protocol.ToolOperationReadFile, protocol.ToolOperationReadFileLines, protocol.ToolOperationListDirectory, protocol.ToolOperationFindFiles, protocol.ToolOperationSearchFiles, protocol.ToolOperationWriteFile, protocol.ToolOperationEditFile, protocol.ToolOperationApplyChanges, protocol.ToolOperationSearchCode, protocol.ToolOperationOutlineCode, protocol.ToolOperationGraphCode, protocol.ToolOperationInspectGit, protocol.ToolOperationReadGitDiff, protocol.ToolOperationRunCommand, protocol.ToolOperationReadCommand, protocol.ToolOperationStopCommand, protocol.ToolOperationFetchWeb, protocol.ToolOperationSearchWeb, protocol.ToolOperationDeleteFile, protocol.ToolOperationMoveFile, protocol.ToolOperationCreateDirectory, protocol.ToolOperationReadNotebook, protocol.ToolOperationEditNotebook, protocol.ToolOperationReadArtifact, protocol.ToolOperationListArtifacts, protocol.ToolOperationListArtifactRevisions, protocol.ToolOperationReadGitLog, protocol.ToolOperationReadGitShow, protocol.ToolOperationReadGitBlame, protocol.ToolOperationListGitChanges, protocol.ToolOperationReadGitChange, protocol.ToolOperationListWorktrees:
 		return true
 	}
 	return false

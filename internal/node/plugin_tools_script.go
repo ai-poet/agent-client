@@ -16,6 +16,7 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/engine"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/operations"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/prompt"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
@@ -68,8 +69,19 @@ func (owner *pluginScriptTurn) evaluate(ctx context.Context, handler, tool, call
 	return result, err
 }
 
-func (node *Node) scriptTools(ctx context.Context, invocation *store.AgentInvocation, info protocol.PluginInfo, native map[string]engine.Tool) ([]engine.Tool, error) {
+type pluginToolBinding struct {
+	owner     protocol.PluginReference
+	alias     string
+	operation protocol.ToolOperation
+}
+
+func (node *Node) scriptTools(ctx context.Context, invocation *store.AgentInvocation, info protocol.PluginInfo, native map[pluginToolBinding]engine.Tool) ([]engine.Tool, error) {
 	host := info.Extension.Host
+	packageRef := plugins.PackageReference(info)
+	boundTool := func(name string, operation protocol.ToolOperation) (engine.Tool, bool) {
+		v, ok := native[pluginToolBinding{packageRef, plugins.ToolAlias(packageRef.Name, name), operation}]
+		return v, ok
+	}
 	declarations := []protocol.ToolDeclaration{}
 	names := []string{}
 	for _, declaration := range info.Extension.Tools {
@@ -86,8 +98,9 @@ func (node *Node) scriptTools(ctx context.Context, invocation *store.AgentInvoca
 				if _, media := mediaOperationKind(*operation); media {
 					continue
 				}
-				if *operation == protocol.ToolOperationReadExternalBrowser || *operation == protocol.ToolOperationControlExternalBrowser || *operation == browserReadOperation || *operation == browserControlOperation {
-					if _, bound := native[plugins.ToolAlias(info.Summary.Name, declaration.Name)]; !bound {
+				switch *operation {
+				case protocol.ToolOperationReadExternalBrowser, protocol.ToolOperationControlExternalBrowser, browserReadOperation, browserControlOperation, protocol.ToolOperationRunCommand, protocol.ToolOperationStopCommand, protocol.ToolOperationWriteCommand:
+					if _, bound := boundTool(declaration.Name, *operation); !bound {
 						continue
 					}
 				}
@@ -99,12 +112,12 @@ func (node *Node) scriptTools(ctx context.Context, invocation *store.AgentInvoca
 	if len(declarations) == 0 {
 		return nil, nil
 	}
-	files, err := node.plugins.manager.ReadBundle(ctx, plugins.PackageReference(info), host.Entry, host.Resources)
+	files, err := node.plugins.manager.ReadBundle(ctx, packageRef, host.Entry, host.Resources)
 	if err != nil {
 		return nil, err
 	}
 	owner := &pluginScriptTurn{node: node, invocation: invocation, info: info, bundle: plugins.ScriptBundle{Entry: host.Entry, Files: files},
-		scope: protocol.PluginContext{Turn: &invocation.Run.Turn, Package: plugins.PackageReference(info), Worktree: &invocation.Run.Worktree,
+		scope: protocol.PluginContext{Turn: &invocation.Run.Turn, Package: packageRef, Worktree: &invocation.Run.Worktree,
 			Session: &invocation.Session.ID, Surface: protocol.PluginDesktopSurface{Kind: "workspace"}}, state: json.RawMessage("null")}
 	instruction := ""
 	if info.Extension.Instructions != nil {
@@ -112,6 +125,9 @@ func (node *Node) scriptTools(ctx context.Context, invocation *store.AgentInvoca
 	}
 	overrides := map[string]json.RawMessage{}
 	var contextParts []string
+	// Turn guidance is a named section: a later turn replaces or clears it.
+	// Appending it to the fixed instructions would change the system prompt.
+	var turnSection prompt.Part
 	if host.Turn != nil {
 		selected := pluginSelectedOperations(info, names)
 		input, err := pluginTurnInput(invocation, info, names, selected)
@@ -157,9 +173,7 @@ func (node *Node) scriptTools(ctx context.Context, invocation *store.AgentInvoca
 				contextParts = append(contextParts, part)
 			}
 		}
-		if selection.Instruction != "" {
-			instruction += "\n\n" + selection.Instruction
-		}
+		turnSection = prompt.Part{Key: "package:" + info.Summary.Name, Text: strings.TrimSpace(selection.Instruction)}
 		declarations = slices.DeleteFunc(declarations, func(declaration protocol.ToolDeclaration) bool {
 			return !slices.Contains(selection.Tools, declaration.Name)
 		})
@@ -215,7 +229,7 @@ func (node *Node) scriptTools(ctx context.Context, invocation *store.AgentInvoca
 				tool.Concurrent = tool.Concurrent && concurrent
 			}
 		}
-		tool.ContextParts = contextParts
+		tool.TurnSection, tool.ContextParts = turnSection, contextParts
 		if host.Turn != nil && host.Turn.BeforeModel != nil {
 			tool.BeforeModel = owner.beforeModel(*host.Turn.BeforeModel)
 		}
@@ -228,7 +242,20 @@ func (node *Node) scriptTools(ctx context.Context, invocation *store.AgentInvoca
 				tools = append(tools, tool)
 				continue
 			}
-			if bound, exists := native[tool.Definition.Name]; exists {
+			if bound, exists := boundTool(declaration.Name, *handler.Operation); exists {
+				if *handler.Operation == protocol.ToolOperationRunCommand && invocation.Turn.Config.Mode == protocol.WorkModePlan {
+					tool.Definition.Description = bound.Definition.Description
+					// A captured package may still describe Full as unrestricted.
+					// Keep its argument contract, but report the effective access.
+					properties, _ := schema["properties"].(map[string]any)
+					if access, ok := properties["access"].(map[string]any); ok {
+						access["description"] = "Only read-only sandboxed workspace access is allowed in this turn."
+						tool.SchemaJSON, err = json.Marshal(schema)
+						if err != nil {
+							return nil, err
+						}
+					}
+				}
 				tools = append(tools, owner.bindNative(tool, bound, declaration, handler))
 				continue
 			}

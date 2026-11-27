@@ -278,7 +278,7 @@ func TestForegroundChildFailureStaysInForeground(t *testing.T) {
 		t.Fatal("foreground failure has no stored reason")
 	}
 	result := mustHaveCallback(t, f.state().Records, child.session, child.turn, protocol.ConversationBackgroundOutcomeFailed)
-	if result.Notice.Summary == nil || *result.Notice.Summary != failed.Error.Message || result.ErrorCode == nil || *result.ErrorCode != failed.Error.Code {
+	if result.ErrorReason != string(protocol.ModelFailureRequest) || result.Retryable || result.Notice.Summary == nil || *result.Notice.Summary != failed.Error.Message || result.ErrorCode == nil || *result.ErrorCode != failed.Error.Code {
 		t.Fatalf("foreground callback lost the fault: %+v", result)
 	}
 	assertBackgroundFailureState(t, f, child.turn, protocol.ConversationBackgroundStateConsumed, nil)

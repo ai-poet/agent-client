@@ -1,6 +1,8 @@
 package node
 
 import (
+	"github.com/ai-poet/cheaprouter-harness/internal/node/files"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -137,6 +139,44 @@ func TestWorkspaceLocks(t *testing.T) {
 		fetch()
 		if len(locks.held) != 0 {
 			t.Fatalf("released roots are kept: %v", locks.held)
+		}
+	})
+	t.Run("prepared_files_and_moves_share_the_root_lock_domain", func(t *testing.T) {
+		var locks workspaceLocks
+		root := t.TempDir()
+		// A mixed patch also owns a path in another worktree.
+		other := t.TempDir()
+		to := filepath.Join(other, "outside")
+		patch := &files.Prepared{Changes: []files.PreparedChange{{Path: "one", Destination: &to}, {Path: "two"}}}
+		hold := locks.fileEffect(root, patch)
+		sibling, ok := within(free, func() func() {
+			return locks.fileEffect(root, &files.Prepared{Changes: []files.PreparedChange{{Path: "one-more"}}})
+		})
+		if !ok {
+			t.Fatal("an independent file waited behind the patch")
+		}
+		sibling()
+		child, ok := within(free, func() func() {
+			return locks.fileEffect(root, &files.Prepared{Changes: []files.PreparedChange{{Path: "two/child"}}})
+		})
+		if !ok {
+			t.Fatal("a file waited for an unrelated parent path")
+		}
+		child()
+		var blockedReleases []func()
+		for _, name := range []string{filepath.Join(root, "one"), to, other, root} {
+			release, ok := within(blocked, func() func() { return locks.effect(name) })
+			if ok {
+				t.Fatalf("%s ran during an overlapping patch", name)
+			}
+			blockedReleases = append(blockedReleases, release)
+		}
+		hold()
+		for _, release := range blockedReleases {
+			release()
+		}
+		if len(locks.held) != 0 {
+			t.Fatalf("released reservations retained: %d", len(locks.held))
 		}
 	})
 }

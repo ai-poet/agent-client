@@ -1758,6 +1758,7 @@ files_download_conflict
 chat_attachment_remove_failed
 workspace_action_failed
 workspace_read_permission_failed
+git_extension_unsupported
 workspace_changed
 workspace_action_unknown
 workspace_saved

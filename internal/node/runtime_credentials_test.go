@@ -156,3 +156,15 @@ func TestExecutorMCPSourceNeverNeedsOAuthClientConfiguration(t *testing.T) {
 		t.Fatalf("runtime MCP token required controller-only client config: %v", err)
 	}
 }
+
+func TestCredentialWakePreservesActiveAccountCooldown(t *testing.T) {
+	t.Parallel()
+	node := nodeFixture(t)
+	now := time.Now()
+	until := now.Add(time.Minute)
+	node.cooldowns.Observe("unchanged-account", until, now)
+	node.RuntimeCredentialsChanged()
+	if observed, ok := node.cooldowns.Until("unchanged-account", now); !ok || !observed.Equal(until) {
+		t.Fatalf("cooldown after credential wake = %v, want %v", observed, until)
+	}
+}

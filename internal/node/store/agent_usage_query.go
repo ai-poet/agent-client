@@ -31,7 +31,7 @@ const agentUsageMedia = `LEFT JOIN session_media media ON media.session=t.sessio
 // rather than returning them through the SQL driver for every attempt.
 const agentUsageScope = `WITH responses AS (SELECT e.sequence,s.project,r.worktree,json_extract(r.config,'$.resource') AS resource,
     json_extract(r.config,'$.assistant') AS assistant,a.provider AS captured,json_extract(m.value,'$.provider') AS assigned,
-    ` + agentUsageProvider + ` ` + agentUsageJoins + ` ` + agentUsageMedia + ` WHERE e.sequence IN (SELECT value FROM json_each(?1)))
+    ` + agentUsageProvider + ` ` + agentUsageJoins + ` ` + agentUsageMedia + ` WHERE e.sequence IN (SELECT CAST(value AS INTEGER) FROM json_each(?1)))
     SELECT e.sequence,e.provider_id,e.model,e.project,e.worktree,json_extract(e.provider,'$.api'),json_extract(e.provider,'$.credential.id'),
     json_extract(e.provider,'$.name'),coalesce(
         (SELECT name FROM projects WHERE id=e.project),
@@ -66,21 +66,21 @@ func agentUsageRows(observations, observedOnly, providerFilters bool) string {
 	` + provider + `,` + attempt + ` ` + agentUsageJoins + ` ` + media + ` ` + join + ` WHERE ` + selection + `
     AND substr(json_extract(e.body,'$.created'),1,19)>=?1
     AND substr(json_extract(e.body,'$.created'),1,19)<=?2
-    AND (?3='[]' OR s.project IN (SELECT value FROM json_each(?3)))
-    AND (?4='[]' OR r.worktree IN (SELECT value FROM json_each(?4)))
-    AND (?9='[]' OR e.session IN (SELECT value FROM json_each(?9)))
+    AND (?3='[]' OR s.project IN (SELECT CAST(value AS TEXT) FROM json_each(?3)))
+    AND (?4='[]' OR r.worktree IN (SELECT CAST(value AS TEXT) FROM json_each(?4)))
+    AND (?9='[]' OR e.session IN (SELECT CAST(value AS TEXT) FROM json_each(?9)))
     AND (CASE WHEN s.project IS NULL THEN coalesce(s.owner,(SELECT id FROM users WHERE local=1))=?14 ELSE EXISTS(SELECT 1 FROM projects access WHERE access.id=s.project AND (access.visibility='shared' OR coalesce(access.owner,(SELECT id FROM users WHERE local=1))=?14)) END))
     SELECT e.sequence,e.turn,e.session,json_extract(e.body,'$.metadata.execution.source'),json_extract(e.body,'$.metadata.execution.media'),
     json_extract(e.body,'$.created'),CASE WHEN e.single THEN e.usage END,CASE WHEN e.single THEN json_extract(e.body,'$.metadata.execution.timing') END,
     json_extract(e.body,'$.metadata.execution.observation.id'),e.ordinal,e.attempt
     FROM responses e
-    WHERE (?5='[]' OR e.provider_id IN (SELECT value FROM json_each(?5)))
-    AND (?6='[]' OR e.model IN (SELECT value FROM json_each(?6)))
-    AND (?7='[]' OR json_extract(e.attempt,'$.outcome') IN (SELECT value FROM json_each(?7)))
-    AND (?8='[]' OR json_extract(e.attempt,'$.end_kind') IN (SELECT value FROM json_each(?8)))
-    AND (?10='[]' OR json_extract(e.provider,'$.credential.id') IN (SELECT value FROM json_each(?10)))
-    AND (?11='[]' OR json_extract(e.attempt,'$.status') IN (SELECT value FROM json_each(?11)))
-    AND (?12='[]' OR ` + agentUsageFailure + ` IN (SELECT value FROM json_each(?12)))
+    WHERE (?5='[]' OR e.provider_id IN (SELECT CAST(value AS TEXT) FROM json_each(?5)))
+    AND (?6='[]' OR e.model IN (SELECT CAST(value AS TEXT) FROM json_each(?6)))
+    AND (?7='[]' OR json_extract(e.attempt,'$.outcome') IN (SELECT CAST(value AS TEXT) FROM json_each(?7)))
+    AND (?8='[]' OR json_extract(e.attempt,'$.end_kind') IN (SELECT CAST(value AS TEXT) FROM json_each(?8)))
+    AND (?10='[]' OR json_extract(e.provider,'$.credential.id') IN (SELECT CAST(value AS TEXT) FROM json_each(?10)))
+    AND (?11='[]' OR json_extract(e.attempt,'$.status') IN (SELECT CAST(value AS INTEGER) FROM json_each(?11)))
+    AND (?12='[]' OR ` + agentUsageFailure + ` IN (SELECT CAST(value AS TEXT) FROM json_each(?12)))
     AND (NOT ?15 OR json_extract(e.provider,'$.credential.id') IS NULL)
     AND (NOT ?16 OR e.attempt IS NOT NULL)
     AND (NOT ?17 OR coalesce(CASE WHEN e.single THEN json_extract(e.usage,'$.cache_read') END,

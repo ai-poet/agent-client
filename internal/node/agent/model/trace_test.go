@@ -140,6 +140,11 @@ func TestTraceFailedSDKAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A rejected route is resent once, so the trace holds one line per attempt;
+	// the first line is the one this test inspects.
+	if line, _, _ := strings.Cut(string(raw), "\n"); line != "" {
+		raw = []byte(line)
+	}
 	var row struct {
 		RequestID string `json:"request_id"`
 		Outcome   string

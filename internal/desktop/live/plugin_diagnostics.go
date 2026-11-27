@@ -35,7 +35,12 @@ func pluginDiagnostic(source protocol.NotificationSystemSystemSource, code proto
 // reportDiagnostic sends a report to the Node the failure belongs to. Its
 // outcome is not shown: the notice is the Node's, and a Node that is away
 // has none to raise.
-func (r *Runtime) reportDiagnostic(report protocol.NotificationSystemSystemDiagnostic) {
+func (r *Runtime) reportDiagnostic(err error, report protocol.NotificationSystemSystemDiagnostic) {
+	// Keep the toast, but do not send a Node-classified delivery back as a
+	// new incident. Plugin-authored error strings are not delivery evidence.
+	if fault := commandFault(err); fault != nil && fault.ReportOwned {
+		return
+	}
 	if report.Code == protocol.ErrorCodeCancelled || !r.controller.Connected() {
 		return
 	}

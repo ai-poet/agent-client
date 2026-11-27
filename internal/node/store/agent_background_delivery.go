@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
+	"github.com/ai-poet/cheaprouter-harness/internal/memory"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
@@ -40,18 +42,51 @@ const backgroundBatchBytes = 32 * 1024
 const automaticLimit = 8
 const automaticLimitMax = 100
 
+const maxRefusedDeliveries = 512
+
 // refusedDeliveries remembers the reason last logged for each session so a
 // delivery that stays refused is reported once, not on every claim pass.
-var refusedDeliveries sync.Map
+var refusedDeliveries = struct {
+	mu      sync.Mutex
+	reasons map[protocol.SessionID]string
+}{
+	reasons: map[protocol.SessionID]string{},
+}
+
+func init() {
+	memory.Default().Register("store.refused_deliveries", func(level memory.Level) {
+		if level != memory.Pressure {
+			return
+		}
+		refusedDeliveries.mu.Lock()
+		clear(refusedDeliveries.reasons)
+		refusedDeliveries.mu.Unlock()
+	})
+}
+
+// clearRefusedDelivery drops any remembered delivery refusal reason for session.
+func clearRefusedDelivery(session protocol.SessionID) {
+	refusedDeliveries.mu.Lock()
+	delete(refusedDeliveries.reasons, session)
+	refusedDeliveries.mu.Unlock()
+}
 
 func reportDelivery(session protocol.SessionID, reason string) {
 	if reason == "" {
-		refusedDeliveries.Delete(session)
+		clearRefusedDelivery(session)
 		return
 	}
-	if last, ok := refusedDeliveries.Swap(session, reason); ok && last == reason {
+	refusedDeliveries.mu.Lock()
+	last, ok := refusedDeliveries.reasons[session]
+	if ok && last == reason {
+		refusedDeliveries.mu.Unlock()
 		return
 	}
+	if !ok && len(refusedDeliveries.reasons) >= maxRefusedDeliveries {
+		clear(refusedDeliveries.reasons)
+	}
+	refusedDeliveries.reasons[session] = reason
+	refusedDeliveries.mu.Unlock()
 	logging.Emit(slog.LevelWarn, slog.String("event", "node.background"), slog.String("operation", "deliver"), slog.String("status", "refused"), slog.String("session", session.String()), slog.String("reason", reason))
 }
 
@@ -130,7 +165,7 @@ func nodeIdentity(ctx context.Context, db *sql.Conn) (protocol.NodeID, error) {
 // deliverable results and is free to run one. The claim pass calls it when
 // nothing is ready, so a result waits only for its blocker, whichever
 // transaction removed it.
-func scheduleDeliveries(ctx context.Context, db *sql.Conn, now time.Time) (bool, []protocol.Event, error) {
+func scheduleDeliveries(ctx context.Context, db *sql.Conn, now time.Time, held []protocol.SessionID) (bool, []protocol.Event, error) {
 	rows, err := db.QueryContext(ctx, "SELECT DISTINCT session FROM agent_background WHERE "+backgroundDeliverable)
 	if err != nil {
 		return false, nil, err
@@ -147,7 +182,9 @@ func scheduleDeliveries(ctx context.Context, db *sql.Conn, now time.Time) (bool,
 			rows.Close()
 			return false, nil, e
 		}
-		sessions = append(sessions, id)
+		if !slices.Contains(held, id) {
+			sessions = append(sessions, id)
+		}
 	}
 	if err = errors.Join(rows.Err(), rows.Close()); err != nil || len(sessions) == 0 {
 		return false, nil, err
@@ -213,7 +250,7 @@ func backgroundResult(ctx context.Context, db *sql.Conn, record BackgroundRecord
 		}
 		if failed.Error != nil {
 			result.Notice.Summary = new(processPreview(failed.Error.Message, 512))
-			result.ErrorCode = &failed.Error.Code
+			result.ApplyFault(failed.Error)
 		}
 	}
 	return result, nil
@@ -346,9 +383,40 @@ func deliverBackground(ctx context.Context, db *sql.Conn, turn protocol.TurnID, 
 		events, err := activityEvent(ctx, db, run.Session)
 		return nil, append(released, events...), err
 	}
+	var fileChanges map[string]map[string]string
+	for _, bg := range records {
+		if bg.Task.Kind.Kind != "agent" {
+			continue
+		}
+		child, ok := processStatusData[protocol.ConversationBackgroundKindAgentPayload](bg.Task.Kind.Data)
+		if !ok {
+			continue
+		}
+		childRun, err := ReadAgentRun(ctx, db, child.Turn)
+		if err != nil {
+			continue
+		}
+		revs, err := childFileRevisions(ctx, db, child.Turn)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(revs) == 0 {
+			continue
+		}
+		if fileChanges == nil {
+			fileChanges = map[string]map[string]string{}
+		}
+		key := childRun.Worktree.String()
+		if fileChanges[key] == nil {
+			fileChanges[key] = map[string]string{}
+		}
+		for path, rev := range revs {
+			fileChanges[key][path] = rev
+		}
+	}
 	record := canonical.NewRecord(turn, "background", &canonical.Background{Initial: initialNotice, Results: results}, now)
 	record.Provenance.Author = "system"
-	record.Metadata.Runtime = &canonical.Runtime{AgentVisible: true}
+	record.Metadata.Runtime = &canonical.Runtime{AgentVisible: true, FileChanges: fileChanges}
 	entry, events, err := AppendCanonical(ctx, db, run.Session, record)
 	if err != nil {
 		return nil, nil, err

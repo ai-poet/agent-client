@@ -177,7 +177,7 @@ func TestCommandKinds(t *testing.T) {
 		}
 	}
 	got := CommandKinds()
-	if extensions := []string{"apply_git_hunk", "synthesize_speech", "count_feature", "read_plugin_memory", "identity", "configuration_follow", "read_resource_catalog", "read_knowledge_candidates", "call_host_handler", "resume_controller_login", "takeover_terminal"}; len(got) != len(want)+len(extensions) || !reflect.DeepEqual(got[:len(want)], want) || !reflect.DeepEqual(got[len(want):], extensions) {
+	if extensions := []string{"apply_git_hunk", "synthesize_speech", "count_feature", "read_plugin_memory", "identity", "configuration_follow", "read_resource_catalog", "read_knowledge_candidates", "call_host_handler", "resume_controller_login", "retry_child_turn", "takeover_terminal"}; len(got) != len(want)+len(extensions) || !reflect.DeepEqual(got[:len(want)], want) || !reflect.DeepEqual(got[len(want):], extensions) {
 		t.Fatalf("command kinds differ from the captured inventory plus the documented native extensions\nwant: %v + %v\n got: %v", want, extensions, got)
 	}
 	t.Run("native Git hunk extension validates captured revisions", func(t *testing.T) {

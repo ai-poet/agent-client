@@ -96,7 +96,7 @@ func (p *workspaceProject) runBranchSwitch(command protocol.Command, branch pane
 			p.panel.SetGitSwitchPending([]panel.PendingOperation{{Label: "files_check_result", Run: func(*ui.Context) { p.runBranchSwitch(command, branch, local, finish) }}})
 		} else if faultCode(err) == protocol.ErrorCodeConflict {
 			p.panel.SetGitSwitchPending([]panel.PendingOperation{{Label: "git_stash_switch", Run: func(*ui.Context) {
-				delete(p.failedReads, "git-stash-switch")
+				p.retryRead("git-stash-switch")
 				p.read("git-stash-switch", protocol.Command{Kind: "inspect_git", Data: protocol.CommandInspectGitPayload{Worktree: p.owner.ID}}, func(c *ui.Context, out protocol.Output) {
 					status, ok := detail[protocol.GitStatus](out.Data)
 					if !ok {

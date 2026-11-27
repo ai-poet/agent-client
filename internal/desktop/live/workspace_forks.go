@@ -72,7 +72,7 @@ func (r *Runtime) openManagedConversation(cv *viewmodel.Conversation, session *p
 	}
 	r.App.PanelOpen = true
 	r.App.Panel.Show(panel.Tab{Kind: panel.Changes, ID: ":changes"})
-	delete(p.failedReads, "managed-worktree-status")
+	p.retryRead("managed-worktree-status")
 	p.read("managed-worktree-status", protocol.Command{Kind: "inspect_git", Data: protocol.CommandInspectGitPayload{Worktree: p.owner.ID}}, func(c *ui.Context, out protocol.Output) {
 		status, ok := detail[protocol.GitStatus](out.Data)
 		if !ok {

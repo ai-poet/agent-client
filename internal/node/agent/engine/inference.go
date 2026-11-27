@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
@@ -86,6 +87,14 @@ func (r *Runtime) infer(x *execution, captured model.Binding, languageModel fant
 		}
 	}
 	parts = append(parts, prompt.Part{Key: "instructions", Text: strings.Join(instructions, "\n\n")})
+	var sections []prompt.Part
+	for _, tool := range x.tools {
+		if tool.TurnSection.Key != "" && !slices.ContainsFunc(sections, func(part prompt.Part) bool { return part.Key == tool.TurnSection.Key }) {
+			sections = append(sections, tool.TurnSection)
+		}
+	}
+	slices.SortFunc(sections, func(a, b prompt.Part) int { return strings.Compare(a.Key, b.Key) })
+	parts = append(parts, sections...)
 	ownedParts := []string{}
 	for _, tool := range x.tools {
 		for _, part := range tool.ContextParts {
@@ -149,16 +158,30 @@ func (r *Runtime) infer(x *execution, captured model.Binding, languageModel fant
 		out.record.Metadata.Runtime = &canonical.Runtime{UserVisible: true, AgentVisible: true, Inference: &canonical.Inference{Provider: "sailry:" + binding.Provider.ID.String(), RequestedModel: binding.Config.Model, ReplayPrefix: model.ReplayPrefix(call)}}
 		return out
 	}
+	observeRequest := model.RequestObserver(x.ctx)
+	var diagnostic model.RequestObservation
+	var requestAttempts uint64
 	for emptyAttempt := 0; emptyAttempt <= 3; emptyAttempt++ {
 		out := newOutput()
 		var streamErr error
 		var attempts []model.Attempt
 		metric := r.telemetry.Capture()
-		err = model.Run(x.ctx, languageModel, call, model.Main, r.clock, func(attempt model.Attempt) error {
+		visibleRetryStart := false
+		streamCtx := model.WithCooldown(x.ctx, r.cooldowns, model.CredentialCooldownKey(binding))
+		if observeRequest != nil {
+			// The outer empty-response policy retries the very same request. Delay
+			// delivery until it too has settled, counting both kinds of attempt.
+			streamCtx = model.WithRequestObserver(streamCtx, func(result model.RequestObservation) { diagnostic = result })
+		}
+		err = model.Run(streamCtx, languageModel, call, model.Main, r.clock, func(attempt model.Attempt) error {
+			requestAttempts++
 			r.observeModel(metric, binding, attempt)
 			x.timeline.attempt(attempt)
 			if attempt.RetryDelay != nil {
-				record := r.retryRecord(x, binding, purpose, attempt)
+				if attempt.Index == 0 && showFirstRetry(attempt) {
+					visibleRetryStart = true
+				}
+				record := r.retryRecord(x, binding, purpose, attempt, visibleRetryStart)
 				// Committing this draft's ID clears provisional text on every
 				// controller before the next attempt, without persisting failed
 				// tool calls or repeating an already completed model step.
@@ -203,7 +226,19 @@ func (r *Runtime) infer(x *execution, captured model.Binding, languageModel fant
 			}
 			billing = append(billing, record)
 		}
-		if x.ctx.Err() != nil || err != nil || !empty || emptyAttempt == 3 || out.limited || successfulTool(state.Records) {
+		retryEmpty := empty && err == nil && !out.limited && !successfulTool(state.Records)
+		if retryEmpty {
+			diagnostic = model.RequestObservation{Failure: model.InvalidResponse}
+		}
+		if x.ctx.Err() != nil || !retryEmpty || emptyAttempt == 3 {
+			if observeRequest != nil && diagnostic.Failure != "" && x.ctx.Err() == nil && (err == nil || model.Classify(err).RequestObserved()) {
+				diagnostic.Attempts = requestAttempts
+				diagnostic.Outcome = model.RequestRecovered
+				if retryEmpty || err != nil {
+					diagnostic.Outcome = model.RequestFailed
+				}
+				observeRequest(diagnostic)
+			}
 			finish := canonical.Completed
 			if x.ctx.Err() != nil {
 				finish = canonical.Interrupted
@@ -263,6 +298,7 @@ func (r *Runtime) infer(x *execution, captured model.Binding, languageModel fant
 				runtime := canonical.DefaultRuntime()
 				runtime.AgentVisible = false
 				record.Metadata.Runtime = &runtime
+				x.failedInferenceRecord, x.inferenceCause = record.ID, err
 				return r.save(x.ctx, x.inv.Session.ID, record)
 			}
 			return nil
@@ -437,24 +473,34 @@ func successfulTool(records []canonical.Record) bool {
 	return found
 }
 
-// quietRetryDelay is the longest wait, in milliseconds, of a first retry that
-// shows no row.
-const quietRetryDelay = 5000
+// Fast transient failures keep the first retry quiet (Attempt 0) to avoid UI
+// jitter. Once an attempt already waited visibly—either a stream idle stall or
+// at least visibleFirstRetryElapsed—showing Attempt 1 immediately lets the user
+// see that recovery is underway instead of staring at a silent spinner.
+const visibleFirstRetryElapsed = 15 * time.Second
+
+func showFirstRetry(attempt model.Attempt) bool {
+	if attempt.Failure == nil {
+		return false
+	}
+	return attempt.RetryDelay != nil && *attempt.RetryDelay >= 5*time.Second || attempt.Failure.StreamStalled() || attempt.Finished.Sub(attempt.Started) >= visibleFirstRetryElapsed
+}
 
 // retryRecord is the observation of an attempt that waits to be sent again,
 // which the conversation shows as the request's retry row. It is the attempt's
 // only record: its usage and timing are not observed a second time.
 //
-// The first retry is a quick resend that most transient failures clear on, so
-// it is numbered 0, which shows no row, and the rows count the retries after
-// it. A first retry that must wait at least quietRetryDelay still shows.
-func (r *Runtime) retryRecord(x *execution, binding model.Binding, purpose canonical.Purpose, attempt model.Attempt) canonical.Record {
+// Fast failures number the first retry 0, which shows no row; slow failures
+// and stream stalls number retries from 1 so recovery is visible at once.
+func (r *Runtime) retryRecord(x *execution, binding model.Binding, purpose canonical.Purpose, attempt model.Attempt, visibleFirst bool) canonical.Record {
 	record := r.observationRecord(x, binding, purpose, attempt)
 	number, limit, delay := attempt.Index, attempt.RetryLimit, uint64(attempt.RetryDelay.Milliseconds())
-	if number == 0 && delay >= quietRetryDelay {
-		number = 1
+	if visibleFirst {
+		number++
+		limit = max(limit, number)
+	} else {
+		limit = max(limit-min(limit, 1), number)
 	}
-	limit = max(limit-min(limit, 1), number)
 	code := string(attempt.Failure.Kind)
 	message := attempt.Failure.Message
 	record.Metadata.Execution.Retry = &protocol.ConversationRecoveryRetry{Attempt: number, Limit: &limit, DelayMs: &delay, Status: attempt.Status, Code: &code, Error: &message}
@@ -465,7 +511,9 @@ func (r *Runtime) retryRecord(x *execution, binding model.Binding, purpose canon
 func (r *Runtime) observationRecord(x *execution, binding model.Binding, purpose canonical.Purpose, attempt model.Attempt) canonical.Record {
 	message := canonical.NewMessage(canonical.Assistant)
 	message.Model = &binding.Config.Model
-	message.Usage = &attempt.Usage
+	if usageReported(attempt.Usage) {
+		message.Usage = &attempt.Usage
+	}
 	record := canonical.NewRecord(x.inv.Run.Turn, "message", message, attempt.Finished)
 	record.Provenance.Author = "assistant"
 	timing := attempt.Timing

@@ -32,15 +32,16 @@ type Options struct {
 	AttachmentBytes    func(context.Context, protocol.Attachment) ([]byte, error)
 	Clock              clock.Clock
 	Model              func(context.Context, model.Binding) (fantasy.LanguageModel, error)
+	Cooldowns          *model.Cooldowns
 	AuthorizeProvider  func(context.Context, *store.AgentInvocation) error
 	Tools              []Tool
 	ToolsForTurn       func(context.Context, *store.AgentInvocation) ([]Tool, error)
 	HooksForTurn       func(context.Context, *store.AgentInvocation) *hooks.Binding
 	PluginAvailability func(protocol.PluginReference) error
-	// AfterTurn, when set, runs after a main task turn's end is stored. It
-	// receives the settled run and what the execution observed.
-	AfterTurn func(context.Context, *store.AgentInvocation, protocol.ConversationRun, TurnObservation)
-	Telemetry *telemetry.Control
+	TurnCompletion     func(context.Context, *store.AgentInvocation) TurnCompletion
+	AfterTurn          func(context.Context, *store.AgentInvocation, protocol.ConversationRun, TurnObservation)
+	Telemetry          *telemetry.Control
+	RequestObserver    func(model.RequestObservation)
 	// Working, when set, brackets every running turn.
 	Working func() func()
 	// StopCommands, when set, stops a session's background commands. The
@@ -60,6 +61,7 @@ type Runtime struct {
 	toolsForTurn      func(context.Context, *store.AgentInvocation) ([]Tool, error)
 	hooksForTurn      func(context.Context, *store.AgentInvocation) *hooks.Binding
 	afterTurn         func(context.Context, *store.AgentInvocation, protocol.ConversationRun, TurnObservation)
+	turnCompletion    func(context.Context, *store.AgentInvocation) TurnCompletion
 	telemetry         *telemetry.Control
 	working           func() func()
 	stopCommands      func(protocol.SessionID)
@@ -71,6 +73,7 @@ type Runtime struct {
 	publish           func()
 	clock             clock.Clock
 	model             func(context.Context, model.Binding) (fantasy.LanguageModel, error)
+	cooldowns         *model.Cooldowns
 	authorizeProvider func(context.Context, *store.AgentInvocation) error
 	tools             []Tool
 	ctx               context.Context
@@ -84,10 +87,18 @@ type Runtime struct {
 	workers           sync.WaitGroup
 	decisions         sync.Mutex
 	publication       sync.Mutex
+	afterTurnSessions map[protocol.SessionID]struct{} // guarded by publication
 	statisticsMu      sync.Mutex
 	statistics        map[protocol.SessionID]bool
 	statisticsOwners  sync.WaitGroup
 	statisticsStopped bool
+}
+
+// TurnCompletion splits a captured workflow's ordered settlement from normal
+// observers. Only Settle holds its session, and it runs after the end is durable.
+type TurnCompletion struct {
+	Settle  func(context.Context, protocol.ConversationRun, TurnObservation)
+	Observe func(context.Context, protocol.ConversationRun, TurnObservation)
 }
 
 // TurnObservation is what one execution saw that storage does not keep apart:
@@ -116,39 +127,44 @@ type execution struct {
 	renewedSecret     protocol.Secret
 	// sessionRoute: the model keeps the session's history and receives only
 	// new messages, so rewriting earlier ones would replay all of it.
-	sessionRoute    bool
-	childBudget     uint64
-	finishing       bool
-	commandsStopped bool // guarded by Runtime.publication
-	operations      uint64
-	operationsDone  chan struct{}
-	attachments     map[protocol.AttachmentID]*attachmentMaterial
-	hooks           *hooks.Binding
-	timeline        *timeline
-	inv             *store.AgentInvocation
-	ctx             context.Context
-	cancel          context.CancelFunc
-	done            chan struct{}
-	wake            chan struct{}
-	guidance        chan struct{}
-	tools           []Tool
-	names           *exposure
-	deferredContext *string
-	toolCleanup     []func() error
-	inputMu         sync.Mutex
-	inputWake       chan struct{}
-	output          output.Cache
+	sessionRoute          bool
+	childBudget           uint64
+	finishing             bool
+	commandsStopped       bool // guarded by Runtime.publication
+	operations            uint64
+	operationsDone        chan struct{}
+	attachments           map[protocol.AttachmentID]*attachmentMaterial
+	hooks                 *hooks.Binding
+	timeline              *timeline
+	inv                   *store.AgentInvocation
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	done                  chan struct{}
+	wake                  chan struct{}
+	guidance              chan struct{}
+	tools                 []Tool
+	names                 *exposure
+	deferredContext       *string
+	toolCleanup           []func() error
+	inputMu               sync.Mutex
+	inputWake             chan struct{}
+	output                output.Cache
+	failedInferenceRecord string
+	inferenceCause        error
 }
 
 func New(db *store.Handle, node protocol.NodeID, profile string, frames *feed.Hub, publish func(), options Options) *Runtime {
 	if options.Clock == nil {
 		options.Clock = clock.System{}
 	}
+	if options.Cooldowns == nil {
+		options.Cooldowns = model.NewCooldowns()
+	}
 	if options.Model == nil {
 		options.Model = model.New
 	}
-	ctx, cancel := context.WithCancel(store.WithPluginAvailability(context.Background(), options.PluginAvailability))
-	return &Runtime{telemetry: options.Telemetry, working: options.Working, stopCommands: options.StopCommands, stopTransient: options.StopTransient, python: options.Python, validateWorktree: options.ValidateWorktree, attachment: options.Attachment, attachmentBytes: options.AttachmentBytes, db: db, node: node, profile: profile, feed: frames, publish: publish, clock: options.Clock, model: options.Model, authorizeProvider: options.AuthorizeProvider, tools: options.Tools, toolsForTurn: options.ToolsForTurn, hooksForTurn: options.HooksForTurn, afterTurn: options.AfterTurn, ctx: ctx, cancel: cancel, done: make(chan struct{}), wake: make(chan struct{}, 1), active: map[protocol.TurnID]*execution{}, children: map[protocol.TurnID]*delegatedChild{}, activity: make(chan struct{}), statistics: map[protocol.SessionID]bool{}}
+	ctx, cancel := context.WithCancel(model.WithRequestObserver(store.WithPluginAvailability(context.Background(), options.PluginAvailability), options.RequestObserver))
+	return &Runtime{telemetry: options.Telemetry, working: options.Working, stopCommands: options.StopCommands, stopTransient: options.StopTransient, python: options.Python, validateWorktree: options.ValidateWorktree, attachment: options.Attachment, attachmentBytes: options.AttachmentBytes, db: db, node: node, profile: profile, feed: frames, publish: publish, clock: options.Clock, model: options.Model, cooldowns: options.Cooldowns, authorizeProvider: options.AuthorizeProvider, tools: options.Tools, toolsForTurn: options.ToolsForTurn, hooksForTurn: options.HooksForTurn, afterTurn: options.AfterTurn, turnCompletion: options.TurnCompletion, ctx: ctx, cancel: cancel, done: make(chan struct{}), wake: make(chan struct{}, 1), active: map[protocol.TurnID]*execution{}, children: map[protocol.TurnID]*delegatedChild{}, activity: make(chan struct{}), statistics: map[protocol.SessionID]bool{}}
 }
 
 // Recover closes interrupted owners and holds every surviving queue. It never
@@ -274,13 +290,7 @@ func (r *Runtime) run() {
 				unlock()
 				break
 			}
-			parent := r.ctx
-			r.mu.Lock()
-			if child := r.children[inv.Run.Turn]; child != nil {
-				parent = child.ctx
-				child.started = true
-			}
-			r.mu.Unlock()
+			parent := r.startClaimedChild(inv)
 			ctx, cancel := context.WithCancel(store.WithCapturedUser(store.WithUser(parent, inv.User), inv.StorageUser))
 			x := &execution{inv: inv, ctx: ctx, cancel: cancel, done: make(chan struct{}), wake: make(chan struct{}, 1), guidance: make(chan struct{}, 1)}
 			// A turn has one owner. A claim that finds an earlier owner waits

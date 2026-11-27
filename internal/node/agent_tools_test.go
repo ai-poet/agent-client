@@ -106,6 +106,9 @@ func TestAgentManagementTools(t *testing.T) {
 			processMu.Lock()
 			processCalls = append(processCalls, launch)
 			processMu.Unlock()
+			if launch.ReadOnly {
+				return protocol.ProcessCompletion{Outcome: protocol.ProcessOutcome{Kind: "exited", Data: int32(0)}}, nil
+			}
 			return protocol.ProcessCompletion{}, errors.New("management tools must not launch a process")
 		}},
 	})
@@ -213,12 +216,15 @@ func TestAgentManagementTools(t *testing.T) {
 	}
 	// turn submits one message and settles it, resolving every pending
 	// approval with decide. It returns the approvals the turn recorded.
-	turn := func(t *testing.T, mode protocol.WorkMode, permission protocol.Permission, decide func(protocol.ConversationApproval) string, plan func(int, map[string]string) [][3]string) (protocol.Session, []protocol.ConversationApproval, protocol.ConversationHistory) {
+	turn := func(t *testing.T, mode protocol.WorkMode, permission protocol.Permission, decide func(protocol.ConversationApproval) string, plan func(int, map[string]string) [][3]string, roster ...protocol.RoleReference) (protocol.Session, []protocol.ConversationApproval, protocol.ConversationHistory) {
 		t.Helper()
 		script.reset(plan)
 		config := protocol.DefaultSessionConfig()
 		config.Provider, config.Model, config.Mode, config.Permission = provider.ID, "fixture", mode, permission
 		session := commandFixture(t, node, protocol.Command{Kind: "create_session", Data: protocol.CommandCreateSessionPayload{Project: &project.ID, Config: &config}}).Data.(protocol.Session)
+		if len(roster) > 0 {
+			session = commandFixture(t, node, protocol.Command{Kind: "set_session_roles", Data: protocol.CommandSetSessionRolesPayload{Session: session.ID, ExpectedRevision: session.Revision, Roles: roster}}).Data.(protocol.Session)
+		}
 		commandFixture(t, node, protocol.Command{Kind: "submit_turn", Data: protocol.CommandSubmitTurnPayload{
 			Session: session.ID, ExpectedRevision: session.Revision, Message: protocol.ConversationInput{Text: "Manage the catalog"},
 		}})
@@ -324,7 +330,10 @@ func TestAgentManagementTools(t *testing.T) {
 			case 2:
 				return [][3]string{{"mixed-patch", "apply_patch", string(args)}}
 			case 3:
-				return [][3]string{{"mixed-edit", "edit_file", `{"path":"mixed-local.txt","old_text":"after","new_text":"next"}`}}
+				// The pinned edit_file handler requires an explicit revision.
+				// Another patch exercises reuse of the mixed patch's Node receipt
+				// without passing the expected revision in the model's arguments.
+				return [][3]string{{"mixed-edit", "apply_patch", `{"input":"*** Begin Patch\n*** Update File: mixed-local.txt\n@@\n-after\n+next\n*** End Patch"}`}}
 			}
 			return nil
 		})
@@ -369,14 +378,19 @@ func TestAgentManagementTools(t *testing.T) {
 			case 1:
 				return [][3]string{{"read", "read_file", `{"path":` + quoted(path) + `}`}}
 			case 2:
-				return [][3]string{{"edit", "edit_file", `{"path":` + quoted(path) + `,"old_text":"one","new_text":"two"}`}}
+				_, header, _ := strings.Cut(current["read"], "; revision ")
+				revision, _, _ := strings.Cut(header, "\n")
+				return [][3]string{
+					{"missing-revision", "edit_file", `{"path":` + quoted(path) + `,"old_text":"one","new_text":"unapproved"}`},
+					{"edit", "edit_file", `{"path":` + quoted(path) + `,"old_text":"one","new_text":"two","expected_revision":` + quoted(revision) + `}`},
+				}
 			case 3:
 				patch := "*** Begin Patch\n*** Update File: " + slash + "\n@@\n-two\n+three\n*** Add File: " + filepath.ToSlash(added) + "\n+added\n*** End Patch"
 				return [][3]string{{"patch", "apply_patch", `{"input":` + quoted(patch) + `}`}}
 			}
 			return nil
 		})
-		expect(t, results, map[string][]string{"read": {canonical, "one"}, "edit": {canonical}, "patch": {canonical}})
+		expect(t, results, map[string][]string{"read": {canonical, "one"}, "missing-revision": {"invalid_request", "expected_revision"}, "edit": {canonical}, "patch": {canonical}})
 		if content, err := os.ReadFile(path); err != nil || string(content) != "three\n" {
 			t.Fatalf("outside file: %q %v; results %v", content, err, results)
 		}
@@ -747,7 +761,7 @@ func TestAgentManagementTools(t *testing.T) {
 			t.Fatalf("prepared command launches = %d, want 3", len(launches))
 		}
 		for _, launch := range launches {
-			if launch.Access != protocol.ProcessAccessUnrestricted {
+			if launch.Access != protocol.ProcessAccessUnrestricted || launch.ReadOnly {
 				t.Fatalf("executed command differs from full approval: %s", launch.Access)
 			}
 		}
@@ -929,7 +943,58 @@ func TestAgentManagementTools(t *testing.T) {
 		}
 	})
 
+	t.Run("read-only delegated command", func(t *testing.T) {
+		role := protocol.DefaultRoleProfile()
+		role.ID, role.Key, role.Name, role.ReadOnly = protocol.NewRoleID(), "command-reader", "Command reader", true
+		role = commandFixture(t, node, protocol.Command{Kind: "put_role", Data: protocol.CommandPutRolePayload{Role: role}}).Data.(protocol.RoleProfile)
+		processMu.Lock()
+		before := len(processCalls)
+		processMu.Unlock()
+		_, _, history := turn(t, protocol.WorkModeFlagship, protocol.PermissionFull, func(protocol.ConversationApproval) string {
+			t.Fatal("read-only delegated inspection must not ask")
+			return "deny"
+		}, func(step int, results map[string]string) [][3]string {
+			switch step {
+			case 1:
+				return [][3]string{{"spawn", "spawn_agent", `{"task":"Inspect the workspace","role":"command-reader","background":false}`}}
+			case 2:
+				return [][3]string{{"child-run", "run_command", `{"command":"pwd"}`}, {"child-escape", "run_command", `{"command":"pwd","access":"unrestricted"}`}}
+			}
+			return nil
+		}, protocol.RoleReference{ID: role.ID, Revision: role.Revision})
+		if len(history.Page.Children) != 1 || history.Page.Children[0].Run.Status != protocol.ConversationStatusCompleted {
+			t.Fatalf("delegated inspection did not complete: %+v", history.Page.Children)
+		}
+		processMu.Lock()
+		launches := slices.Clone(processCalls[before:])
+		processMu.Unlock()
+		script.mu.Lock()
+		defer script.mu.Unlock()
+		expect(t, script.results, map[string][]string{"child-escape": {"permission_denied", "unrestricted access is not allowed"}})
+		if !process.SandboxSupported() {
+			if len(launches) != 0 || !strings.Contains(script.results["child-run"], "permission_denied") {
+				t.Fatalf("unsupported child sandbox: %+v, %s", launches, script.results["child-run"])
+			}
+			return
+		}
+		if len(launches) != 1 || !launches[0].ReadOnly || launches[0].Access != protocol.ProcessAccessWorkspace || launches[0].Turn != history.Page.Children[0].Run.Turn || launches[0].Background || launches[0].Service || launches[0].Pty {
+			t.Fatalf("child inherited writable process access: %+v", launches)
+		}
+		expect(t, script.results, map[string][]string{"child-run": {`"kind":"command_result"`}})
+	})
 	t.Run("plan mode", func(t *testing.T) {
+		role := protocol.DefaultRoleProfile()
+		role.ID, role.Key, role.Name, role.ReadOnly = protocol.NewRoleID(), "plan-reader", "Plan reader", true
+		role = commandFixture(t, node, protocol.Command{Kind: "put_role", Data: protocol.CommandPutRolePayload{Role: role}}).Data.(protocol.RoleProfile)
+		processMu.Lock()
+		before := len(processCalls)
+		processMu.Unlock()
+		restore := commandFixture(t, node, protocol.Command{Kind: "read_sandbox_settings"}).Data.(protocol.SandboxSettings)
+		defer func() {
+			current := commandFixture(t, node, protocol.Command{Kind: "read_sandbox_settings"}).Data.(protocol.SandboxSettings)
+			current.Enabled = restore.Enabled
+			commandFixture(t, node, protocol.Command{Kind: "save_sandbox_settings", Data: &current})
+		}()
 		var results map[string]string
 		_, approvals, _ := turn(t, protocol.WorkModePlan, protocol.PermissionFull, func(protocol.ConversationApproval) string {
 			t.Fatal("plan mode must not ask")
@@ -951,7 +1016,32 @@ func TestAgentManagementTools(t *testing.T) {
 					{"agent", "add_agent", `{"key":"planner","name":"Planner","instructions":"Plan"}`},
 					{"keep", roles("drop"), `{"role":"` + protocol.NewRoleID().String() + `","expected_revision":"1"}`},
 					{"command", "run_command", `{"command":"git --no-pager diff"}`},
+					{"escape", "run_command", `{"command":"pwd","access":"unrestricted"}`},
+					{"background", "run_command", `{"command":"pwd","background":true}`},
+					{"pty", "run_command", `{"command":"pwd","pty":true,"background":true}`},
 				}
+			case 3:
+				settings := commandFixture(t, node, protocol.Command{Kind: "read_sandbox_settings"}).Data.(protocol.SandboxSettings)
+				settings.Enabled = false
+				commandFixture(t, node, protocol.Command{Kind: "save_sandbox_settings", Data: &settings})
+				// Exercise the launcher independently of the next tool's preparation:
+				// an already prepared foreground workspace command must also fail.
+				processMu.Lock()
+				launches := slices.Clone(processCalls[before:])
+				processMu.Unlock()
+				if len(launches) == 1 {
+					input := protocol.DefaultCommandRunCommandPayload()
+					input.Turn, input.Access, input.Command, input.TimeoutMs = launches[0].Turn, protocol.ProcessAccessWorkspace, "pwd", 1000
+					request := protocol.NewRequest(node.ID(), protocol.Command{Kind: "run_command", Data: &input})
+					effect := &workspaceCompletion{}
+					_, err := node.launchWorkspaceCommand(t.Context(), node.ID(), request, input, effect)
+					effect.close()
+					var denied *protocol.Fault
+					if !errors.As(err, &denied) || denied.Code != protocol.ErrorCodePermissionDenied {
+						t.Errorf("launch after sandbox disabled: %v", err)
+					}
+				}
+				return [][3]string{{"disabled", "run_command", `{"command":"pwd"}`}}
 			}
 			return nil
 		})
@@ -962,13 +1052,31 @@ func TestAgentManagementTools(t *testing.T) {
 			"mcp-install":   {"permission_denied", "MCP mutations are unavailable in Plan mode"},
 			"skills":        {`{"skills":[]}`},
 			"skill-remove":  {"permission_denied", "skill installation changes are unavailable in Plan mode"},
-			"agents":        {`"key":"writer"`},
+			"agents":        {`"key":"plan-reader"`, role.ID.String()},
 			"agent":         {"permission_denied", "planning mode permits read-only tools"},
 			"keep":          {"permission_denied", "planning mode permits read-only tools"},
-			"command":       {"permission_denied", "planning mode permits read-only tools"},
+			"escape":        {"permission_denied", "unrestricted access is not allowed"},
+			"background":    {"permission_denied", "foreground"},
+			"pty":           {"permission_denied", "foreground"},
+			"disabled":      {"permission_denied", "enabled read-only OS sandbox"},
 		})
-		if len(approvals) != 0 {
-			t.Fatalf("plan mode recorded approvals: %+v", approvals)
+		processMu.Lock()
+		launches := slices.Clone(processCalls[before:])
+		processMu.Unlock()
+		if process.SandboxSupported() {
+			if len(approvals) != 1 || approvals[0].Source != protocol.ConversationApprovalSourceSandbox || approvals[0].State != protocol.ConversationApprovalStateApproved || approvals[0].Access == nil || *approvals[0].Access != protocol.ProcessAccessWorkspace {
+				t.Fatalf("Plan+Full command approvals: %+v", approvals)
+			}
+			if len(launches) != 1 || !launches[0].ReadOnly || launches[0].Access != protocol.ProcessAccessWorkspace || launches[0].Background || launches[0].Pty || launches[0].Service {
+				t.Fatalf("Plan+Full launches: %+v", launches)
+			}
+			expect(t, results, map[string][]string{"command": {`"kind":"command_result"`}})
+		} else if len(approvals) != 0 || len(launches) != 0 || !strings.Contains(results["command"], "permission_denied") {
+			t.Fatalf("unsupported OS granted command: %+v, %+v, %s", approvals, launches, results["command"])
+		}
+		roles := commandFixture(t, node, protocol.Command{Kind: "list_roles"}).Data.([]protocol.RoleProfile)
+		if slices.ContainsFunc(roles, func(role protocol.RoleProfile) bool { return role.Key == "planner" }) {
+			t.Fatalf("plan mode edited role catalog: %+v", roles)
 		}
 		installed := commandFixture(t, node, protocol.Command{Kind: "list_plugins"}).Data.([]protocol.PluginSummary)
 		if !slices.ContainsFunc(installed, func(entry protocol.PluginSummary) bool { return entry.Name == "roles-fixture" }) ||

@@ -244,7 +244,15 @@ func (node *Node) workspaceIO(ctx context.Context, caller protocol.NodeID, reque
 			release := node.locks.effect()
 			effect.release = func() { release(); node.locks.settings.Unlock() }
 		default:
-			effect.release = node.locks.effect(source, root)
+			if prepared != nil && prepared.Rejected == nil && fileTextMutation(command.Kind) {
+				fileRoot := root
+				if effect.fileScope.root != "" {
+					fileRoot = effect.fileScope.root
+				}
+				effect.release = node.locks.fileEffect(fileRoot, prepared)
+			} else {
+				effect.release = node.locks.effect(source, root)
+			}
 		}
 		if effect.release != nil && node.locks.registrations.Load() != registrations {
 			// A project or worktree was registered, moved or removed while

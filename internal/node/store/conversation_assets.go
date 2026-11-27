@@ -13,6 +13,9 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 )
 
+// Leave the same reply headroom as history pages for metadata and the Link envelope.
+const conversationAssetPageBytes = protocol.MAX_FRAME_BYTES - 64*1024
+
 // ListConversationAssets derives bounded inventory pages from canonical history.
 // It does not index workspace writes or inspect the filesystem.
 func ListConversationAssets(ctx context.Context, db *sql.Conn, session protocol.SessionID, query protocol.ConversationAssetsQuery) (protocol.ConversationAssetsPage, error) {
@@ -39,54 +42,37 @@ func ListConversationAssets(ctx context.Context, db *sql.Conn, session protocol.
 	}
 	boundary := uint64(math.MaxInt64)
 	if query.Before != nil {
-		boundary = *query.Before
+		boundary = *query.Before - 1
 	}
-	rows, err := db.QueryContext(ctx, "SELECT e.sequence,e.turn,e.body FROM conversation_events h JOIN agent_events e ON e.sequence=h.sequence WHERE h.session=?1 AND h.sequence<?2 ORDER BY h.sequence DESC LIMIT 257", session.String(), boundary)
+	oldest, more, err := conversationAssetBoundary(ctx, db, session, boundary)
+	if err != nil || oldest == 0 {
+		return page, err
+	}
+	rows, err := db.QueryContext(ctx, `SELECT h.sequence,e.turn,e.body`+conversationAssetMembers+` AND h.sequence>=?3 ORDER BY h.sequence DESC`, session.String(), boundary, oldest)
 	if err != nil {
 		return page, err
 	}
-	type event struct {
-		sequence uint64
-		turn     string
-		body     []byte
-	}
-	records := []event{}
-	storedBytes := 0
-	more := false
-	for rows.Next() {
-		if len(records) == 256 || storedBytes >= 4*1024*1024 {
-			more = true
-			break
-		}
-		var value event
-		if err = rows.Scan(&value.sequence, &value.turn, &value.body); err != nil {
-			rows.Close()
-			return page, err
-		}
-		records = append(records, value)
-		storedBytes += len(value.body)
-	}
-	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
-		return page, err
-	}
+	defer rows.Close()
 	type location struct {
 		worktree protocol.WorktreeID
 		root     *string
 	}
 	locations := map[protocol.TurnID]location{}
 	var last uint64
-	for _, value := range records {
-		if len(page.Groups) == int(query.Limit) {
-			page.NextBefore = &last
-			return page, nil
+	remaining := conversationAssetPageBytes
+	for rows.Next() {
+		var sequence uint64
+		var turnText string
+		var body sql.RawBytes
+		if err := rows.Scan(&sequence, &turnText, &body); err != nil {
+			return page, err
 		}
-		last = value.sequence
-		turn, err := protocol.ParseTurnID(value.turn)
+		turn, err := protocol.ParseTurnID(turnText)
 		if err != nil {
 			return page, err
 		}
 		var record canonical.Record
-		if err = json.Unmarshal(value.body, &record); err != nil {
+		if err = json.Unmarshal(body, &record); err != nil {
 			return page, err
 		}
 		kind := protocol.ConversationAssetsKindArtifact
@@ -94,6 +80,7 @@ func ListConversationAssets(ctx context.Context, db *sql.Conn, session protocol.
 			kind = protocol.ConversationAssetsKindResource
 		}
 		if query.Kind != nil && *query.Kind != kind {
+			last = sequence
 			continue
 		}
 		owner, ok := locations[turn]
@@ -112,13 +99,41 @@ func ListConversationAssets(ctx context.Context, db *sql.Conn, session protocol.
 			}
 			locations[turn] = owner
 		}
-		items, err := conversationAssetItems(ctx, db, record, owner.worktree, owner.root)
+		items, itemBytes, err := conversationAssetItems(ctx, db, record, owner.worktree, owner.root)
 		if err != nil {
 			return page, err
 		}
 		if len(items) > 0 {
-			page.Groups = append(page.Groups, protocol.ConversationAssetsGroup{Sequence: value.sequence, Turn: turn, Worktree: owner.worktree, TimestampMs: record.Created.UnixMilli(), Kind: kind, Items: items})
+			group := protocol.ConversationAssetsGroup{Sequence: sequence, Turn: turn, Worktree: owner.worktree, TimestampMs: record.Created.UnixMilli(), Kind: kind}
+			// The empty items array includes both brackets. Its contents have
+			// already been encoded to deduplicate the targets.
+			header, err := encode(group)
+			if err != nil {
+				return page, err
+			}
+			size := len(header) + itemBytes
+			if size > conversationAssetPageBytes {
+				return page, invalid("conversation asset group exceeds the response frame budget")
+			}
+			if len(page.Groups) > 0 {
+				size++ // comma between groups
+			}
+			if size > remaining {
+				more = true
+				break
+			}
+			remaining -= size
+			group.Items = items
+			page.Groups = append(page.Groups, group)
 		}
+		last = sequence
+		if len(page.Groups) == int(query.Limit) {
+			more = more || last > oldest
+			break
+		}
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return page, err
 	}
 	if more {
 		page.NextBefore = &last
@@ -126,10 +141,38 @@ func ListConversationAssets(ctx context.Context, db *sql.Conn, session protocol.
 	return page, nil
 }
 
+const conversationAssetMembers = ` FROM conversation_events h CROSS JOIN agent_events e ON e.sequence=h.sequence WHERE h.session=?1 AND h.sequence<=?2`
+
+func conversationAssetBoundary(ctx context.Context, db *sql.Conn, session protocol.SessionID, through uint64) (oldest uint64, more bool, err error) {
+	rows, err := db.QueryContext(ctx, `SELECT h.sequence,`+historyStoredBytes+conversationAssetMembers+` ORDER BY h.sequence DESC LIMIT 257`, session.String(), through)
+	if err != nil {
+		return 0, false, err
+	}
+	defer rows.Close()
+	var storedBytes int64
+	for count := 0; rows.Next(); count++ {
+		var sequence uint64
+		var size int64
+		if err := rows.Scan(&sequence, &size); err != nil {
+			return 0, false, err
+		}
+		// One oversized stored event must advance on its own. Only fetch bodies
+		// inside this window, even if the lookahead event is very large.
+		if count == 256 || count > 0 && size > 4*1024*1024-storedBytes {
+			more = true
+			break
+		}
+		oldest = sequence
+		storedBytes += size
+	}
+	return oldest, more, errors.Join(rows.Err(), rows.Close())
+}
+
 type conversationAssetTargets struct {
-	items []protocol.ConversationAssetsTarget
-	seen  map[string]bool
-	err   error
+	items        []protocol.ConversationAssetsTarget
+	seen         map[string]bool
+	encodedBytes int
+	err          error
 }
 
 func (targets *conversationAssetTargets) push(kind string, data any) {
@@ -146,6 +189,14 @@ func (targets *conversationAssetTargets) push(kind string, data any) {
 		targets.seen = map[string]bool{}
 	}
 	if !targets.seen[string(body)] {
+		if len(targets.items) > 0 {
+			targets.encodedBytes++ // comma between targets
+		}
+		if len(body) > conversationAssetPageBytes-targets.encodedBytes {
+			targets.err = invalid("conversation asset group exceeds the response frame budget")
+			return
+		}
+		targets.encodedBytes += len(body)
 		targets.items = append(targets.items, value)
 		targets.seen[string(body)] = true
 	}
@@ -163,11 +214,11 @@ func (targets *conversationAssetTargets) image(record canonical.Record, worktree
 	}
 	return err
 }
-func conversationAssetItems(ctx context.Context, db *sql.Conn, record canonical.Record, worktree protocol.WorktreeID, root *string) ([]protocol.ConversationAssetsTarget, error) {
+func conversationAssetItems(ctx context.Context, db *sql.Conn, record canonical.Record, worktree protocol.WorktreeID, root *string) ([]protocol.ConversationAssetsTarget, int, error) {
 	targets := &conversationAssetTargets{items: []protocol.ConversationAssetsTarget{}}
 	message := record.Message()
 	if message == nil {
-		return targets.items, nil
+		return targets.items, 0, nil
 	}
 	hidden := record.Provenance.Author == "system" && record.Metadata.Context != nil && record.Metadata.Context.Captured
 	if !hidden {
@@ -191,21 +242,21 @@ func conversationAssetItems(ctx context.Context, db *sql.Conn, record canonical.
 				case *canonical.AssetContent:
 					if block.Kind == "image" {
 						if err := targets.image(record, worktree, part, 0, value.Asset); err != nil {
-							return nil, err
+							return nil, 0, err
 						}
 					}
 				case *canonical.FileContent:
 					if strings.HasPrefix(value.File.URI, "sailry-attachment://") {
 						id, err := protocol.ParseAttachmentID(strings.TrimPrefix(value.File.URI, "sailry-attachment://"))
 						if err != nil {
-							return nil, err
+							return nil, 0, err
 						}
 						attachment, err := GetTurnAttachment(ctx, db, record.Turn, id)
 						if err != nil {
-							return nil, err
+							return nil, 0, err
 						}
 						if value.File.Mime == nil || *value.File.Mime != attachment.Spec.MediaType {
-							return nil, invalid("attachment media type mismatch")
+							return nil, 0, invalid("attachment media type mismatch")
 						}
 						targets.push("attachment", &attachment)
 					}
@@ -218,7 +269,7 @@ func conversationAssetItems(ctx context.Context, db *sql.Conn, record canonical.
 					}
 					for index, asset := range conversationAssetImages(value) {
 						if err := targets.image(record, worktree, part, uint64(index), asset); err != nil {
-							return nil, err
+							return nil, 0, err
 						}
 					}
 				}
@@ -248,7 +299,7 @@ func conversationAssetItems(ctx context.Context, db *sql.Conn, record canonical.
 		}
 		hydrated, err := HydrateCanonicalPayload(ctx, db, response.Result)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		raw := rawAgentTool{Presentation: protocol.ToolPresentationContent, Result: &hydrated, Format: response.Format}
 		for index, asset := range conversationAssetImages(response) {
@@ -271,7 +322,7 @@ func conversationAssetItems(ctx context.Context, db *sql.Conn, record canonical.
 			}
 		}
 	}
-	return targets.items, targets.err
+	return targets.items, targets.encodedBytes, targets.err
 }
 
 func conversationAssetResultMayContain(value json.RawMessage, key string) bool {

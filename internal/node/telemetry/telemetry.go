@@ -50,10 +50,15 @@ type Control struct {
 	metrics      bool
 	configured   bool
 	closing      bool
-	epoch        uint64
-	scope        context.Context // ends when the epoch advances
-	advance      context.CancelFunc
 	installation string
+
+	identityScope  context.Context
+	cancelIdentity context.CancelFunc
+	errorScope     context.Context
+	cancelErrors   context.CancelFunc
+	metricsScope   context.Context
+	cancelMetrics  context.CancelFunc
+	metricsEpoch   uint64
 
 	breadcrumbs []breadcrumb
 	limits      map[string]*limit
@@ -110,19 +115,27 @@ func New(options Options) *Control {
 		c.channel = "beta"
 	}
 	c.release = "sailry@" + link.ProductVersion + "+" + revision
-	c.scope, c.advance = context.WithCancel(context.Background())
+	c.identityScope, c.cancelIdentity = context.WithCancel(context.Background())
+	c.errorScope, c.cancelErrors = context.WithCancel(c.identityScope)
+	c.metricsScope, c.cancelMetrics = context.WithCancel(c.identityScope)
 	return c
 }
 
-// advanceLocked abandons everything prepared under the previous consent or
-// identity: reports in flight, warnings kept for the next report and the
-// usage window.
-func (c *Control) advanceLocked() {
-	c.epoch++
-	c.advance()
-	c.scope, c.advance = context.WithCancel(context.Background())
-	c.breadcrumbs = nil
+func (c *Control) advanceMetricsLocked() {
+	c.metricsEpoch++
+	c.cancelMetrics()
+	if c.ready {
+		c.metricsScope, c.cancelMetrics = context.WithCancel(c.identityScope)
+	}
 	c.clearWindowLocked()
+}
+
+func (c *Control) advanceErrorsLocked() {
+	c.cancelErrors()
+	if c.ready {
+		c.errorScope, c.cancelErrors = context.WithCancel(c.identityScope)
+	}
+	c.breadcrumbs = nil
 }
 
 // Configure takes the saved settings. The first one counts the launch when
@@ -130,9 +143,21 @@ func (c *Control) advanceLocked() {
 func (c *Control) Configure(settings protocol.TelemetrySettings) {
 	c.mu.Lock()
 	id := settings.InstallationID.String()
-	if !c.closing && !(c.ready && c.errors == settings.Errors && c.metrics == settings.Metrics && c.installation == id) {
+	if !c.closing {
+		identityChanged := !c.ready || c.installation != id
+		errorsChanged := identityChanged || c.errors != settings.Errors
+		metricsChanged := identityChanged || c.metrics != settings.Metrics
 		c.ready, c.errors, c.metrics, c.installation = true, settings.Errors, settings.Metrics, id
-		c.advanceLocked()
+		if identityChanged {
+			c.cancelIdentity()
+			c.identityScope, c.cancelIdentity = context.WithCancel(context.Background())
+		}
+		if errorsChanged {
+			c.advanceErrorsLocked()
+		}
+		if metricsChanged {
+			c.advanceMetricsLocked()
+		}
 	}
 	first := !c.configured && !c.closing
 	c.configured = true
@@ -164,7 +189,9 @@ func (c *Control) Close() {
 	}
 	c.mu.Lock()
 	c.ready = false
-	c.advanceLocked()
+	c.cancelIdentity()
+	c.advanceErrorsLocked()
+	c.advanceMetricsLocked()
 	c.mu.Unlock()
 	<-done
 }

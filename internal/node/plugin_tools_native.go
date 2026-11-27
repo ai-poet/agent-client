@@ -17,29 +17,32 @@ func (owner *pluginScriptTurn) bindNative(tool, bound engine.Tool, declaration p
 	tool.Confirm, tool.ConfigureApproval, tool.Approved, tool.Close = bound.Confirm, bound.ConfigureApproval, bound.Approved, bound.Close
 	var mu sync.Mutex
 	calls := map[string]canonical.ToolRequest{}
-	tool.Prepare = func(ctx context.Context, call canonical.ToolRequest) error {
+	transform := func(ctx context.Context, call canonical.ToolRequest) (canonical.ToolRequest, error) {
 		var input any
 		if json.Unmarshal(call.Arguments, &input) != nil {
-			return &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "invalid plugin tool arguments"}
+			return call, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "invalid plugin tool arguments"}
 		}
 		prepared, err := owner.evaluate(ctx, handler.Name, declaration.Name, call.ID, input, true)
 		if err != nil {
-			return err
+			return call, err
 		}
 		var result any
 		if json.Unmarshal(prepared, &result) != nil {
-			return &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "plugin tool returned invalid preparation"}
+			return call, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "plugin tool returned invalid preparation"}
 		}
 		if pluginResultFailed(result) {
 			object := result.(map[string]any)
 			body, _ := json.Marshal(object["error"])
 			var failure protocol.Fault
 			if json.Unmarshal(body, &failure) == nil && failure.Code != "" && failure.Message != "" {
-				return &failure
+				return call, &failure
 			}
-			return &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "plugin tool preparation failed"}
+			return call, &protocol.Fault{Code: protocol.ErrorCodeInvalidRequest, Message: "plugin tool preparation failed"}
 		}
 		call.Arguments = prepared
+		return call, nil
+	}
+	capture := func(ctx context.Context, call canonical.ToolRequest) error {
 		if bound.Prepare != nil {
 			if err := bound.Prepare(ctx, call); err != nil {
 				return err
@@ -49,6 +52,25 @@ func (owner *pluginScriptTurn) bindNative(tool, bound engine.Tool, declaration p
 		calls[call.ID] = call
 		mu.Unlock()
 		return nil
+	}
+	tool.Prepare = func(ctx context.Context, call canonical.ToolRequest) error {
+		input, err := transform(ctx, call)
+		if err != nil {
+			return err
+		}
+		return capture(ctx, input)
+	}
+	if bound.NativeQueue {
+		tool.NativeQueue, tool.FilePaths = true, bound.FilePaths
+		tool.QueueArguments, tool.PrepareQueued = transform, capture
+	}
+	tool.ReleasePrepared = func(call canonical.ToolRequest) {
+		mu.Lock()
+		delete(calls, call.ID)
+		mu.Unlock()
+		if bound.ReleasePrepared != nil {
+			bound.ReleasePrepared(call)
+		}
 	}
 	tool.Execute = func(ctx context.Context, call canonical.ToolRequest) engine.ToolResult {
 		mu.Lock()

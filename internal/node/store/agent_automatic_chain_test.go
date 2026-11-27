@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
@@ -425,6 +427,18 @@ func TestAutomaticChain(t *testing.T) {
 					started, err := readActivity(ctx, db, session.ID)
 					if err != nil {
 						return err
+					}
+					listed, err := ReadSessions(ctx, db)
+					if err != nil {
+						return err
+					}
+					i := slices.IndexFunc(listed, func(s protocol.Session) bool { return s.ID == session.ID })
+					single, err := ReadSession(ctx, db, session.ID)
+					if err != nil {
+						return err
+					}
+					if i < 0 || !reflect.DeepEqual(listed[i], single) {
+						return errors.New("batched active session differs from single session")
 					}
 					if started.Attention.Unread {
 						return errors.New("a started automatic turn left the session unread")

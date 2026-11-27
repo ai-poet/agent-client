@@ -11,6 +11,7 @@ import (
 
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/files"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"lukechampine.com/blake3"
 )
@@ -19,11 +20,14 @@ const attachmentPrefix = "sailry-attachment://"
 const attachmentReadNote = "Contents not included; use an attachment-capable tool with source {\"kind\":\"attachment\",\"value\":\"<id>\"} to read this file"
 
 type attachmentMaterial struct {
-	attachment protocol.Attachment
-	current    bool
-	data       []byte
-	err        error
-	loaded     bool
+	attachment    protocol.Attachment
+	current       bool
+	data          []byte
+	err           error
+	loaded        bool
+	prepared      bool
+	referenceOnly bool
+	mime          string
 }
 
 // hydrateAttachments changes the request's copy only. Canonical history retains
@@ -96,7 +100,7 @@ func (r *Runtime) hydrateAttachments(x *execution, records []canonical.Record) (
 			}
 			included := false
 			image := strings.HasPrefix(strings.ToLower(attachment.Spec.MediaType), "image/")
-			if attachment.Spec.Size <= remaining {
+			if !entry.referenceOnly && (attachment.Spec.Size <= remaining || entry.prepared && uint64(len(entry.data)) <= remaining) {
 				if !entry.loaded {
 					entry.data, entry.err = r.attachmentBytes(x.ctx, attachment)
 					entry.loaded = true
@@ -113,10 +117,29 @@ func (r *Runtime) hydrateAttachments(x *execution, records []canonical.Record) (
 					content = append(content, canonical.Text(uint64(len(content)), "Attachment reference: "+string(descriptor)+"\nAttachment unavailable; contents not included"))
 					continue
 				}
-				mime := strings.Split(mimetype.Detect(entry.data).String(), ";")[0]
+				mime := entry.mime
+				if mime == "" {
+					mime = strings.Split(mimetype.Detect(entry.data).String(), ";")[0]
+				}
 				image = strings.HasPrefix(mime, "image/")
 				switch {
 				case image && vision:
+					if !entry.prepared {
+						source, sent, encoded, err := files.PrepareImage(entry.data)
+						if err != nil {
+							entry.referenceOnly = true
+							entry.data = nil
+							break
+						}
+						mime = source.MimeType
+						if sent != nil {
+							mime = sent.MimeType
+						}
+						entry.data, entry.mime, entry.prepared = encoded, mime, true
+					}
+					if uint64(len(entry.data)) > remaining {
+						break
+					}
 					digest := blake3.Sum256(entry.data)
 					key := hex.EncodeToString(digest[:])
 					assets[key] = entry.data
@@ -131,13 +154,15 @@ func (r *Runtime) hydrateAttachments(x *execution, records []canonical.Record) (
 					included = true
 				}
 				if included {
-					remaining -= attachment.Spec.Size
+					remaining -= uint64(len(entry.data))
 				}
 			}
 			descriptor, _ := json.Marshal(map[string]any{"id": id, "name": attachment.Spec.Name, "media_type": attachment.Spec.MediaType, "size": attachment.Spec.Size})
 			note := "Attachment reference: " + string(descriptor)
 			if !included {
 				switch {
+				case entry.referenceOnly:
+					note += "\nImage contents could not be prepared; only its reference is included."
 				case !image:
 					note += "\n" + attachmentReadNote
 				case canInspect && attachment.Spec.Size <= protocol.MAX_IMAGE_BYTES:

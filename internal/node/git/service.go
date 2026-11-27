@@ -132,6 +132,9 @@ func open(root string) (*gogit.Repository, error) {
 		return nil, mapError(err)
 	}
 	r, err := gogit.PlainOpenWithOptions(root, &gogit.PlainOpenOptions{DetectDotGit: false, EnableDotGitCommonDir: true})
+	if errors.Is(err, gogit.ErrUnknownExtension) || errors.Is(err, gogit.ErrUnsupportedExtensionRepositoryFormatVersion) {
+		r, err = openExtended(root)
+	}
 	if err != nil {
 		return nil, mapError(err)
 	}
