@@ -96,35 +96,7 @@ func TestWorkspaceNativeTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	project := commandFixture(t, node, protocol.Command{Kind: "create_project", Data: protocol.ProjectsDraft{Name: "Fixture", Path: root, Source: protocol.ProjectsSource{Kind: "local"}, Appearance: protocol.DefaultProjectsAppearance()}}).Data.(protocol.Project)
-	provider := protocol.DefaultConversationProvider()
-	provider.ID = protocol.NewProviderID()
-	provider.Revision = 1
-	provider.Enabled = true
-	provider.Name = "Fixture"
-	provider.Api = protocol.ConversationModelApiChatCompletions
-	provider.Authentication = protocol.AuthenticationApiKey
-	provider.Endpoint = "http://fixture.invalid/v1"
-	provider.DefaultModel = "fixture"
-	selected := protocol.DefaultConversationModel()
-	selected.ID = "fixture"
-	selected.Context = 32000
-	selected.Output = 8000
-	selected.Tools = true
-	provider.Models = []protocol.ConversationModel{selected}
-	err = node.profile.Store.Node.Write(t.Context(), func(db *sql.Conn) error {
-		body, err := json.Marshal(map[string]any{"id": provider.ID, "provider": provider, "listed": true, "authorizations": map[string]any{}, "quota": nil})
-		if err != nil {
-			return err
-		}
-		_, err = db.ExecContext(t.Context(), "INSERT INTO providers(id,body) VALUES(?1,?2)", provider.ID.String(), body)
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	config := protocol.DefaultSessionConfig()
-	config.Provider = provider.ID
-	config.Model = "fixture"
+	config := workspaceTurnConfig(t, node)
 	config.Permission = protocol.PermissionAsk
 	config.Mode = protocol.WorkModeCode
 	session := commandFixture(t, node, protocol.Command{Kind: "create_session", Data: protocol.CommandCreateSessionPayload{Project: &project.ID, Config: &config}}).Data.(protocol.Session)
@@ -217,5 +189,140 @@ func TestWorkspaceNativeTurn(t *testing.T) {
 	listed := commandFixture(t, node, protocol.Command{Kind: "list_file_checkpoints", Data: protocol.CommandListFileCheckpointsPayload{Session: session.ID, Turn: turn, Limit: 50}}).Data.(protocol.ConversationCheckpointPage)
 	if len(listed.Files) != 1 || !listed.Files[0].Restored || listed.Files[0].ID != checkpoints.Files[0].ID {
 		t.Fatalf("the restored checkpoint is listed %+v", listed.Files)
+	}
+}
+
+func workspaceTurnConfig(t *testing.T, node *Node) protocol.SessionConfig {
+	t.Helper()
+	provider := protocol.DefaultConversationProvider()
+	provider.ID = protocol.NewProviderID()
+	provider.Revision = 1
+	provider.Enabled = true
+	provider.Name = "Fixture"
+	provider.Api = protocol.ConversationModelApiChatCompletions
+	provider.Authentication = protocol.AuthenticationApiKey
+	provider.Endpoint = "http://fixture.invalid/v1"
+	provider.DefaultModel = "fixture"
+	selected := protocol.DefaultConversationModel()
+	selected.ID = "fixture"
+	selected.Context = 32000
+	selected.Output = 8000
+	selected.Tools = true
+	provider.Models = []protocol.ConversationModel{selected}
+	err := node.profile.Store.Node.Write(t.Context(), func(db *sql.Conn) error {
+		body, err := json.Marshal(map[string]any{"id": provider.ID, "provider": provider, "listed": true, "authorizations": map[string]any{}, "quota": nil})
+		if err != nil {
+			return err
+		}
+		_, err = db.ExecContext(t.Context(), "INSERT INTO providers(id,body) VALUES(?1,?2)", provider.ID.String(), body)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := protocol.DefaultSessionConfig()
+	config.Provider = provider.ID
+	config.Model = "fixture"
+	return config
+}
+
+type multiEditBatchModel struct {
+	fantasy.LanguageModel
+	step atomic.Int32
+}
+
+func (m *multiEditBatchModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
+	step := m.step.Add(1)
+	if step > 2 {
+		return nil, errors.New("unexpected extra multi-edit model request")
+	}
+	return func(yield func(fantasy.StreamPart) bool) {
+		switch step {
+		case 1:
+			calls := []fantasy.StreamPart{
+				{Type: fantasy.StreamPartTypeToolCall, ID: "r1", ToolCallName: "read_file", ToolCallInput: `{"path":"note.txt"}`},
+				{Type: fantasy.StreamPartTypeToolCall, ID: "e1", ToolCallName: "apply_patch", ToolCallInput: `{"input":"*** Begin Patch\n*** Update File: note.txt\n@@\n-alpha\n+beta\n*** End Patch"}`},
+				{Type: fantasy.StreamPartTypeToolCall, ID: "e2", ToolCallName: "apply_patch", ToolCallInput: `{"input":"*** Begin Patch\n*** Update File: note.txt\n@@\n-gamma\n+delta\n*** End Patch"}`},
+			}
+			for _, part := range calls {
+				if !yield(part) {
+					return
+				}
+			}
+		case 2:
+			if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "done", Delta: "Applied both edits"}) {
+				return
+			}
+		}
+		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+	}, nil
+}
+
+func TestWorkspaceSequentialSameFilePatchesInSingleBatch(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "note.txt"), []byte("alpha\ngamma\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	script := &multiEditBatchModel{}
+	node, err := StartWithOptions(t.Context(), filepath.Join(t.TempDir(), "profile"), Options{
+		MCP:   fixtureMCPOptions(),
+		Model: func(context.Context, model.Binding) (fantasy.LanguageModel, error) { return script, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer node.Stop(context.Background())
+
+	project := commandFixture(t, node, protocol.Command{Kind: "create_project", Data: protocol.ProjectsDraft{Name: "Fixture", Path: root, Source: protocol.ProjectsSource{Kind: "local"}, Appearance: protocol.DefaultProjectsAppearance()}}).Data.(protocol.Project)
+	config := workspaceTurnConfig(t, node)
+	config.Permission = protocol.PermissionFull
+	config.Mode = protocol.WorkModeCode
+	session := commandFixture(t, node, protocol.Command{Kind: "create_session", Data: protocol.CommandCreateSessionPayload{Project: &project.ID, Config: &config}}).Data.(protocol.Session)
+
+	subscription, err := node.Subscribe(t.Context(), node.ID(), protocol.Topic{Kind: "node"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Close()
+
+	commandFixture(t, node, protocol.Command{Kind: "submit_turn", Data: protocol.CommandSubmitTurnPayload{
+		Session: session.ID, ExpectedRevision: session.Revision, Message: protocol.ConversationInput{Text: "Read and edit note.txt twice"},
+	}})
+	for {
+		var history protocol.ConversationHistory
+		err = node.profile.Store.Node.Read(t.Context(), func(db *sql.Conn) error {
+			var err error
+			history, err = store.ReadConversation(t.Context(), db, session.ID, nil, 100)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, approval := range history.Page.Approvals {
+			if approval.State == protocol.ConversationApprovalStatePending {
+				commandFixture(t, node, protocol.Command{Kind: "resolve_approval", Data: protocol.CommandResolveApprovalPayload{
+					Session: session.ID, Approval: approval.ID, Decision: protocol.ConversationDecision{Kind: "approve"},
+				}})
+			}
+		}
+		finished := false
+		for _, run := range history.Page.Runs {
+			switch run.Status {
+			case protocol.ConversationStatusCompleted:
+				finished = true
+			case protocol.ConversationStatusFailed, protocol.ConversationStatusInterrupted, protocol.ConversationStatusCancelled:
+				t.Fatalf("sequential edit batch failed: %#v", run)
+			}
+		}
+		if finished {
+			break
+		}
+		if _, err = subscription.Next(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(root, "note.txt"))
+	if err != nil || string(got) != "beta\ndelta\n" {
+		t.Fatalf("note.txt after two edits in one batch = %q (err=%v), want %q", string(got), err, "beta\ndelta\n")
 	}
 }

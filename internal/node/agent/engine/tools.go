@@ -541,24 +541,30 @@ func (r *Runtime) runTools(x *execution, state store.AgentState, calls []canonic
 		metric, started := r.telemetry.Capture(), time.Now()
 		defer func() { observeTool(metric, x.ctx, x.tools, calls[i].Name, results[i], started) }()
 		// A panicking tool fails its own call; the turn and the Node continue.
-		defer func() {
+		containPanic := func() {
 			if value := recover(); value != nil {
 				logPanic(x, "tool", calls[i].ID, value)
 				results[i] = ToolResult{Failure: &protocol.Fault{Code: protocol.ErrorCodeOutcomeUnknown, Message: "Tool call failed unexpectedly"}}
 			}
-		}()
+		}
+		defer containPanic()
 		if err := x.hooks.Before(x.ctx, calls[i].Name); err != nil {
-			results[i] = toolFault(err)
+			if x.ctx.Err() == nil {
+				results[i] = toolFault(err)
+			}
 			return
 		}
 		if x.ctx.Err() != nil {
 			return
 		}
 		tool := findTool(x.tools, calls[i].Name)
+		defer func() {
+			x.hooks.After(x.ctx, calls[i].Name, results[i].Failure == nil && !results[i].Error && !results[i].ReturnedError)
+		}()
+		defer containPanic()
 		defer x.timeline.tool(calls[i], tool.Delegation)()
 		startedCalls[i] = true
 		results[i] = tool.Execute(x.ctx, calls[i])
-		x.hooks.After(x.ctx, calls[i].Name, results[i].Failure == nil && !results[i].Error && !results[i].ReturnedError)
 	}
 	concurrent := func(i int) bool {
 		tool := findTool(x.tools, calls[i].Name)
@@ -591,7 +597,7 @@ func (r *Runtime) runTools(x *execution, state store.AgentState, calls []canonic
 	blocks := make([]canonical.Block, 0, len(calls))
 	var contextDelta canonical.Context
 	for i, call := range calls {
-		if (executable[i] || batchErr != nil || x.ctx.Err() != nil) && results[i].Value == nil && results[i].Failure == nil {
+		if (executable[i] || batchErr != nil || x.ctx.Err() != nil) && results[i].Value == nil && results[i].Failure == nil && (!results[i].Error || x.ctx.Err() != nil) {
 			results[i] = interruptedTool(startedCalls[i])
 		}
 		blocks = append(blocks, responseBlock(uint64(i), call, results[i]))
