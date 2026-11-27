@@ -87,6 +87,14 @@ func (r *Runtime) infer(x *execution, captured model.Binding, languageModel fant
 		}
 	}
 	parts = append(parts, prompt.Part{Key: "instructions", Text: strings.Join(instructions, "\n\n")})
+	var sections []prompt.Part
+	for _, tool := range x.tools {
+		if tool.TurnSection.Key != "" && !slices.ContainsFunc(sections, func(part prompt.Part) bool { return part.Key == tool.TurnSection.Key }) {
+			sections = append(sections, tool.TurnSection)
+		}
+	}
+	slices.SortFunc(sections, func(a, b prompt.Part) int { return strings.Compare(a.Key, b.Key) })
+	parts = append(parts, sections...)
 	ownedParts := []string{}
 	for _, tool := range x.tools {
 		for _, part := range tool.ContextParts {

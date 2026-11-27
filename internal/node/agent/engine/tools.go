@@ -16,6 +16,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/model"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/prompt"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/logging"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
@@ -55,9 +56,12 @@ type Tool struct {
 	Approved          func(canonical.ToolRequest, protocol.ApprovalID, protocol.RequestID)
 	Close             func() error
 	Instruction       string
-	ContextParts      []string
-	BeforeModel       func(context.Context, []canonical.Record) (bool, error)
-	BindDelegation    func(Tool) Tool
+	// TurnSection is guidance that may change between turns. It is sent as a
+	// named turn-context section so the system prompt stays byte-stable.
+	TurnSection    prompt.Part
+	ContextParts   []string
+	BeforeModel    func(context.Context, []canonical.Record) (bool, error)
+	BindDelegation func(Tool) Tool
 	// Guidance makes BindDelegation receive guide_agent instead of spawn_agent.
 	Guidance bool
 	// Hosted marks a package tool whose script runs with neither a bound

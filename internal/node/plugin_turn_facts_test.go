@@ -27,20 +27,26 @@ type turnFactsModel struct {
 	fantasy.LanguageModel
 	mu      sync.Mutex
 	prompts []string
+	systems []string
 }
 
 func (script *turnFactsModel) Stream(_ context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
-	var text strings.Builder
+	var text, system strings.Builder
 	for _, message := range call.Prompt {
 		for _, part := range message.Content {
 			if value, found := fantasy.AsMessagePart[fantasy.TextPart](part); found {
 				text.WriteString(value.Text)
 				text.WriteByte('\n')
+				if message.Role == fantasy.MessageRoleSystem {
+					system.WriteString(value.Text)
+					system.WriteByte('\n')
+				}
 			}
 		}
 	}
 	script.mu.Lock()
 	script.prompts = append(script.prompts, text.String())
+	script.systems = append(script.systems, system.String())
 	step := len(script.prompts)
 	script.mu.Unlock()
 	note := operations.Alias("turn-facts-fixture", "note")
@@ -257,9 +263,23 @@ export async function completed(args){
 	t.Run("initialize", func(t *testing.T) {
 		script.mu.Lock()
 		prompts := append([]string(nil), script.prompts...)
+		systems := append([]string(nil), script.systems...)
 		script.mu.Unlock()
 		if len(prompts) != 4 {
 			t.Fatalf("model requests = %d", len(prompts))
+		}
+		// Turn guidance changes between these turns; the system prompt must not.
+		for index, system := range systems {
+			if system == "" || system != systems[0] || strings.Contains(system, "facts automatic=") {
+				t.Fatalf("request %d system prompt carried turn guidance or changed", index+1)
+			}
+		}
+		section := `<context-section name="package:turn-facts-fixture">`
+		if count := strings.Count(prompts[2], section); count != 1 {
+			t.Fatalf("unchanged turn guidance was sent %d times in one turn", count)
+		}
+		if count := strings.Count(prompts[3], section); count != 2 {
+			t.Fatalf("changed turn guidance appeared %d times, want one section per turn", count)
 		}
 		if !strings.Contains(prompts[0], "facts automatic=false notice=false marker=none") {
 			t.Fatal("the user turn was initialized as automatic")

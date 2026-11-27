@@ -16,6 +16,7 @@ import (
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/canonical"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/engine"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/operations"
+	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/prompt"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/plugins"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/store"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
@@ -124,6 +125,9 @@ func (node *Node) scriptTools(ctx context.Context, invocation *store.AgentInvoca
 	}
 	overrides := map[string]json.RawMessage{}
 	var contextParts []string
+	// Turn guidance is a named section: a later turn replaces or clears it.
+	// Appending it to the fixed instructions would change the system prompt.
+	var turnSection prompt.Part
 	if host.Turn != nil {
 		selected := pluginSelectedOperations(info, names)
 		input, err := pluginTurnInput(invocation, info, names, selected)
@@ -169,9 +173,7 @@ func (node *Node) scriptTools(ctx context.Context, invocation *store.AgentInvoca
 				contextParts = append(contextParts, part)
 			}
 		}
-		if selection.Instruction != "" {
-			instruction += "\n\n" + selection.Instruction
-		}
+		turnSection = prompt.Part{Key: "package:" + info.Summary.Name, Text: strings.TrimSpace(selection.Instruction)}
 		declarations = slices.DeleteFunc(declarations, func(declaration protocol.ToolDeclaration) bool {
 			return !slices.Contains(selection.Tools, declaration.Name)
 		})
@@ -227,7 +229,7 @@ func (node *Node) scriptTools(ctx context.Context, invocation *store.AgentInvoca
 				tool.Concurrent = tool.Concurrent && concurrent
 			}
 		}
-		tool.ContextParts = contextParts
+		tool.TurnSection, tool.ContextParts = turnSection, contextParts
 		if host.Turn != nil && host.Turn.BeforeModel != nil {
 			tool.BeforeModel = owner.beforeModel(*host.Turn.BeforeModel)
 		}
