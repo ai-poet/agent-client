@@ -227,6 +227,7 @@ func readConversationPage(ctx context.Context, db *sql.Conn, session protocol.Se
 	}
 	return page, nil
 }
+
 // historyOwners maps each run to the recipient whose history it belongs to.
 // An orphan in older stored history can still be read on its own.
 func historyOwners(runs []protocol.ConversationRun) map[protocol.TurnID]protocol.ConversationRun {
@@ -401,15 +402,45 @@ func ReadConversation(ctx context.Context, db *sql.Conn, session protocol.Sessio
 	for _, id := range trimmed {
 		missing[id] = true
 	}
-	// Seek the (turn, sequence) index before checking session membership.
-	const firstVisible = "SELECT (SELECT e.sequence FROM agent_events e CROSS JOIN conversation_events h ON h.sequence=e.sequence AND h.session=?1 WHERE e.turn=?2 AND " + visibleCanonical + " ORDER BY e.sequence LIMIT 1)"
-	for _, r := range page.Runs {
-		var first sql.NullInt64
-		if err = db.QueryRowContext(ctx, firstVisible, session.String(), r.Turn.String()).Scan(&first); err != nil {
+	retained := make(map[uint64]bool, len(page.Entries))
+	for _, e := range page.Entries {
+		retained[e.Sequence] = true
+	}
+	var turns []protocol.TurnID
+	seen := make(map[protocol.TurnID]bool, len(page.Runs))
+	for _, run := range page.Runs {
+		if !missing[run.Turn] && !seen[run.Turn] {
+			turns = append(turns, run.Turn)
+			seen[run.Turn] = true
+		}
+	}
+	// Each indexed turn scan stops at its first visible member of this session.
+	const firstVisible = `SELECT requested.key, (
+		SELECT e.sequence FROM agent_events e CROSS JOIN conversation_events h ON h.sequence=e.sequence AND h.session=?1
+		WHERE e.turn=CAST(requested.value AS TEXT) AND ` + visibleCanonical + ` ORDER BY e.sequence LIMIT 1
+	) FROM json_each(?2) requested`
+	for batch := range slices.Chunk(turns, 200) {
+		encoded, err := encode(batch)
+		if err != nil {
 			return value, err
 		}
-		if first.Valid && !slices.ContainsFunc(page.Entries, func(e protocol.ConversationEntry) bool { return e.Sequence == uint64(first.Int64) }) {
-			missing[r.Turn] = true
+		rows, err := db.QueryContext(ctx, firstVisible, session.String(), string(encoded))
+		if err != nil {
+			return value, err
+		}
+		for rows.Next() {
+			var index int
+			var first sql.NullInt64
+			if err := rows.Scan(&index, &first); err != nil {
+				rows.Close()
+				return value, err
+			}
+			if first.Valid && !retained[uint64(first.Int64)] {
+				missing[batch[index]] = true
+			}
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return value, err
 		}
 	}
 	value.Page = page
