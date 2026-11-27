@@ -280,7 +280,7 @@
   },
   {
     "operation": "files.apply",
-    "description": "Apply a patch in the *** Begin Patch format that adds, updates, moves or deletes up to 16 related files with one approval (with Full permission, absolute paths may reach outside the worktree on the same volume). Context lines match the current file exactly, and updated, moved or deleted files must have been read in this session. If a file changed since you read it, read it again. Every file is validated first; any failure rejects the whole patch without writing. Files are then written in order; a later failure stops without rollback and each file reports its status",
+    "description": "Apply a *** Begin Patch text patch to up to 16 related file changes with one approval. Read existing targets first. Context lines locate edits; add and move can replace a previously read destination. Changes run in patch order and stop on failure without rollback.",
     "parameters": {
       "type": "object",
       "properties": {

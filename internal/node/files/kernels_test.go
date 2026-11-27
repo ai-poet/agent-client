@@ -50,6 +50,26 @@ func TestFileTextKernels(t *testing.T) {
 	if _, err = ApplyPatchChunks("a\nx\na\n", []PatchChunk{{Old: []string{"a"}, New: []string{"b"}}}); err == nil || !strings.Contains(err.Error(), "lines 1 and 3") {
 		t.Fatalf("ambiguous hunk locations: %v", err)
 	}
+	anchor := "header"
+	if after, err = ApplyPatchChunks("header\nbody\n", []PatchChunk{{Context: &anchor, New: []string{"last"}}}); err != nil || after != "header\nbody\nlast\n" {
+		t.Fatalf("anchored append: %q %v", after, err)
+	}
+	if after, err = ApplyPatchChunks("hello\u2014\u201cworld\u201d\n", []PatchChunk{{Old: []string{`hello-"world"`}, New: []string{"updated"}}}); err != nil || after != "updated\n" {
+		t.Fatalf("normalized punctuation: %q %v", after, err)
+	}
+	if after, err = ApplyPatchChunks("func main() {\n\tfmt.Println(\"hi\")   \n}\n", []PatchChunk{{Old: []string{"fmt.Println(\"hi\")"}, New: []string{"\tfmt.Println(\"bye\")"}}}); err != nil || !strings.Contains(after, "bye") {
+		t.Fatalf("fuzzy patch failed: %q %v", after, err)
+	}
+	// Fuzzy patch matching preserves original text of untouched context lines (e.g., tabs in Makefile/Python).
+	tabFile := "all:\n\techo one\n\techo two\n\techo three\n"
+	tabPatch := "*** Begin Patch\n*** Update File: Makefile\n@@\n     echo one\n-    echo two\n+\techo TWO\n     echo three\n*** End Patch"
+	parsedTab, err := ParsePatch(tabPatch)
+	if err != nil || len(parsedTab) != 1 {
+		t.Fatalf("parse tab patch: %v", err)
+	}
+	if after, err = ApplyPatchChunks(tabFile, parsedTab[0].Chunks); err != nil || after != "all:\n\techo one\n\techo TWO\n\techo three\n" {
+		t.Fatalf("fuzzy patch rewrote untouched context lines: got %q, err=%v", after, err)
+	}
 	hunks, err := SplitHunks("note.txt", "one\ntwo\nthree\n", "one\nnext\nthree\n", 0)
 	if err != nil || len(hunks) != 1 || !validRevision(hunks[0].Hunk.ID) {
 		t.Fatalf("hunks: %+v %v", hunks, err)
@@ -90,10 +110,149 @@ func TestPreparedFileChanges(t *testing.T) {
 	if _, err = os.Stat(filepath.Join(root, "third.txt")); !os.IsNotExist(err) {
 		t.Fatalf("unattempted file exists: %v", err)
 	}
-	if _, err = ResolvePatchWithRevisions(ctx, root, "*** Begin Patch\n*** Update File: first.txt\n@@\n-after\n+next\n*** End Patch", nil, core.ManualFiles); err == nil || !strings.Contains(err.Error(), "first.txt") {
+	if _, err = PreparePatch(ctx, root, "*** Begin Patch\n*** Update File: first.txt\n@@\n-after\n+next\n*** End Patch", protocol.WorktreeID{}, core.ManualFiles, func(p string) string { return p }, nil); err == nil || !strings.Contains(err.Error(), "first.txt") {
 		t.Fatalf("unobserved file update: %v", err)
 	}
 }
+func observedForPatch(t *testing.T, root string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, name := range []string{"a", "b", "c", "Foo", "foo", "hardlink", "source"} {
+		data, err := os.ReadFile(filepath.Join(root, name))
+		if err == nil {
+			out[name] = revision(data)
+		} else if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+	}
+	return out
+}
+func TestPatchOverwritesAndMovesInOrder(t *testing.T) {
+	root, _ := filesFixture(t)
+	for name, content := range map[string]string{"a": "source\n", "b": "destination\n", "c": "existing\n"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	patch := `*** Begin Patch
+*** Update File: a
+*** Move to: b
+@@
+-source
++moved
+*** Update File: b
+@@
+-moved
++changed
+*** Add File: c
++replaced
+*** Add File: new/nested.txt
++nested
+*** End Patch`
+	ctx := context.Background()
+	p, err := PreparePatch(ctx, root, patch, protocol.WorktreeID{}, core.ManualFiles, func(path string) string { return path }, observedForPatch(t, root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Apply(ctx, root, p)
+	if err != nil || out.Data.(protocol.FileChanges).Status != protocol.ChangesStatusApplied {
+		t.Fatalf("apply: %+v %v", out, err)
+	}
+	for name, want := range map[string]string{"b": "changed\n", "c": "replaced\n", "new/nested.txt": "nested\n"} {
+		got, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil || string(got) != want {
+			t.Fatalf("%s = %q, %v", name, got, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "a")); !os.IsNotExist(err) {
+		t.Fatalf("move source: %v", err)
+	}
+}
+
+func TestPatchMovesCaseVariantsAndHardLinks(t *testing.T) {
+	for _, tt := range []struct {
+		name, destination, chunk, want string
+		link                           bool
+	}{
+		{"nested rename", "new/dir/renamed", "", "original\n", false},
+		{"case rename", "foo", "", "original\n", false},
+		{"case rename with edit", "foo", "@@\n-original\n+edited\n", "edited\n", false},
+		{"move over hard link", "hardlink", "", "original\n", true},
+		{"edit and move over hard link", "hardlink", "@@\n-original\n+edited\n", "edited\n", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root, _ := filesFixture(t)
+			source := filepath.Join(root, "Foo")
+			if err := os.WriteFile(source, []byte("original\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			destination := filepath.Join(root, tt.destination)
+			if tt.link {
+				if err := os.Link(source, destination); err != nil {
+					t.Skipf("hard links unavailable: %v", err)
+				}
+				if err := os.Link(source, filepath.Join(root, "retained")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ctx := context.Background()
+			patch := "*** Begin Patch\n*** Update File: Foo\n*** Move to: " + tt.destination + "\n" + tt.chunk + "*** End Patch"
+			prepared, err := PreparePatch(ctx, root, patch, protocol.WorktreeID{}, core.ManualFiles, func(path string) string { return path }, observedForPatch(t, root))
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := Apply(ctx, root, prepared)
+			if err != nil || out.Data.(protocol.FileChanges).Status != protocol.ChangesStatusApplied {
+				t.Fatalf("move: %+v %v", out, err)
+			}
+			entries, err := os.ReadDir(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range entries {
+				if entry.Name() == "Foo" {
+					t.Fatal("original directory entry still exists")
+				}
+			}
+			if got, err := os.ReadFile(destination); err != nil || string(got) != tt.want {
+				t.Fatalf("destination: %q %v", got, err)
+			}
+			if tt.link {
+				if got, err := os.ReadFile(filepath.Join(root, "retained")); err != nil || string(got) != "original\n" {
+					t.Fatalf("retained hard link: %q %v", got, err)
+				}
+			}
+		})
+	}
+}
+
+func TestMoveCreatesPatchParentsOnlyAfterRevisionCheck(t *testing.T) {
+	root, fs := filesFixture(t)
+	path := filepath.Join(root, "source")
+	if err := os.WriteFile(path, []byte("original\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	dst := "new/target"
+	if err := fs.MoveFile(ctx, "source", dst, revision([]byte("original\n")), false); err == nil {
+		t.Fatal("ordinary move created missing parent")
+	}
+	p, err := PreparePatch(ctx, root, "*** Begin Patch\n*** Update File: source\n*** Move to: "+dst+"\n*** End Patch", protocol.WorktreeID{}, core.ManualFiles, func(path string) string { return path }, observedForPatch(t, root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("changed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Apply(ctx, root, p)
+	if err != nil || out.Data.(protocol.FileChanges).Status != protocol.ChangesStatusRejected {
+		t.Fatalf("stale move: %+v %v", out, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "new")); !os.IsNotExist(err) {
+		t.Fatalf("stale move created parent: %v", err)
+	}
+}
+
 func TestNotebookPreparation(t *testing.T) {
 	t.Parallel()
 	draft := `{"nbformat":4,"nbformat_minor":5,"metadata":{},"cells":[{"cell_type":"code","metadata":{},"source":["old\n"],"outputs":[{"output_type":"stream","text":"cached"}],"execution_count":2}]}`
@@ -147,11 +306,7 @@ func TestRepreparePatchKeepsOriginalTargets(t *testing.T) {
 				write("a", tc.before)
 			}
 			patch := "*** Begin Patch\n" + tc.patch + "\n*** End Patch"
-			changes, err := ResolvePatchWithRevisions(ctx, root, patch, map[string]string{"a": revision([]byte(tc.before))}, core.RestrictedFiles)
-			if err != nil {
-				t.Fatal(err)
-			}
-			p, err := Prepare(ctx, root, protocol.Command{Kind: "apply_changes", Data: &protocol.CommandApplyChangesPayload{Changes: changes}}, core.RestrictedFiles)
+			p, err := PreparePatch(ctx, root, patch, protocol.NewWorktreeID(), core.RestrictedFiles, func(s string) string { return s }, map[string]string{"a": revision([]byte(tc.before))})
 			if err != nil || p.Rejected != nil {
 				t.Fatalf("prepare: %+v %v", p, err)
 			}

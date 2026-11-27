@@ -786,10 +786,15 @@ and termination handling.
 
 Tools come from the captured enabled declarations. Everyday file, command, Git,
 code and web tools are initially exposed; `tool_search` discovers other declared
-tools without granting permission. Each approval settles before its effect. Adjacent independent native file writes
-and concurrent reads can use up to eight execution slots. File reservations include
+tools without granting permission. Each approval settles before its effect. The batch queues native coding tools by
+their prepared arguments, with up to eight execution slots. Reads and writes to
+one file follow model order; a foreground command precedes later file access. File reservations include
 move destinations and order workspace effects through durable completion. Tool
-responses remain in request order.
+responses remain in request order. A patch matches current text against the
+conversation's observed revisions, captures a concrete preview, and executes
+guarded changes in order. Only unique, exact in-place edits can be rematched
+under Full permission; creates, replacements, moves and deletes cannot acquire
+new preconditions after preparation.
 Node owns approval and question deadlines.
 
 Standard mode (`code` on the wire) runs ordinary work. Plan is read-only with a

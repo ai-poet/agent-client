@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -42,6 +43,31 @@ func (locks *workspaceLocks) reserve(keys []string, root bool) func() {
 	if locks.held == nil {
 		locks.held = make(map[workspacePath]chan struct{})
 	}
+	wait = locks.predecessors(keys, root)
+	for _, key := range keys {
+		locks.held[workspacePath{name: key, root: root}] = done
+	}
+	locks.mu.Unlock()
+	for _, prior := range wait {
+		<-prior
+	}
+	return func() {
+		locks.mu.Lock()
+		for _, name := range keys {
+			key := workspacePath{name: name, root: root}
+			if locks.held[key] == done {
+				delete(locks.held, key)
+			}
+		}
+		close(done)
+		locks.mu.Unlock()
+	}
+}
+
+// predecessors snapshots the queues already registered for these targets.
+// The caller holds mu, so a multi-file reservation is installed atomically.
+func (locks *workspaceLocks) predecessors(keys []string, root bool) []chan struct{} {
+	var wait []chan struct{}
 	for _, key := range keys {
 		if prior := locks.held[workspacePath{name: key}]; prior != nil {
 			wait = append(wait, prior)
@@ -65,24 +91,20 @@ func (locks *workspaceLocks) reserve(keys []string, root bool) func() {
 			}
 		}
 	}
-	for _, key := range keys {
-		locks.held[workspacePath{name: key, root: root}] = done
-	}
+	return wait
+}
+func (locks *workspaceLocks) waitFiles(ctx context.Context, keys []string) error {
+	locks.mu.Lock()
+	wait := locks.predecessors(keys, false)
 	locks.mu.Unlock()
 	for _, prior := range wait {
-		<-prior
-	}
-	return func() {
-		locks.mu.Lock()
-		for _, name := range keys {
-			key := workspacePath{name: name, root: root}
-			if locks.held[key] == done {
-				delete(locks.held, key)
-			}
+		select {
+		case <-prior:
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-		close(done)
-		locks.mu.Unlock()
 	}
+	return ctx.Err()
 }
 
 // A command that operates in no worktree has no root to reserve.

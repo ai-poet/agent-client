@@ -19,13 +19,16 @@ type PreparedChange struct {
 	Before           *string
 	After            *string
 	ExpectedRevision *string
+	CreateParents    bool
 }
 type Prepared struct {
-	Command  protocol.Command
-	Access   core.FileAccess
-	Changes  []PreparedChange
-	Preview  protocol.ChangePreview
-	Rejected *protocol.FileChanges
+	patchKeys map[string]string
+	patchKey  func(string) string
+	Command   protocol.Command
+	Access    core.FileAccess
+	Changes   []PreparedChange
+	Preview   protocol.ChangePreview
+	Rejected  *protocol.FileChanges
 }
 
 func Prepare(ctx context.Context, root string, command protocol.Command, access core.FileAccess) (*Prepared, error) {
@@ -271,14 +274,14 @@ func Apply(ctx context.Context, root string, p *Prepared) (protocol.Output, erro
 		var err error
 		if !stopped {
 			switch entry.Operation {
-			case "create", "write":
-				written, err = f.Save(ctx, entry.Path, *entry.After, entry.ExpectedRevision)
-			case "edit":
+			case "create":
+				written, err = f.Save(ctx, entry.Path, *entry.After, nil)
+			case "write", "edit":
 				written, err = f.RestoreText(ctx, entry.Path, *entry.After, *entry.ExpectedRevision)
 			case "delete":
 				err = f.DeleteFile(ctx, entry.Path, *entry.ExpectedRevision)
 			case "move":
-				err = f.MoveFile(ctx, entry.Path, *entry.Destination, *entry.ExpectedRevision)
+				err = f.MoveFile(ctx, entry.Path, *entry.Destination, *entry.ExpectedRevision, entry.CreateParents)
 			}
 			if err != nil {
 				stopped = true

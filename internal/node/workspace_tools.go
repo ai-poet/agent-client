@@ -31,8 +31,8 @@ type workspaceToolCall struct {
 	prepared              *files.Prepared
 	approval              protocol.ApprovalID
 	commandControl        *process.ControlTarget
-	patchInput, patchRoot string
 	fileScope             externalFileScope
+	patchInput, patchRoot string
 }
 
 func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation) ([]engine.Tool, error) {
@@ -67,9 +67,12 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 		var mu sync.Mutex
 		calls := map[string]*workspaceToolCall{}
 		tool := engine.Tool{Definition: fantasy.FunctionTool{Name: declaration.Name, Description: declaration.Description, InputSchema: schema}, SchemaJSON: declaration.Parameters, ReadOnly: declaration.ReadOnly, Concurrent: declaration.Concurrent, Deferred: !declaration.Initial, Approval: !declaration.ReadOnly, Binding: &store.ApprovalBinding{Owner: declaration.Owner, Tool: declaration.Name, Operation: &declaration.Operation}}
+
+		tool.ReleasePrepared = func(call canonical.ToolRequest) { mu.Lock(); delete(calls, call.ID); mu.Unlock() }
 		switch declaration.Operation {
-		case protocol.ToolOperationWriteFile, protocol.ToolOperationEditFile, protocol.ToolOperationApplyChanges,
+		case protocol.ToolOperationReadFile, protocol.ToolOperationReadFileLines, protocol.ToolOperationReadNotebook, protocol.ToolOperationWriteFile, protocol.ToolOperationEditFile, protocol.ToolOperationApplyChanges,
 			protocol.ToolOperationDeleteFile, protocol.ToolOperationMoveFile, protocol.ToolOperationEditNotebook:
+			tool.NativeQueue = true
 			tool.FilePaths = func(call canonical.ToolRequest) []string {
 				paths := collectFileArgPaths(declaration.Operation, call.Arguments)
 				for i, path := range paths {
@@ -77,6 +80,8 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 				}
 				return paths
 			}
+		case protocol.ToolOperationFindFiles, protocol.ToolOperationListDirectory, protocol.ToolOperationSearchFiles, protocol.ToolOperationRunCommand:
+			tool.NativeQueue = true
 		}
 		observed := workspaceRevisions{worktreeID: inv.Run.Worktree}
 		fullFiles := inv.Turn.Config.Permission == protocol.PermissionFull && externalFileOperation(declaration.Operation)
@@ -100,7 +105,6 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 			}
 			args := call.Arguments
 			worktree := filepath.Clean(inv.Worktree.Path)
-			var patchInput string
 			var scope externalFileScope
 			if fullFiles {
 				worktree = resolvedPath(worktree)
@@ -147,6 +151,13 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 			if err == nil && planning && declaration.Operation == protocol.ToolOperationRunCommand {
 				err = store.CheckPlanRunCommand(*command.Data.(*protocol.CommandRunCommandPayload), process.SandboxSupported(), sandbox.Enabled)
 			}
+			var patchChanges *files.Prepared
+			var patchInput string
+			if !declaration.ReadOnly && tool.FilePaths != nil {
+				if err := node.locks.waitFiles(ctx, tool.FilePaths(call)); err != nil {
+					return err
+				}
+			}
 			if declaration.Operation == protocol.ToolOperationApplyChanges {
 				var patch struct {
 					Input string `json:"input"`
@@ -159,12 +170,11 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 				if scope.root != "" {
 					revisions = rootRevisions(worktree, root, revisions)
 				}
-				changes, e := files.ResolvePatchWithRevisions(ctx, root, patch.Input, revisions, core.RestrictedFiles)
-				if e != nil {
-					return e
+				patchChanges, err = files.PreparePatch(ctx, root, patch.Input, inv.Run.Worktree, core.RestrictedFiles, func(path string) string { return workspaceFileKey(root, path) }, revisions)
+				if err != nil {
+					return err
 				}
-				command = protocol.Command{Kind: "apply_changes", Data: &protocol.CommandApplyChangesPayload{Worktree: inv.Run.Worktree, Changes: changes}}
-				err = nil
+				command = patchChanges.Command
 			}
 			if err != nil {
 				return err
@@ -190,8 +200,8 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 			}
 			request := protocol.NewRequest(node.ID(), command)
 			request.Plugin = &protocol.PluginContext{Turn: &inv.Run.Turn, Package: declaration.Owner, Worktree: &inv.Run.Worktree, Session: &inv.Session.ID, Surface: protocol.PluginDesktopSurface{Kind: "workspace"}}
-			current := &workspaceToolCall{request: request, fileScope: scope, patchInput: patchInput, patchRoot: root}
-			if fileTextMutation(command.Kind) {
+			current := &workspaceToolCall{request: request, fileScope: scope, prepared: patchChanges, patchInput: patchInput, patchRoot: root}
+			if current.prepared == nil && fileTextMutation(command.Kind) {
 				current.prepared, err = files.Prepare(ctx, root, command, core.RestrictedFiles)
 				if err != nil {
 					return err
@@ -249,12 +259,11 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 			if current == nil {
 				return workspaceToolFault(errors.New("native tool was not prepared"))
 			}
-			if current.patchInput != "" && inv.Turn.Config.Permission == protocol.PermissionFull && current.prepared.Rejected == nil {
-				// This fork serializes workspace effects at the root. Check the complete
-				// prepared set before admission; Apply checks each precondition again.
-				release := node.locks.roots(current.patchRoot, inv.Worktree.Path)
+			if current.patchInput != "" && inv.Turn.Config.Permission == protocol.PermissionFull && current.prepared != nil && current.prepared.Rejected == nil {
+				if err := node.locks.waitFiles(ctx, preparedFileKeys(current.patchRoot, current.prepared)); err != nil {
+					return workspaceToolFault(err)
+				}
 				fresh, err := files.RepreparePatch(ctx, current.patchRoot, current.patchInput, current.prepared)
-				release()
 				if err != nil {
 					return workspaceToolFault(err)
 				}

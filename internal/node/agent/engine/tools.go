@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"charm.land/fantasy"
@@ -34,7 +33,14 @@ type Tool struct {
 	ReadOnly     bool
 	Concurrent   bool
 	// FilePaths names the targets of the native executor, never of a script that rewrites its arguments.
-	FilePaths  func(canonical.ToolRequest) []string
+	FilePaths   func(canonical.ToolRequest) []string
+	NativeQueue bool
+	// QueueArguments resolves a package's native arguments once, before
+	// scheduling. PrepareQueued captures revisions later, at admission.
+	QueueArguments  func(context.Context, canonical.ToolRequest) (canonical.ToolRequest, error)
+	PrepareQueued   func(context.Context, canonical.ToolRequest) error
+	ReleasePrepared func(canonical.ToolRequest)
+
 	Deferred   bool
 	Delegation bool
 	Approval   bool
@@ -354,6 +360,7 @@ func (r *Runtime) runTools(x *execution, state store.AgentState, calls []canonic
 	startedCalls := make([]bool, len(calls))
 	asks := make([]bool, len(calls))
 	var marks []canonical.Record
+	var historyLimit int
 	x.observedMu.Lock()
 	if x.observed.Tools == nil {
 		x.observed.Tools = map[string]int{}
@@ -362,6 +369,22 @@ func (r *Runtime) runTools(x *execution, state store.AgentState, calls []canonic
 		x.observed.Tools[call.Name]++
 	}
 	x.observedMu.Unlock()
+	inputs := slices.Clone(calls)
+	deferPrepare := func(tool *Tool) bool {
+		if tool.Confirm != nil && !tool.Approval {
+			return false
+		}
+		return tool.FilePaths != nil || tool.ObserveHistory != nil || tool.Binding != nil && tool.Binding.Operation != nil && strings.HasPrefix(string(*tool.Binding.Operation), "files.")
+	}
+	prepare := func(i int, tool *Tool) error {
+		if tool.PrepareQueued != nil {
+			return tool.PrepareQueued(x.ctx, inputs[i])
+		}
+		if tool.Prepare != nil {
+			return tool.Prepare(x.ctx, inputs[i])
+		}
+		return nil
+	}
 	// Mark every allowed call before requesting the first approval.
 	for i, call := range calls {
 		tool := findTool(x.tools, call.Name)
@@ -397,15 +420,33 @@ func (r *Runtime) runTools(x *execution, state store.AgentState, calls []canonic
 			results[i] = invalidTool(fmt.Sprintf("invalid tool arguments: %s", err))
 			continue
 		}
-		if tool.Approval && (tool.FilePaths != nil || tool.ObserveHistory != nil) {
-			asks[i] = true
+		if tool.ReleasePrepared != nil {
+			defer tool.ReleasePrepared(call)
+		}
+		if tool.QueueArguments != nil {
+			input, err := tool.QueueArguments(x.ctx, call)
+			if err != nil {
+				results[i] = toolFault(err)
+				continue
+			}
+			inputs[i] = input
+		}
+		if deferPrepare(tool) {
+			if tool.ObserveHistory != nil {
+				historyLimit = i
+			}
+			asks[i] = tool.Approval
+			if !asks[i] {
+				executable[i] = true
+				marks = append(marks, r.executableRecord(x, call, true))
+			}
 			continue
 		}
 		if tool.ObserveHistory != nil {
 			tool.ObserveHistory(state.Records)
 		}
 		if tool.Prepare != nil {
-			if err := tool.Prepare(x.ctx, call); err != nil {
+			if err := prepare(i, tool); err != nil {
 				results[i] = toolFault(err)
 				continue
 			}
@@ -418,22 +459,62 @@ func (r *Runtime) runTools(x *execution, state store.AgentState, calls []canonic
 	if err := r.save(x.ctx, x.inv.Session.ID, marks...); err != nil {
 		return err
 	}
-	admit := func(i int, history []canonical.Record) error {
+	// Earlier writes may finish out of order. Preparation sees completed
+	// predecessors in the same order as their eventual canonical receipts.
+	receipts := make([]canonical.Record, historyLimit)
+	completed := make([]bool, historyLimit)
+	recordCompletion := func(i int) {
+		if i >= historyLimit {
+			return
+		}
+		completed[i] = true
+		if results[i].Value == nil && results[i].Failure == nil {
+			return
+		}
+		rec := canonical.NewRecord(x.inv.Run.Turn, "message", canonical.NewMessage(canonical.User, responseBlock(uint64(i), calls[i], results[i])), r.clock.Now())
+		rec.ID = "batch:" + calls[i].ID
+		rec.Provenance.Author = "tool"
+		receipts[i] = rec
+	}
+	prefix := 0
+	history := state.Records[:len(state.Records):len(state.Records)]
+	historyBefore := func(i int) []canonical.Record {
+		// An unadmitted call is incomplete, so the prefix cannot pass i
+		// even when an independent later call was admitted first.
+		for prefix < i && completed[prefix] {
+			if receipts[prefix].ID != "" {
+				history = append(history, receipts[prefix])
+			}
+			prefix++
+		}
+		visible := history[:len(history):len(history)]
+		for j := prefix + 1; j < i; j++ {
+			if receipts[j].ID != "" {
+				visible = append(visible, receipts[j])
+			}
+		}
+		return visible
+	}
+	admit := func(i int) error {
 		call := calls[i]
 		tool := findTool(x.tools, call.Name)
-		if !asks[i] || results[i].Value != nil || results[i].Failure != nil {
+		if !asks[i] && !executable[i] || results[i].Value != nil || results[i].Failure != nil {
 			return nil
 		}
-		if tool.Approval && (tool.FilePaths != nil || tool.ObserveHistory != nil) {
+		if deferPrepare(tool) {
 			if tool.ObserveHistory != nil {
-				tool.ObserveHistory(history)
+				tool.ObserveHistory(historyBefore(i))
 			}
 			if tool.Prepare != nil {
-				if err := tool.Prepare(x.ctx, call); err != nil {
+				if err := prepare(i, tool); err != nil {
+					executable[i] = false
 					results[i] = toolFault(err)
 					return nil
 				}
 			}
+		}
+		if !asks[i] {
+			return nil
 		}
 		approved, err := r.approval(x, call, tool)
 		var denied *protocol.Fault
@@ -474,58 +555,36 @@ func (r *Runtime) runTools(x *execution, state store.AgentState, calls []canonic
 			return
 		}
 		tool := findTool(x.tools, calls[i].Name)
-		finished := x.timeline.tool(calls[i], tool.Delegation)
+		defer x.timeline.tool(calls[i], tool.Delegation)()
 		startedCalls[i] = true
 		results[i] = tool.Execute(x.ctx, calls[i])
-		finished()
 		x.hooks.After(x.ctx, calls[i].Name, results[i].Failure == nil && !results[i].Error && !results[i].ReturnedError)
 	}
 	concurrent := func(i int) bool {
 		tool := findTool(x.tools, calls[i].Name)
 		return !asks[i] && (!executable[i] || tool != nil && tool.ReadOnly && tool.Concurrent && !x.hooks.WrapsTools())
 	}
-	writePaths := func(i int) []string {
-		tool := findTool(x.tools, calls[i].Name)
-		if !asks[i] || tool.FilePaths == nil || x.hooks.WrapsTools() {
-			return nil
+	access := make([]toolAccess, len(calls))
+	for i, call := range inputs {
+		if (asks[i] || executable[i]) && !x.hooks.WrapsTools() {
+			access[i] = parallelToolAccess(findTool(x.tools, call.Name), call)
 		}
-		return tool.FilePaths(calls[i])
 	}
-	history := state.Records[:len(state.Records):len(state.Records)]
 	var batchErr error
-	for start := 0; start < len(calls) && x.ctx.Err() == nil && batchErr == nil; {
+	for start := 0; start < len(calls) && x.ctx.Err() == nil; {
 		end := start + 1
-		if concurrent(start) {
-			for end < len(calls) && end-start < 8 && concurrent(end) {
-				end++
-			}
-		} else {
-			paths := writePaths(start)
-			for len(paths) > 0 && end < len(calls) && end-start < 8 {
-				next := writePaths(end)
-				if len(next) == 0 || slices.ContainsFunc(next, func(p string) bool { return slices.Contains(paths, p) }) {
-					break
-				}
-				paths = append(paths, next...)
-				end++
-			}
-		}
-		var workers sync.WaitGroup
-		for i := start; i < end && x.ctx.Err() == nil; i++ {
-			if batchErr = admit(i, history); batchErr != nil {
+		reads, mixed := concurrent(start), access[start].parallel
+		for end < len(calls) {
+			reads = reads && concurrent(end)
+			mixed = mixed && access[end].parallel
+			if !reads && !mixed {
 				break
 			}
-			workers.Go(func() { execute(i) })
+			end++
 		}
-		workers.Wait()
-		for i := start; i < end; i++ {
-			if results[i].Value == nil && results[i].Failure == nil {
-				continue
-			}
-			rec := canonical.NewRecord(x.inv.Run.Turn, "message", canonical.NewMessage(canonical.User, responseBlock(uint64(i), calls[i], results[i])), r.clock.Now())
-			rec.ID = "batch:" + calls[i].ID
-			rec.Provenance.Author = "tool"
-			history = append(history, rec)
+		batchErr = runQueuedTools(x.ctx, start, access[start:end], admit, execute, recordCompletion)
+		if batchErr != nil {
+			break
 		}
 		start = end
 	}
