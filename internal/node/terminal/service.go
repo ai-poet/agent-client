@@ -218,6 +218,7 @@ func (service *Service) Start(ctx context.Context, launch Launch) (protocol.Term
 			return
 		}
 		value.info.Title = &title
+		value.wakeStreamsLocked()
 		value.mu.Unlock()
 		value.publish()
 	}
@@ -260,6 +261,9 @@ func (service *Service) Start(ctx context.Context, launch Launch) (protocol.Term
 	go func() {
 		defer service.work.Done()
 		<-terminal.Done()
+		// The output source has ended, so it cannot release a synchronized
+		// draw itself. Let attached mirrors capture its last screen.
+		terminal.Feed([]byte("\x1b[?2026l"))
 		status := protocol.TerminalStatus{Kind: "exited", Data: protocol.TerminalStatusExitedPayload{Code: uint32(terminal.ExitCode())}}
 		switch {
 		case terminal.ExitCode() < 0:
