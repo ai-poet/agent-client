@@ -25,7 +25,7 @@ func (p *workspaceProject) showGitDocument(id string) {
 
 func (p *workspaceProject) openGitCommit(id string) {
 	key := "git-document/commit/" + id
-	delete(p.failedReads, key)
+	p.retryRead(key)
 	p.read(key, protocol.Command{Kind: "read_git_commit", Data: protocol.CommandReadGitCommitPayload{Worktree: p.owner.ID, Commit: id}}, func(_ *ui.Context, out protocol.Output) {
 		value, ok := detail[protocol.GitCommit](out.Data)
 		if out.Kind != "git_commit" || !ok {
@@ -42,7 +42,7 @@ func (p *workspaceProject) openGitCommit(id string) {
 
 func (p *workspaceProject) openGitStash(id string) {
 	key := "git-document/stash/" + id
-	delete(p.failedReads, key)
+	p.retryRead(key)
 	p.read(key, protocol.Command{Kind: "read_git_stash", Data: protocol.CommandReadGitStashPayload{Worktree: p.owner.ID, Commit: id}}, func(c *ui.Context, out protocol.Output) {
 		value, ok := detail[protocol.GitDiff](out.Data)
 		if out.Kind != "git_diff" || !ok {
@@ -54,7 +54,7 @@ func (p *workspaceProject) openGitStash(id string) {
 
 func (p *workspaceProject) openGitOutput() {
 	key := "git-document/output"
-	delete(p.failedReads, key)
+	p.retryRead(key)
 	p.read(key, protocol.Command{Kind: "read_git_output", Data: protocol.CommandReadGitOutputPayload{Worktree: p.owner.ID}}, func(c *ui.Context, out protocol.Output) {
 		value, ok := detail[protocol.OutputGitOutputPayload](out.Data)
 		if out.Kind != "git_output" || !ok {

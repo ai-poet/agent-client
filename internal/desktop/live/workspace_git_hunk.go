@@ -42,7 +42,7 @@ func (p *workspaceProject) manualGitHunk(c *ui.Context, relative string, display
 		return
 	}
 	readKey := "manual-hunk/source/" + relative
-	delete(p.failedReads, readKey)
+	p.retryRead(readKey)
 	p.read(readKey, protocol.Command{Kind: "read_file", Data: protocol.CommandReadFilePayload{Worktree: p.owner.ID, Path: relative}}, func(c *ui.Context, out protocol.Output) {
 		source, ok := detail[protocol.FileContent](out.Data)
 		if !ok || source.Revision == nil || source.Truncated {
