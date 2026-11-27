@@ -3,6 +3,66 @@
 Release entries supply the corresponding GitHub Release notes. A version is
 released only after its entry is here.
 
+## [0.5.5](https://github.com/ai-poet/cheaprouter-harness/releases/tag/v0.5.5) — 2026-11-27
+
+修复每轮对话都让提示词缓存失效的问题，GPT 与 Claude 系列的速度和费用恢复正常；工作区可以读取稀疏检出、过滤克隆和其他账户拥有的 Git 仓库，读取持续失败时不再反复弹出提示；另含上游 0.3.0 的稳定性、沙箱与模型请求恢复修复。
+
+Fixes the prompt cache being invalidated on every turn, restoring the speed and cost of GPT and Claude models; the workspace reads sparse checkouts, filtered clones and Git repositories owned by another account, and a read that keeps failing no longer shows its toast again and again; plus stability, sandbox and model-request recovery fixes from upstream 0.3.0.
+
+### 修复 / Fixed
+
+- 提示词缓存：插件每轮变化的说明（例如定时任务的当前时间）改为放在轮次上下文中，系统提示词保持不变；每轮缓存命中恢复，Claude 跨轮保留自己先前的思考
+
+  Prompt cache: package guidance that changes each turn, such as the scheduled tasks' current time, now goes in the turn context and the system prompt stays unchanged; each turn hits the cache again, and Claude keeps its earlier thinking across turns
+
+- 工作区 Git：启用 sparse-checkout、worktreeConfig 或过滤克隆（partial clone）的仓库可正常读取状态、分支和历史；使用暂不支持的 Git 扩展时给出明确提示，不再显示「工作区操作失败」
+
+  Workspace Git: repositories with sparse checkout, worktreeConfig or a filtered (partial) clone show their status, branches and history; a repository using an unsupported Git extension names that cause instead of "Workspace action failed"
+
+- 工作区 Git：仓库所有者与当前用户不同（Git 报告 dubious ownership，常见于其他磁盘、拷贝或管理员创建的目录）时，已打开的项目可正常读取
+
+  Workspace Git: a project whose repository another account owns (Git's dubious ownership, common on other drives and in copied or administrator-created folders) reads normally once opened
+
+- 工作区读取持续失败时，同一原因只提示一次；读取成功或手动刷新后才会再次提示
+
+  A workspace read that keeps failing reports the same cause once, and again only after a successful read or a manual refresh
+
+- 模型请求：HTTP/2 连接被对端重置后恢复中断的流，被拒绝的路由重试时保留原始诊断；同一凭据的 429 等待在各调用间共享，冷却按上游凭据隔离
+
+  Model requests: streams reset by an HTTP/2 peer recover, and retried route rejections keep their original diagnosis; HTTP 429 waits are shared by calls on one credential, and cooldowns are scoped to the upstream credential
+
+- 上下文压缩交接保留嵌套代码块并能恢复结构化 Markdown；重放时不再发送没有签名的 Anthropic 思考
+
+  Compaction handoffs keep nested code fences and recover structured Markdown; replay no longer sends unsigned Anthropic thinking
+
+- 委派与工具：限制子任务步数并收窄其工具范围，预算用尽后仍送达引导；互不重叠的文件写入可并行，补丁移动与 MCP 调用结果有了更严格的保护
+
+  Delegation and tools: delegated steps are bounded and child tools narrowed, and guidance still arrives after the budget is spent; disjoint file writes run in parallel, with stricter guards for patch moves and MCP call outcomes
+
+- 稳定性：空闲终端降低轮询频率，长会话历史按索引加载，已停用的 MCP 服务器在启用状态合并变化后会重新连接
+
+  Stability: idle terminals poll less often, long conversation history loads through its turn index, and retired MCP servers reconnect when enable changes coalesce
+
+### 安全 / Security
+
+- 计划模式与委派审查强制只读执行；沙箱默认只读并遮蔽凭据，保护 Git 凭据
+
+  Plan mode and delegated reviews run read-only; the sandbox defaults to read-only reads with credential masks and protects Git credentials
+
+- 受工作区权限限制的终端在沙箱不可用时拒绝启动，不再以不受限的方式运行
+
+  A terminal limited to workspace access refuses to start when no sandbox is available, instead of running unconfined
+
+### 说明 / Notes
+
+- 升级后的第一轮会重建一次提示词缓存
+
+  The first turn after upgrading rebuilds the prompt cache once
+
+- 移动端 App 本版无变化
+
+  The mobile app is unchanged in this release
+
 ## [0.5.3](https://github.com/ai-poet/cheaprouter-harness/releases/tag/v0.5.3) — 2026-11-26
 
 新增请求轨迹与请求洞察，可逐次查看模型请求的诊断、正文与耗时；接入 Amazon Bedrock 与 Vertex AI，按模型路由原生压缩上下文；另含大量模型请求重试与稳定性修复。

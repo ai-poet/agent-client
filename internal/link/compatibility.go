@@ -2,7 +2,7 @@ package link
 
 import "github.com/ai-poet/cheaprouter-harness/internal/protocol"
 
-var ProductVersion = "0.5.3"
+var ProductVersion = "0.5.5"
 
 func CheckHost(hostProtocol *uint16, hostVersion *string) error {
 	local := uint16(protocol.VERSION)
