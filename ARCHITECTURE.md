@@ -774,6 +774,11 @@ request within the same budgets, respecting Retry-After. A repeated rejection
 retains its original diagnosis, including unauthorized and context overflow.
 Permanent failures without an HTTP error response do not earn that resend;
 completed tools are not replayed.
+The Node shares throttle windows across model calls using the same upstream
+origin and credential. Replacing an API key starts a separate window; rotating
+an OAuth token on the same account does not. A throttled attempt publishes
+the provider wait before releasing its concurrency slot. Queued siblings
+recheck the window before sending, without spending another attempt.
 Responses and Anthropic streams complete at their explicit terminal event after
 final output and usage have arrived; a later HTTP disconnect does not restart
 that completed step. Other stream formats retain their required trailing usage
@@ -805,11 +810,15 @@ but no task input or result text. An explicit stop is recorded with the exact
 child delegation and remains available after request receipts expire.
 Listing does not resume, collect or replay work. An explicit spawn using a
 listed child session starts a new child turn with its own admission receipt;
-waiting only observes a specific execution.
+waiting only observes a specific execution. A controller can retry the latest
+failed or interrupted child task if its parent tool capture exists. The retry
+gets a new turn, with the original capture and matching tool declarations,
+and delivers its result as background work. A stop in the parent session
+cancels a claimed retry and waits for admitted work to settle.
 
 Input received during a running task is durable guidance, consumed at a model
-boundary. A delegated child that fails or is stopped holds its own queue, which
-nothing resumes, so guidance it settles without joining ends cancelled with it;
+boundary. A delegated child that fails or is stopped holds its own queue, so
+guidance it settles without joining ends cancelled with it;
 the parent sees the child's outcome and can guide it again. Node recovery
 cancels such guidance that earlier versions left queued. Stop cancels work explicitly. Partial text and reasoning use a bounded
 in-memory feed; committed output is canonical. Interrupted streams seal visible

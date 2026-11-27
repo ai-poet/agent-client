@@ -28,13 +28,14 @@ import (
 // Tool is one captured declaration and executor. Concurrency and authority are
 // properties of the captured registration, never arguments supplied by a model.
 type Tool struct {
-	Definition fantasy.FunctionTool
-	SchemaJSON json.RawMessage
-	ReadOnly   bool
-	Concurrent bool
-	Deferred   bool
-	Delegation bool
-	Approval   bool
+	Definition   fantasy.FunctionTool
+	SchemaJSON   json.RawMessage
+	MCPAuthority [32]byte
+	ReadOnly     bool
+	Concurrent   bool
+	Deferred     bool
+	Delegation   bool
+	Approval     bool
 	// Confirm reports whether one prepared call of a tool without Approval
 	// asks first: a read-only tool with an optional project write.
 	Confirm           func(canonical.ToolRequest) bool
@@ -86,6 +87,35 @@ type ToolResult struct {
 	Attachments []canonical.Attachment
 }
 
+// A retry reconstructs executors from its own turn; only declarations with the
+// same binding, schema, approval behavior and MCP authority may be reused.
+func delegatedToolDigest(tool Tool) ([32]byte, error) {
+	body, err := json.Marshal([]any{tool.Binding, tool.Definition.InputSchema, tool.MCPAuthority, tool.Flow, tool.ReadOnly, tool.Hosted, tool.Approval, tool.Confirm != nil})
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return blake3.Sum256(body), nil
+}
+
+func encodeDelegatedTools(tools []Tool) ([]byte, error) {
+	allowed := make(map[string][32]byte, len(tools))
+	for _, tool := range tools {
+		if tool.Delegation || tool.BindDelegation != nil || tool.Definition.Name == "tool_search" {
+			continue
+		}
+		name := tool.Definition.Name
+		if _, ok := allowed[name]; ok {
+			continue
+		}
+		digest, err := delegatedToolDigest(tool)
+		if err != nil {
+			return nil, err
+		}
+		allowed[name] = digest
+	}
+	return json.Marshal(allowed)
+}
+
 func (r *Runtime) captureTools(x *execution) error {
 	x.tools = append([]Tool(nil), r.tools...)
 	if r.toolsForTurn != nil {
@@ -122,6 +152,17 @@ func (r *Runtime) captureTools(x *execution) error {
 		}
 	}
 	if x.inv.Session.Delegation != nil && *x.inv.Session.Delegation != nil {
+		if x.inv.RetryTools != nil {
+			var allowed map[string][32]byte
+			if err := json.Unmarshal(x.inv.RetryTools, &allowed); err != nil {
+				return err
+			}
+			x.tools = slices.DeleteFunc(x.tools, func(tool Tool) bool {
+				want, ok := allowed[tool.Definition.Name]
+				got, err := delegatedToolDigest(tool)
+				return !ok || err != nil || got != want
+			})
+		}
 		if x.childRole != nil && x.childRole.Tools != nil {
 			for _, selection := range *x.childRole.Tools {
 				if !slices.ContainsFunc(x.tools, func(tool Tool) bool { return roleToolMatches(selection, tool) }) {

@@ -13,10 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"github.com/jonboulle/clockwork"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
 	"golang.org/x/sync/semaphore"
 	"lukechampine.com/blake3"
 )
@@ -126,6 +126,12 @@ type Lease struct {
 	config     Configuration
 	closeOnce  sync.Once
 	closeErr   error
+}
+
+// AuthorityDigest identifies this exact authorized launch without retaining secrets.
+func (lease *Lease) AuthorityDigest() [32]byte {
+	body, _ := json.Marshal(lease.connection.key)
+	return blake3.Sum256(body)
 }
 
 func New(ctx context.Context, options Options) *Pool {

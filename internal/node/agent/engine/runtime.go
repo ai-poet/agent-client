@@ -279,13 +279,7 @@ func (r *Runtime) run() {
 				unlock()
 				break
 			}
-			parent := r.ctx
-			r.mu.Lock()
-			if child := r.children[inv.Run.Turn]; child != nil {
-				parent = child.ctx
-				child.started = true
-			}
-			r.mu.Unlock()
+			parent := r.startClaimedChild(inv)
 			ctx, cancel := context.WithCancel(store.WithCapturedUser(store.WithUser(parent, inv.User), inv.StorageUser))
 			x := &execution{inv: inv, ctx: ctx, cancel: cancel, done: make(chan struct{}), wake: make(chan struct{}, 1), guidance: make(chan struct{}, 1)}
 			// A turn has one owner. A claim that finds an earlier owner waits
