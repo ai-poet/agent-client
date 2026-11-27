@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	pathpkg "path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -83,11 +82,8 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 		case protocol.ToolOperationFindFiles, protocol.ToolOperationListDirectory, protocol.ToolOperationSearchFiles, protocol.ToolOperationRunCommand:
 			tool.NativeQueue = true
 		}
-		observed := workspaceRevisions{worktreeID: inv.Run.Worktree}
+		observed := workspaceRevisions{worktreeID: inv.Run.Worktree, worktree: inv.Worktree.Path}
 		fullFiles := inv.Turn.Config.Permission == protocol.PermissionFull && externalFileOperation(declaration.Operation)
-		if fullFiles {
-			observed.worktree = inv.Worktree.Path
-		}
 		if observesRevisions(declaration.Operation) {
 			tool.ObserveHistory = observed.update
 		}
@@ -166,10 +162,7 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 					return err
 				}
 				patchInput = patch.Input
-				revisions := observed.paths
-				if scope.root != "" {
-					revisions = rootRevisions(worktree, root, revisions)
-				}
+				revisions := rootRevisions(root, collectFileArgPaths(declaration.Operation, arguments), observed.paths)
 				patchChanges, err = files.PreparePatch(ctx, root, patch.Input, inv.Run.Worktree, core.RestrictedFiles, func(path string) string { return workspaceFileKey(root, path) }, revisions)
 				if err != nil {
 					return err
@@ -728,10 +721,7 @@ func (r *workspaceRevisions) resolve(operation protocol.ToolOperation, arguments
 	if json.Unmarshal(values["path"], &path) != nil {
 		return arguments, nil
 	}
-	revision, ok := r.paths[path]
-	if !ok && path != "" {
-		revision, ok = r.paths[r.pathKey(path)]
-	}
+	revision, ok := r.paths[r.pathKey(path)]
 	switch {
 	case operation == protocol.ToolOperationWriteFile:
 		values["expected_revision"] = json.RawMessage("null")
@@ -744,17 +734,13 @@ func (r *workspaceRevisions) resolve(operation protocol.ToolOperation, arguments
 }
 
 func (r *workspaceRevisions) pathKey(path string) string {
-	if filepath.IsAbs(path) {
-		path = filepath.Clean(path)
-		if r.worktree != "" {
-			path = localPath(r.worktree, path)
-		}
-		return filepath.ToSlash(path)
-	}
 	if path == "" {
 		return ""
 	}
-	return pathpkg.Clean(filepath.ToSlash(path))
+	if r.worktree == "" && !filepath.IsAbs(path) {
+		return filepath.ToSlash(filepath.Clean(path))
+	}
+	return workspaceFileKey(r.worktree, path)
 }
 
 func (r *workspaceRevisions) observeRevision(path, revision string) {

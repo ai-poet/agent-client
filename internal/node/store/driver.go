@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unicode/utf8"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/core"
@@ -160,6 +161,8 @@ func openConnections(ctx context.Context, path string) (_ *connections, result e
 	// A reader beyond the idle set is reopened with its pragmas on every read;
 	// database/sql keeps only two by default.
 	readDB.SetMaxIdleConns(8)
+	readDB.SetMaxOpenConns(32)
+	readDB.SetConnMaxIdleTime(2 * time.Minute)
 	var ready int
 	if err := readDB.QueryRowContext(ctx, "SELECT 1").Scan(&ready); err != nil {
 		_ = readDB.Close()

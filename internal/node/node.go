@@ -16,6 +16,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/ai-poet/cheaprouter-harness/internal/core"
 	"github.com/ai-poet/cheaprouter-harness/internal/link"
+	"github.com/ai-poet/cheaprouter-harness/internal/memory"
 
 	"github.com/ai-poet/cheaprouter-harness/internal/node/admission"
 	"github.com/ai-poet/cheaprouter-harness/internal/node/agent/engine"
@@ -45,6 +46,7 @@ import (
 
 // Node owns one profile, admitted operations and their committed event feed.
 type Node struct {
+	stopMemory       func()
 	accessMu         sync.Mutex
 	accessObservers  map[*accessObservation]struct{}
 	pluginStatus     *pluginStatusService
@@ -276,6 +278,21 @@ func StartWithOptions(ctx context.Context, path string, options Options) (*Node,
 		return nil, err
 	}
 	value.agent.Start()
+	// Register only after startup succeeds; this Node owns both caches.
+	governor := memory.Default()
+	unregister := governor.Register("node.caches", func(level memory.Level) {
+		if level != memory.Pressure {
+			return
+		}
+		value.plugins.manager.ClearRepositories()
+		value.web.mu.Lock()
+		for _, searcher := range value.web.search {
+			searcher.ClearResults()
+		}
+		value.web.mu.Unlock()
+	})
+	stop := governor.Start()
+	value.stopMemory = func() { unregister(); stop(); value.plugins.manager.ClearRepositories() }
 	for index := range value.lanes {
 		go value.run(&value.lanes[index])
 	}
@@ -379,6 +396,12 @@ func (node *Node) shutdown(grace time.Duration) {
 		{"external browsers", quiet(node.externalBrowser.Shutdown)},
 		{"plugins and MCP servers", node.closePlugins},
 		{"requests in flight", quiet(node.work.Wait)},
+		{"resource projections", quiet(node.clearResourceProjections)},
+		{"memory governor", quiet(func() {
+			if node.stopMemory != nil {
+				node.stopMemory()
+			}
+		})},
 		// No request holds a package version or a settings revision any more.
 		{"plugin collection", quiet(func() { node.collectPlugins(context.Background()) })},
 		{"telemetry", quiet(func() {

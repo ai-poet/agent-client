@@ -53,6 +53,13 @@ func NewSearcher(options SearchOptions) *Searcher {
 	return searcher
 }
 
+// ClearResults drops cached pages without resetting driver cooldowns.
+func (searcher *Searcher) ClearResults() {
+	searcher.mu.Lock()
+	searcher.cache = nil
+	searcher.mu.Unlock()
+}
+
 func (searcher *Searcher) Configure(settings protocol.SearchSettings) {
 	encoded, err := json.Marshal(settings)
 	if err != nil {

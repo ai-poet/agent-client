@@ -43,6 +43,16 @@ func TestWorkspaceAliasLookup(t *testing.T) {
 		if (before[i] == one) != alias || workspaceFileKey(root, name) != before[i] {
 			t.Errorf("%q did not follow the volume's lookup rules before and after creation (alias=%v)", name, alias)
 		}
+		observed := workspaceRevisions{worktree: root, paths: map[string]string{}}
+		observed.observeRevision(observed.pathKey(file), "original")
+		patch := rootRevisions(root, []string{name}, observed.paths)
+		if (patch[name] == "original") != alias {
+			t.Errorf("patch observation for %q does not follow lookup (alias=%v)", name, alias)
+		}
+		observed.invalidate(observed.pathKey(filepath.Join(root, name)))
+		if _, present := observed.paths[one]; present == alias {
+			t.Errorf("invalidating %q did not follow lookup (alias=%v)", name, alias)
+		}
 	}
 	if runtime.GOOS != "windows" {
 		alias := filepath.Join(t.TempDir(), "alias")

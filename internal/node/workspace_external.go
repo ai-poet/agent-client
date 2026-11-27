@@ -253,12 +253,14 @@ func (scope externalFileScope) checkpoints(prepared *files.Prepared) *files.Prep
 	return &local
 }
 
-// rootRevisions keys observed revisions by their paths relative to root.
-func rootRevisions(worktree, root string, observed map[string]string) map[string]string {
-	keyed := make(map[string]string, len(observed))
-	for path, revision := range observed {
-		if rel, err := rootPath(worktree, root, path); err == nil {
-			keyed[rel] = revision
+// Match the actual patch spelling against the observation, including when
+// a mixed patch executes from a volume root. Never substitute the ordering
+// key for the name which the confined file service validates.
+func rootRevisions(root string, paths []string, observed map[string]string) map[string]string {
+	keyed := make(map[string]string, len(paths))
+	for _, path := range paths {
+		if revision, ok := observed[workspaceFileKey(root, path)]; ok {
+			keyed[path] = revision
 		}
 	}
 	return keyed

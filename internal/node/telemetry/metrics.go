@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"slices"
@@ -12,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/ai-poet/cheaprouter-harness/internal/protocol"
+	"github.com/google/uuid"
 )
 
 // Anonymous counters are aggregated locally in one bounded window and sent
@@ -428,6 +429,7 @@ func (c *Control) post(ctx context.Context, client *http.Client, body []byte) in
 		}
 		return -1
 	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
 	_ = response.Body.Close()
 	return response.StatusCode
 }

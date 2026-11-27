@@ -330,7 +330,10 @@ func TestAgentManagementTools(t *testing.T) {
 			case 2:
 				return [][3]string{{"mixed-patch", "apply_patch", string(args)}}
 			case 3:
-				return [][3]string{{"mixed-edit", "edit_file", `{"path":"mixed-local.txt","old_text":"after","new_text":"next"}`}}
+				// The pinned edit_file handler requires an explicit revision.
+				// Another patch exercises reuse of the mixed patch's Node receipt
+				// without passing the expected revision in the model's arguments.
+				return [][3]string{{"mixed-edit", "apply_patch", `{"input":"*** Begin Patch\n*** Update File: mixed-local.txt\n@@\n-after\n+next\n*** End Patch"}`}}
 			}
 			return nil
 		})
@@ -375,14 +378,19 @@ func TestAgentManagementTools(t *testing.T) {
 			case 1:
 				return [][3]string{{"read", "read_file", `{"path":` + quoted(path) + `}`}}
 			case 2:
-				return [][3]string{{"edit", "edit_file", `{"path":` + quoted(path) + `,"old_text":"one","new_text":"two"}`}}
+				_, header, _ := strings.Cut(current["read"], "; revision ")
+				revision, _, _ := strings.Cut(header, "\n")
+				return [][3]string{
+					{"missing-revision", "edit_file", `{"path":` + quoted(path) + `,"old_text":"one","new_text":"unapproved"}`},
+					{"edit", "edit_file", `{"path":` + quoted(path) + `,"old_text":"one","new_text":"two","expected_revision":` + quoted(revision) + `}`},
+				}
 			case 3:
 				patch := "*** Begin Patch\n*** Update File: " + slash + "\n@@\n-two\n+three\n*** Add File: " + filepath.ToSlash(added) + "\n+added\n*** End Patch"
 				return [][3]string{{"patch", "apply_patch", `{"input":` + quoted(patch) + `}`}}
 			}
 			return nil
 		})
-		expect(t, results, map[string][]string{"read": {canonical, "one"}, "edit": {canonical}, "patch": {canonical}})
+		expect(t, results, map[string][]string{"read": {canonical, "one"}, "missing-revision": {"invalid_request", "expected_revision"}, "edit": {canonical}, "patch": {canonical}})
 		if content, err := os.ReadFile(path); err != nil || string(content) != "three\n" {
 			t.Fatalf("outside file: %q %v; results %v", content, err, results)
 		}

@@ -377,8 +377,15 @@ session namespace.
 Every connection uses full synchronous durability. `internal/turso` delegates SQL
 and value binding to the official SDK. Its native extension supplies connection
 ownership and interruption, which SDK 0.8.3 does not expose. Cancellation joins
-the interrupt watcher before reusing a connection. The shipped native library
+any active interrupt before reusing a connection; an uncancelled query needs no
+watcher goroutine. Reader pools allow 32 open connections with up to eight idle,
+expiring idle connections after two minutes. The shipped native library
 enables the same full-text index implementation as the Rust database.
+
+The Node samples the Go live heap to reclaim cached search results, inspected
+repository buffers and delivery-refusal diagnostics under pressure. Driver
+cooldowns and canonical data are not cache entries. Unconsumed repository
+inspections also expire after ten minutes.
 
 Canonical conversation data uses Sailry-owned records, messages and blocks.
 Binary content is stored by digest. Unknown usage counts remain unknown.
@@ -844,7 +851,7 @@ input or approval remains visible when background work is active.
 | Service | Implemented boundary |
 | --- | --- |
 | Commands | Workspace sandbox on macOS and Linux by default; private temporary files, read-only toolchains and no network; Full permission grants the full environment outside Plan and read-only roles |
-| Files and Git | Captured paths, ignore rules, bounded reads and revision-checked writes; change sets stop at the first failure. Under full permission, file tools also take absolute paths outside the session worktree, running the same confined, revision-checked operation from the path's volume root with symbolic links in its ancestors resolved, without worktree locks, checkpoints or durable admission |
+| Files and Git | Captured paths, ignore rules, bounded reads and revision-checked writes; change sets stop at the first failure. Under full permission, file tools also take absolute paths outside the session worktree, running the same confined, revision-checked operation from the path's volume root with symbolic links in its ancestors resolved, with the same file reservations for mutations. Purely external operations have no worktree checkpoints or durable admission |
 | Terminals | Node owns the PTY and screen mirror; local and remote controllers attach to that mirror |
 | Web | Execution-Node reads and ordered search channels; direct reads pin public DNS on redirects and reject private addresses |
 | Browser | Node-owned Chromium process tree and private browser profile per conversation |
