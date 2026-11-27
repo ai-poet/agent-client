@@ -262,3 +262,35 @@ func mustHaveText(t *testing.T, records []canonical.Record, want string) {
 	}
 	t.Fatal(fmt.Sprintf("missing text %q", want))
 }
+
+func TestCommandSettlesBeforeFilePreparation(t *testing.T) {
+	done := make(chan struct{})
+	shell := objectTool("shell", false, false, func(context.Context, canonical.ToolRequest) ToolResult { close(done); return ToolResult{Value: "done"} })
+	shellOp := protocol.ToolOperationRunCommand
+	shell.Binding = &store.ApprovalBinding{Tool: "shell", Operation: &shellOp}
+	edit := objectTool("edit", false, false, func(context.Context, canonical.ToolRequest) ToolResult { return ToolResult{Value: "edited"} })
+	editOp := protocol.ToolOperationEditFile
+	edit.Binding = &store.ApprovalBinding{Tool: "edit", Operation: &editOp}
+	prepared := make(chan bool, 1)
+	edit.Prepare = func(context.Context, canonical.ToolRequest) error {
+		select {
+		case <-done:
+			prepared <- true
+		default:
+			prepared <- false
+		}
+		return nil
+	}
+	model := &scriptedModel{scripts: []script{response(call("c", "shell", "{}"), call("e", "edit", "{}"), finish()), response(text("Done"), finish())}}
+	f := newFixture(t, model, shell, edit)
+	f.start()
+	f.waitRun(f.submit("command then edit"), protocol.ConversationStatusCompleted)
+	select {
+	case ordered := <-prepared:
+		if !ordered {
+			t.Fatal("edit prepared before command settled")
+		}
+	default:
+		t.Fatal("edit not prepared")
+	}
+}

@@ -180,7 +180,7 @@
         "expected_revision": {
           "type": "string",
           "pattern": "^[a-fA-F0-9]{64}$",
-          "description": "Optional; defaults to the revision last seen in this conversation"
+          "description": "Optional; omit to use the current revision observed in this conversation"
         }
       },
       "required": [
@@ -240,7 +240,7 @@
         "expected_revision": {
           "type": "string",
           "pattern": "^[a-fA-F0-9]{64}$",
-          "description": "Optional; defaults to the revision last seen in this conversation"
+          "description": "Optional; omit to use the current revision observed in this conversation"
         }
       },
       "required": [
@@ -266,7 +266,7 @@
         "expected_revision": {
           "type": "string",
           "pattern": "^[a-fA-F0-9]{64}$",
-          "description": "Optional; defaults to the revision last seen in this conversation"
+          "description": "Optional; omit to use the current revision observed in this conversation"
         }
       },
       "required": [
@@ -469,7 +469,7 @@
         },
         "expected_revision": {
           "type": "string",
-          "description": "Optional; defaults to the revision last seen in this conversation"
+          "description": "Optional; omit to use the current revision observed in this conversation"
         },
         "edits": {
           "description": "Indices refer to the notebook before this batch is applied.",

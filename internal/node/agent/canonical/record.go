@@ -14,6 +14,12 @@ import (
 const ExecutableKey = "sailry.executable"
 const ExternalDispatchKey = "sailry.external_dispatch"
 
+// FileChangesKey scopes runtime-recorded file mutations (for example from a
+// completed child session) to the worktree whose files changed.
+func FileChangesKey(worktree protocol.WorktreeID) string {
+	return "sailry.file_changes." + worktree.String()
+}
+
 type Record struct {
 	ID         string          `json:"id"`
 	Created    time.Time       `json:"created"`

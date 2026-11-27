@@ -67,7 +67,7 @@ func (node *Node) workspaceTools(ctx context.Context, inv *store.AgentInvocation
 		var mu sync.Mutex
 		calls := map[string]*workspaceToolCall{}
 		tool := engine.Tool{Definition: fantasy.FunctionTool{Name: declaration.Name, Description: declaration.Description, InputSchema: schema}, SchemaJSON: declaration.Parameters, ReadOnly: declaration.ReadOnly, Concurrent: declaration.Concurrent, Deferred: !declaration.Initial, Approval: !declaration.ReadOnly, Binding: &store.ApprovalBinding{Owner: declaration.Owner, Tool: declaration.Name, Operation: &declaration.Operation}}
-		var observed workspaceRevisions
+		observed := workspaceRevisions{worktreeID: inv.Run.Worktree}
 		fullFiles := inv.Turn.Config.Permission == protocol.PermissionFull && externalFileOperation(declaration.Operation)
 		if fullFiles {
 			observed.worktree = inv.Worktree.Path
@@ -494,6 +494,7 @@ func (node *Node) workspaceToolValue(ctx context.Context, request protocol.Reque
 // workspaceRevisions follows the canonical history visible to this turn. Receipts
 // from a successful write are observations of its new revision, like reads.
 type workspaceRevisions struct {
+	worktreeID  protocol.WorktreeID
 	invalidated map[string]struct{}
 	paths       map[string]string
 	count       int
@@ -508,6 +509,14 @@ func (r *workspaceRevisions) update(records []canonical.Record) {
 		r.count = 0
 	}
 	for _, record := range records[r.count:] {
+		if record.Kind == "background" {
+			if rt := record.Metadata.Runtime; rt != nil && rt.FileChanges != nil {
+				if changes := rt.FileChanges[r.worktreeID.String()]; len(changes) != 0 {
+					r.observeChildChanges(changes, r.pathKey, combinesChildChanges(record.Background()))
+				}
+			}
+			continue
+		}
 		message := record.Message()
 		if message == nil || record.Provenance.Author != "tool" {
 			continue
@@ -521,13 +530,31 @@ func (r *workspaceRevisions) update(records []canonical.Record) {
 					continue
 				}
 			}
-			r.observe(response)
+			r.observe(response, r.pathKey)
 		}
 	}
 	r.count = len(records)
 	if r.count > 0 {
 		r.last = records[r.count-1].ID
 	}
+}
+
+// Batched background delivery flattens child receipts into one path map. A
+// value can already have overwritten a different revision for the same path.
+func combinesChildChanges(background *canonical.Background) bool {
+	if background == nil {
+		return false
+	}
+	seenChild := false
+	for _, result := range background.Results {
+		if result.Notice.Kind.Kind == "agent" {
+			if seenChild {
+				return true
+			}
+			seenChild = true
+		}
+	}
+	return false
 }
 
 func (r *workspaceRevisions) observeChildChanges(files map[string]string, key func(string) string, combined bool) {
@@ -575,8 +602,16 @@ func (r *workspaceRevisions) isInvalidated(path string) bool {
 	}
 }
 
-func (r *workspaceRevisions) observe(response *canonical.ToolResponse) {
-	key := r.pathKey
+func (r *workspaceRevisions) observe(response *canonical.ToolResponse, key func(string) string) {
+	if response.Status == canonical.ToolSuccess && response.Meta != nil {
+		if raw := (*response.Meta)[canonical.FileChangesKey(r.worktreeID)]; raw != nil {
+			var files map[string]string
+			if json.Unmarshal(raw, &files) == nil {
+				r.observeChildChanges(files, key, false)
+			}
+		}
+	}
+
 	var value struct {
 		Kind string
 		Data struct {

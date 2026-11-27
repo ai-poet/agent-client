@@ -283,7 +283,12 @@ func (r *Runtime) waitChild(x *execution, call canonical.ToolRequest) ToolResult
 			return toolFault(err)
 		}
 		if !childPending(state.Run) {
-			return ToolResult{Value: map[string]any{"session": state.Run.Session, "turn": state.Run.Turn, "status": state.Run.Status, "response": state.Response, "error": state.Run.Error}, Collect: &collectedChild{session: args.Session, turn: state.Run.Turn}}
+			var meta *map[string]json.RawMessage
+			if len(state.FileRevisions) > 0 {
+				raw, _ := json.Marshal(state.FileRevisions)
+				meta = &map[string]json.RawMessage{canonical.FileChangesKey(state.Run.Worktree): raw}
+			}
+			return ToolResult{Meta: meta, Value: map[string]any{"session": state.Run.Session, "turn": state.Run.Turn, "status": state.Run.Status, "response": state.Response, "error": state.Run.Error}, Collect: &collectedChild{session: args.Session, turn: state.Run.Turn}}
 		}
 		value := map[string]any{"session": state.Run.Session, "turn": state.Run.Turn, "status": state.Run.Status}
 		if state.Paused && state.Run.Status == protocol.ConversationStatusQueued {

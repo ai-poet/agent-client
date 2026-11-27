@@ -74,7 +74,7 @@ func Prepare(ctx context.Context, root string, command protocol.Command, access 
 			return nil, e
 		}
 		if revision([]byte(before)) != v.Edit.ExpectedRevision {
-			return nil, conflict("file changed before editing")
+			return nil, conflict("file changed since the expected revision; read the current content before editing")
 		}
 		p.Changes = []PreparedChange{{Operation: "edit", Kind: protocol.ChangeKindModified, Path: v.Edit.Path, Before: &before, After: &after, ExpectedRevision: &v.Edit.ExpectedRevision}}
 		p.Preview.Files = append(p.Preview.Files, preview(p.Changes[0]))
@@ -200,7 +200,7 @@ func prepareChange(ctx context.Context, f *core.Files, change protocol.FileChang
 			return p, e
 		}
 		if revision(data) != *p.ExpectedRevision {
-			return p, conflict("file changed before editing")
+			return p, conflict("file changed since the expected revision; read the current content before editing")
 		}
 		if p.Kind == protocol.ChangeKindRenamed {
 			target, e := f.Open(*p.Destination)
