@@ -1145,7 +1145,11 @@ original path cannot resolve local image references from their display names.
 Generated-image tool details retain status and parameters while the answer shows
 the image. Its preview attachment remains available to reply embeds; the output
 inventory identifies native generation by its workspace file, so publishing that
-file in the answer does not add another output.
+file in the answer does not add another output. The Node pages the asset inventory
+in whole event groups (at most 50), reserving 64 KiB of each Link frame for
+page metadata and the reply envelope. A cursor resumes before the last consumed
+event; a group too large for a page returns `invalid_request` instead of an
+unusable cursor.
 Session HTML uses a sandboxed MyGo WebView with no privileged bridge. The host
 inlines available document images as data URLs; the page receives neither a file
 base URL nor network access.

@@ -99,17 +99,19 @@ func ListConversationAssets(ctx context.Context, db *sql.Conn, session protocol.
 			}
 			locations[turn] = owner
 		}
-		items, err := conversationAssetItems(ctx, db, record, owner.worktree, owner.root)
+		items, itemBytes, err := conversationAssetItems(ctx, db, record, owner.worktree, owner.root)
 		if err != nil {
 			return page, err
 		}
 		if len(items) > 0 {
-			group := protocol.ConversationAssetsGroup{Sequence: sequence, Turn: turn, Worktree: owner.worktree, TimestampMs: record.Created.UnixMilli(), Kind: kind, Items: items}
-			body, err := encode(group)
+			group := protocol.ConversationAssetsGroup{Sequence: sequence, Turn: turn, Worktree: owner.worktree, TimestampMs: record.Created.UnixMilli(), Kind: kind}
+			// The empty items array includes both brackets. Its contents have
+			// already been encoded to deduplicate the targets.
+			header, err := encode(group)
 			if err != nil {
 				return page, err
 			}
-			size := len(body)
+			size := len(header) + itemBytes
 			if size > conversationAssetPageBytes {
 				return page, invalid("conversation asset group exceeds the response frame budget")
 			}
@@ -121,6 +123,7 @@ func ListConversationAssets(ctx context.Context, db *sql.Conn, session protocol.
 				break
 			}
 			remaining -= size
+			group.Items = items
 			page.Groups = append(page.Groups, group)
 		}
 		last = sequence
@@ -166,9 +169,10 @@ func conversationAssetBoundary(ctx context.Context, db *sql.Conn, session protoc
 }
 
 type conversationAssetTargets struct {
-	items []protocol.ConversationAssetsTarget
-	seen  map[string]bool
-	err   error
+	items        []protocol.ConversationAssetsTarget
+	seen         map[string]bool
+	encodedBytes int
+	err          error
 }
 
 func (targets *conversationAssetTargets) push(kind string, data any) {
@@ -185,6 +189,14 @@ func (targets *conversationAssetTargets) push(kind string, data any) {
 		targets.seen = map[string]bool{}
 	}
 	if !targets.seen[string(body)] {
+		if len(targets.items) > 0 {
+			targets.encodedBytes++ // comma between targets
+		}
+		if len(body) > conversationAssetPageBytes-targets.encodedBytes {
+			targets.err = invalid("conversation asset group exceeds the response frame budget")
+			return
+		}
+		targets.encodedBytes += len(body)
 		targets.items = append(targets.items, value)
 		targets.seen[string(body)] = true
 	}
@@ -202,11 +214,11 @@ func (targets *conversationAssetTargets) image(record canonical.Record, worktree
 	}
 	return err
 }
-func conversationAssetItems(ctx context.Context, db *sql.Conn, record canonical.Record, worktree protocol.WorktreeID, root *string) ([]protocol.ConversationAssetsTarget, error) {
+func conversationAssetItems(ctx context.Context, db *sql.Conn, record canonical.Record, worktree protocol.WorktreeID, root *string) ([]protocol.ConversationAssetsTarget, int, error) {
 	targets := &conversationAssetTargets{items: []protocol.ConversationAssetsTarget{}}
 	message := record.Message()
 	if message == nil {
-		return targets.items, nil
+		return targets.items, 0, nil
 	}
 	hidden := record.Provenance.Author == "system" && record.Metadata.Context != nil && record.Metadata.Context.Captured
 	if !hidden {
@@ -230,21 +242,21 @@ func conversationAssetItems(ctx context.Context, db *sql.Conn, record canonical.
 				case *canonical.AssetContent:
 					if block.Kind == "image" {
 						if err := targets.image(record, worktree, part, 0, value.Asset); err != nil {
-							return nil, err
+							return nil, 0, err
 						}
 					}
 				case *canonical.FileContent:
 					if strings.HasPrefix(value.File.URI, "sailry-attachment://") {
 						id, err := protocol.ParseAttachmentID(strings.TrimPrefix(value.File.URI, "sailry-attachment://"))
 						if err != nil {
-							return nil, err
+							return nil, 0, err
 						}
 						attachment, err := GetTurnAttachment(ctx, db, record.Turn, id)
 						if err != nil {
-							return nil, err
+							return nil, 0, err
 						}
 						if value.File.Mime == nil || *value.File.Mime != attachment.Spec.MediaType {
-							return nil, invalid("attachment media type mismatch")
+							return nil, 0, invalid("attachment media type mismatch")
 						}
 						targets.push("attachment", &attachment)
 					}
@@ -257,7 +269,7 @@ func conversationAssetItems(ctx context.Context, db *sql.Conn, record canonical.
 					}
 					for index, asset := range conversationAssetImages(value) {
 						if err := targets.image(record, worktree, part, uint64(index), asset); err != nil {
-							return nil, err
+							return nil, 0, err
 						}
 					}
 				}
@@ -287,7 +299,7 @@ func conversationAssetItems(ctx context.Context, db *sql.Conn, record canonical.
 		}
 		hydrated, err := HydrateCanonicalPayload(ctx, db, response.Result)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		raw := rawAgentTool{Presentation: protocol.ToolPresentationContent, Result: &hydrated, Format: response.Format}
 		for index, asset := range conversationAssetImages(response) {
@@ -310,7 +322,7 @@ func conversationAssetItems(ctx context.Context, db *sql.Conn, record canonical.
 			}
 		}
 	}
-	return targets.items, targets.err
+	return targets.items, targets.encodedBytes, targets.err
 }
 
 func conversationAssetResultMayContain(value json.RawMessage, key string) bool {
