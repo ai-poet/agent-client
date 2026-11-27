@@ -379,12 +379,16 @@ func TestForbiddenAndBalanceRetries(t *testing.T) {
 	}
 	balance := providerPart(403, `{"error":{"code":"insufficient_balance","message":"insufficient balance"}}`)
 	t.Run("balance_terminal", func(t *testing.T) {
-		fake := &policyModel{responses: [][]fantasy.StreamPart{{balance}}}
+		fake := &policyModel{responses: [][]fantasy.StreamPart{{balance}, {balance}}}
 		timer := &policyClock{}
 		err := Run(t.Context(), fake, fantasy.Call{}, Main, timer, nil, nil, nil)
 		failure := Classify(err)
-		if fake.calls != 1 || len(timer.delays) != 0 || failure.Kind != Quota || failure.Exhausted {
-			t.Fatalf("balance terminal: calls=%d failure=%+v", fake.calls, failure)
+		// A declared balance refusal still gets the single route-recovery resend
+		// the rejected-route path allows (waiting for the provider's Retry-After),
+		// then stays terminal: no retry budget, no further attempts, and the
+		// quota diagnosis survives the resend.
+		if fake.calls != 2 || len(timer.delays) > 1 || failure.Kind != Quota {
+			t.Fatalf("balance terminal: calls=%d delays=%v exhausted=%v kind=%v failure=%+v", fake.calls, timer.delays, failure.Exhausted, failure.Kind, failure)
 		}
 		fault := Fault(err)
 		if fault.Details.Kind != "model_request" || fault.Details.Data.(protocol.FaultDetailsModelRequestPayload).Reason != protocol.ModelFailureQuota || !strings.Contains(fault.Message, "insufficient balance (HTTP 403)") {
