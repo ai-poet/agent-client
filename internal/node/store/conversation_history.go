@@ -152,7 +152,7 @@ func historyEntries(ctx context.Context, db *sql.Conn, session protocol.SessionI
 		if err != nil {
 			return nil, false, err
 		}
-		const query = "SELECT " + historyEntryColumns + " FROM conversation_events h JOIN agent_events e ON e.sequence=h.sequence WHERE h.session=?1 AND e.turn IN (SELECT value FROM json_each(?2)) AND h.sequence<?3 AND " + visibleCanonical + " ORDER BY h.sequence DESC LIMIT ?4"
+		const query = "SELECT " + historyEntryColumns + " FROM conversation_events h JOIN agent_events e ON e.sequence=h.sequence WHERE h.session=?1 AND e.turn IN (SELECT CAST(value AS TEXT) FROM json_each(?2)) AND h.sequence<?3 AND " + visibleCanonical + " ORDER BY h.sequence DESC LIMIT ?4"
 		if err = read(query, string(members)); err != nil {
 			return nil, false, err
 		}
@@ -401,9 +401,11 @@ func ReadConversation(ctx context.Context, db *sql.Conn, session protocol.Sessio
 	for _, id := range trimmed {
 		missing[id] = true
 	}
+	// Seek the (turn, sequence) index before checking session membership.
+	const firstVisible = "SELECT (SELECT e.sequence FROM agent_events e CROSS JOIN conversation_events h ON h.sequence=e.sequence AND h.session=?1 WHERE e.turn=?2 AND " + visibleCanonical + " ORDER BY e.sequence LIMIT 1)"
 	for _, r := range page.Runs {
 		var first sql.NullInt64
-		if err = db.QueryRowContext(ctx, "SELECT min(e.sequence) FROM conversation_events h JOIN agent_events e ON e.sequence=h.sequence WHERE h.session=?1 AND e.turn=?2 AND "+visibleCanonical, session.String(), r.Turn.String()).Scan(&first); err != nil {
+		if err = db.QueryRowContext(ctx, firstVisible, session.String(), r.Turn.String()).Scan(&first); err != nil {
 			return value, err
 		}
 		if first.Valid && !slices.ContainsFunc(page.Entries, func(e protocol.ConversationEntry) bool { return e.Sequence == uint64(first.Int64) }) {
