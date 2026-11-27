@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 
@@ -32,23 +33,33 @@ type SearchPage struct {
 	NextBefore *uint64
 }
 
+// Match the original text with the same Unicode simple folding as Node search.
+func searchPattern(query string) *regexp.Regexp {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return nil
+	}
+	pattern, _ := regexp.Compile("(?i)" + regexp.QuoteMeta(q))
+	return pattern
+}
+
 // Find returns every occurrence of query in the turns, in order: each
 // turn's user message, then its answer. An empty query finds none.
 func Find(turns []Turn, query string) []Match {
-	q := strings.ToLower(strings.TrimSpace(query))
-	if q == "" {
+	q := searchPattern(query)
+	if q == nil {
 		return nil
 	}
 	var out []Match
 	for i := range turns {
-		for n := range strings.Count(strings.ToLower(turns[i].User), q) {
+		for n := range q.FindAllStringIndex(turns[i].User, -1) {
 			out = append(out, Match{Turn: i, User: true, N: n})
 		}
 		answer := searchable(turns[i].Reply.Blocks)
 		if len(turns[i].Segments) > 0 {
 			answer = segmentedText(&turns[i])
 		}
-		for n := range strings.Count(strings.ToLower(answer), q) {
+		for n := range q.FindAllStringIndex(answer, -1) {
 			out = append(out, Match{Turn: i, N: n})
 		}
 	}
@@ -64,8 +75,8 @@ func searchable(blocks []Block) string {
 // code spans, fenced code and link destinations, keeping the text's own
 // case.
 func Mark(src, query string) string {
-	q := strings.TrimSpace(query)
-	if q == "" {
+	q := searchPattern(query)
+	if q == nil {
 		return src
 	}
 	var b strings.Builder
@@ -100,18 +111,18 @@ func Mark(src, query string) string {
 // markProse marks q in s but for the destinations of its links, "](" to the
 // ")" closing it, which stay the addresses they are: a citation's, as Cite
 // writes it, or the author's.
-func markProse(b *strings.Builder, s, q string) {
+func markProse(b *strings.Builder, s string, q *regexp.Regexp) {
 	for {
 		i := strings.Index(s, "](")
 		if i < 0 {
 			break
 		}
 		end := max(destinationEnd(s[i+2:]), 0) // not a link: text after all
-		b.WriteString(markPlain(s[:i], q, "<mark>", "</mark>"))
+		b.WriteString(q.ReplaceAllString(s[:i], "<mark>${0}</mark>"))
 		b.WriteString(s[i : i+2+end])
 		s = s[i+2+end:]
 	}
-	b.WriteString(markPlain(s, q, "<mark>", "</mark>"))
+	b.WriteString(q.ReplaceAllString(s, "<mark>${0}</mark>"))
 }
 
 // destinationEnd is the length of a link's destination and the ")" closing
@@ -139,53 +150,23 @@ func destinationEnd(s string) int {
 	return -1
 }
 
-// markPlain wraps the occurrences of q in s, ignoring case.
-func markPlain(s, q, open, close string) string {
-	ls, lq := strings.ToLower(s), strings.ToLower(q)
-	if len(ls) != len(s) || !strings.Contains(ls, lq) {
-		// Case folding changed the length: leave it unmarked rather than cut
-		// a rune.
-		return s
-	}
-	var b strings.Builder
-	at := 0
-	for {
-		i := strings.Index(ls[at:], lq)
-		if i < 0 {
-			break
-		}
-		b.WriteString(s[at : at+i])
-		b.WriteString(open)
-		b.WriteString(s[at+i : at+i+len(q)])
-		b.WriteString(close)
-		at += i + len(q)
-	}
-	b.WriteString(s[at:])
-	return b.String()
-}
-
 // spans splits plain text at the occurrences of q, for the user bubble:
 // the current one stands out.
 func spans(text, q string, current int, p *theme.Palette) []ui.Span {
-	ls, lq := strings.ToLower(text), strings.ToLower(strings.TrimSpace(q))
-	if lq == "" || len(ls) != len(text) {
+	pattern := searchPattern(q)
+	if pattern == nil {
 		return []ui.Span{{Text: text}}
 	}
 	var out []ui.Span
-	at, n := 0, 0
-	for {
-		i := strings.Index(ls[at:], lq)
-		if i < 0 {
-			break
-		}
-		out = append(out, ui.Span{Text: text[at : at+i]})
+	at := 0
+	for n, loc := range pattern.FindAllStringIndex(text, -1) {
+		out = append(out, ui.Span{Text: text[at:loc[0]]})
 		bg := p.Warning.Alpha(0.3)
 		if n == current {
 			bg = p.Warning.Alpha(0.6)
 		}
-		out = append(out, ui.Span{Text: text[at+i : at+i+len(lq)], Background: bg, Radius: 2})
-		at += i + len(lq)
-		n++
+		out = append(out, ui.Span{Text: text[loc[0]:loc[1]], Background: bg, Radius: 2})
+		at = loc[1]
 	}
 	return append(out, ui.Span{Text: text[at:]})
 }

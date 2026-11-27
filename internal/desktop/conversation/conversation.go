@@ -372,7 +372,11 @@ func (s *State) turn(c *ui.Context, session string, i int, t *Turn, n int, sess 
 					ui.Column(c.Key(inputIndex)).FillWidth().Children(func() {
 						s.user(c, session, &message, q, current, marked, actions)
 					})
-					current -= strings.Count(strings.ToLower(input.User), strings.ToLower(q))
+					if current >= 0 {
+						if pattern := searchPattern(q); pattern != nil {
+							current -= len(pattern.FindAllStringIndex(input.User, current+1))
+						}
+					}
 				}
 				end := len(blocks)
 				latest := index == len(t.Segments)-1
